@@ -7,8 +7,12 @@ dist/
 build/
 .pytest_cache/
 
-# Runtime na RAIZ do repo (não commitar — são dados da instalação, não código):
-/agents/         # agentes criados por `okami agent new` (o exemplo fica em examples/company/agents)
-/inbox/          # imagens recebidas (vision §6)
+# Runtime na RAIZ do repo (dados da instalação, não código).
+# IMPORTANTE: comentário em LINHA PRÓPRIA — inline (/agents/ # ...) NÃO funciona no .gitignore.
+# agentes criados por `okami agent new` (o exemplo fica em examples/company/agents)
+/agents/
+# imagens recebidas (vision §6)
+/inbox/
 workspaces/
-.okami/          # estado runtime: sessões, sinais de persona, memória local (por workspace)
+# estado runtime: sessões, sinais de persona, memória local (por workspace)
+.okami/
