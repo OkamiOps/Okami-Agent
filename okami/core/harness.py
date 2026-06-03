@@ -1,0 +1,476 @@
+"""Harness do Okami (Fase 1) — o coração confiável.
+
+Garante, por construção e independente da LLM:
+  - Action-or-Terminate (§3.2): todo turno termina em ação OU sinal terminal. Texto sem
+    ação é rejeitado e re-prompted.
+  - Estado dono do harness (§3.1): PENDING→IN_PROGRESS→COMPLETE/BLOCKED/NEEDS_INPUT/FAILED.
+  - exitCriteria verificados (§3.4): 'concluído' é asserção do harness, não do modelo.
+  - Watchdog/stall (§3.3) e orçamentos.
+  - Anti-loop (§3.6): fingerprint+dedup, ciclo, circuit breaker.
+  - Anti-alucinação (§3.7): grounding no write (ver tools.WriteFile).
+
+O protocolo é por AÇÃO JSON (model-agnóstico) — funciona em LLM fraca/local, que é a base
+da paridade (§3.5). Modos nativos de tool-calling entram na Fase 1.5.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Callable
+
+from okami.memory import compaction as _compaction
+from okami.core import approval
+from okami.core.tools import Tool, ToolContext, ToolResult, default_registry, sanitized_env
+
+Generate = Callable[[list[dict], "dict | None"], str]  # (messages, action_schema) -> texto
+
+
+class TaskState(str, Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETE = "COMPLETE"
+    BLOCKED = "BLOCKED"
+    NEEDS_INPUT = "NEEDS_INPUT"
+    FAILED = "FAILED"
+
+
+@dataclass
+class Step:
+    n: int
+    tool: str
+    args: dict
+    output: str
+    effect: bool
+
+
+@dataclass
+class Task:
+    goal: str
+    exit_criteria: list[dict] = field(default_factory=list)
+    state: TaskState = TaskState.PENDING
+    steps: list[Step] = field(default_factory=list)
+    result: str | None = None
+    reason: str | None = None
+    stats: dict = field(default_factory=dict)   # sinais p/ reflexão (§7): violations/loops/...
+
+
+@dataclass
+class Budget:
+    max_steps: int = 24
+    max_consecutive_violations: int = 3
+    max_repeat: int = 3          # mesma ação N vezes → loop
+    stall_limit: int = 4         # passos sem efeito observável → quebra
+    max_loop_breaks: int = 3     # quebras de loop antes de FAILED
+    max_total_turns: int = 100   # backstop: o harness SEMPRE termina
+    max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
+
+
+# ----------------------------------------------------------------------------- protocolo
+FUTURE_INTENT = re.compile(
+    r"\b(vou|irei|em seguida|depois eu|let me|i['’]?ll|i will|next i|i'm going to)\b",
+    re.IGNORECASE,
+)
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_BARE_JSON = re.compile(r"(\{(?:[^{}]|\{[^{}]*\})*\})", re.DOTALL)
+
+
+@dataclass
+class Action:
+    tool: str
+    args: dict
+
+
+def parse_action(text: str) -> Action | None:
+    """Extrai a última ação JSON do texto. None se não houver ação válida."""
+    candidates = _JSON_BLOCK.findall(text) or _BARE_JSON.findall(text)
+    for raw in reversed(candidates):
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("tool"), str):
+            return Action(obj["tool"], obj.get("args") or {})
+    return None
+
+
+def action_schema(registry: dict[str, Tool]) -> dict:
+    """JSON schema da ação — usado no constrained decoding (§3.5)."""
+    return {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string", "enum": list(registry.keys())},
+            "args": {"type": "object"},
+        },
+        "required": ["tool", "args"],
+    }
+
+
+def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "") -> str:
+    lines = []
+    for t in registry.values():
+        args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
+        lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
+    tools_block = "\n".join(lines)
+    criteria = task.exit_criteria or [{"type": "model_declared"}]
+    crit_txt = "\n".join(f"  - {c}" for c in criteria)
+    extra_block = f"\n\n{extra}\n" if extra else ""
+    return f"""Você é o Okami, um agente que age por AÇÕES, não por descrição.{extra_block}
+
+REGRAS DURAS (o harness aplica à força):
+1. A cada turno, emita EXATAMENTE UMA ação como bloco ```json {{"tool": "...", "args": {{...}}}} ```.
+2. NUNCA responda só com texto/plano. Sem ação = turno rejeitado.
+3. Não diga "vou fazer X" — FAÇA emitindo a ação.
+4. Para terminar use task_complete; se travar, task_blocked; se precisar do usuário, need_input.
+5. task_complete só é aceito quando os CRITÉRIOS DE SAÍDA forem verificados pelo harness.
+6. EVOLUA: ao aprender algo DURÁVEL sobre o usuário use `remember_user`; sobre o projeto use
+   `remember`. NÃO reescreva SOUL/VOICE/PERSONA por conta própria (identidade é curada). MAS se o
+   usuário PEDIR p/ mudar a identidade ou QUALQUER arquivo (código, .env, config), FAÇA — ações
+   sensíveis passam por go/no-go (confirmação) automaticamente.
+
+OBJETIVO:
+{task.goal}
+
+CRITÉRIOS DE SAÍDA (verificados pelo harness):
+{crit_txt}
+
+FERRAMENTAS DISPONÍVEIS:
+{tools_block}
+
+Responda agora com a PRÓXIMA ação (um único bloco json)."""
+
+
+def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
+    status = "ok" if res.ok else "ERRO"
+    return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{res.output}"
+
+
+def _user_start(images: list) -> object:
+    """Mensagem inicial do usuário; com imagens vira content multimodal (vision §6, exige modelo
+    multimodal — texto-only ignora/erra e cai no failover §3.5)."""
+    if not images:
+        return "Comece."
+    import base64
+    import mimetypes
+    content = [{"type": "text", "text": "Comece. O usuário anexou imagem(ns) — analise-as."}]
+    for img in images:
+        s = str(img)
+        if s.startswith(("http://", "https://", "data:")):
+            url = s
+        else:
+            try:
+                mime = mimetypes.guess_type(s)[0] or "image/png"
+                url = f"data:{mime};base64,{base64.b64encode(Path(s).read_bytes()).decode()}"
+            except Exception:  # noqa: BLE001
+                continue
+        content.append({"type": "image_url", "image_url": {"url": url}})
+    return content if len(content) > 1 else "Comece."
+
+
+# ----------------------------------------------------------------------------- exit criteria
+def check_exit(criteria: list[dict], ctx: ToolContext) -> tuple[bool, list[str]]:
+    """Verifica os critérios de saída. Vazio/model_declared → aceita."""
+    missing: list[str] = []
+    for c in criteria:
+        t = c.get("type")
+        if t in (None, "model_declared"):
+            continue
+        if t == "file_exists":
+            if not (ctx.workspace / c["path"]).exists():
+                missing.append(f"arquivo '{c['path']}' não existe")
+        elif t == "shell_ok":
+            try:
+                r = subprocess.run(
+                    c["cmd"], shell=True, cwd=str(ctx.workspace),
+                    capture_output=True, text=True, timeout=120, env=sanitized_env(),
+                )
+                if r.returncode != 0:
+                    missing.append(f"comando falhou (exit {r.returncode}): {c['cmd']}")
+            except Exception as e:  # noqa: BLE001
+                missing.append(f"comando erro: {c['cmd']} ({e})")
+        elif t == "file_contains":
+            p = ctx.workspace / c["path"]
+            if not p.exists() or c.get("text", "") not in p.read_text(encoding="utf-8", errors="ignore"):
+                missing.append(f"'{c['path']}' não contém o texto esperado")
+        elif t == "ui_gate":
+            from okami.contracts import check_ui  # lazy: evita acoplar core a contracts
+            target = ctx.workspace / c.get("path", ".")
+            viols = check_ui(target, c.get("contract") or {})
+            if viols:
+                shown = "; ".join(str(x) for x in viols[:6])
+                more = f" (+{len(viols) - 6})" if len(viols) > 6 else ""
+                missing.append(f"gate de UI: {len(viols)} violações → {shown}{more}")
+        else:
+            missing.append(f"critério desconhecido: {t}")
+    return (not missing, missing)
+
+
+# ----------------------------------------------------------------------------- o loop
+class Harness:
+    def __init__(
+        self,
+        generate: Generate,
+        task: Task,
+        workspace: Path,
+        registry: dict[str, Tool] | None = None,
+        budget: Budget | None = None,
+        on_event: Callable[[dict], None] | None = None,
+        escalate: Generate | None = None,
+        system_extra: str = "",
+        memory=None,
+        core_block: str = "",
+        approve: Callable[[dict], bool] | None = None,
+        skills: dict | None = None,
+        cancel: Callable[[], bool] | None = None,
+        checkpoints=None,
+        hooks=None,
+        spawn=None,
+        images=None,
+    ):
+        self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
+        self.generate = generate
+        self.escalate = escalate  # gerador de modelo mais forte (§3.5 cascata)
+        self.approve = approve or (lambda req: True)  # go/no-go (§12); default = auto-OK
+        self.cancel = cancel or (lambda: False)       # /stop do gateway (§13)
+        self.system_extra = system_extra  # skills forçadas / sections (§4.2, §8)
+        self.core_block = core_block      # .md sempre injetados: AGENTS/USER/MEMORY (§6 tier core)
+        self.memory = memory  # backend de memória (§6) — opcional
+        self.task = task
+        self.registry = registry or default_registry()
+        self.budget = budget or Budget()
+        self.hooks = hooks                 # event hooks (§11): before_tool pode VETAR
+        self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
+                               checkpoints=checkpoints, spawn=spawn)
+        self.on_event = on_event or (lambda e: None)
+        self.messages: list[dict] = []
+        self._action_schema = action_schema(self.registry)
+        self._fingerprints: deque[str] = deque(maxlen=12)
+        self._failures: dict[str, int] = {}
+        self._consecutive_violations = 0
+        self._steps_without_effect = 0
+        self._loop_breaks = 0
+        self._escalated = False
+        self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
+
+    def _emit(self, kind: str, **data):
+        self.on_event({"kind": kind, **data})
+
+    @staticmethod
+    def _fingerprint(action: Action) -> str:
+        return f"{action.tool}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
+
+    def run(self) -> Task:
+        t = self.task
+        t.state = TaskState.IN_PROGRESS
+        t.stats = self._stats  # acumulado por referência → usado na reflexão/auto-aprimoramento (§7)
+        # Ordem: .md core (sempre on) → recall da memória (relevante) → skills/sections.
+        memory_block = self.memory.inject(t.goal) if self.memory is not None else ""
+        extra = "\n\n".join(x for x in (self.core_block, memory_block, self.system_extra) if x)
+        self.messages = [
+            {"role": "system", "content": build_system_prompt(t, self.registry, extra)},
+            {"role": "user", "content": _user_start(self.images)},   # texto (+ imagens, se multimodal)
+        ]
+        self._emit("start", goal=t.goal)
+
+        step_n = 0
+        turns = 0
+        while True:
+            turns += 1
+            if turns > self.budget.max_total_turns:
+                return self._fail(t, "backstop de turnos do harness atingido")
+            if step_n >= self.budget.max_steps:
+                return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+            if self.cancel():                        # /stop do usuário (§13)
+                t.state = TaskState.BLOCKED
+                t.reason = "cancelado pelo usuário (/stop)"
+                self._emit("cancelled")
+                return t
+            # Auto-compaction (§6.4): promove à memória + ponteiro, antes de comprimir.
+            if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
+                self.messages, promoted = _compaction.compact(self.messages, self.memory)
+                self._emit("compact", promoted=promoted)
+            out = self.generate(self.messages, self._action_schema)
+            self.messages.append({"role": "assistant", "content": out})
+            action = parse_action(out)
+
+            # --- Action-or-Terminate (§3.2) ---
+            if action is None or action.tool not in self.registry:
+                self._consecutive_violations += 1
+                self._stats["violations"] += 1
+                hint = ""
+                if action is None and FUTURE_INTENT.search(out):
+                    hint = " Você descreveu intenção em vez de agir."
+                self._emit("violation", n=self._consecutive_violations, text=out[:200])
+                if self._consecutive_violations >= self.budget.max_consecutive_violations:
+                    if self._try_escalate("violações de Action-or-Terminate"):
+                        continue
+                    return self._fail(t, "violações repetidas de Action-or-Terminate")
+                self.messages.append({"role": "user", "content":
+                    f"REJEITADO: nenhuma ação válida.{hint} Emita UM bloco ```json "
+                    f'{{"tool": "...", "args": {{...}}}}``` agora — ou task_blocked.'})
+                continue
+            self._consecutive_violations = 0
+
+            # --- Anti-loop (§3.6) ---
+            fp = self._fingerprint(action)
+            repeats = self._fingerprints.count(fp)
+            cycle = (len(self._fingerprints) >= 4
+                     and self._fingerprints[-1] == self._fingerprints[-3]
+                     and self._fingerprints[-2] == self._fingerprints[-4])
+            if repeats >= self.budget.max_repeat - 1 or cycle:
+                self._loop_breaks += 1
+                self._stats["loops"] += 1
+                self._emit("loop", fingerprint=fp, repeats=repeats + 1, cycle=cycle)
+                if self._loop_breaks >= self.budget.max_loop_breaks:
+                    if self._try_escalate("loop persistente"):
+                        continue
+                    return self._fail(t, "loop persistente de tool-calling")
+                self.messages.append({"role": "user", "content":
+                    "LOOP DETECTADO: você já repetiu essa ação. NÃO repita — faça algo "
+                    "diferente ou declare task_blocked com a razão."})
+                self._fingerprints.append(fp)
+                continue
+
+            tool = self.registry[action.tool]
+
+            # --- Tools terminais ---
+            if tool.terminal:
+                result = self._handle_terminal(t, action)
+                if result is not None:
+                    return result
+                continue  # task_complete rejeitado → segue
+
+            # --- Validação de args: ação malformada NÃO quebra o harness, vira re-prompt ---
+            missing = [a for a in tool.required if a not in action.args]
+            if missing:
+                self._stats["violations"] += 1
+                self._fingerprints.append(fp)
+                self.messages.append({"role": "user", "content":
+                    f"Ação '{action.tool}' sem argumento(s) obrigatório(s): {missing}. Reenvie completa."})
+                continue
+
+            # --- Go/No-Go para ação sensível (§12): identidade, .env, segredos, shell destrutivo ---
+            sens = approval.classify(action.tool, action.args)
+            if sens is not None:
+                self._emit("approval_request", tool=action.tool, reason=sens.reason, category=sens.category)
+                req = {"tool": action.tool, "args": action.args, "reason": sens.reason,
+                       "category": sens.category, "risk": sens.risk}
+                if not self.approve(req):
+                    self._stats["denials"] += 1
+                    self._fingerprints.append(fp)
+                    step_n += 1
+                    t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False))
+                    self._emit("step", n=step_n, tool=action.tool, ok=False, effect=False)
+                    self.messages.append({"role": "user", "content":
+                        f"AÇÃO NEGADA (go/no-go): o usuário recusou — {sens.reason}. Proponha "
+                        "alternativa, peça confirmação com outra abordagem, ou declare task_blocked."})
+                    continue
+
+            # --- Hook before_tool (§11): política externa pode VETAR a tool ---
+            if self.hooks is not None and not self.hooks.fire(
+                    "before_tool", {"tool": action.tool, "args": action.args}):
+                step_n += 1
+                t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False))
+                self._emit("step", n=step_n, tool=action.tool, ok=False, effect=False)
+                self.messages.append({"role": "user", "content":
+                    f"AÇÃO BLOQUEADA por um hook de política: '{action.tool}'. Tente outra "
+                    "abordagem ou declare task_blocked."})
+                continue
+
+            # --- Tool normal ---
+            self._fingerprints.append(fp)
+            try:
+                res = tool.run(action.args, self.ctx)
+            except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
+                res = ToolResult(False, f"erro na tool {action.tool}: {e}")
+            step_n += 1
+            t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
+            self._emit("step", n=step_n, tool=action.tool, ok=res.ok, effect=res.effect)
+            if self.hooks is not None:
+                self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
+
+            # circuit breaker de falha repetida
+            if not res.ok:
+                key = f"{action.tool}:{res.output[:60]}"
+                self._failures[key] = self._failures.get(key, 0) + 1
+                if self._failures[key] >= 3:
+                    self.messages.append({"role": "user", "content":
+                        "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro. "
+                        "Mude de estratégia ou declare task_blocked."})
+
+            # watchdog / stall (§3.3)
+            self._steps_without_effect = 0 if res.effect else self._steps_without_effect + 1
+            if self._steps_without_effect >= self.budget.stall_limit:
+                self._emit("stall", steps=self._steps_without_effect)
+                self.messages.append({"role": "user", "content":
+                    "SEM PROGRESSO: vários passos sem efeito observável. Tome uma ação "
+                    "concreta (escreva/rode algo) ou declare task_blocked."})
+                self._steps_without_effect = 0
+
+            self.messages.append({"role": "user", "content": format_observation(step_n, action.tool, res)})
+
+        return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+
+    def _handle_terminal(self, t: Task, action: Action) -> Task | None:
+        if action.tool == "task_blocked":
+            t.state = TaskState.BLOCKED
+            t.reason = action.args.get("reason", "(sem razão)")
+            self._emit("blocked", reason=t.reason)
+            return t
+        if action.tool == "need_input":
+            t.state = TaskState.NEEDS_INPUT
+            t.reason = action.args.get("question", "(sem pergunta)")
+            self._emit("need_input", question=t.reason)
+            return t
+        if action.tool == "task_complete":
+            ok, missing = check_exit(t.exit_criteria, self.ctx)
+            if ok:
+                t.state = TaskState.COMPLETE
+                t.result = action.args.get("summary", "(sem resumo)")
+                self._extract_on_complete(t)
+                self._emit("complete", summary=t.result)
+                return t
+            # rejeitado: 'concluído' falso (§3.4)
+            self._stats["gate_rejections"] += 1
+            self._emit("complete_rejected", missing=missing)
+            self.messages.append({"role": "user", "content":
+                "task_complete REJEITADO — critérios de saída não satisfeitos:\n"
+                + "\n".join(f"  - {m}" for m in missing)
+                + "\nContinue trabalhando para satisfazê-los."})
+            return None
+        return None  # não deveria acontecer
+
+    def _try_escalate(self, why: str) -> bool:
+        """Cascata (§3.5): troca para o modelo mais forte uma vez antes de falhar."""
+        if not self.escalate or self._escalated:
+            return False
+        self._escalated = True
+        self.generate = self.escalate
+        self._loop_breaks = 0
+        self._consecutive_violations = 0
+        self._fingerprints.clear()
+        self._emit("escalate", why=why)
+        self.messages.append({"role": "user", "content":
+            "Trocando para um modelo mais forte. Reavalie o estado e tome a PRÓXIMA "
+            "ação concreta (um bloco json), ou declare task_blocked."})
+        return True
+
+    def _extract_on_complete(self, t: Task) -> None:
+        """Extract (§6.2 passo 4): promove o resumo da tarefa para memória + MEMORY.md."""
+        if self.memory is None or not t.result:
+            return
+        from okami.memory import files as _mfiles
+        from okami.memory.base import MemoryItem
+        self.memory.write(MemoryItem(text=f"{t.goal} → {t.result}", kind="summary", source="task"))
+        _mfiles.append_fact(self.ctx.workspace, f"{t.goal} → {t.result}")
+
+    def _fail(self, t: Task, reason: str) -> Task:
+        t.state = TaskState.FAILED
+        t.reason = reason
+        self._emit("failed", reason=reason)
+        return t

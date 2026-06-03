@@ -1,0 +1,9 @@
+# Normaliza fim de linha. Scripts shell DEVEM ser LF (CRLF quebra no Linux/macOS).
+* text=auto eol=lf
+*.sh   text eol=lf
+*.ps1  text eol=crlf
+# binários (não normalizar)
+*.png  binary
+*.gif  binary
+*.mp3  binary
+*.ico  binary

@@ -1,0 +1,152 @@
+"""Runner — roda uma tarefa no harness montando tudo (memória, skills, MCP, learning).
+
+Compartilhado entre a CLI (`okami task`) e o gateway (Telegram §13). Não imprime nada: recebe
+`approve` (go/no-go), `on_event` (progresso) e `emit` (logs) como callbacks. Devolve a Task.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
+
+from okami import learning
+from okami.llm import providers as prov
+from okami import skills as skillmod
+from okami.config import OkamiConfig
+from okami.core import Budget, Harness, Task
+from okami.core import default_registry
+from okami.memory import files as memfiles
+from okami.memory import make_embedder, open_memory
+from okami.skills.skill_security import scan_path
+
+
+def run_task(
+    cfg: OkamiConfig,
+    workspace,
+    goal: str,
+    *,
+    exit_criteria: list[dict] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    approve: Callable[[dict], bool] | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    max_steps: int = 24,
+    escalate_to: str | None = None,
+    skills_dir: str = "skills",
+    extra_context: str = "",
+    cancel: Callable[[], bool] | None = None,
+    depth: int = 0,
+    images: list[str] | None = None,
+    emit: Callable[[str], None] = lambda m: None,
+) -> Task:
+    ws = Path(workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+
+    from okami.integrations.references import expand_references          # @file / @url / @gitdiff (#3)
+    goal, ref_block = expand_references(goal, ws)
+    if ref_block:
+        extra_context = (ref_block + "\n\n" + extra_context) if extra_context else ref_block
+
+    # Vision (§6): só manda imagem p/ modelo multimodal; senão, avisa e segue texto (failover decide).
+    if images and not cfg.provider(provider).capability.vision:
+        emit("modelo atual sem visão — imagem ignorada (configure capability.vision: true num provider).")
+        extra_context = "[O usuário enviou imagem(ns), mas este modelo não tem visão.]\n\n" + extra_context
+        images = None
+
+    def _spawn(subgoal, agent=None, model_=None):     # subagente em runtime (#1), com guarda de profundidade
+        if depth >= 2:
+            return "(limite de profundidade de subagentes atingido)"
+        scfg, sws = cfg, ws
+        if agent:
+            from okami.agents import effective_config, load_agents
+            from okami.config import load_raw
+            spec = load_agents().get(agent)
+            if spec:
+                graw, _ = load_raw()
+                scfg, sws = effective_config(graw, spec), spec.dir
+        sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1, emit=emit)
+        return (sub.result or sub.reason or sub.state.value)[:2000]
+
+    def generate(messages, schema=None):
+        return prov.complete_messages(cfg, messages, provider=provider, model=model, response_schema=schema)
+
+    escalate = None
+    if escalate_to:
+        def escalate(messages, schema=None):  # noqa: F811
+            return prov.complete_messages(cfg, messages, provider=escalate_to, response_schema=schema)
+
+    # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
+    all_skills = skillmod.load_skills(Path(skills_dir))
+    safe = [s for s in all_skills if not scan_path(s.path.parent).blocked]
+    if len(safe) != len(all_skills):
+        emit("skills bloqueadas pelo scan: " + ", ".join({s.name for s in all_skills} - {s.name for s in safe}))
+    routed = skillmod.route(goal, cfg.contracts, safe)
+    catalog = skillmod.catalog(safe, exclude={s.name for s in routed})
+    # Taste model (§9): em tarefa de UI, injeta o GOSTO aprendido (crítico soft) junto às skills.
+    from okami.learning import taste as tastemod
+    ui_task = bool((cfg.contracts or {}).get("ui")) or any(
+        k in s.name.lower() for s in routed for k in ("frontend", "design", "shadcn", "heroui", "ui"))
+    taste_block = tastemod.TasteProfile.load(ws).steer() if ui_task else ""
+    # extra_context (ex.: histórico da conversa do gateway §13) vem primeiro.
+    system_extra = "\n\n".join(x for x in (extra_context, taste_block, skillmod.render_block(routed),
+                                           catalog) if x)
+    skills_map = {s.name: s.body for s in safe}
+
+    mem = open_memory(ws, backend=cfg.memory.get("backend", "sqlite-fts5"),
+                      embedder=make_embedder(cfg.memory.get("embedder")), config=cfg.memory)
+    core_block = memfiles.core_block(ws, cfg.memory.get("files", {}))
+
+    registry = default_registry()
+    mcp_clients = []
+    servers = (cfg.mcp or {}).get("servers")
+    if servers:
+        from okami.integrations.mcp import load_mcp_tools
+        mcp_tools, mcp_clients = load_mcp_tools(servers, emit=emit)
+        registry.update(mcp_tools)
+
+    # Auto-compaction adaptativa à janela do modelo (§6.4): Qwen 32K comprime cedo, Claude 200K tarde.
+    pc = cfg.provider(provider)
+    tune_key = model or pc.name
+    if (cfg.learning or {}).get("auto_tune"):         # §7: aplica calibração aprendida do modelo
+        ov = learning.tuned_overrides(ws, tune_key)
+        if ov.get("tool_mode") and pc.capability.tool_mode != ov["tool_mode"]:
+            pc.capability.tool_mode = ov["tool_mode"]
+            emit(f"🔧 auto-tune: {tune_key} → tool_mode={ov['tool_mode']}")
+    budget = Budget(max_steps=max_steps, max_context_chars=prov.compaction_threshold_chars(pc))
+    emit(f"janela≈{prov.context_window_tokens(pc)//1000}K tokens · compacta em ~{budget.max_context_chars//1000}k chars")
+
+    from okami.gateway.checkpoints import Checkpoints
+    from okami.automation.hooks import HookManager
+    hooks = HookManager(cfg.hooks, root=str(ws), emit=emit)   # event hooks (§11)
+    t = Task(goal=goal, exit_criteria=exit_criteria or [])
+    if not hooks.fire("before_task", {"goal": goal}):         # política externa pode VETAR a tarefa
+        from okami.core import TaskState
+        t.state, t.reason = TaskState.BLOCKED, "bloqueada por hook before_task"
+        mem.close()
+        for c in mcp_clients:
+            c.close()
+        return t
+    harness = Harness(generate, t, ws, budget=budget,
+                      on_event=on_event, escalate=escalate, system_extra=system_extra,
+                      memory=mem, core_block=core_block, approve=approve,
+                      skills=skills_map, registry=registry, cancel=cancel,
+                      checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
+                      images=images)   # vision §6 (modelo multimodal)
+    try:
+        harness.run()
+        hooks.fire("after_task", {"goal": goal, "state": t.state.value, "result": t.result or ""})
+        try:
+            learning.apply(mem, t, model_name=model or "default")
+            learning.record_run(ws, tune_key, t.stats)    # §7: acumula stats p/ auto-tune do modelo
+            if (cfg.learning or {}).get("auto_skill"):    # §7: destila skill da experiência (escaneada)
+                name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default",
+                                                  cfg=cfg)
+                if name:
+                    emit(f"🧠 skill nova destilada e escaneada: {name}")
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        mem.close()
+        for c in mcp_clients:
+            c.close()
+    return t

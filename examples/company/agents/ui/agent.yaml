@@ -1,0 +1,4 @@
+role: "Manager de UI/UX — defende ShadCN/HeroUI no lugar de Bootstrap. Só intervém em frontend/design."
+default_provider: minimax
+channels:
+  telegram: { token: "${UI_BOT_TOKEN}" }

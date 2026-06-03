@@ -1,0 +1,5 @@
+role: "CTO — lidera, decide a stack, foca em entrega e simplicidade."
+default_provider: codex            # cada agente roda SEU modelo (credenciais são globais)
+channels:
+  telegram: { token: "${CTO_BOT_TOKEN}", allow_chats: [] }
+match: ["telegram:.*"]

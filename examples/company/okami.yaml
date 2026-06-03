@@ -1,0 +1,12 @@
+# Exemplo de EMPRESA multi-agente. Cada agente tem pasta própria em agents/<id>/ (workspace+identidade).
+default_provider: lmstudio
+providers:                              # CREDENCIAIS são GLOBAIS; cada agente escolhe o seu default_provider
+  lmstudio: { model: openai/qwen3.5-4b-mtp, api_base: http://192.168.3.24:4480/v1, api_key: lm-studio }
+  codex:    { model: openai-codex/gpt-5.4, transport: codex_oauth, auth: oauth_subscription }
+  minimax:  { model: openai/MiniMax-M3, transport: minimax_oauth, auth: oauth_subscription }
+agents:
+  default: cto
+groups:                                 # reunião sem stampede: o moderador decide quem fala
+  - members: [cto, ui, backend]
+    moderator: { provider: lmstudio }
+    cooldown: 2

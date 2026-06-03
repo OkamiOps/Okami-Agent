@@ -1,0 +1,32 @@
+[project]
+name = "okami-agent"
+version = "0.0.1"
+description = "Okami Agent — reliable, self-improving coding agent with capability parity across LLMs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.50",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+    "questionary>=2.0",      # menus interativos (seta ↑↓) no setup/provider; fallback numerado embutido
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+honcho = ["honcho-ai>=1.0"]
+voice = ["faster-whisper>=1.0", "edge-tts>=6.1"]
+browser = ["playwright>=1.40"]      # browser automation (§13); sem ela, browse cai p/ fetch read-only
+
+[project.scripts]
+okami = "okami.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["okami"]

@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Runtime na RAIZ do repo (não commitar — são dados da instalação, não código):
+/agents/         # agentes criados por `okami agent new` (o exemplo fica em examples/company/agents)
+/inbox/          # imagens recebidas (vision §6)
+workspaces/
+.okami/          # estado runtime: sessões, sinais de persona, memória local (por workspace)
