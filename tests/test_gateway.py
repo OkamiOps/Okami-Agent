@@ -50,7 +50,7 @@ def test_message_runs_task_and_replies():
     ep = _ep()
     ep.handle("7", "crie x")
     texts = [t for _, t in ep.channel.sent]
-    assert any("trabalhando" in t for t in texts)
+    assert any("pensando" in t for t in texts)
     assert any(t.startswith("✅") and "feito: crie x" in t for t in texts)
 
 

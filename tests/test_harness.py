@@ -53,6 +53,38 @@ def test_parse_action_none_on_prose():
     assert parse_action("só um plano: vou criar o arquivo depois") is None
 
 
+# ------------------------------------------------------------------ loop ReAct (conversa vs ação)
+def test_respond_is_conversational_terminal(tmp_path):
+    """`respond` é o ramo 'fala' do ReAct: encerra COMPLETE com a mensagem, sem exigir tarefa."""
+    r = Harness(Script([J("respond", message="Oi! Sou o Okami, tudo certo 👋")]),
+                Task(goal="oi, tudo bem? quem é você?"), tmp_path).run()
+    assert r.state == TaskState.COMPLETE
+    assert "Okami" in r.result and "especifique" not in r.result.lower()   # conversa, não telemarketing
+
+
+def test_action_request_blocks_lazy_respond_then_executes(tmp_path):
+    """Pedido com verbo de ação: se o modelo só fala (respond) sem executar, o backstop re-prompta
+    e ele acaba usando a ferramenta de verdade (paridade com modelo fraco)."""
+    outputs = [
+        J("respond", message="pronto, criei!"),                 # preguiça: diz que fez sem fazer
+        J("write_file", path="nota.txt", content="feito de verdade"),
+        J("respond", message="Arquivo nota.txt criado."),       # agora sim, com efeito
+    ]
+    events = []
+    r = Harness(Script(outputs), Task(goal="crie um arquivo nota.txt"), tmp_path,
+                on_event=events.append).run()
+    assert r.state == TaskState.COMPLETE
+    assert (tmp_path / "nota.txt").read_text(encoding="utf-8") == "feito de verdade"  # executou
+    assert any(e["kind"] == "violation" for e in events)         # o backstop disparou 1x
+
+
+def test_pure_chat_is_not_nudged(tmp_path):
+    """Sem verbo de ação ('oi'), respond passa direto — nada de backstop (não vira tarefa)."""
+    s = Script([J("respond", message="oi!")])
+    r = Harness(s, Task(goal="oi tudo bem?"), tmp_path).run()
+    assert r.state == TaskState.COMPLETE and s.calls == 1          # 1 turno só, sem re-prompt
+
+
 # ------------------------------------------------------------------ happy path
 def test_happy_path_completes(tmp_path):
     outputs = [

@@ -1,0 +1,4 @@
+{"id": "838253616-0", "parentId": null, "role": "USER", "text": "oi", "ts": 1780528865.3269894}
+{"id": "838253616-1", "parentId": "838253616-0", "role": "AGENTE", "text": "Okami online. Sou seu engenheiro de software pragmático — direto, sem enrolação.\n\nO que vamos construir hoje? Código, design, documentação ou algo mais?", "ts": 1780528869.6009662}
+{"id": "838253616-2", "parentId": "838253616-1", "role": "USER", "text": "quem é voce?", "ts": 1780528887.5559826}
+{"id": "838253616-3", "parentId": "838253616-2", "role": "AGENTE", "text": "Okami online. Sou seu engenheiro de software pragmático.\n\nO que vamos construir hoje? Código, design, documentação ou algo mais?", "ts": 1780528893.8000972}

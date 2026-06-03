@@ -78,6 +78,12 @@ FUTURE_INTENT = re.compile(
 )
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _BARE_JSON = re.compile(r"(\{(?:[^{}]|\{[^{}]*\})*\})", re.DOTALL)
+# Verbo de AÇÃO no pedido → o agente DEVE executar uma ferramenta, não só falar (backstop p/ modelo fraco).
+_ACTION_RE = re.compile(
+    r"\b(cri[ae]|cri[ae]r|faç[ao]|faz|edit|alter|mud[ae]|atualiz|rod[ae]|execut|implement|"
+    r"refator|consert|corrij|arrum|ger[ae]|ger[ae]r|escrev|escrev[ae]|instal|configur|delet|"
+    r"apag|remov|adicion|comit|build|create|fix|run|write|generate|install|add|delete|deploy)",
+    re.IGNORECASE)
 
 
 @dataclass
@@ -117,21 +123,31 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "") 
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
         lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
     tools_block = "\n".join(lines)
-    criteria = task.exit_criteria or [{"type": "model_declared"}]
-    crit_txt = "\n".join(f"  - {c}" for c in criteria)
     extra_block = f"\n\n{extra}\n" if extra else ""
-    return f"""Você é o Okami, um agente que age por AÇÕES, não por descrição.{extra_block}
+    # Há um TRABALHO com critérios verificáveis? (≠ simples conversa)
+    real_criteria = [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
 
-REGRAS DURAS (o harness aplica à força):
-1. A cada turno, emita EXATAMENTE UMA ação como bloco ```json {{"tool": "...", "args": {{...}}}} ```.
-2. NUNCA responda só com texto/plano. Sem ação = turno rejeitado.
-3. Não diga "vou fazer X" — FAÇA emitindo a ação.
-4. Para terminar use task_complete; se travar, task_blocked; se precisar do usuário, need_input.
-5. task_complete só é aceito quando os CRITÉRIOS DE SAÍDA forem verificados pelo harness.
-6. EVOLUA: ao aprender algo DURÁVEL sobre o usuário use `remember_user`; sobre o projeto use
-   `remember`. NÃO reescreva SOUL/VOICE/PERSONA por conta própria (identidade é curada). MAS se o
-   usuário PEDIR p/ mudar a identidade ou QUALQUER arquivo (código, .env, config), FAÇA — ações
-   sensíveis passam por go/no-go (confirmação) automaticamente.
+    # Loop ReAct (estilo OpenClaw/Hermes): a cada turno o agente FALA (respond) OU AGE (uma tool).
+    loop = """COMO VOCÊ FUNCIONA — a cada turno emita EXATAMENTE UMA ação, um bloco ```json {"tool": "...", "args": {...}}```:
+• Para FALAR com o usuário (responder, opinar, perguntar, conversar) → use `respond`. Isso encerra o turno.
+• Para AGIR (ler/escrever arquivo, rodar shell, buscar, lembrar, gerar imagem) → use a ferramenta;
+  você verá o resultado (OBSERVAÇÃO) e raciocina o próximo passo. Encadeie quantas ações precisar.
+RACIOCÍNIO: aja em vez de só descrever — "vou fazer X" não conta, FAÇA. Pense, então responda/aja.
+AÇÃO REAL (obrigatório): se pedirem p/ CRIAR/EDITAR/RODAR/GERAR/INSTALAR/APAGAR algo, você é OBRIGADO
+a usar a ferramenta de verdade (write_file, run_shell, generate_image…) ANTES de confirmar. Dizer
+"pronto/feito/criei" com `respond` SEM ter executado a ferramenta é PROIBIDO.
+MEMÓRIA: aprendeu algo durável sobre o usuário → `remember_user`; sobre o projeto → `remember`.
+Não reescreva SOUL/VOICE/PERSONA sozinho (identidade é curada); mas se o usuário PEDIR p/ mudar
+qualquer arquivo (código, .env, identidade), FAÇA — ações sensíveis passam por confirmação (go/no-go)."""
+
+    if real_criteria:                                # --- modo TRABALHO (com gate de saída) ---
+        crit_txt = "\n".join(f"  - {c}" for c in real_criteria)
+        return f"""Você é o agente pessoal do usuário — uma IA que RACIOCINA e EXECUTA. Sua identidade
+(SOUL/VOICE/PERSONA), o usuário e a memória estão abaixo; aja e fale no SEU tom.{extra_block}
+
+{loop}
+Ao concluir um trabalho COM critérios, use `task_complete` (o harness verifica de verdade). Se
+travar, `task_blocked`. Se faltar uma informação que só o usuário tem, `need_input`.
 
 OBJETIVO:
 {task.goal}
@@ -142,7 +158,27 @@ CRITÉRIOS DE SAÍDA (verificados pelo harness):
 FERRAMENTAS DISPONÍVEIS:
 {tools_block}
 
-Responda agora com a PRÓXIMA ação (um único bloco json)."""
+Próxima ação (um único bloco json)."""
+
+    # --- modo CONVERSA / agente pessoal (sem critérios: papo, perguntas, pedidos) ---
+    return f"""Você é o agente pessoal do usuário — uma IA real que conversa de igual pra igual, com
+raciocínio e personalidade PRÓPRIOS. Siga sua identidade abaixo (SOUL = quem você é, VOICE = como
+fala, PERSONA = seu jeito) e o que sabe do usuário. Você NÃO é um chatbot de formulário.{extra_block}
+
+{loop}
+
+Você está numa CONVERSA. Responda de forma natural, pensada e direta com `respond`. Se for papo
+("oi", "tudo bem?", "quem é você?"), apresente-se / converse como VOCÊ é — JAMAIS peça "especifique
+a tarefa" nem responda como atendente de telemarketing. Tenha opinião. Quando o usuário pedir um
+trabalho concreto, aí sim use as ferramentas pra executar (mostrando um raciocínio curto antes).
+
+MENSAGEM DO USUÁRIO:
+{task.goal}
+
+FERRAMENTAS DISPONÍVEIS:
+{tools_block}
+
+Próxima ação (um único bloco json)."""
 
 
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
@@ -256,6 +292,9 @@ class Harness:
         self._loop_breaks = 0
         self._escalated = False
         self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
+        # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
+        self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
+        self._nudged_action = False
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -417,6 +456,21 @@ class Harness:
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
 
     def _handle_terminal(self, t: Task, action: Action) -> Task | None:
+        if action.tool == "respond":                     # FALA com o usuário (ReAct: ramo "texto")
+            # backstop: pediram AÇÃO mas ele só falou sem executar NADA com efeito → re-prompt 1x.
+            if (self._action_expected and not self._nudged_action
+                    and not any(s.effect for s in t.steps)):
+                self._nudged_action = True
+                self._emit("violation", n=0, text="respondeu sem executar a ação pedida")
+                self.messages.append({"role": "user", "content":
+                    "Você respondeu SEM executar nada. O pedido exige uma ferramenta de verdade "
+                    "(ex.: write_file p/ criar arquivo, run_shell p/ rodar). Faça a AÇÃO agora "
+                    "(um bloco json com a ferramenta certa) — depois confirme com respond."})
+                return None
+            t.state = TaskState.COMPLETE
+            t.result = action.args.get("message") or action.args.get("summary") or ""
+            self._emit("complete", summary=t.result)     # sem _extract: conversa não polui a memória
+            return t
         if action.tool == "task_blocked":
             t.state = TaskState.BLOCKED
             t.reason = action.args.get("reason", "(sem razão)")

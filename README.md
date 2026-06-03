@@ -87,7 +87,7 @@ okami setup                       # assistente de configuração (menus de seta 
 okami setup provider              # pula direto pra uma seção (provider|memory|identity|channel)
 okami provider add                # adiciona um modelo do catálogo (Codex, OpenAI, Ollama…) sem editar YAML
 okami chat                        # conversa no terminal (TUI com sessão persistente)
-okami chat -q "diga oi"           # uma pergunta e sai (scripts/pipe)
+okami chat "diga oi"              # uma pergunta e sai (scripts/pipe)
 okami chat -a cto                 # conversa COMO um agente (agents/cto)
 okami doctor                      # diagnostica config, chaves e conectividade
 okami run "explique recursão" -p claude   # ida-e-volta crua (sem sessão/harness)

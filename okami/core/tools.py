@@ -264,9 +264,18 @@ class GenerateImage(Tool):
 
 
 # Tools terminais: o loop trata especialmente, mas elas existem para schema/parse.
+class Respond(Tool):
+    name = "respond"
+    description = ("FALA com o usuário (responder, opinar, perguntar, conversar) e encerra o turno. "
+                   "É assim que você conversa — use sempre que for só diálogo, sem precisar agir.")
+    args_schema = {"message": "sua mensagem ao usuário, no seu tom (VOICE/PERSONA)"}
+    required = ("message",)
+    terminal = True
+
+
 class TaskComplete(Tool):
     name = "task_complete"
-    description = "Conclui a tarefa. Só é aceito se os critérios de saída forem verificados."
+    description = "Conclui um TRABALHO com critérios. Só é aceito se os critérios de saída forem verificados."
     args_schema = {"summary": "resumo do que foi feito"}
     terminal = True
 
@@ -288,7 +297,7 @@ class NeedInput(Tool):
 
 
 def default_registry() -> dict[str, Tool]:
-    tools = [ReadFile(), WriteFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
+    tools = [Respond(), ReadFile(), WriteFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
              RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
              TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

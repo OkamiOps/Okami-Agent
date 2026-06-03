@@ -1,177 +1,84 @@
-# Okami — configuração raiz.
-# Providers via LiteLLM. `tier` foreshadowa o capability profile (§3.5).
-# `auth: oauth_subscription` = usar ASSINATURA do usuário (NUNCA pay-as-you-go);
-# adapter OAuth ainda será implementado (Fase 8) — ver memory okami-provider-auth.
-
 default_provider: lmstudio
-
-# Memória (§6). Backends (escolha por `backend`):
-#   sqlite-fts5  -> custo baixíssimo (público/hardware fraco 4GB/2-core). BM25 + embeddings opcionais.
-#   holographic  -> NATIVO no agente (HRR/numpy in-process, MESMA máquina, NUNCA remoto; sem rede).
-#                   Igual ao Hermes. Semântica sem servidor de embedding.
-#   honcho       -> ÚNICO remoto: user-model + dialética numa instância própria (ex.: VPS via Tailscale).
-# Split nativo vs remoto: NATIVOS no agente = harness, holographic, skills, gates. REMOTOS (opcionais,
-# por host/Tailscale) = honcho, embedder do sqlite-fts5, e os LLMs/providers.
 memory:
-  backend: sqlite-fts5                   # público/fallback. Daily-driver: [holographic, honcho]
-  # backend: [holographic, honcho]       # combo em CAMADAS (local + user-model remoto). Tolerante:
-                                          #   se o honcho cair, segue só com holographic.
-
-  embedder:                              # usado pelo sqlite-fts5 (holographic NÃO precisa). OpenAI-compat.
-    enabled: true                        # false p/ desligar (hardware fraco)
-    api_base: http://192.168.3.24:4480/v1   # LMStudio; llama.cpp: http://localhost:8080/v1; Tailscale: http://<host>:porta/v1
+  backend: sqlite-fts5
+  embedder:
+    enabled: true
+    api_base: http://192.168.3.24:4480/v1
     model: text-embedding-nomic-embed-text-v1.5
-
   holographic:
-    dim: 1024                            # dimensão dos vetores HRR
-
-  files:                                 # .md SEMPRE injetados (tier core). Limites em chars.
-    soul: 6000                           # SOUL.md    — identidade/valores (não auto-evolui; edita a pedido)
-    voice: 6000                          # VOICE.md   — voz/tom
-    persona: 6000                        # PERSONA.md — self-model (PROFILE.md como fallback)
-    agents: 4000                         # AGENTS.md  — instruções do projeto
-    user: 4000                           # USER.md    — modelo do usuário (agente atualiza)
-    memory: 4000                         # MEMORY.md  — fatos duráveis (agente atualiza)
-
-  # honcho:                              # [próximo passo]
-  #   base_url: http://<vps-honcho-tailscale>:8000
-  #   api_key: ...
-  #   workspace: okami
-
-# Contratos de projeto (§4.1): regras DURAS, verificadas pelos gates (okami gate / -e ui_gate).
+    dim: 1024
+  files:
+    soul: 6000
+    voice: 6000
+    persona: 6000
+    agents: 4000
+    user: 4000
+    memory: 4000
 contracts:
   ui:
     library: shadcn
-    component_source: "@/components/ui"
+    component_source: '@/components/ui'
     forbid_inline_hex: true
     forbid_raw_css: true
     require_component_source: true
-
-# Servidores MCP (§12): as tools deles viram tools nativas do harness (mesmas invariantes).
-# mcp:
-#   servers:
-#     filesystem:
-#       command: npx
-#       args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-#     github:
-#       command: npx
-#       args: ["-y", "@modelcontextprotocol/server-github"]
-#       env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }
-
-# Persona evolutiva (§8): o agente PERCEBE seu estilo (palavrão, apelido, sarcasmo, registro técnico)
-# ao longo da conversa e evolui VOICE/PERSONA + USER.md SOZINHO — gradual e sem perguntar (reversível
-# com /undo). SOUL fica protegido (só muda a pedido explícito). Ligado por padrão.
-# persona:
-#   observe: true          # false p/ desligar a auto-evolução (heurística, a cada msg)
-#   gradual_scale: 1        # >1 = exige mais observações antes de "pegar" um traço (mais conservador)
-#   llm_every: 0            # >0 = leitura RICA por LLM a cada N turnos (pega sarcasmo pelo tom; tem custo)
-
-# Auto-aprimoramento (§7): destila skills da experiência e ajusta com o tempo.
-# learning:
-#   auto_skill: false       # true = após uma tarefa bem-sucedida e NÃO-trivial, destila uma SKILL.md
-#                           #         (escaneada por segurança antes de ativar). Estilo Hermes.
-#   auto_tune: false        # true = calibra o capability profile por modelo pelos stats (muita ação
-#                           #         malformada → força json_constrained naquele modelo). §3.5/§7.
-# FAILOVER (§3.5): em cada provider, `fallback: [outro_provider]` — se ele cair/rate-limit, tenta o backup.
-#   Ex.: minimax: { ..., fallback: [mimo, lmstudio] }   # robustez é a dor nº1.
-
-# Scheduling (§11): agende tarefas. `okami cron add '1h' 'resumir o dia' --to <chat>` · `okami cron list`.
-#   cron 5-campos ("0 9 * * 1"), intervalo ("1h","every 30m","2h30m") ou ISO one-shot. O gateway entrega no chat.
-# Event hooks (§11): roda código nos pontos do ciclo; before_* pode VETAR (política). `okami hooks` lista.
-# hooks:
-#   before_tool: ["./scripts/policy.sh"]   # exit≠0 = bloqueia a tool
-#   after_task:  ["./scripts/notify.sh"]    # observador (notifica, loga, etc.)
-
-# Gateway (§13): sessões persistem em <ws>/.okami/sessions (restart NÃO perde o contexto da conversa).
-# gateway:
-#   auto_resume: false      # true = retoma tarefa interrompida por restart no boot (1x, com guarda
-#                           #         anti-loop). Default false = avisa e oferece /retry (mais seguro).
-#   max_sessions: 500       # poda sessões antigas no boot (mantém as mais recentes)
-
-# Voz (§13, opcional): áudio no Telegram → Whisper transcreve; resposta → TTS. `pip install ".[voice]"`.
-# voice:
-#   stt: { enabled: true, model: base, device: cpu }   # whisper local; model: tiny|base|small (tiny=rápido)
-#   tts: { enabled: true, backend: edge, voice: pt-BR-AntonioNeural }   # ou backend: minimax (api_key + voice)
-
-# Multi-agente (§10): cada agente vive em agents/<id>/ (workspace+config+persona próprios).
-# Crie com `okami agent new <id>`; rode com `okami task -a <id> "..."`. Roteamento por bindings:
-# agents:
-#   default: suporte
-#   bindings:
-#     - { match: "telegram:12345", agent: suporte }   # origem exata → agente
-#     - { match: "telegram:.*",    agent: geral }      # regex → agente
-# (cada agent.yaml também pode declarar `match: [...]` próprio — ex.: o Telegram daquele agente.)
-
-# Salas multi-agente (§10): vários agentes conversam como em grupo de empresa — o MODERADOR decide
-# quem fala (ou ninguém), com cooldown e anti-stampede. Cada agente tem um `role:` no seu agent.yaml.
-# groups:
-#   - members: [cto, ui_manager, backend_manager, data_manager, qa_manager]
-#     moderator: { provider: mimo }   # modelo barato p/ escolher o speaker (constrained enum)
-#     cooldown: 2                      # turnos de silêncio após falar
-#     max_bot_streak: 4                # máx. mensagens de agente seguidas sem humano
-#     min_delay: 0.0                   # (Telegram) pausa entre falas p/ parecer humano
-# Use: okami room "CTO, quero usar Bootstrap no frontend"   (ou @ui_manager p/ forçar)
-# Cada agente fala no SEU modelo (default_provider do agent.yaml); credenciais providers: globais.
-# No TELEGRAM (vários bots num grupo): cada membro precisa de channels.telegram.token no seu
-# agent.yaml; `okami gateway` sobe os grupos (um listener lê, cada bot responde pela sua token).
-
 providers:
-  # --- Local (funciona já; sem custo) -------------------------------------
-    # IMPORTANTE: use SÓ o modelo carregado no LMStudio (senão ele tenta subir outro e estoura a RAM).
   lmstudio:
-    model: openai/qwen3.5-4b-mtp        # o modelo carregado agora
+    model: openai/qwen3.5-4b-mtp
     api_base: http://192.168.3.24:4480/v1
-    api_key: lm-studio                  # dummy; LMStudio ignora
+    api_key: lm-studio
     auth: api_key
     tier: local
-    context_window: 32768               # Qwen 4b = 32K (compacta cedo p/ não estourar)
+    context_window: 32768
     capability:
-      tool_mode: json_constrained       # força JSON de ação válido (paridade §3.5)
-    models: [qwen3.6-35b-a3b-mtp, qwen3.5-9b-mtp, qwen3.5-4b-mtp, qwen3.5-2b-mtp, google/gemma-4-26b-a4b]
-    notes: "Liste os modelos com 'okami doctor'. Troque o model à vontade."
-
-  # --- Assinatura principal: GPT / Codex (device auth, NÃO pay-as-you-go) --
+      tool_mode: json_constrained
+    models:
+    - qwen3.6-35b-a3b-mtp
+    - qwen3.5-9b-mtp
+    - qwen3.5-4b-mtp
+    - qwen3.5-2b-mtp
+    - google/gemma-4-26b-a4b
+    notes: Liste os modelos com 'okami doctor'. Troque o model à vontade.
   codex:
-    model: openai-codex/gpt-5.4         # default; alterne com -m
+    model: openai-codex/gpt-5.4
     auth: oauth_subscription
-    transport: codex_oauth              # token NATIVO (~/.okami/credentials/codex.json), fallback ~/.codex/auth.json
+    transport: codex_oauth
     tier: strong
-    context_window: 256000              # GPT-5.x
-    models: [gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex-spark]
-    notes: "Login: `okami login codex` — device flow NATIVO (não precisa do codex CLI). Habilite Device Code nas configs de segurança do ChatGPT."
-
-  # --- Claude (assinatura via CLI claude, NÃO pay-as-you-go) ---------------
+    context_window: 256000
+    notes: 'Login depois: okami login codex (habilite Device Code no ChatGPT).'
   claude:
     model: claude-subscription/claude-opus-4-8
     auth: oauth_subscription
-    transport: claude_cli               # dirige o CLI oficial `claude -p` (sancionado)
+    transport: claude_cli
     tier: strong
-    context_window: 200000              # Claude
-    models: [claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5-20251001]
-    notes: "Usa o CLI `claude` (assinatura/OAuth/refresh cuidados pelo CLI). NÃO usar ANTHROPIC_API_KEY pay-as-you-go (ToS restringe reuse direto do token)."
-
-  # --- MiniMax (OAuth token plan, NÃO API key) ----------------------------
+    context_window: 200000
+    models:
+    - claude-opus-4-8
+    - claude-sonnet-4-6
+    - claude-haiku-4-5-20251001
+    notes: Usa o CLI `claude` (assinatura/OAuth/refresh cuidados pelo CLI). NÃO usar
+      ANTHROPIC_API_KEY pay-as-you-go (ToS restringe reuse direto do token).
   minimax:
     model: openai/MiniMax-M3
-    api_base: https://api.minimax.io/v1   # CONFIRMAR base do token plan
-    context_window: 1000000               # MiniMax-M3 (janela grande; CONFIRMAR)
+    api_base: https://api.minimax.io/v1
+    context_window: 1000000
     transport: minimax_oauth
     auth: oauth_subscription
-    oauth:                                # device flow — CONFIRMAR client_id/endpoints nos docs
-      client_id: minimax-cli              # CONFIRMAR
-      device_authorization_url: https://api.minimax.io/oauth/code    # docs citam /oauth/code
-      token_url: https://api.minimax.io/oauth/token                  # docs citam /oauth/token
-      scope: ""
+    oauth:
+      client_id: minimax-cli
+      device_authorization_url: https://api.minimax.io/oauth/code
+      token_url: https://api.minimax.io/oauth/token
+      scope: ''
     tier: weak
-    notes: "Login: `okami login minimax` (device flow OAuth, token plan). Confirmar client_id/endpoints nos docs."
-
-  # --- MiMo / Xiaomi (API key no .env) ------------------------------------
+    notes: 'Login: `okami login minimax` (device flow OAuth, token plan). Confirmar
+      client_id/endpoints nos docs.'
   mimo:
     model: openai/mimo-v2.5-pro
-    api_base: https://platform.xiaomimimo.com/v1   # CONFIRMAR base
-    api_key_env: MIMO_API_KEY             # ponha a chave no .env (MIMO_API_KEY=...)
+    api_base: https://platform.xiaomimimo.com/v1
+    api_key_env: MIMO_API_KEY
     auth: api_key
     tier: weak
-    context_window: 128000                # MiMo (CONFIRMAR)
-    models: [mimo-v2.5-pro, mimo-v2.5]
-    notes: "MiMo via API key no .env (MIMO_API_KEY)."
+    context_window: 128000
+    models:
+    - mimo-v2.5-pro
+    - mimo-v2.5
+    notes: MiMo via API key no .env (MIMO_API_KEY).

@@ -1,0 +1,4 @@
+{"id": "terminal-0", "parentId": null, "role": "USER", "text": "oi tudo bem?", "ts": 1780528307.6508634}
+{"id": "terminal-1", "parentId": "terminal-0", "role": "AGENTE", "text": "O que você gostaria de fazer? Por favor, especifique o projeto, tarefa ou objetivo (ex: criar landing page, documentar código, refatorar módulo, etc.) para eu poder começar.", "ts": 1780528326.4600396}
+{"id": "terminal-2", "parentId": "terminal-1", "role": "USER", "text": "quem é voce?", "ts": 1780528340.1753185}
+{"id": "terminal-3", "parentId": "terminal-2", "role": "AGENTE", "text": "Qual projeto ou tarefa você gostaria que eu execute? Por favor, especifique (ex: criar landing page, documentar código, refatorar módulo, etc.) para eu poder começar.", "ts": 1780528343.9965088}

@@ -330,7 +330,7 @@ class AgentEndpoint:
                     "o gpt-image-2 é quem gera.")
             ctx = note + ("\n\n" + ctx if ctx else "")
             images = abss                                  # vision lê os caminhos no inbox
-        self.channel.send(chat_id, f"▶ {self.agent_id}: trabalhando…")
+        self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
         try:
             kw = {"approve": self._approve(chat_id, s), "extra_context": ctx, "cancel": lambda: s.cancel}
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)

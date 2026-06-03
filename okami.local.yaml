@@ -1,0 +1,8 @@
+agents:
+  default: okami
+memory:
+  backend: holographic
+  files:
+    agents: 4000
+    user: 4000
+    memory: 4000
