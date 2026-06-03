@@ -742,8 +742,9 @@ def setup(
         local["agents"] = agents
         save_local()
         verb = "criado" if created else "já existia"
-        console.print(f"[green]✓ agente '{agent_id}' {verb}[/green] em agents/{agent_id}/ "
-                      f"[dim](SOUL/VOICE/PERSONA + sessões/memória próprias)[/dim]")
+        d = (Path("agents") / agent_id).resolve()
+        console.print(f"[green]✓ agente '{agent_id}' {verb}[/green]\n[dim]   {d}[/dim]\n"
+                      f"[dim]   SOUL/VOICE/PERSONA + sessões/memória próprias[/dim]")
 
     def step_channel() -> None:
         agent_id = (local.get("agents") or {}).get("default") or "okami"
@@ -1104,8 +1105,9 @@ def agent_new(
         raise typer.Exit(1)
     _ensure_agent(agent_id, name=name, provider=provider, memory=memory, match=match,
                   telegram_token=telegram_token)
-    console.print(f"[green]✓ agente '{agent_id}' criado[/green] em agents/{agent_id}/ "
-                  "(edite agent.yaml e a identidade).")
+    d = (Path("agents") / agent_id).resolve()
+    console.print(f"[green]✓ agente '{agent_id}' criado[/green]\n[dim]   {d}[/dim]\n"
+                  "[dim]   (NÃO confundir com okami/agents/ que é o código)[/dim]")
 
 
 @agent_app.command("list")
@@ -1120,7 +1122,8 @@ def agent_list() -> None:
         console.print("[dim]nenhum agente (crie com: okami agent new <id>)[/dim]")
         return
     graw, _ = load_raw()
-    table = Table(title="Agentes")
+    default = (build_config(graw).agents or {}).get("default")
+    table = Table(title=f"Agentes  ·  pasta: {Path('agents').resolve()}")
     table.add_column("id", style="bold")
     table.add_column("provider")
     table.add_column("memória")
@@ -1131,7 +1134,8 @@ def agent_list() -> None:
             prov, memb = eff.default_provider, str(eff.memory.get("backend", "sqlite-fts5"))
         except Exception:  # noqa: BLE001
             prov, memb = "?", "?"
-        table.add_row(aid, prov, memb, ", ".join(spec.raw.get("match") or []) or "-")
+        mark = aid + (" [cyan](default)[/cyan]" if aid == default else "")
+        table.add_row(mark, prov, memb, ", ".join(spec.raw.get("match") or []) or "-")
     console.print(table)
 
 
@@ -1283,19 +1287,89 @@ def chat(
         last_elapsed = _time.time() - t0
 
 
-@app.command()
-def gateway() -> None:
-    """Sobe o gateway: um bot Telegram por agente (channels.telegram.token no agent.yaml)."""
-    from okami.agents import load_agents
-    from okami.config import load_raw
-    from okami.gateway import run_gateway
+def _gateway_files() -> tuple[Path, Path]:
+    d = Path(".okami")
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "gateway.pid", d / "gateway.log"
 
-    graw, _ = load_raw()
-    agents = load_agents()
-    if not agents:
+
+def _pid_alive(pid: int) -> bool:
+    import os
+    if os.name == "nt":
+        import subprocess
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True)
+        return str(pid) in out.stdout
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+@app.command()
+def gateway(
+    foreground: bool = typer.Option(False, "-f", "--foreground",
+                                    help="Roda no terminal (logs ao vivo, Ctrl+C p/ sair)."),
+    stop: bool = typer.Option(False, "--stop", help="Para o gateway que está em background."),
+    status: bool = typer.Option(False, "--status", help="Mostra se o gateway está no ar."),
+) -> None:
+    """Sobe os bots de Telegram (1 por agente). Por padrão roda em BACKGROUND e te devolve o terminal;
+    use -f p/ rodar em primeiro plano, --stop p/ parar, --status p/ checar."""
+    import os
+    import subprocess
+    import sys
+
+    pidfile, logfile = _gateway_files()
+    running_pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text().strip().isdigit() else None
+    alive = running_pid is not None and _pid_alive(running_pid)
+
+    if status:
+        console.print(f"[green]● no ar[/green] (pid {running_pid}) · log: {logfile}" if alive
+                      else "[dim]○ parado[/dim]")
+        return
+    if stop:
+        if not alive:
+            console.print("[dim]gateway não está rodando.[/dim]")
+            pidfile.unlink(missing_ok=True)
+            return
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(running_pid)], capture_output=True)
+        else:
+            import signal
+            os.kill(running_pid, signal.SIGTERM)
+        pidfile.unlink(missing_ok=True)
+        console.print(f"[yellow]⏹ gateway parado[/yellow] (pid {running_pid})")
+        return
+
+    from okami.agents import load_agents
+    if not load_agents():
         console.print("[yellow]nenhum agente. Crie com: okami agent new <id>[/yellow]")
         raise typer.Exit(1)
-    run_gateway(graw, agents, emit=lambda m: console.print(f"🤖 {m}"))
+    if alive and not foreground:
+        console.print(f"[yellow]gateway já está no ar[/yellow] (pid {running_pid}). Pare com: okami gateway --stop")
+        return
+
+    if foreground:                                # primeiro plano: logs ao vivo, bloqueia (Ctrl+C)
+        from okami.config import load_raw
+        from okami.gateway import run_gateway
+        graw, _ = load_raw()
+        run_gateway(graw, load_agents(), emit=lambda m: console.print(f"🤖 {m}"))
+        return
+
+    # background (default): relança a si mesmo destacado e DEVOLVE o terminal
+    flags = {}
+    if os.name == "nt":
+        flags["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        flags["start_new_session"] = True
+    log = open(logfile, "a", encoding="utf-8")
+    proc = subprocess.Popen([sys.executable, "-m", "okami.cli", "gateway", "--foreground"],
+                            stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            cwd=os.getcwd(), **flags)
+    pidfile.write_text(str(proc.pid))
+    console.print(f"[green]🤖 gateway no ar em background[/green] (pid {proc.pid}) — terminal livre.")
+    console.print(f"[dim]logs:[/dim] {logfile}   [dim]status:[/dim] okami gateway --status   "
+                  "[dim]parar:[/dim] okami gateway --stop")
 
 
 @app.command()
