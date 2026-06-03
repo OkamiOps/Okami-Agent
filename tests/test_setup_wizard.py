@@ -76,6 +76,24 @@ def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
     assert "OPENAI_API_KEY=sk-test" in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
+def test_provider_add_selects_model_and_merges_without_clobber(tmp_path, monkeypatch):
+    """Re-adicionar um provider existente ESCOLHE o modelo e MESCLA (não apaga config nem models)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n"
+        "  lmstudio: {model: openai/x, api_key: lm, tier: local}\n"
+        "  codex: {model: openai-codex/gpt-5.4, transport: codex_oauth, auth: oauth_subscription,"
+        " tier: strong, custom_keep: 1}\n", encoding="utf-8")
+    # codex=1 · modelo gpt-5.5=1 · id default(codex→merge) · default? n · (login? n se perguntar)
+    res = runner.invoke(app, ["provider", "add"], input="1\n1\n\nn\nn\n")
+    assert res.exit_code == 0, res.output
+    cx = yaml.safe_load((tmp_path / "okami.yaml").read_text(encoding="utf-8"))["providers"]["codex"]
+    assert cx["model"] == "openai-codex/gpt-5.5"        # escolheu o modelo (não cravou 5.4)
+    assert "gpt-5.5" in cx.get("models", [])            # lista de modelos preservada/adicionada
+    assert cx.get("custom_keep") == 1                   # MERGE: não apagou o que já existia
+    assert "modelo" in res.output and "gpt-5.5" in res.output   # diz qual modelo ficou
+
+
 def test_help_command_lists_groups():
     res = runner.invoke(app, ["help"])
     assert res.exit_code == 0

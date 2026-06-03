@@ -25,6 +25,8 @@ class Preset:
     hint: str
     base: dict = field(default_factory=dict)     # config estática do provider
     fields: list[Field] = field(default_factory=list)
+    model_prefix: str = ""   # prefixo LiteLLM dos modelos (ex.: "openai-codex/")
+    models: list[str] = field(default_factory=list)  # modelos do plano (escolhível no add)
     login: str = ""          # transport que exige `okami login` (codex_oauth/claude_cli/minimax_oauth)
     note: str = ""
 
@@ -34,10 +36,14 @@ PRESETS: list[Preset] = [
     Preset("codex", "OpenAI Codex / ChatGPT", "assinatura (device flow, NÃO pay-as-you-go)",
            base={"model": "openai-codex/gpt-5.4", "auth": "oauth_subscription",
                  "transport": "codex_oauth", "tier": "strong", "context_window": 256000},
-           login="codex_oauth", note="Login depois: okami login codex (habilite Device Code no ChatGPT)."),
+           model_prefix="openai-codex/",
+           models=["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"],
+           login="codex_oauth", note="Login: okami login codex (device flow; habilite Device Code no ChatGPT)."),
     Preset("claude", "Anthropic Claude", "assinatura via CLI `claude` (NÃO pay-as-you-go)",
            base={"model": "claude-subscription/claude-opus-4-8", "auth": "oauth_subscription",
                  "transport": "claude_cli", "tier": "strong", "context_window": 200000},
+           model_prefix="claude-subscription/",
+           models=["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
            login="claude_cli", note="Usa o CLI oficial `claude` (instale e logue-o)."),
     Preset("lmstudio", "LM Studio (local)", "app desktop com servidor de modelo embutido",
            base={"auth": "api_key", "api_key": "lm-studio", "tier": "local", "context_window": 32768,
@@ -63,10 +69,10 @@ PRESETS: list[Preset] = [
            fields=[Field("model", "Modelo", "openai/mimo-v2.5-pro"),
                    Field("__secret__", "API key da MiMo", env="MIMO_API_KEY", kind="secret")]),
     Preset("openai", "OpenAI API", "api.openai.com — API key",
-           base={"api_base": "https://api.openai.com/v1", "auth": "api_key", "tier": "strong",
-                 "context_window": 128000},
-           fields=[Field("model", "Modelo", "openai/gpt-4o-mini"),
-                   Field("__secret__", "API key", env="OPENAI_API_KEY", kind="secret")]),
+           base={"model": "openai/gpt-4o-mini", "api_base": "https://api.openai.com/v1",
+                 "auth": "api_key", "tier": "strong", "context_window": 128000},
+           model_prefix="openai/", models=["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "o3-mini"],
+           fields=[Field("__secret__", "API key", env="OPENAI_API_KEY", kind="secret")]),
     Preset("openrouter", "OpenRouter", "100+ modelos, pay-per-use",
            base={"api_base": "https://openrouter.ai/api/v1", "auth": "api_key", "tier": "strong",
                  "context_window": 128000},

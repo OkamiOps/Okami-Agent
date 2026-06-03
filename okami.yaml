@@ -39,12 +39,17 @@ providers:
     - google/gemma-4-26b-a4b
     notes: Liste os modelos com 'okami doctor'. Troque o model à vontade.
   codex:
-    model: openai-codex/gpt-5.4
+    model: openai-codex/gpt-5.5
     auth: oauth_subscription
     transport: codex_oauth
     tier: strong
     context_window: 256000
-    notes: 'Login depois: okami login codex (habilite Device Code no ChatGPT).'
+    models:
+    - gpt-5.5
+    - gpt-5.4
+    - gpt-5.4-mini
+    - gpt-5.3-codex-spark
+    notes: 'Login: okami login codex (device flow; habilite Device Code no ChatGPT).'
   claude:
     model: claude-subscription/claude-opus-4-8
     auth: oauth_subscription

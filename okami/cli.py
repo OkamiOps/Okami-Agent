@@ -596,6 +596,11 @@ def _provider_add_flow(default_key: str | None = None) -> tuple[str, dict] | Non
         return None
     p = preset(key)
     pdict = dict(p.base)
+    if p.models:                                  # escolhe o MODELO do plano (ex.: gpt-5.5 vs 5.4)
+        cur = (p.base.get("model", "") or "").split("/")[-1]
+        chosen = menu.select("Qual modelo?", [(m, m, "") for m in p.models], default=cur or p.models[0])
+        pdict["model"] = (p.model_prefix or "") + chosen
+        pdict["models"] = list(p.models)          # preserva a lista (doctor + troca com -m)
     for fld in p.fields:
         if fld.kind == "secret":
             val = menu.text(fld.q, password=True)
@@ -1602,23 +1607,56 @@ def provider_add_cmd(
     pid, pdict = res
     cfg_path = Path("okami.yaml")
     raw = (_yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}) or {}
-    raw.setdefault("providers", {})[pid] = pdict
-    raw.setdefault("default_provider", pid)        # 1º provider vira default automaticamente
+    provs = raw.setdefault("providers", {})
+    if pid in provs:                               # NÃO clobbera: mescla sobre o existente (preserva extras)
+        merged = dict(provs[pid] or {})
+        merged.update(pdict)
+        provs[pid] = merged
+        console.print(f"[yellow]provider '{pid}' já existia — atualizado[/yellow] (config preservada + novos valores)")
+    else:
+        provs[pid] = pdict
+        console.print(f"[green]✓ provider '{pid}' adicionado em okami.yaml[/green]")
+    raw.setdefault("default_provider", pid)        # 1º provider de todos vira default automaticamente
     cfg_path.write_text(_yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    console.print(f"[green]✓ provider '{pid}' gravado em okami.yaml[/green]")
+
     make_default = default if default is not None else menu.confirm(f"Usar '{pid}' como default?", default=False)
     if make_default:
         _write_local({"default_provider": pid})
-        console.print(f"[green]✓ default agora é '{pid}'[/green]")
-    # oferece login se for assinatura/OAuth
+
+    _provider_finish(pid, pdict, made_default=make_default)
+
+
+def _provider_finish(pid: str, pdict: dict, *, made_default: bool) -> None:
+    """Status de autenticação EXPLÍCITO + como usar. (compartilhado por provider add / setup)."""
+    from okami import menu
+    model = pdict.get("model", "?")
     try:
         pc = _load().provider(pid)
-        if not pc.ready and pc.transport in ("codex_oauth", "minimax_oauth") and \
-                menu.confirm(f"'{pid}' precisa de login. Fazer agora?", default=True):
-            login(pid)
-    except Exception:  # noqa: BLE001
-        pass
-    console.print("[dim]confira com: okami doctor[/dim]")
+    except Exception as e:  # noqa: BLE001 — config inválida é erro de verdade, não engole
+        console.print(f"[red]✗ não consegui carregar '{pid}':[/red] {e}")
+        return
+    # --- autenticação ---
+    if pc.ready:
+        console.print(f"[green]✓ '{pid}' já está autenticado[/green] [dim](pronto pra usar)[/dim]")
+    elif pc.transport in ("codex_oauth", "minimax_oauth"):
+        if menu.confirm(f"'{pid}' usa assinatura e ainda NÃO está logado. Fazer login agora?", default=True):
+            login(pid)                              # abre o device flow de verdade
+        else:
+            console.print(f"[yellow]→ logue depois com:[/yellow] okami login {pid}")
+    elif pc.transport == "claude_cli":
+        ok = "[green]CLI `claude` OK[/green]" if pc.ready else "[yellow]instale e rode `claude login`[/yellow]"
+        console.print(f"autenticação: {ok}")
+    elif pc.api_key_env:
+        s = "[green]chave no .env OK[/green]" if pc.resolved_key() else f"[yellow]falta {pc.api_key_env} no .env[/yellow]"
+        console.print(f"autenticação: {s}")
+    # --- como usar ---
+    console.print(f"\n[bold green]pronto![/bold green] provider [bold]{pid}[/bold] · modelo [bold]{model}[/bold]"
+                  + (" · [cyan]DEFAULT[/cyan]" if made_default else ""))
+    if made_default:
+        console.print("   testar agora: [bold]okami chat \"oi\"[/bold]   ·   trocar modelo: [bold]okami chat -m <id>[/bold]")
+    else:
+        console.print(f"   usar:  [bold]okami chat -p {pid}[/bold]   ·   tornar default: [bold]okami provider default {pid}[/bold]")
+    console.print("[dim]diagnóstico completo: okami doctor[/dim]")
 
 
 @provider_app.command("list")
