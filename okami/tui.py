@@ -110,16 +110,15 @@ def banner(version: str) -> Text:
 
 
 def _meta_block(model: str, provider: str, cwd: Path, session: str, agent: str) -> Group:
-    """Coluna da esquerda: mascote + estado da sessão."""
-    wolf = Text("\n".join(_WOLF), style=f"bold {ORANGE}")
+    """Coluna da esquerda: estado da sessão (sem mascote — wordmark é a identidade, estilo Hermes)."""
     info = Text()
-    info.append(f"\n {agent}", style=f"bold {ORANGE}")
+    info.append(f" {agent}", style=f"bold {ORANGE}")
     info.append("   ● operacional", style="green")
     info.append(f"\n {model}", style=FG)
     info.append(f"\n {provider}", style=MUTE)
     info.append(f"\n {cwd}", style=CYAN)
     info.append(f"\n sessão: {session}", style=DIM)
-    return Group(Align.center(wolf), info)
+    return Group(info)
 
 
 def _tools_skills(tools: list[str], skills: list) -> Group:

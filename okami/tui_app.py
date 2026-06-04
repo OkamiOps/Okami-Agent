@@ -44,6 +44,40 @@ _SYS_COLOR = {"💭": "dim", "🧬": "magenta", "🎨": "magenta", "🎭": "mage
               "🔊": "cyan", "▶": "dim", "✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan"}
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
+# Gradiente da MARCA Okami (igual ao logotipo): laranja → ciano → magenta, da esquerda p/ a direita.
+_BRAND_STOPS = ((0xFF, 0x75, 0x27), (0x00, 0xDF, 0xE8), (0xFF, 0x39, 0xD1))
+
+
+def _grad_color(t: float) -> str:
+    """Cor hex no ponto t∈[0,1] do gradiente laranja→ciano→magenta (faithful aos tons do logo)."""
+    s = _BRAND_STOPS
+    if t <= 0:
+        r, g, b = s[0]
+    elif t >= 1:
+        r, g, b = s[2]
+    elif t < 0.5:
+        a, c, f = s[0], s[1], t / 0.5
+        r, g, b = (round(a[i] + (c[i] - a[i]) * f) for i in range(3))
+    else:
+        a, c, f = s[1], s[2], (t - 0.5) / 0.5
+        r, g, b = (round(a[i] + (c[i] - a[i]) * f) for i in range(3))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _brand_wordmark():
+    """Wordmark OKAMI (bloco) com gradiente horizontal da marca — estilo Hermes (wordmark, sem mascote)."""
+    from rich.console import Group
+    from rich.text import Text
+    from okami.tui import _LOGO
+    rows = []
+    for line in _LOGO:
+        t = Text(no_wrap=True)
+        n = max(1, len(line) - 1)
+        for i, ch in enumerate(line):
+            t.append(ch, style=None if ch == " " else _grad_color(i / n))
+        rows.append(t)
+    return Group(*rows)
+
 
 class TuiChannel(Channel):
     """Canal que entrega `send()` pra árvore Textual (thread-safe via call_from_thread)."""
@@ -311,18 +345,20 @@ if _HAS_TEXTUAL:
                          Padding(Text(text, style="#f4f4f8"), (0, 0, 1, 2)))
 
         def _greet(self, log) -> None:
+            from rich.align import Align
             from rich.text import Text
             n = len(self.ep.session(self._cid).history) // 2
-            t = Text()
-            t.append("🐺 ", style="#ff7527")
-            t.append("Okami", style="bold #ff7527")
-            t.append(" — seu confidente no terminal.  ", style="#b9bac8")
-            t.append(f"{len(self._tools)} ferramentas · {len(self._skills)} skills · ", style="#6c6d80")
-            t.append("/help", style="#00dfe8")
-            t.append(" pros comandos.", style="#6c6d80")
-            log.write(t)
+            log.write(Text(""))
+            log.write(Align.center(_brand_wordmark()))               # wordmark em gradiente (sem mascote)
+            log.write(Align.center(Text("CUSTOM SOLUTIONS · AI INNOVATION", style="#6c6d80")))
+            log.write(Text(""))
+            tip = Text()
+            tip.append("Digite sua mensagem ou ", style="#b9bac8")
+            tip.append("/help", style="#00dfe8")
+            tip.append(" pros comandos.", style="#b9bac8")
+            log.write(Align.center(tip))
             if n:
-                log.write(Text(f"↻ retomando conversa ({n} trocas anteriores)", style="#6c6d80"))
+                log.write(Align.center(Text(f"↻ retomando ({n} trocas anteriores)", style="#6c6d80")))
             log.write(Text(""))
 
         def _ctx_pct(self) -> int:
