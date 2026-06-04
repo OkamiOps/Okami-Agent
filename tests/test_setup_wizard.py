@@ -30,7 +30,8 @@ def test_setup_memory_flag_noninteractive(tmp_path, monkeypatch):
 def test_setup_wizard_creates_fresh_yaml(tmp_path, monkeypatch):
     """Sem okami.yaml + sem TTY → menus caem no fallback numerado; wizard cria tudo do zero."""
     monkeypatch.chdir(tmp_path)
-    # fluxo: provider=3(lmstudio) · api_base(default) · model(default) · id(default) ·
+    monkeypatch.setattr("okami.llm.models.discover_models", lambda **kw: ([], "none"))  # sem rede
+    # fluxo: provider=3(lmstudio) · api_base(default) · model-texto(default) · id(default) ·
     #        memória=1(fts5) · nome(default Okami) · telegram? não
     answers = "\n".join(["3", "", "", "", "1", "", "n"]) + "\n"
     res = runner.invoke(app, ["setup"], input=answers)
@@ -62,18 +63,36 @@ def test_setup_agent_section_creates_named_agent(tmp_path, monkeypatch):
 def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
     """`okami provider add` grava o provider no okami.yaml e a chave no .env (não no yaml)."""
     monkeypatch.chdir(tmp_path)
+    # evita rede no teste: discover_models devolve um catálogo fixo
+    monkeypatch.setattr("okami.llm.models.discover_models",
+                        lambda **kw: (["gpt-4o-mini", "gpt-4o"], "catalog"))
     (tmp_path / "okami.yaml").write_text(
         "default_provider: lmstudio\nproviders:\n  lmstudio: {model: openai/x, api_key: lm, tier: local}\n",
         encoding="utf-8")
-    # provider=7(openai) · model(default) · API key='sk-test' · id(default 'openai') · default? não
-    answers = "\n".join(["7", "", "sk-test", "", "n"]) + "\n"
+    # provider=7(openai) · API key='sk-test' (campo vem ANTES do modelo) · modelo(default) · id · default? não
+    answers = "\n".join(["7", "sk-test", "", "", "n"]) + "\n"
     res = runner.invoke(app, ["provider", "add"], input=answers)
     assert res.exit_code == 0, res.output
     cfg = yaml.safe_load((tmp_path / "okami.yaml").read_text(encoding="utf-8"))
     assert "openai" in cfg["providers"]
     assert cfg["providers"]["openai"]["api_key_env"] == "OPENAI_API_KEY"
+    assert cfg["providers"]["openai"]["model"] == "openai/gpt-4o-mini"   # prefixo + modelo escolhido
     assert "sk-test" not in (tmp_path / "okami.yaml").read_text(encoding="utf-8")   # chave NÃO no yaml
     assert "OPENAI_API_KEY=sk-test" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_discover_models_live_then_catalog(monkeypatch):
+    """discover_models: usa /models ao vivo; se falhar, cai pro catálogo; senão vazio."""
+    from okami.llm import models as M
+    monkeypatch.setattr(M, "_http_models", lambda *a, **k: ["m-b", "m-a", "embedding-x"])
+    got, src = M.discover_models(api_base="http://x/v1")
+    assert src == "live" and got == ["m-a", "m-b"]          # ordena + filtra não-chat (embedding)
+
+    def boom(*a, **k):
+        raise OSError("offline")
+    monkeypatch.setattr(M, "_http_models", boom)
+    assert M.discover_models(api_base="http://x/v1", catalog=["c1"]) == (["c1"], "catalog")
+    assert M.discover_models(api_base=None, catalog=[]) == ([], "none")
 
 
 def test_provider_add_selects_model_and_merges_without_clobber(tmp_path, monkeypatch):

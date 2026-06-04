@@ -596,20 +596,36 @@ def _provider_add_flow(default_key: str | None = None) -> tuple[str, dict] | Non
         return None
     p = preset(key)
     pdict = dict(p.base)
-    if p.models:                                  # escolhe o MODELO do plano (ex.: gpt-5.5 vs 5.4)
-        cur = (p.base.get("model", "") or "").split("/")[-1]
-        chosen = menu.select("Qual modelo?", [(m, m, "") for m in p.models], default=cur or p.models[0])
-        pdict["model"] = (p.model_prefix or "") + chosen
-        pdict["models"] = list(p.models)          # preserva a lista (doctor + troca com -m)
+    # 1) credenciais/endpoint PRIMEIRO (precisa do api_base + chave p/ listar modelos ao vivo)
+    secret_val = None
     for fld in p.fields:
         if fld.kind == "secret":
             val = menu.text(fld.q, password=True)
             if val:
                 _set_env_var(fld.env, val)
                 pdict["api_key_env"] = fld.env
+                secret_val = val
                 console.print(f"  [dim]🔑 {fld.env} salvo no .env[/dim]")
         else:
             pdict[fld.key] = menu.text(fld.q, default=fld.default)
+    # 2) DESCOBRE os modelos: ao vivo via /models (Hermes) senão catálogo do preset (OpenClaw)
+    from okami.llm.models import discover_models
+    console.print("[dim]buscando modelos disponíveis…[/dim]")
+    models, src = discover_models(api_base=pdict.get("api_base"),
+                                  key=secret_val or pdict.get("api_key"),
+                                  transport=pdict.get("transport", "litellm"), catalog=p.models)
+    if models:
+        tag = "ao vivo" if src == "live" else "catálogo"
+        cur = (p.base.get("model", "") or "").split("/")[-1]
+        chosen = menu.select(f"Qual modelo?  [{len(models)} · {tag}]",
+                             [(m, m, "") for m in models[:80]],
+                             default=(cur if cur in models else models[0]))
+        pdict["model"] = (p.model_prefix or "") + chosen
+        if src == "catalog":
+            pdict["models"] = models              # preserva a lista (doctor + troca com -m)
+    else:                                         # nada descoberto → digita o id
+        pdict["model"] = menu.text("Modelo (id LiteLLM)",
+                                   default=p.base.get("model") or (p.model_prefix or "") + "model")
     if p.note:
         pdict["notes"] = p.note
     provider_id = menu.text("ID deste provider no okami.yaml", default=p.key)
@@ -1698,6 +1714,36 @@ def provider_default_cmd(provider_id: str = typer.Argument(..., help="ID do prov
 def provider_login_cmd(provider_id: str = typer.Argument(..., help="Provider p/ autenticar.")) -> None:
     """Atalho p/ `okami login <provider>`."""
     login(provider_id)
+
+
+@provider_app.command("models")
+def provider_models_cmd(
+    provider_id: str = typer.Argument(None, help="Provider (vazio = todos)."),
+) -> None:
+    """Lista os modelos de um provider — AO VIVO via /models, senão catálogo (estilo `openclaw models list`)."""
+    from okami.llm.models import discover_models
+
+    cfg = _load()
+    if provider_id and provider_id not in cfg.providers:
+        console.print(f"[red]'{provider_id}' não existe[/red] (okami providers)")
+        raise typer.Exit(1)
+    targets = [provider_id] if provider_id else list(cfg.providers)
+    tags = {"live": "[green]ao vivo[/green]", "catalog": "[cyan]catálogo[/cyan]", "none": "[dim]—[/dim]"}
+    for pid in targets:
+        pc = cfg.providers[pid]
+        models, src = discover_models(api_base=pc.api_base, key=pc.resolved_key(),
+                                      transport=pc.transport, catalog=pc.models)
+        head = f"[bold]{pid}[/bold] {tags[src]}" + (f" [dim]({len(models)})[/dim]" if models else "")
+        if provider_id:                            # detalhe: 1 por linha
+            console.print(head)
+            for m in models:
+                mark = "  [cyan]●[/cyan] " if (pc.model or "").endswith(m) else "    "
+                console.print(f"{mark}{m}")
+            if not models:
+                console.print("  [dim]nenhum modelo (endpoint offline ou sem catálogo)[/dim]")
+        else:                                      # resumo: 1 linha por provider
+            shown = ", ".join(models[:8]) + (f" … (+{len(models) - 8})" if len(models) > 8 else "")
+            console.print(f"{head}: {shown or '[dim]—[/dim]'}")
 
 
 # Grupos do `okami help` (visão geral amigável; cada item é um comando real).
