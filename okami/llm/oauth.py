@@ -224,12 +224,22 @@ def codex_access_token(now: Callable[[], float] = time.time) -> str | None:
         if rt and (new := _codex_refresh(rt, now)):
             return new["access_token"]
         return data.get("access_token")
-    if _CLI_AUTH.exists():  # fallback: token do codex CLI, se existir
+    if _CLI_AUTH.exists():  # fallback: token do codex CLI (ex.: auth.json copiado de outra máquina)
         try:
             d = json.loads(_CLI_AUTH.read_text(encoding="utf-8"))
-            return d.get("tokens", d).get("access_token")
         except (json.JSONDecodeError, OSError):
             return None
+        t = d.get("tokens", d) if isinstance(d.get("tokens", d), dict) else {}
+        at = t.get("access_token")
+        rt = t.get("refresh_token")
+        # O okami NÃO escreve no auth.json (é do codex CLI). Se o token copiado já
+        # expirou e há refresh_token, renova p/ o NOSSO store — que daí cuida do refresh.
+        claims = _decode_jwt_claims(at) if at else {}
+        exp = claims.get("exp", 0)
+        if rt and exp and exp - 60 <= now():
+            if new := _codex_refresh(rt, now):
+                return new["access_token"]
+        return at
     return None
 
 

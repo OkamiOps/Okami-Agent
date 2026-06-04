@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
 
 from okami.config import ProviderConfig
@@ -84,11 +85,51 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
 CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 
 
+def _codex_sse_text(lines) -> str:
+    """Acumula o texto de saída de um stream SSE da Responses API do Codex.
+
+    Fonte primária: os deltas `response.output_text.delta`. Fallback: o `output`
+    do evento final `response.completed`. `lines` é qualquer iterável de bytes/str
+    (a resposta do urlopen é iterável linha-a-linha) — função pura, testável sem rede.
+    """
+    chunks: list[str] = []
+    final = ""
+    for raw in lines:
+        line = raw.decode("utf-8", "ignore") if isinstance(raw, (bytes, bytearray)) else raw
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        t = obj.get("type", "")
+        if t == "response.output_text.delta":
+            chunks.append(obj.get("delta", ""))
+        elif t == "response.completed":
+            out = obj.get("response", {}).get("output", []) or []
+            texts = [
+                c.get("text", "")
+                for it in out if isinstance(it, dict)
+                for c in (it.get("content") or [])
+                if isinstance(c, dict) and c.get("type") in ("output_text", "text")
+            ]
+            if texts:
+                final = "".join(texts)
+        elif t in ("response.failed", "error"):
+            err = (obj.get("response") or obj).get("error") or obj.get("error") or obj
+            raise RuntimeError(f"codex stream falhou: {err}")
+    return "".join(chunks) or final
+
+
 def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None) -> str:
     """Assinatura ChatGPT via Responses API do Codex, com token OAuth NATIVO do Okami.
 
     Login: `okami login codex` (device flow nativo, sem precisar do codex CLI).
-    Schema do endpoint a confirmar ao vivo — não chamamos isto em testes/dev automático.
+    O endpoint EXIGE `store=false` + `stream=true` (só SSE) — verificado ao vivo.
     """
     from okami.llm import oauth
     access = oauth.codex_access_token()
@@ -105,25 +146,21 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
         "model": model_short,
         "instructions": system,
         "input": input_items,
-        "stream": False,
+        "store": False,    # exigido pelo endpoint ("Store must be set to false")
+        "stream": True,     # exigido pelo endpoint ("Stream must be set to true")
     }).encode("utf-8")
     req = urllib.request.Request(CODEX_URL, data=body, method="POST")
     req.add_header("Authorization", f"Bearer {access}")
     if account:
         req.add_header("ChatGPT-Account-Id", account)
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
-        data = json.loads(resp.read().decode("utf-8"))
-    # Responses API: tenta extrair o texto de saída de formatos comuns.
-    if isinstance(data.get("output_text"), str):
-        return data["output_text"]
-    out = data.get("output") or []
-    chunks: list[str] = []
-    for item in out:
-        for c in item.get("content", []) if isinstance(item, dict) else []:
-            if isinstance(c, dict) and c.get("type") in ("output_text", "text"):
-                chunks.append(c.get("text", ""))
-    return "".join(chunks) or json.dumps(data)[:2000]
+    req.add_header("Accept", "text/event-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
+            return _codex_sse_text(resp)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:300]
+        raise RuntimeError(f"codex HTTP {e.code}: {detail}") from e
 
 
 # --------------------------------------------------------------------- minimax_oauth

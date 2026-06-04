@@ -68,6 +68,25 @@ def test_codex_native_device_flow(tmp_path, monkeypatch):
     assert oauth.codex_access_token(now=lambda: clock[0]) == "AT"
 
 
+def test_codex_access_token_refreshes_expired_cli_authjson(tmp_path, monkeypatch):
+    """auth.json copiado de outra máquina (token expirado) → renova via refresh_token."""
+    import base64
+    import json as _json
+
+    _isolate(tmp_path, monkeypatch)
+    # access_token expirado (exp no passado) + refresh_token, no formato do codex CLI.
+    claims = {"exp": 1000}
+    payload = base64.urlsafe_b64encode(_json.dumps(claims).encode()).decode().rstrip("=")
+    auth = tmp_path / "auth.json"
+    auth.write_text(_json.dumps({"tokens": {"access_token": f"h.{payload}.s",
+                                            "refresh_token": "RT"}}))
+    monkeypatch.setattr(oauth, "_CLI_AUTH", auth)
+    monkeypatch.setattr(oauth, "_codex_refresh",
+                        lambda rt, now: {"access_token": "FRESH"} if rt == "RT" else None)
+    # now=5000 > exp(1000) → expirado → usa o refresh
+    assert oauth.codex_access_token(now=lambda: 5000.0) == "FRESH"
+
+
 def test_codex_account_id_from_id_token(tmp_path, monkeypatch):
     import base64
     import json as _json
