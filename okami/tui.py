@@ -249,30 +249,35 @@ def _tools_skills(tools: list[str], skills: list) -> Group:
 
 def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str, agent: str,
             tools: list[str], skills: list, resumed: int = 0) -> Group:
-    """Tela de boas-vindas completa (logo + painel com 2 colunas + dicas)."""
-    left = _meta_block(model, provider, cwd, session, agent)
-    right = _tools_skills(tools, skills)
-    grid = Table.grid(padding=(0, 3))                 # 2 colunas lado a lado (determinístico)
-    grid.add_column(width=28, justify="left")          # largura do hero (lobo) na esquerda
-    grid.add_column(ratio=1, justify="left")
-    grid.add_row(left, right)
-    footer = Text(f"{len(tools)} ferramentas · {len(skills)} skills · /help para comandos",
-                  style=MUTE, justify="center")
-    panel = Panel(Group(grid, Text(""), footer), border_style=ORANGE,
-                  title=f"[bold {ORANGE}]Okami Agent[/] [{DIM}]v{version}[/]", title_align="center")
-    tag = Text(justify="center")                        # tagline do logo (laranja→magenta da marca)
+    """Tela de boas-vindas: LOGO ao lado do nome (header) → painel de ferramentas/skills → dicas."""
+    # tagline + meta da sessão, que ficam À DIREITA do logo (ao lado, não embaixo).
+    tag = Text()
     tag.append("CUSTOM SOLUTIONS", style=ORANGE)
     tag.append(" · ", style=DIM)
     tag.append("AI INNOVATION", style=MAGENTA)
+    meta = Text()
+    meta.append(f"{agent} ", style=f"bold {ORANGE}")
+    meta.append("● operacional", style="green")
+    meta.append(f"   {model}", style=FG)
+    meta.append(f"  ·  {provider}", style=MUTE)
+    meta.append(f"\nsessão {session}  ·  {cwd}", style=DIM)
+    right = Group(banner(version), Text(""), tag, Text(""), meta)
+    header = Table.grid(padding=(0, 3))               # LOGO | (wordmark + tagline + sessão), centrados na vertical
+    header.add_column(justify="left", vertical="middle")
+    header.add_column(justify="left", vertical="middle")
+    header.add_row(hero(24), right)
+
+    footer = Text(f"{len(tools)} ferramentas · {len(skills)} skills · /help para comandos",
+                  style=MUTE, justify="center")
+    panel = Panel(Group(_tools_skills(tools, skills), Text(""), footer), border_style=ORANGE,
+                  title=f"[bold {ORANGE}]Okami Agent[/] [{DIM}]v{version}[/]", title_align="center")
     tips = Text()
     tips.append("\nBem-vindo ao Okami! ", style=f"bold {FG}")
     tips.append("Digite sua mensagem, ou /help para os comandos.", style=SOFT)
     if resumed:
         tips.append(f"\n↻ retomando conversa ({resumed} trocas anteriores)", style=MUTE)
     tips.append("\n✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.", style=MUTE)
-    # Hero = LOGO REAL (emblema) centralizado → wordmark em gradiente → tagline → painel → dicas.
-    return Group(Align.center(hero(50)), Text(""), Align.center(banner(version)),
-                 tag, Text(""), panel, tips)
+    return Group(header, Text(""), panel, tips)
 
 
 def _args_preview(args: dict) -> str:
