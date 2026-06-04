@@ -390,12 +390,25 @@ class AgentEndpoint:
         self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
         try:
             approve = self._approve(chat_id, s)
+            on_ev = self.on_event
             if genesis:                                   # na gênese, escrever a própria identidade é o
                 base = approve                            # OBJETIVO → auto-aprova identity_file (sem /yes a cada arquivo)
                 approve = lambda req: True if req.get("category") == "identity_file" else base(req)  # noqa: E731
+                # identidade já é auto-aprovada aqui → não assustar o usuário com "⚠ aprovação" no terminal.
+                if on_ev is not None:
+                    def on_ev(e, _b=self.on_event):       # noqa: E306
+                        if e.get("kind") == "approval_request" and e.get("category") == "identity_file":
+                            return
+                        _b(e)
+                # stubs de SOUL/VOICE/PERSONA são placeholders NOSSOS → já "conhecidos" (sem ✗ grounding).
+                kw_pre = ["SOUL.md", "VOICE.md", "PERSONA.md", "USER.md"]
+            else:
+                kw_pre = None
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
-            if self.on_event is not None:                 # progresso ao vivo (tool-calls, loop, compaction…)
-                kw["on_event"] = self.on_event
+            if kw_pre:
+                kw["prelearned_files"] = kw_pre
+            if on_ev is not None:                         # progresso ao vivo (tool-calls, loop, compaction…)
+                kw["on_event"] = on_ev
             if s.reasoning_effort:                        # /think desta sessão → vence o default do provider
                 kw["reasoning_effort"] = s.reasoning_effort
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)

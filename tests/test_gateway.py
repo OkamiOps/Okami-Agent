@@ -35,7 +35,7 @@ def _ok_task(goal):
     return t
 
 
-def _runner_ok(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+def _runner_ok(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, **kw):
     return _ok_task(goal)
 
 
@@ -58,7 +58,7 @@ def test_genesis_block_injected_on_first_contact_then_gone(tmp_path):
     """1ª conversa de um agente novo → bloco de gênese no contexto; selado → some."""
     captured = {}
 
-    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, **kw):
         captured["ctx"] = extra_context
         t = Task(goal=goal)
         t.state, t.result = TaskState.COMPLETE, "oi!"
@@ -101,7 +101,7 @@ def test_real_task_keeps_completion_seal():
     """Tarefa de verdade (passo com efeito) MANTÉM o ✅ — só o papo casual perde o selo."""
     from okami.core import Step
 
-    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, **kw):
         t = Task(goal=goal)
         t.state, t.result = TaskState.COMPLETE, "arquivo criado"
         t.steps = [Step(1, "write_file", {}, "ok", effect=True)]   # houve trabalho real
@@ -394,7 +394,7 @@ def test_prune_sessions(tmp_path):
 def test_persona_session_overlay(tmp_path):
     captured = {}
 
-    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, emit=lambda m: None):
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, emit=lambda m: None, **kw):
         captured["ctx"] = extra_context
         return _ok_task(goal)
 

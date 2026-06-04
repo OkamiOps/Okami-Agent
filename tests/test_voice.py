@@ -43,7 +43,7 @@ class FakeTTS:
         return out
 
 
-def _runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+def _runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, **kw):
     t = Task(goal=goal)
     t.state, t.result = TaskState.COMPLETE, f"resposta para: {goal}"
     return t

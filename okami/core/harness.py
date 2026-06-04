@@ -266,6 +266,7 @@ class Harness:
         hooks=None,
         spawn=None,
         images=None,
+        prelearned_files=None,
     ):
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
         self.generate = generate
@@ -281,6 +282,9 @@ class Harness:
         self.hooks = hooks                 # event hooks (§11): before_tool pode VETAR
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn)
+        # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
+        # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
+        self.ctx.read_files.update(prelearned_files or [])
         self.on_event = on_event or (lambda e: None)
         self.messages: list[dict] = []
         self._action_schema = action_schema(self.registry)

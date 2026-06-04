@@ -80,6 +80,27 @@ def _skill_category(s) -> str:
     return "geral"
 
 
+def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
+    """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
+
+    Retorna: exit · help · approval · stop · queue · handle.
+    - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
+    - /stop sempre passa direto (cancela mesmo ocupado);
+    - digitou enquanto ocupado → `queue` (vai pra fila FIFO, processa quando terminar)."""
+    low = line.strip().lower()
+    if low in ("/exit", "/quit", "exit", "quit", ":q"):
+        return "exit"
+    if low == "/help":
+        return "help"
+    if pending_approval:
+        return "approval"
+    if low in ("/stop", "/cancel", "/parar"):
+        return "stop"
+    if busy:
+        return "queue"
+    return "handle"
+
+
 def banner(version: str) -> Text:
     """Logo OKAMI multilinha, centralizado e colorido."""
     t = Text(justify="center")

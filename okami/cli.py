@@ -482,8 +482,15 @@ def learn(
     console.print(f"[green]✓ instaladas:[/green] {', '.join(promoted)}")
 
 
-mem_app = typer.Typer(help="Inspecionar/editar a memória de um workspace.")
+mem_app = typer.Typer(invoke_without_command=True, help="Inspecionar/editar a memória de um workspace.")
 app.add_typer(mem_app, name="memory")
+
+
+@mem_app.callback(invoke_without_command=True)
+def memory_main(ctx: typer.Context) -> None:
+    """`okami memory` SEM subcomando → lista a memória (não pede argumento; estilo hermes/openclaw)."""
+    if ctx.invoked_subcommand is None:
+        memory_list(workspace="workspaces/default")
 
 
 def _open_mem(workspace: str):
@@ -1179,8 +1186,16 @@ def persona_rollback(
         console.print(f"[yellow]revertido[/yellow] {r.get('target')}: {r.get('text')}")
 
 
-taste_app = typer.Typer(help="Taste model de design (§9): aprende seu gosto (aprovado→atrai, rejeitado→repele).")
+taste_app = typer.Typer(invoke_without_command=True,
+                        help="Taste model de design (§9): aprende seu gosto (aprovado→atrai, rejeitado→repele).")
 app.add_typer(taste_app, name="taste")
+
+
+@taste_app.callback(invoke_without_command=True)
+def taste_main(ctx: typer.Context) -> None:
+    """`okami taste` SEM subcomando → mostra o perfil de gosto atual."""
+    if ctx.invoked_subcommand is None:
+        taste_show(agent=None, workspace="workspaces/default")
 
 
 def _taste_feedback(verdict: str, descriptor: str, tags: str | None, agent: str | None, workspace: str):
@@ -1249,8 +1264,16 @@ def taste_steer(agent: str = typer.Option(None, "-a", "--agent"),
     console.print(taste.TasteProfile.load(_persona_ws(agent, workspace)).steer())
 
 
-cron_app = typer.Typer(help="Scheduling (§11): cron, intervalos ('1h','every 30m'), one-shot (ISO).")
+cron_app = typer.Typer(invoke_without_command=True,
+                       help="Scheduling (§11): cron, intervalos ('1h','every 30m'), one-shot (ISO).")
 app.add_typer(cron_app, name="cron")
+
+
+@cron_app.callback(invoke_without_command=True)
+def cron_main(ctx: typer.Context) -> None:
+    """`okami cron` SEM subcomando → lista os jobs agendados."""
+    if ctx.invoked_subcommand is None:
+        cron_list(workspace=".")
 
 
 def _cron_execute(job: dict, workspace: str):
@@ -1353,8 +1376,16 @@ def hooks_cmd(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
         console.print(f"  [bold]{name}[/bold]: {n} hook(s)")
 
 
-agent_app = typer.Typer(help="Multi-agente (§10): cada agente tem workspace/config/persona próprios.")
+agent_app = typer.Typer(invoke_without_command=True,
+                        help="Multi-agente (§10): cada agente tem workspace/config/persona próprios.")
 app.add_typer(agent_app, name="agent")
+
+
+@agent_app.callback(invoke_without_command=True)
+def agent_main(ctx: typer.Context) -> None:
+    """`okami agent` SEM subcomando → lista os agentes."""
+    if ctx.invoked_subcommand is None:
+        agent_list()
 
 
 @agent_app.command("new")
@@ -1459,6 +1490,141 @@ def _wait_for_turn(ep, cid: str, poll: float = 0.05) -> None:
         _t.sleep(poll)
 
 
+from okami.tui import _route_repl_line  # roteamento puro do chat (REPL + TUI compartilham)  # noqa: E402
+
+
+def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
+    """REPL CONCORRENTE (estilo Hermes/Claude-Code): você digita ENQUANTO o agente trabalha; a
+    aprovação go/no-go é respondível na hora; mensagens novas entram numa FILA e rodam em ordem;
+    Ctrl-C cancela o turno (NÃO sai), Ctrl-D sai. Sem prompt_toolkit → cai no REPL simples (bloqueante),
+    pra nunca quebrar o básico. O ponto-chave é o `patch_stdout`: o progresso ao vivo do agente não
+    corrompe a linha que você está digitando (o que faz o terminal sentir 'perfeito')."""
+    import sys
+    if not sys.stdin.isatty():            # pipe/CI/sem terminal → REPL simples (prompt_toolkit travaria no /dev/tty)
+        _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
+        return
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.patch_stdout import patch_stdout
+    except Exception:  # noqa: BLE001 — sem prompt_toolkit: REPL simples garante o essencial
+        _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
+        return
+
+    import collections
+    import threading
+    import time as _t
+
+    hist_dir = Path(".okami")
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    cmds = ["/help", "/new", "/status", "/stop", "/yolo", "/normal", "/think ", "/persona ",
+            "/feedback ", "/undo", "/retry", "/exit"]
+    session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
+                            completer=WordCompleter(cmds, sentence=True, ignore_case=True))
+    prompt_fmt = ANSI("\x1b[1;38;2;255;117;39m›\x1b[0m ")
+    inflight: "collections.deque[str]" = collections.deque()   # digitado enquanto ocupado (FIFO)
+    stop = threading.Event()
+
+    def _busy() -> bool:
+        s = ep.sessions.get(cid)
+        return bool(s and s.busy)
+
+    def _drain() -> None:
+        """ÚNICO produtor de turnos: tira da fila quando o agente fica livre → sem corrida."""
+        while not stop.is_set():
+            if inflight and not _busy() and cid not in ep._pending:
+                try:
+                    ep.handle(cid, inflight.popleft())
+                except Exception as e:  # noqa: BLE001 — um turno que falha não derruba o REPL
+                    console.print(f"[red]erro: {e}[/red]")
+            _t.sleep(0.08)
+
+    threading.Thread(target=_drain, daemon=True).start()
+
+    def _toolbar():
+        try:
+            pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
+        except Exception:  # noqa: BLE001
+            pct, turns = 0, 0
+        state = ("⏳ trabalhando" if _busy()
+                 else "✍ responda a aprovação" if cid in ep._pending else "● pronto")
+        q = f"  ·  {len(inflight)} na fila" if inflight else ""
+        return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
+                    "    Ctrl-C cancela · Ctrl-D sai ")
+
+    while True:
+        try:
+            with patch_stdout(raw=True):
+                line = session.prompt(prompt_fmt, bottom_toolbar=_toolbar, refresh_interval=0.5)
+        except EOFError:                                # Ctrl-D → sai
+            break
+        except KeyboardInterrupt:                       # Ctrl-C → cancela o turno, não sai
+            if _busy():
+                s = ep.sessions.get(cid)
+                if s:
+                    s.cancel = True
+                console.print("[yellow]⏹ cancelando…[/yellow]")
+            else:
+                console.print("[dim]Ctrl-D ou /exit p/ sair[/dim]")
+            continue
+        if not (line and line.strip()):
+            continue
+        decision = _route_repl_line(line, busy=_busy(), pending_approval=cid in ep._pending)
+        if decision == "exit":
+            break
+        if decision == "help":
+            console.print(tui.help_table())
+            continue
+        if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
+            inflight.append(line)
+            if decision == "queue":
+                console.print(f"[dim]↩ na fila ({len(inflight)}) — respondo assim que terminar[/dim]")
+            continue
+        ep.handle(cid, line)                            # approval | stop → direto (não inicia turno novo)
+    stop.set()
+    console.print("[dim]tchau 🐺[/dim]")
+
+
+def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
+    """Fallback bloqueante (sem prompt_toolkit): 1 turno por vez, status-bar impressa a cada prompt."""
+    import time as _time
+    last_elapsed = 0.0
+    while True:
+        try:
+            console.print(tui.status_bar(model=model_label, ctx_pct=ctx_pct(),
+                                         turns=len(ep.session(cid).history) // 2, elapsed=last_elapsed))
+        except Exception:  # noqa: BLE001 — console legacy: segue sem a barra
+            pass
+        try:
+            line = console.input("[bold #ff7527]›[/bold #ff7527] ")
+        except (EOFError, KeyboardInterrupt):
+            console.print("[dim]tchau 🐺[/dim]")
+            break
+        cmd = line.strip().lower()
+        if cmd in ("/exit", "/quit", "exit", "quit", ":q"):
+            console.print("[dim]tchau 🐺[/dim]")
+            break
+        if cmd == "/help":
+            console.print(tui.help_table())
+            continue
+        t0 = _time.time()
+        ep.handle(cid, line)
+        try:
+            _wait_for_turn(ep, cid)
+        except KeyboardInterrupt:                       # Ctrl-C durante o turno = aborta (não sai)
+            s = ep.sessions.get(cid)
+            if s and s.busy:
+                s.cancel = True
+                console.print("[yellow]⏹ cancelando…[/yellow]")
+                try:
+                    _wait_for_turn(ep, cid)
+                except KeyboardInterrupt:
+                    pass
+        last_elapsed = _time.time() - t0
+
+
 @app.command()
 def chat(
     message: str = typer.Argument(None, help="Mensagem única (modo -q/scripts). Vazio = REPL interativo."),
@@ -1468,12 +1634,14 @@ def chat(
     model: str = typer.Option(None, "-m", "--model"),
     new: bool = typer.Option(False, "--new", help="Começa do zero (arquiva a conversa anterior do terminal)."),
     yolo: bool = typer.Option(False, "-y", "--yolo", help="Auto-aprova ações sensíveis nesta sessão."),
+    use_tui: bool = typer.Option(True, "--tui/--no-tui",
+                                 help="TUI de tela cheia (default). --no-tui usa o REPL de linha."),
 ) -> None:
     """Conversa com o agente NO TERMINAL — sem Telegram. Sessão persiste (retoma ao reabrir).
 
-    Dentro do chat valem os slash commands do gateway: /new /status /stop /yolo /feedback /persona
-    /undo /help. Saia com /exit (ou Ctrl-D)."""
-    from okami.channels.terminal import TerminalChannel
+    Por padrão abre a TUI de tela cheia (regiões fixas, mouse, scroll, status pinado, aprovação por
+    botão). Use --no-tui pro REPL de linha. Slash commands: /new /status /stop /yolo /feedback /persona
+    /undo /help. Saia com /exit, Ctrl-D (TUI) ou Ctrl-D (REPL)."""
     from okami.gateway import AgentEndpoint
     from okami.runner import run_task as _rt
 
@@ -1483,28 +1651,22 @@ def chat(
     def run_task(c, w, goal, **kw):                # honra -p/-m no chat de terminal
         return _rt(c, w, goal, provider=provider, model=model, **kw)
 
-    ch = TerminalChannel(name, console=console)
     mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
-    from okami import tui as _tui
-
-    def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
-        line = _tui.event_line(e)
-        if line is not None:
-            console.print(line)
-
-    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event)
     cid = "terminal"
-    if new:
-        ep.session(cid).history.clear()
-        ep.store.reset(cid)
 
     if message:                                   # modo não-interativo (-q / pipe / script)
+        from okami.channels.terminal import TerminalChannel
+        ch = TerminalChannel(name, console=console)
+        ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode)
+        if new:
+            ep.session(cid).history.clear()
+            ep.store.reset(cid)
         ep.handle(cid, message)
         _wait_for_turn(ep, cid)
         return
 
-    # --- TUI: banner + painel de tools/skills + status bar (estilo Hermes) ----
-    import time as _time
+    # --- parâmetros de exibição (TUI e REPL compartilham) ---------------------
+    import sys
     from datetime import datetime
 
     from okami import __version__, tui
@@ -1520,11 +1682,36 @@ def chat(
         sks = skillmod.load_skills(Path("skills"))
     except Exception:  # noqa: BLE001 — sem skills não impede o chat
         sks = []
+    ctx_budget = max(1, int(context_window_tokens(pc) * pc.chars_per_token))
+
+    # --- TUI de tela cheia (default, quando há terminal real) -----------------
+    if use_tui and sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from okami.tui_app import run_chat_tui
+            if run_chat_tui(cfg=cfg, ws=ws, name=name, cid=cid, run_task=run_task, approval_mode=mode,
+                            model_label=model_label, ctx_budget=ctx_budget, agent=name,
+                            session_id=session_id, tools=tools, skills=sks, version=__version__, new=new):
+                return
+        except Exception as e:  # noqa: BLE001 — TUI falhou? cai no REPL, nunca deixa o usuário na mão
+            console.print(f"[dim](TUI indisponível: {e} — caindo no REPL)[/dim]")
+
+    # --- fallback: REPL de linha (prompt_toolkit) -----------------------------
+    from okami.channels.terminal import TerminalChannel
+
+    def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
+        line = tui.event_line(e)
+        if line is not None:
+            console.print(line)
+
+    ch = TerminalChannel(name, console=console)
+    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event)
+    if new:
+        ep.session(cid).history.clear()
+        ep.store.reset(cid)
 
     def _ctx_pct() -> int:
-        budget = max(1, int(context_window_tokens(pc) * pc.chars_per_token))
         used = sum(len(t) for _, t in ep.session(cid).history)
-        return min(100, round(100 * used / budget))
+        return min(100, round(100 * used / ctx_budget))
 
     s = ep.session(cid)
     try:                                          # console Windows legacy (cp1252) não aguenta █ → fallback
@@ -1536,39 +1723,7 @@ def chat(
         console.print(f"[bold]Okami[/bold] · {name} · {model_label} [dim]({cfg.default_provider})[/dim] · "
                       f"{len(tools)} tools · {len(sks)} skills · /help")
 
-    last_elapsed = 0.0
-    while True:
-        try:
-            console.print(tui.status_bar(model=model_label, ctx_pct=_ctx_pct(),
-                                         turns=len(ep.session(cid).history) // 2, elapsed=last_elapsed))
-        except Exception:  # noqa: BLE001 — console legacy: segue sem a barra
-            pass
-        try:
-            line = console.input("[bold #ff7527]›[/bold #ff7527] ")
-        except (EOFError, KeyboardInterrupt):
-            console.print("[dim]tchau 🐺[/dim]")
-            break
-        cmd = line.strip().lower()
-        if cmd in ("/exit", "/quit", "exit", "quit", ":q"):
-            console.print("[dim]tchau 🐺[/dim]")
-            break
-        if cmd == "/help":                        # /help bonito (tabela) em vez do texto cru
-            console.print(tui.help_table())
-            continue
-        t0 = _time.time()
-        ep.handle(cid, line)
-        try:
-            _wait_for_turn(ep, cid)
-        except KeyboardInterrupt:                  # Ctrl-C DURANTE o turno = aborta a geração (não sai)
-            s = ep.sessions.get(cid)
-            if s and s.busy:
-                s.cancel = True
-                console.print("[yellow]⏹ cancelando…[/yellow]")
-                try:
-                    _wait_for_turn(ep, cid)        # espera o harness parar no próximo passo
-                except KeyboardInterrupt:
-                    pass
-        last_elapsed = _time.time() - t0
+    _run_repl(ep, cid, console, tui, model_label=model_label, ctx_pct=_ctx_pct)
 
 
 def _gateway_files() -> tuple[Path, Path]:
@@ -1866,8 +2021,16 @@ def _write_local(update: dict) -> None:
     p.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
-provider_app = typer.Typer(help="Providers de LLM (§3.5): adicionar, listar, remover, default, login.")
+provider_app = typer.Typer(invoke_without_command=True,
+                           help="Providers de LLM (§3.5): adicionar, listar, remover, default, login.")
 app.add_typer(provider_app, name="provider")
+
+
+@provider_app.callback(invoke_without_command=True)
+def provider_main(ctx: typer.Context) -> None:
+    """`okami provider` SEM subcomando → lista os providers e a prontidão."""
+    if ctx.invoked_subcommand is None:
+        provider_list_cmd()
 
 
 @provider_app.command("add")
@@ -2089,9 +2252,69 @@ def _redact(obj):
     return obj
 
 
-config_app = typer.Typer(help="Config (estilo hermes/openclaw): show/get/set/edit/path/check. "
-                              "Segredos vão pro .env; o resto pro okami.local.yaml.")
+config_app = typer.Typer(invoke_without_command=True,
+                         help="Config (estilo hermes/openclaw): show/get/set/edit/path/check. "
+                              "Sem subcomando abre o painel interativo. Segredos→.env, resto→okami.local.yaml.")
 app.add_typer(config_app, name="config")
+
+
+def _config_effective_yaml() -> str:
+    """YAML da config efetiva (base + overrides) com segredos mascarados."""
+    import yaml as _yaml
+    from okami.config import load_raw
+    raw, _ = load_raw()
+    return _yaml.safe_dump(_redact(raw), allow_unicode=True, sort_keys=False)
+
+
+@config_app.callback(invoke_without_command=True)
+def config_main(ctx: typer.Context) -> None:
+    """`okami config` SEM subcomando: mostra a config efetiva e abre um menu (não exige argumentos).
+
+    Era o que faltava — antes `okami config` pedia subcomando. Agora, igual hermes/openclaw, você dá
+    `config` e cai num painel: ver / mudar / ler / editar / paths / validar."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+    console.print(Panel(Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark",
+                               background_color="default"),
+                        title="[bold #ff7527]config efetiva[/]", border_style="#3d3e50",
+                        subtitle="[dim]okami.yaml + okami.local.yaml · segredos mascarados[/]"))
+    config_path()
+    from okami import menu
+    if not menu._interactive():                       # script/pipe: só mostra (não trava pedindo input)
+        console.print("[dim]subcomandos: show · get · set · edit · path · check[/dim]")
+        return
+    while True:
+        pick = menu.select("config — o que fazer?", [
+            ("set", "mudar um valor (segredo→.env, resto→local)", ""),
+            ("get", "ler um valor", ""),
+            ("edit", "abrir no editor ($EDITOR)", ""),
+            ("show", "rever a config efetiva", ""),
+            ("check", "validar (lite doctor)", ""),
+            ("sair", "fechar o painel", ""),
+        ], default="set")
+        if pick in (None, "sair"):
+            return
+        if pick == "set":
+            key = menu.text("chave (ex.: memory.backend ou OPENAI_API_KEY)").strip()
+            if not key:
+                continue
+            val = menu.text(f"valor de {key}", password=_is_secret_key(key))
+            config_set(key, val)
+        elif pick == "get":
+            key = menu.text("chave a ler (ex.: default_provider)").strip()
+            if key:
+                config_get(key)
+        elif pick == "edit":
+            config_edit(base=False)
+        elif pick == "show":
+            console.print(_config_effective_yaml())
+        elif pick == "check":
+            try:
+                config_check()
+            except typer.Exit:
+                pass
 
 
 @config_app.command("show")

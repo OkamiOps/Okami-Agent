@@ -38,6 +38,7 @@ def run_task(
     depth: int = 0,
     images: list[str] | None = None,
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
+    prelearned_files: list[str] | None = None,  # arquivos já "conhecidos" (não exige read antes de sobrescrever)
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)
@@ -145,7 +146,7 @@ def run_task(
                       memory=mem, core_block=core_block, approve=approve,
                       skills=skills_map, registry=registry, cancel=cancel,
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
-                      images=images)   # vision §6 (modelo multimodal)
+                      images=images, prelearned_files=prelearned_files)   # vision §6 + arquivos pré-conhecidos
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
