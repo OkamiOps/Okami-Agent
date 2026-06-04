@@ -25,13 +25,14 @@ MUTE = "#6c6d80"        # fg-mute — secundário
 DIM = "#3d3e50"         # fg-dim
 TAGLINE = "IA com soberania para PMEs"
 
-# Logo em bloco (5 linhas). Gradiente laranja→magenta (o "glow" contido da marca).
+# Wordmark OKAMI em bloco (figlet ANSI Shadow, 6 linhas — maior/com profundidade). Gradiente da marca.
 _LOGO = [
-    " ██████  ██   ██  █████  ███    ███ ██",
-    "██    ██ ██  ██  ██   ██ ████  ████ ██",
-    "██    ██ █████   ███████ ██ ████ ██ ██",
-    "██    ██ ██  ██  ██   ██ ██  ██  ██ ██",
-    " ██████  ██   ██ ██   ██ ██      ██ ██",
+    " ██████╗ ██╗  ██╗ █████╗ ███╗   ███╗██╗",
+    "██╔═══██╗██║ ██╔╝██╔══██╗████╗ ████║██║",
+    "██║   ██║█████╔╝ ███████║██╔████╔██║██║",
+    "██║   ██║██╔═██╗ ██╔══██║██║╚██╔╝██║██║",
+    "╚██████╔╝██║  ██╗██║  ██║██║ ╚═╝ ██║██║",
+    " ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝",
 ]
 # Gradiente da MARCA (igual ao logotipo Okami): laranja → ciano → magenta, da esquerda p/ a direita.
 _BRAND_STOPS = ((0xFF, 0x75, 0x27), (0x00, 0xDF, 0xE8), (0xFF, 0x39, 0xD1))
@@ -252,9 +253,9 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     """Tela de boas-vindas: LOGO ao lado do nome (header) → painel de ferramentas/skills → dicas."""
     # tagline + meta da sessão, que ficam À DIREITA do logo (ao lado, não embaixo).
     tag = Text()
-    tag.append("CUSTOM SOLUTIONS", style=ORANGE)
+    tag.append("CUSTOM SOLUTIONS", style=f"bold {ORANGE}")
     tag.append(" · ", style=DIM)
-    tag.append("AI INNOVATION", style=MAGENTA)
+    tag.append("AI INNOVATION", style=f"bold {MAGENTA}")
     meta = Text()
     meta.append(f"{agent} ", style=f"bold {ORANGE}")
     meta.append("● operacional", style="green")
@@ -265,7 +266,7 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     header = Table.grid(padding=(0, 3))               # LOGO | (wordmark + tagline + sessão), centrados na vertical
     header.add_column(justify="left", vertical="middle")
     header.add_column(justify="left", vertical="middle")
-    header.add_row(hero(36), right)
+    header.add_row(hero(43), right)
 
     footer = Text(f"{len(tools)} ferramentas · {len(skills)} skills · /help para comandos",
                   style=MUTE, justify="center")
