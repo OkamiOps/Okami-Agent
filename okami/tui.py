@@ -33,17 +33,66 @@ _LOGO = [
     "██    ██ ██  ██  ██   ██ ██  ██  ██ ██",
     " ██████  ██   ██ ██   ██ ██      ██ ██",
 ]
-_LOGO_COLORS = ["#ff7115", "#ff6757", "#ff6382", "#ff64a8", "#f269cb"]
+# Gradiente da MARCA (igual ao logotipo Okami): laranja → ciano → magenta, da esquerda p/ a direita.
+_BRAND_STOPS = ((0xFF, 0x75, 0x27), (0x00, 0xDF, 0xE8), (0xFF, 0x39, 0xD1))
 
-# Mascote (lobo — okami = 狼).
+
+def _grad_color(t: float) -> str:
+    """Cor hex no ponto t∈[0,1] do gradiente laranja→ciano→magenta (fiel aos tons do logo)."""
+    s = _BRAND_STOPS
+    if t <= 0:
+        r, g, b = s[0]
+    elif t >= 1:
+        r, g, b = s[2]
+    elif t < 0.5:
+        a, c, f = s[0], s[1], t / 0.5
+        r, g, b = (round(a[i] + (c[i] - a[i]) * f) for i in range(3))
+    else:
+        a, c, f = s[1], s[2], (t - 0.5) / 0.5
+        r, g, b = (round(a[i] + (c[i] - a[i]) * f) for i in range(3))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _grad_lines(art: list[str]) -> Group:
+    """Cada linha de `art` colorida com o gradiente HORIZONTAL da marca (vazios ficam transparentes)."""
+    rows = []
+    for line in art:
+        t = Text(no_wrap=True)
+        n = max(1, len(line) - 1)
+        for i, ch in enumerate(line):
+            t.append(ch, style=None if ch in (" ", "⠀") else f"bold {_grad_color(i / n)}")
+        rows.append(t)
+    return Group(*rows)
+
+
+def _brand_wordmark() -> Group:
+    """Wordmark OKAMI (bloco) no gradiente da marca — estilo Hermes (wordmark, não mascote crua)."""
+    return _grad_lines(_LOGO)
+
+
+# Mascote: lobo geométrico (front view, low-poly) em braille — gerado por silhueta. okami = 狼.
 _WOLF = [
-    "   /\\___/\\",
-    "  ( o   o )",
-    "  (  =^=  )",
-    "   )     (",
-    "  (       )",
-    "  (__)_(__)",
+    "⠀⠀⠀⠀⣴⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣦",
+    "⠀⠀⠀⢠⣿⣷⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣾⣿⡄",
+    "⠀⠀⠀⣼⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⣿⣿⣧",
+    "⠀⠀⢀⣿⣿⣿⣿⣧⠀⠀⣠⣶⣄⠀⠀⣠⣶⣄⠀⠀⣼⣿⣿⣿⣿⡀",
+    "⠀⠀⣸⣿⣿⣿⣿⣿⣧⣾⣿⣿⣿⣦⣴⣿⣿⣿⣷⣼⣿⣿⣿⣿⣿⣇",
+    "⠀⢀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡀",
+    "⠀⢸⣿⣿⣿⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣿⣿⣿⣿⡇",
+    "⠀⠀⢿⣿⣿⣿⣿⣿⣍⡀⠀⣿⣿⣿⣿⣿⣿⠀⢀⣩⣿⣿⣿⣿⣿⡿",
+    "⠀⠀⠈⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠁",
+    "⠀⠀⠀⠘⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠃",
+    "⠀⠀⠀⠀⠈⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠁",
+    "⠀⠀⠀⠀⠀⠀⠙⣿⣿⠟⠁⢸⣿⣿⣿⣿⡇⠈⠻⣿⣿⠋",
+    "⠀⠀⠀⠀⠀⠀⠀⠈⠁⠀⠀⠸⣿⣿⣿⣿⠇",
+    "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿",
+    "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⣿⣿⠏",
 ]
+
+
+def _wolf_hero() -> Group:
+    """Lobo geométrico no gradiente da marca — o 'hero' do painel (como a caduceus do Hermes)."""
+    return _grad_lines(_WOLF)
 
 # Buckets p/ agrupar as tools por domínio (como o "Available Tools" do Hermes).
 _TOOL_BUCKETS = [
@@ -101,16 +150,13 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
     return "handle"
 
 
-def banner(version: str) -> Text:
-    """Logo OKAMI multilinha, centralizado e colorido."""
-    t = Text(justify="center")
-    for line, color in zip(_LOGO, _LOGO_COLORS):
-        t.append(line + "\n", style=f"bold {color}")
-    return t
+def banner(version: str) -> Group:
+    """Wordmark OKAMI multilinha no gradiente da marca."""
+    return _brand_wordmark()
 
 
 def _meta_block(model: str, provider: str, cwd: Path, session: str, agent: str) -> Group:
-    """Coluna da esquerda: estado da sessão (sem mascote — wordmark é a identidade, estilo Hermes)."""
+    """Coluna da esquerda: hero (lobo geométrico) + estado da sessão — como a caduceus do Hermes."""
     info = Text()
     info.append(f" {agent}", style=f"bold {ORANGE}")
     info.append("   ● operacional", style="green")
@@ -118,7 +164,7 @@ def _meta_block(model: str, provider: str, cwd: Path, session: str, agent: str) 
     info.append(f"\n {provider}", style=MUTE)
     info.append(f"\n {cwd}", style=CYAN)
     info.append(f"\n sessão: {session}", style=DIM)
-    return Group(info)
+    return Group(_wolf_hero(), Text(""), info)
 
 
 def _tools_skills(tools: list[str], skills: list) -> Group:
@@ -156,22 +202,24 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     left = _meta_block(model, provider, cwd, session, agent)
     right = _tools_skills(tools, skills)
     grid = Table.grid(padding=(0, 3))                 # 2 colunas lado a lado (determinístico)
-    grid.add_column(width=22, justify="left")
+    grid.add_column(width=28, justify="left")          # largura do hero (lobo) na esquerda
     grid.add_column(ratio=1, justify="left")
     grid.add_row(left, right)
     footer = Text(f"{len(tools)} ferramentas · {len(skills)} skills · /help para comandos",
                   style=MUTE, justify="center")
     panel = Panel(Group(grid, Text(""), footer), border_style=ORANGE,
                   title=f"[bold {ORANGE}]Okami Agent[/] [{DIM}]v{version}[/]", title_align="center")
-    tag = Text(f"{TAGLINE.upper()}", style=f"{CYAN}", justify="center")  # tagline da marca
-    rule = Text("─" * 38, style=DIM, justify="center")
+    tag = Text()                                        # tagline do logo (laranja→magenta da marca)
+    tag.append(" CUSTOM SOLUTIONS", style=ORANGE)
+    tag.append(" · ", style=DIM)
+    tag.append("AI INNOVATION", style=MAGENTA)
     tips = Text()
     tips.append("\nBem-vindo ao Okami! ", style=f"bold {FG}")
     tips.append("Digite sua mensagem, ou /help para os comandos.", style=SOFT)
     if resumed:
         tips.append(f"\n↻ retomando conversa ({resumed} trocas anteriores)", style=MUTE)
     tips.append("\n✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.", style=MUTE)
-    return Group(Align.center(banner(version)), Align.center(tag), Align.center(rule), panel, tips)
+    return Group(banner(version), tag, Text(""), panel, tips)
 
 
 def _args_preview(args: dict) -> str:

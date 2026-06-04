@@ -1689,8 +1689,9 @@ def chat(
         try:
             from okami.tui_app import run_chat_tui
             if run_chat_tui(cfg=cfg, ws=ws, name=name, cid=cid, run_task=run_task, approval_mode=mode,
-                            model_label=model_label, ctx_budget=ctx_budget, agent=name,
-                            session_id=session_id, tools=tools, skills=sks, version=__version__, new=new):
+                            model_label=model_label, provider_label=f"{cfg.default_provider} · {pc.tier}",
+                            ctx_budget=ctx_budget, agent=name, session_id=session_id, tools=tools,
+                            skills=sks, version=__version__, new=new):
                 return
         except Exception as e:  # noqa: BLE001 — TUI falhou? cai no REPL, nunca deixa o usuário na mão
             console.print(f"[dim](TUI indisponível: {e} — caindo no REPL)[/dim]")
