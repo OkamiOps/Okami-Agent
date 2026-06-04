@@ -28,12 +28,12 @@ def test_setup_memory_flag_noninteractive(tmp_path, monkeypatch):
 
 
 def test_setup_wizard_creates_fresh_yaml(tmp_path, monkeypatch):
-    """Sem okami.yaml + sem TTY → menus caem no fallback numerado; wizard cria tudo do zero."""
+    """Sem okami.yaml + sem TTY → menus caem no fallback numerado; modo COMPLETO cria tudo do zero."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("okami.llm.models.discover_models", lambda **kw: ([], "none"))  # sem rede
-    # fluxo: provider=3(lmstudio) · api_base(default) · model-texto(default) · id(default) ·
+    # fork=2(completo) · provider=3(lmstudio) · api_base(default) · model-texto(default) · id(default) ·
     #        memória=1(fts5) · nome(default Okami) · telegram? não
-    answers = "\n".join(["3", "", "", "", "1", "", "n"]) + "\n"
+    answers = "\n".join(["2", "3", "", "", "", "1", "", "n"]) + "\n"
     res = runner.invoke(app, ["setup"], input=answers)
     assert res.exit_code == 0, res.output
     cfg = yaml.safe_load((tmp_path / "okami.yaml").read_text(encoding="utf-8"))
@@ -93,6 +93,32 @@ def test_discover_models_live_then_catalog(monkeypatch):
     monkeypatch.setattr(M, "_http_models", boom)
     assert M.discover_models(api_base="http://x/v1", catalog=["c1"]) == (["c1"], "catalog")
     assert M.discover_models(api_base=None, catalog=[]) == ([], "none")
+
+
+def test_setup_quick_uses_detected_provider(tmp_path, monkeypatch):
+    """Modo RÁPIDO: detecta um provider pronto, só pede o modelo, cria o agente padrão."""
+    monkeypatch.chdir(tmp_path)
+    from okami import cli
+    det = cli._Detected("lmstudio", "LM Studio local (no ar)",
+                        {"api_base": "http://x/v1", "api_key": "lm", "tier": "local", "auth": "api_key"}, True)
+    monkeypatch.setattr(cli, "_detect_environment", lambda existing=None: [det])
+    monkeypatch.setattr("okami.llm.models.discover_models", lambda **kw: (["qwen-a", "qwen-b"], "live"))
+    # fork=1(rápido) · usar=1(lmstudio detectado) · modelo=1(qwen-a)
+    res = runner.invoke(app, ["setup"], input="1\n1\n1\n")
+    assert res.exit_code == 0, res.output
+    cfg = yaml.safe_load((tmp_path / "okami.yaml").read_text(encoding="utf-8"))
+    assert cfg["default_provider"] == "lmstudio"
+    assert cfg["providers"]["lmstudio"]["model"] == "openai/qwen-a"   # prefixo + modelo escolhido
+    assert (tmp_path / "agents" / "okami" / "SOUL.md").exists()       # agente padrão criado sozinho
+
+
+def test_detect_environment_finds_env_key(tmp_path, monkeypatch):
+    """_detect_environment acha chave no ambiente (sem rede para locais)."""
+    from okami import cli
+    monkeypatch.setattr("okami.llm.models.discover_models", lambda **kw: ([], "none"))  # locais offline
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
+    found = {d.key for d in cli._detect_environment(existing={})}
+    assert "openrouter" in found
 
 
 def test_provider_add_selects_model_and_merges_without_clobber(tmp_path, monkeypatch):

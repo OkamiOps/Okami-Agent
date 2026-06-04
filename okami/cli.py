@@ -14,6 +14,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 import typer
 from rich.console import Console
@@ -585,6 +586,29 @@ def _set_env_var(key: str, value: str, path: str = ".env") -> None:
     p.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def _pick_model(pdict: dict, *, model_prefix: str = "", catalog=None, probe_key: str | None = None) -> dict:
+    """Escolhe o modelo: descobre ao vivo via /models (Hermes) senão catálogo (OpenClaw) senão texto."""
+    import os
+    from okami import menu
+    from okami.llm.models import discover_models
+    key = probe_key or pdict.get("api_key") or os.getenv(pdict.get("api_key_env") or "") or None
+    console.print("[dim]buscando modelos disponíveis…[/dim]")
+    models, src = discover_models(api_base=pdict.get("api_base"), key=key,
+                                  transport=pdict.get("transport", "litellm"), catalog=catalog or [])
+    if models:
+        tag = "ao vivo" if src == "live" else "catálogo"
+        cur = (pdict.get("model", "") or "").split("/")[-1]
+        chosen = menu.select(f"Qual modelo?  [{len(models)} · {tag}]", [(m, m, "") for m in models[:80]],
+                             default=(cur if cur in models else models[0]))
+        pdict["model"] = (model_prefix or "") + chosen
+        if src == "catalog":
+            pdict["models"] = models
+    else:
+        pdict["model"] = menu.text("Modelo (id LiteLLM)",
+                                   default=pdict.get("model") or (model_prefix or "") + "model")
+    return pdict
+
+
 def _provider_add_flow(default_key: str | None = None) -> tuple[str, dict] | None:
     """Escolhe um preset (menu de seta), pergunta os campos e devolve (provider_id, provider_dict).
     Grava segredos no .env. Compartilhado por `okami provider add` e `okami setup`."""
@@ -596,9 +620,8 @@ def _provider_add_flow(default_key: str | None = None) -> tuple[str, dict] | Non
         return None
     p = preset(key)
     pdict = dict(p.base)
-    # 1) credenciais/endpoint PRIMEIRO (precisa do api_base + chave p/ listar modelos ao vivo)
     secret_val = None
-    for fld in p.fields:
+    for fld in p.fields:                          # credenciais/endpoint PRIMEIRO (p/ listar modelos)
         if fld.kind == "secret":
             val = menu.text(fld.q, password=True)
             if val:
@@ -608,28 +631,80 @@ def _provider_add_flow(default_key: str | None = None) -> tuple[str, dict] | Non
                 console.print(f"  [dim]🔑 {fld.env} salvo no .env[/dim]")
         else:
             pdict[fld.key] = menu.text(fld.q, default=fld.default)
-    # 2) DESCOBRE os modelos: ao vivo via /models (Hermes) senão catálogo do preset (OpenClaw)
-    from okami.llm.models import discover_models
-    console.print("[dim]buscando modelos disponíveis…[/dim]")
-    models, src = discover_models(api_base=pdict.get("api_base"),
-                                  key=secret_val or pdict.get("api_key"),
-                                  transport=pdict.get("transport", "litellm"), catalog=p.models)
-    if models:
-        tag = "ao vivo" if src == "live" else "catálogo"
-        cur = (p.base.get("model", "") or "").split("/")[-1]
-        chosen = menu.select(f"Qual modelo?  [{len(models)} · {tag}]",
-                             [(m, m, "") for m in models[:80]],
-                             default=(cur if cur in models else models[0]))
-        pdict["model"] = (p.model_prefix or "") + chosen
-        if src == "catalog":
-            pdict["models"] = models              # preserva a lista (doctor + troca com -m)
-    else:                                         # nada descoberto → digita o id
-        pdict["model"] = menu.text("Modelo (id LiteLLM)",
-                                   default=p.base.get("model") or (p.model_prefix or "") + "model")
+    _pick_model(pdict, model_prefix=p.model_prefix, catalog=p.models, probe_key=secret_val)
     if p.note:
         pdict["notes"] = p.note
     provider_id = menu.text("ID deste provider no okami.yaml", default=p.key)
     return provider_id, pdict
+
+
+@dataclass
+class _Detected:
+    key: str
+    label: str
+    pdict: dict
+    ready: bool
+
+
+def _detect_environment(existing: dict | None = None) -> list["_Detected"]:
+    """Auto-detecta providers já disponíveis (estilo Hermes/OpenClaw): servidores locais no ar,
+    OAuth/CLI logado, chaves no ambiente, e providers já no okami.yaml que respondem. Pré-seleção.
+    Os probes de rede rodam em PARALELO (rápido mesmo com endpoints offline)."""
+    import concurrent.futures as cf
+    import os
+    import shutil
+    from okami.llm.models import discover_models
+    from okami.provider_catalog import preset
+
+    # candidatos que exigem probe de rede: (key, base, pdict). Existing primeiro (prioridade), depois locais.
+    probes: list[tuple[str, str, dict]] = []
+    for pid, pc in (existing or {}).items():
+        if pc.get("api_base"):
+            probes.append((pid, pc["api_base"], dict(pc)))
+    for key, base in (("lmstudio", "http://localhost:1234/v1"), ("ollama", "http://localhost:11434/v1")):
+        if key not in {p[0] for p in probes}:
+            pd = dict(preset(key).base)
+            pd["api_base"] = base
+            probes.append((key, base, pd))
+
+    live: dict[str, int] = {}                     # key → nº de modelos (só os que responderam)
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(discover_models, api_base=base, key=pd.get("api_key") or "x", timeout=2.0): key
+                for key, base, pd in probes}
+        for fut in cf.as_completed(futs):
+            try:
+                models, src = fut.result()
+            except Exception:  # noqa: BLE001
+                models, src = [], "none"
+            if src == "live" and models:
+                live[futs[fut]] = len(models)
+
+    found: list[_Detected] = []
+    seen: set[str] = set()
+
+    def add(key, label, pdict, ready=True):
+        if key not in seen:
+            seen.add(key)
+            found.append(_Detected(key, label, pdict, ready))
+
+    for key, base, pd in probes:                  # mantém a ordem (existing → locais)
+        if key in live:
+            add(key, f"{key} — {base} ([green]{live[key]} modelos, no ar[/green])", pd)
+    # assinaturas/OAuth logadas (sem rede)
+    if (Path.home() / ".codex" / "auth.json").exists() or \
+            (Path.home() / ".okami" / "credentials" / "codex.json").exists():
+        add("codex", "OpenAI Codex / ChatGPT ([green]assinatura logada[/green])", dict(preset("codex").base))
+    if shutil.which("claude"):
+        add("claude", "Anthropic Claude ([green]CLI `claude` instalado[/green])", dict(preset("claude").base))
+    # chaves no ambiente / .env (sem rede)
+    for key, env in (("openai", "OPENAI_API_KEY"), ("openrouter", "OPENROUTER_API_KEY"),
+                     ("deepseek", "DEEPSEEK_API_KEY"), ("groq", "GROQ_API_KEY"),
+                     ("gemini", "GEMINI_API_KEY"), ("mimo", "MIMO_API_KEY")):
+        if os.getenv(env):
+            pd = dict(preset(key).base)
+            pd["api_key_env"] = env
+            add(key, f"{preset(key).label} ([green]{env} no ambiente[/green])", pd)
+    return found
 
 
 _SETUP_SECTIONS = ("provider", "default", "memory", "agent", "identity", "channel")
@@ -776,24 +851,76 @@ def setup(
         else:
             console.print("[dim]beleza — fale com ele por: okami chat[/dim]")
 
+    def step_quick() -> None:
+        """RÁPIDO (estilo Hermes/OpenClaw): detecta o que você já tem → provider + modelo → agente.
+        2-3 decisões e tá conversando."""
+        from okami.provider_catalog import preset
+        raw = (_yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}) or {}
+        console.print("[dim]🔍 procurando providers disponíveis (servidores locais, OAuth, chaves)…[/dim]")
+        detected = _detect_environment(existing=raw.get("providers"))
+        choices = [(d.key, d.label, "") for d in detected]
+        choices.append(("__other__", "outro provider (catálogo completo)", "Codex, OpenAI, OpenRouter…"))
+        if detected:
+            console.print(f"[green]✓ encontrei {len(detected)} provider(es) prontos[/green]")
+        pick = menu.select("Qual usar?", choices, default=(detected[0].key if detected else "__other__"))
+        if not pick:
+            return
+        if pick == "__other__":
+            res = _provider_add_flow()
+            if not res:
+                return
+            pid, pdict = res
+        else:                                     # detectado → só falta escolher o modelo
+            d = next(x for x in detected if x.key == pick)
+            p = preset(d.key)
+            pdict = dict(d.pdict)
+            _pick_model(pdict, model_prefix=(p.model_prefix if p else ""), catalog=(p.models if p else []))
+            if p and p.note:
+                pdict["notes"] = p.note
+            pid = pick
+        raw.setdefault("providers", {})
+        raw["providers"][pid] = {**(raw["providers"].get(pid) or {}), **pdict}   # merge, não clobbera
+        raw["default_provider"] = pid
+        cfg_path.write_text(_yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        local["default_provider"] = pid
+        save_local()
+        console.print(f"[green]✓ provider:[/green] {pid} · [bold]{pdict.get('model')}[/bold]")
+        step_login()
+        _ensure_agent("okami", name="Okami")      # agente padrão (sem perguntar no rápido)
+        local.setdefault("agents", {})["default"] = "okami"
+        save_local()
+        console.print(f"[green]✓ agente padrão 'okami'[/green] [dim]({(Path('agents') / 'okami').resolve()})[/dim]")
+
     steps = {"provider": step_provider, "default": step_provider, "memory": step_memory,
              "agent": step_agent, "identity": step_agent, "channel": step_channel}
-    if section:                                   # pulo direto pra uma seção
+    if section:                                   # pulo direto pra uma seção (sem fork)
         steps[section]()
         if section in ("provider", "default"):
             step_login()
         return
 
-    step_provider()
-    step_login()
-    step_memory()
-    step_agent()
-    step_channel()
+    # FORK Rápido vs Completo no PRIMEIRO prompt (a maior melhoria, validada em Hermes E OpenClaw)
+    mode = menu.select("Como configurar?", [
+        ("quick", "Rápido", "provider + modelo (recomendado) — detecta o que você já tem"),
+        ("full", "Completo", "provider · memória · identidade · canal"),
+    ], default="quick")
+    if mode == "full":
+        step_provider()
+        step_login()
+        step_memory()
+        step_agent()
+        step_channel()
+    else:
+        step_quick()
+
     default_agent = (local.get("agents") or {}).get("default", "okami")
     console.print("\n[bold green]✓ tudo pronto![/bold green]  Próximos passos:")
-    console.print("  [bold]okami doctor[/bold]   — confere chaves e conectividade")
     console.print(f"  [bold]okami chat[/bold]     — conversa com o agente '{default_agent}'")
-    console.print("  [bold]okami agent new <id>[/bold]  — cria outro agente (ganha sua própria pasta)")
+    console.print("  [bold]okami doctor[/bold]   — confere chaves e conectividade")
+    if mode == "quick":
+        console.print("  [dim]ajustar mais:[/dim] okami setup memory · okami setup channel · okami provider add")
+    else:
+        console.print("  [bold]okami provider add[/bold]  — adiciona outro modelo quando quiser")
 
 
 def _write_persona_stubs(ws: Path, name: str) -> list[str]:

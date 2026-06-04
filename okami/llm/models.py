@@ -42,7 +42,9 @@ def discover_models(*, api_base: str | None = None, key: str | None = None,
     OpenAI-compat (api_base + transport litellm) → busca ao vivo, filtra não-chat.
     Senão usa o catálogo do preset. Tolerante a falha de rede."""
     catalog = list(catalog or [])
+    tried = False
     if api_base and transport in ("litellm", "", None):
+        tried = True
         try:
             ids = [i for i in _http_models(api_base, key, timeout)
                    if not any(s in i.lower() for s in _SKIP)]
@@ -52,7 +54,7 @@ def discover_models(*, api_base: str | None = None, key: str | None = None,
             pass
     if catalog:
         return catalog, "catalog"
-    if api_base:                                  # último recurso (ex.: oauth com /models autenticado)
+    if api_base and not tried:                    # só se NÃO tentou (ex.: oauth com /models autenticado)
         try:
             ids = _http_models(api_base, key, timeout)
             if ids:
