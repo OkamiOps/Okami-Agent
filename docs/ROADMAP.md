@@ -1,6 +1,6 @@
 # Okami Agent — Roadmap (plano em fases)
 
-> Acompanha `ARCHITECTURE.md` v0.4. Stack: **Python 3.12+ / uv / LiteLLM**. Referência rodável:
+> Acompanha `ARCHITECTURE.md` v0.4. Stack: **Python 3.11+ / uv / LiteLLM**. Referência rodável:
 > [build-your-own-openclaw](https://github.com/czl9707/build-your-own-openclaw) (18 passos) + Hermes.
 > Ordem pedida pelo usuário: provar as 2 dores → **Telegram cedo** → **auto-melhoria + memória**
 > → persona evolutiva + gosto de design. As fases 1, 1.5, 2, 5, 6 e 7 são o coração.

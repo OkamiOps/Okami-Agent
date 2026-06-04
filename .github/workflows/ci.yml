@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Pin Python
+        run: uv python install 3.12
+      - name: Sync (locked, dev + voice)
+        run: uv sync --frozen --extra dev --extra voice
+      - name: Tests
+        run: uv run pytest -q
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Smoke — installed package runs outside the checkout
+        run: |
+          uv run --no-project --with dist/*.whl okami --help >/dev/null
+          echo "pacote instalado roda ✓"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Nenhum segredo versionado
+        run: |
+          set -e
+          if git ls-files | grep -E '(^|/)\.env$' ; then echo "::error::.env está versionado"; exit 1; fi
+          if git ls-files | grep -E 'okami\.local\.yaml$' ; then echo "::error::okami.local.yaml está versionado"; exit 1; fi
+          # padrões óbvios de chave em arquivos versionados (ignora locks e exemplos)
+          if git grep -nIE '(sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+               -- . ':!*.lock' ':!*.example.*' ; then
+            echo "::error::possível segredo versionado"; exit 1
+          fi
+          echo "sem segredos versionados ✓"

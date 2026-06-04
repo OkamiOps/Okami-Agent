@@ -271,7 +271,10 @@ class Harness:
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
         self.generate = generate
         self.escalate = escalate  # gerador de modelo mais forte (§3.5 cascata)
-        self.approve = approve or (lambda req: True)  # go/no-go (§12); default = auto-OK
+        # go/no-go (§12) FAIL-CLOSED: sem approver explícito, ação sensível é NEGADA (não auto-OK).
+        # Sem humano (cron/spawn/lib) → bloqueia e instrui o modelo a achar alternativa. Auto-aprovar
+        # exige passar approve explícito (ex.: yolo do gateway). Não-sensível roda normal (não chama isto).
+        self.approve = approve if approve is not None else (lambda req: False)
         self.cancel = cancel or (lambda: False)       # /stop do gateway (§13)
         self.system_extra = system_extra  # skills forçadas / sections (§4.2, §8)
         self.core_block = core_block      # .md sempre injetados: AGENTS/USER/MEMORY (§6 tier core)

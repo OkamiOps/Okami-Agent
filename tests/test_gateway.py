@@ -15,9 +15,10 @@ from okami.gateway import AgentEndpoint, build_endpoints
 class FakeChannel(Channel):
     name = "fake"
 
-    def __init__(self, token=None, allow_chats=None):
+    def __init__(self, token=None, allow_chats=None, allow_all=False):
         self.sent: list[tuple[str, str]] = []
         self.allow = {str(c) for c in (allow_chats or [])}
+        self.allow_all = bool(allow_all)
 
     def poll(self):
         return []

@@ -94,7 +94,10 @@ class McpStdioClient:
         self.tools: list[dict] = []
 
     def start(self) -> list[dict]:
-        full_env = {**os.environ, **(self.env or {})}
+        # Servidor MCP é processo de TERCEIRO → NÃO vaza chaves/tokens do ambiente (mesma
+        # sanitização do run_shell). Env extra explícito (self.env do config) é allowlist opt-in.
+        from okami.core.tools import sanitized_env
+        full_env = {**sanitized_env(), **(self.env or {})}
         self.proc = subprocess.Popen(
             self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1, env=full_env, cwd=self.cwd,

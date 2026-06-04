@@ -89,7 +89,7 @@ gente **projeta e verifica** (não herda).
 
 ## 2. Stack e estrutura
 
-- **Runtime**: **Python 3.12+**. Gerenciador: **uv**. Tipagem estrita (mypy/pydantic).
+- **Runtime**: **Python 3.11+** (ver `requires-python` no pyproject). Gerenciador: **uv**. Tipagem estrita (mypy/pydantic).
 - **Providers**: **LiteLLM** unifica Claude Code, Codex, MiniMax, MiMo e LMStudio (§5).
 - **Estado**: SQLite + FTS5 + arquivos markdown versionáveis.
 - **Memória**: backend `honcho` via **SDK Python**; `holographic` com **numpy nativo** (sem ponte IPC).

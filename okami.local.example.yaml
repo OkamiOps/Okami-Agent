@@ -1,0 +1,23 @@
+# okami.local.example.yaml — modelo de overrides LOCAIS.
+#
+# Copie para `okami.local.yaml` (que é gitignored) e ajuste ao seu ambiente.
+# Esses valores são MESCLADOS sobre o okami.yaml (versionado). Aqui vai infra
+# da sua máquina/rede — nunca segredos (chaves/tokens vão no .env).
+#
+# Exemplos comuns:
+
+# Trocar o provider padrão só na sua máquina:
+# default_provider: codex
+
+# Apontar LMStudio + embedder pro seu servidor local (IP interno fica AQUI, não no repo):
+# memory:
+#   embedder:
+#     api_base: http://SEU-IP:4480/v1
+# providers:
+#   lmstudio:
+#     api_base: http://SEU-IP:4480/v1
+
+# Ligar/ajustar voz, memória, etc. (qualquer chave do okami.yaml):
+# voice:
+#   tts:
+#     enabled: false

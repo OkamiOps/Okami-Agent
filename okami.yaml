@@ -3,7 +3,7 @@ memory:
   backend: sqlite-fts5
   embedder:
     enabled: true
-    api_base: http://192.168.3.24:4480/v1
+    api_base: http://localhost:4480/v1   # aponte p/ seu LMStudio em okami.local.yaml (não versionado)
     model: text-embedding-nomic-embed-text-v1.5
   holographic:
     dim: 1024
@@ -34,7 +34,7 @@ voice:                        # Telegram (áudio). Requer deps: uv sync --extra 
 providers:
   lmstudio:
     model: openai/qwen3.5-4b-mtp
-    api_base: http://192.168.3.24:4480/v1
+    api_base: http://localhost:4480/v1   # aponte p/ seu LMStudio em okami.local.yaml (não versionado)
     api_key: lm-studio
     auth: api_key
     tier: local

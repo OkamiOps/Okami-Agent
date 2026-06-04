@@ -72,10 +72,11 @@ class TelegramChannel(Channel):
 
     name = "telegram"
 
-    def __init__(self, token: str, allow_chats=None):
+    def __init__(self, token: str, allow_chats=None, allow_all: bool = False):
         self.client = TelegramClient(token)
         self._offset = 0
         self.allow = {str(c) for c in (allow_chats or [])}
+        self.allow_all = bool(allow_all)   # SÓ explícito abre p/ todos (deny-by-default)
 
     def poll(self) -> list[Inbound]:
         out = []
@@ -113,7 +114,11 @@ class TelegramChannel(Channel):
         self.client.send_audio(chat_id, audio_path)
 
     def allowed(self, chat_id) -> bool:
-        return not self.allow or str(chat_id) in self.allow
+        # DENY-BY-DEFAULT: sem allowlist, NINGUÉM passa (a não ser allow_all explícito). Agente com
+        # shell/tools/memória atrás de um bot público é perigoso → fail-closed.
+        if self.allow:
+            return str(chat_id) in self.allow
+        return self.allow_all
 
 
 class TelegramGroupChannel:
@@ -124,11 +129,12 @@ class TelegramGroupChannel:
     name = "telegram-group"
 
     def __init__(self, tokens: dict[str, str], listen_token: str | None = None,
-                 allow_chats=None, api_base: str = "https://api.telegram.org"):
+                 allow_chats=None, api_base: str = "https://api.telegram.org", allow_all: bool = False):
         self.clients = {aid: TelegramClient(tok, api_base) for aid, tok in tokens.items()}
         self.listener = TelegramClient(listen_token or next(iter(tokens.values())), api_base)
         self._offset = 0
         self.allow = {str(c) for c in (allow_chats or [])}
+        self.allow_all = bool(allow_all)   # deny-by-default (só explícito abre)
         self._bot_ids: set[int] = set()
 
     def start(self) -> None:
@@ -160,4 +166,6 @@ class TelegramGroupChannel:
             c.send_message(chat_id, text)
 
     def allowed(self, chat_id) -> bool:
-        return not self.allow or str(chat_id) in self.allow
+        if self.allow:                       # deny-by-default (igual ao TelegramChannel)
+            return str(chat_id) in self.allow
+        return self.allow_all

@@ -16,3 +16,9 @@ build/
 workspaces/
 # estado runtime: sessões, sinais de persona, memória local (por workspace)
 .okami/
+
+# overrides locais (mesclados sobre okami.yaml) — podem conter IP/infra interna, NÃO versionar
+okami.local.yaml
+
+# macOS
+.DS_Store

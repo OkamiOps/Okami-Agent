@@ -570,7 +570,10 @@ def build_group_endpoints(global_raw: dict, agents: dict, groups: list,
         room = build_room(global_raw, agents, gcfg,
                           select_speaker=llm_moderator(build_config(global_raw), provider=mod_provider),
                           respond=agent_responder(global_raw, agents))
-        channel = (make_channel or TelegramGroupChannel)(tokens, allow_chats=gcfg.get("allow_chats"))
+        g_allow, g_all = gcfg.get("allow_chats"), bool(gcfg.get("allow_all", False))
+        if not g_allow and not g_all:
+            emit(f"⚠ [grupo{gi}] sem allowlist → deny-by-default. Configure allow_chats ou allow_all: true.")
+        channel = (make_channel or TelegramGroupChannel)(tokens, allow_chats=g_allow, allow_all=g_all)
         eps.append(GroupEndpoint(room, channel, label=f"grupo{gi}",
                                  min_delay=float(gcfg.get("min_delay", 0.0)), emit=emit))
         emit(f"grupo {gi} no ar: {', '.join(tokens)} ({len(tokens)} bots) · moderador={mod_provider or 'default'}")
@@ -591,7 +594,11 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
         if not token:
             continue
         cfg = effective_config(global_raw, spec)
-        channel = (make_channel or TelegramChannel)(token, allow_chats=tg.get("allow_chats"))
+        allow_chats, allow_all = tg.get("allow_chats"), bool(tg.get("allow_all", False))
+        if not allow_chats and not allow_all:      # fail-closed: avisa ALTO por que o bot fica mudo
+            emit(f"⚠ [{aid}] Telegram SEM allowlist → deny-by-default (bot não responde ninguém). "
+                 f"Adicione channels.telegram.allow_chats: [<seu_chat_id>] ou allow_all: true (inseguro).")
+        channel = (make_channel or TelegramChannel)(token, allow_chats=allow_chats, allow_all=allow_all)
         # histórico da sessão ~12% da janela do modelo (32K Qwen guarda menos; 200K Claude mais).
         from okami.llm.providers import context_window_tokens
         pc = cfg.provider()

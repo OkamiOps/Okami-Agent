@@ -578,7 +578,9 @@ def _to_int(s, default: int) -> int:
 
 
 def _set_env_var(key: str, value: str, path: str = ".env") -> None:
-    """Grava/atualiza KEY=value no .env (segredos NÃO vão pro okami.yaml versionado)."""
+    """Grava/atualiza KEY=value no .env — escrita ATÔMICA + permissão 0600 (segredo só p/ o dono)."""
+    import os
+    import tempfile
     p = Path(path)
     lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
     out, done = [], False
@@ -590,7 +592,24 @@ def _set_env_var(key: str, value: str, path: str = ".env") -> None:
             out.append(ln)
     if not done:
         out.append(f"{key}={value}")
-    p.write_text("\n".join(out) + "\n", encoding="utf-8")
+    data = "\n".join(out) + "\n"
+    # tmp no mesmo diretório → os.replace é atômico (sem janela de arquivo meia-escrita/world-readable).
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent if str(p.parent) else "."), prefix=".env.", suffix=".tmp")
+    try:
+        try:
+            os.fchmod(fd, 0o600)                       # 0600 ANTES de escrever o segredo
+        except (AttributeError, OSError):              # Windows/sem suporte → segue
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp, p)
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def _pick_model(pdict: dict, *, model_prefix: str = "", catalog=None, probe_key: str | None = None) -> dict:
