@@ -87,15 +87,18 @@ if _HAS_TEXTUAL:
         """App Textual do chat: header · log · aprovação · input · status."""
 
         CSS = """
-        Screen { layout: vertical; background: $surface; }
-        #header { height: auto; padding: 0 1; color: $text; }
-        #log { height: 1fr; padding: 0 1; border: round #3d3e50; scrollbar-color: #ff7527; }
-        #approval { height: auto; display: none; padding: 0 1; background: #2a2118; }
+        Screen { layout: vertical; background: #0d0d12; }
+        #header { height: 1; padding: 0 1; background: #16161f; }
+        #log { height: 1fr; padding: 1 2; background: #0d0d12; scrollbar-color: #ff7527; scrollbar-size: 1 1; }
+        #activity { height: auto; display: none; padding: 0 2; }
+        #approval { height: auto; display: none; padding: 1 2; background: #221a12; border-top: solid #ff7527; }
         #approval-label { width: 1fr; content-align: left middle; color: #ffb86c; }
-        #input { border: round #ff7527; }
-        #input:focus { border: round #ff39d1; }
-        #status { height: 1; padding: 0 1; color: $text-muted; background: $panel; }
-        Button { min-width: 10; margin: 0 1; }
+        #input { border: round #3d3e50; background: #16161f; }
+        #input:focus { border: round #ff7527; }
+        #status { height: 1; padding: 0 1; color: #6c6d80; background: #16161f; }
+        Button { min-width: 12; margin: 0 1; }
+        Button#approve { background: #1f7a3d; }
+        Button#deny { background: #7a2a2a; }
         """
 
         BINDINGS = [
@@ -128,17 +131,19 @@ if _HAS_TEXTUAL:
             self._stop = threading.Event()
             self._spin = 0
             self._exit_armed = 0.0
+            self._busy_since: float | None = None
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
 
         # ---- layout ----------------------------------------------------------
         def compose(self) -> "ComposeResult":
             yield Static(self._header_text(), id="header")
             yield RichLog(id="log", wrap=True, markup=True, highlight=False, min_width=10)
+            yield Static("", id="activity")
             with Horizontal(id="approval"):
                 yield Static("⚠ aprovar a ação pendente?", id="approval-label")
                 yield Button("Aprovar", id="approve", variant="success")
                 yield Button("Negar", id="deny", variant="error")
-            yield Input(placeholder="fala comigo…   /help · Ctrl-D sai", id="input")
+            yield Input(placeholder="fala comigo…   ↵ envia · /help · Ctrl-D sai", id="input")
             yield Static("", id="status")
 
         def on_mount(self) -> None:
@@ -146,16 +151,9 @@ if _HAS_TEXTUAL:
             if self._new:
                 self.ep.session(self._cid).history.clear()
                 self.ep.store.reset(self._cid)
-            log = self.query_one("#log", RichLog)
-            try:                                           # banner de boas-vindas (reusa o tui.welcome)
-                log.write(_tui.welcome(version=self._version, model=self._model_label, provider="",
-                                       cwd=Path.cwd(), session=self._session_id,
-                                       agent=self._agent, tools=self._tools, skills=self._skills,
-                                       resumed=len(self.ep.session(self._cid).history) // 2))
-            except Exception:  # noqa: BLE001
-                log.write(f"Okami · {self._agent} · {self._model_label}")
+            self._greet(self.query_one("#log", RichLog))
             self.query_one("#input", Input).focus()
-            self.set_interval(0.25, self._tick)
+            self.set_interval(0.12, self._tick)
             threading.Thread(target=self._worker, daemon=True).start()
             if self._on_started:
                 self._on_started(self)
@@ -165,8 +163,18 @@ if _HAS_TEXTUAL:
 
         # ---- sinks (sempre via call_from_thread quando vier de fundo) ---------
         def sink_message(self, chat_id, text: str) -> None:
+            from rich.text import Text
+            head = text[:1]
+            if head == "💭":                              # "está pensando…" → indicador animado, não polui o log
+                return
+            log = self.query_one("#log", RichLog)
+            if head in _SYS_MARKS and head not in _REPLY_MARKS:   # nota de sistema (🧬 🎭 ↻ 🧹 ⏰ …)
+                self.transcript.append(("note", text))
+                log.write(Text("  " + text, style=_SYS_COLOR.get(head, "dim")))
+                return
+            body = text[1:].strip() if head in _REPLY_MARKS else text   # fala do agente
             self.transcript.append(("agent", text))
-            self.query_one("#log", RichLog).write(_render_message(text))
+            log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
             line = _tui.event_line(e)
@@ -187,9 +195,8 @@ if _HAS_TEXTUAL:
             event.input.value = ""
             if not text.strip():
                 return
-            from rich.text import Text
             self.transcript.append(("user", text))
-            self.query_one("#log", RichLog).write(Text("› " + text, style="bold #ff7527"))
+            self.query_one("#log", RichLog).write(self._user_block(text))
             self._input_q.put(text)
 
         def on_button_pressed(self, event) -> None:
@@ -233,10 +240,24 @@ if _HAS_TEXTUAL:
             except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a TUI
                 self.call_from_thread(self.sink_note, f"erro: {e}")
 
-        # ---- timer: status + barra de aprovação ------------------------------
+        # ---- timer: atividade + status + barra de aprovação ------------------
         def _tick(self) -> None:
+            from rich.text import Text
             self._spin = (self._spin + 1) % len(_SPINNER)
+            busy = self._busy()
+            self._busy_since = (self._busy_since or time.monotonic()) if busy else None
             try:
+                act = self.query_one("#activity", Static)
+                if busy:                                   # indicador VIVO de "raciocinando", com relógio
+                    el = int(time.monotonic() - (self._busy_since or time.monotonic()))
+                    a = Text()
+                    a.append(f"{_SPINNER[self._spin]} ", style="bold #ff7527")
+                    a.append(f"{self._agent} está raciocinando…", style="#ffb86c")
+                    a.append(f"  {el}s", style="#3d3e50")
+                    act.update(a)
+                    act.display = True
+                elif act.display:
+                    act.display = False
                 self.query_one("#status", Static).update(self._status_text())
             except Exception:  # noqa: BLE001
                 return
@@ -250,12 +271,59 @@ if _HAS_TEXTUAL:
         # ---- render helpers --------------------------------------------------
         def _header_text(self):
             from rich.text import Text
-            t = Text()
-            t.append(" 🐺 Okami ", style="bold #ff7527")
-            t.append(f"· {self._agent} ", style="#f4f4f8")
-            t.append(f"· {self._model_label} ", style="#b9bac8")
-            t.append(f"· sessão {self._session_id}", style="#6c6d80")
+            t = Text(no_wrap=True, overflow="ellipsis")
+            t.append(" 🐺 ", style="#ff7527")
+            t.append("OKAMI", style="bold #ff7527")
+            t.append("  ", style="")
+            t.append(self._agent, style="#f4f4f8")
+            t.append("  ·  ", style="#3d3e50")
+            t.append(self._model_label, style="#b9bac8")
+            t.append("  ·  ", style="#3d3e50")
+            t.append(f"sessão {self._session_id}", style="#6c6d80")
             return t
+
+        @staticmethod
+        def _now() -> str:
+            from datetime import datetime
+            return datetime.now().strftime("%H:%M")
+
+        def _author_line(self, name: str, color: str):
+            from rich.text import Text
+            t = Text()
+            t.append("▌ ", style=color)
+            t.append(name, style=f"bold {color}")
+            t.append("  " + self._now(), style="#3d3e50")
+            return t
+
+        def _agent_block(self, body: str):
+            from rich.console import Group
+            from rich.markdown import Markdown
+            from rich.padding import Padding
+            from rich.text import Text
+            inner = Markdown(body) if body.strip() else Text("(sem resposta)", style="#6c6d80")
+            return Group(self._author_line(self._agent, "#ff7527"), Padding(inner, (0, 0, 1, 2)))
+
+        def _user_block(self, text: str):
+            from rich.console import Group
+            from rich.padding import Padding
+            from rich.text import Text
+            return Group(self._author_line("você", "#00dfe8"),
+                         Padding(Text(text, style="#f4f4f8"), (0, 0, 1, 2)))
+
+        def _greet(self, log) -> None:
+            from rich.text import Text
+            n = len(self.ep.session(self._cid).history) // 2
+            t = Text()
+            t.append("🐺 ", style="#ff7527")
+            t.append("Okami", style="bold #ff7527")
+            t.append(" — seu confidente no terminal.  ", style="#b9bac8")
+            t.append(f"{len(self._tools)} ferramentas · {len(self._skills)} skills · ", style="#6c6d80")
+            t.append("/help", style="#00dfe8")
+            t.append(" pros comandos.", style="#6c6d80")
+            log.write(t)
+            if n:
+                log.write(Text(f"↻ retomando conversa ({n} trocas anteriores)", style="#6c6d80"))
+            log.write(Text(""))
 
         def _ctx_pct(self) -> int:
             used = sum(len(x) for _, x in self.ep.session(self._cid).history)
@@ -270,24 +338,24 @@ if _HAS_TEXTUAL:
             gauge_n = max(0, min(10, round(10 * pct / 100)))
             gcolor = ("#00dfe8" if pct < 60 else "#ffb86c" if pct < 80 else
                       "#ff7527" if pct < 92 else "#ff5555")
-            t = Text()
+            t = Text(no_wrap=True, overflow="ellipsis")          # nunca quebra linha (terminal estreito)
             if busy:
                 t.append(f" {_SPINNER[self._spin]} ", style="bold #ff7527")
                 t.append("trabalhando ", style="#ffb86c")
             elif pending:
                 t.append(" ✍ ", style="bold #ff39d1")
-                t.append("responda a aprovação ", style="#ff39d1")
+                t.append("responda acima ", style="#ff39d1")
             else:
                 t.append(" ● ", style="bold #00dfe8")
                 t.append("pronto ", style="#6c6d80")
             t.append(f" {self._model_label} ", style="#b9bac8")
             t.append("· ctx ", style="#6c6d80")
             t.append("█" * gauge_n + "░" * (10 - gauge_n), style=gcolor)
-            t.append(f" {pct:>3}% ", style=gcolor)
+            t.append(f" {pct}% ", style=gcolor)
             t.append(f"· {turns} trocas ", style="#6c6d80")
             if self.inflight:
                 t.append(f"· {len(self.inflight)} na fila ", style="#ffb86c")
-            t.append("· Ctrl-C cancela · Ctrl-D sai", style="#3d3e50")
+            t.append("· ^C parar · ^D sair", style="#3d3e50")
             return t
 
         # ---- ações -----------------------------------------------------------
