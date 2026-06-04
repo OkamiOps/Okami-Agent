@@ -69,15 +69,25 @@ def run_task(
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
     eff = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+    from okami.llm.usage import CanonicalUsage
+    _acc = {"usage": CanonicalUsage(), "served": ""}   # tokens + quem respondeu (custo §A5 / served-by §E5)
 
     def generate(messages, schema=None):
-        return prov.complete_messages(cfg, messages, provider=provider, model=model,
-                                      response_schema=schema, **eff)
+        res = prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
+                                        response_schema=schema, **eff)
+        _acc["usage"] = _acc["usage"] + res.usage
+        if res.provider:
+            _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
+        return res.text
 
     escalate = None
     if escalate_to:
         def escalate(messages, schema=None):  # noqa: F811
-            return prov.complete_messages(cfg, messages, provider=escalate_to, response_schema=schema, **eff)
+            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema, **eff)
+            _acc["usage"] = _acc["usage"] + res.usage
+            if res.provider:
+                _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
+            return res.text
 
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
     all_skills = skillmod.load_skills(Path(skills_dir))
@@ -138,6 +148,8 @@ def run_task(
                       images=images)   # vision §6 (modelo multimodal)
     try:
         harness.run()
+        t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
+        t.stats["served_by"] = _acc["served"]             # quem realmente respondeu (§E5)
         hooks.fire("after_task", {"goal": goal, "state": t.state.value, "result": t.result or ""})
         try:
             learning.apply(mem, t, model_name=model or "default")

@@ -2219,6 +2219,18 @@ def status() -> None:
             f"[dim]voz[/] {'on' if voice_on else 'off'}   "
             f"[dim]auto-skill[/] {'on' if learn.get('auto_skill') else 'off'}")
     console.print(Panel(body, title="[bold #ff7527]Okami status[/]", border_style="#ff7527"))
+    try:                                              # tokens/custo acumulados do agente default (§A5)
+        from okami.gateway.sessions import TranscriptStore
+        from okami.llm.usage import estimate_cost, format_tokens, summarize_store
+        ws = Path("agents") / default_agent if default_agent and default_agent != "—" else Path(".")
+        u = summarize_store(TranscriptStore(ws).load_store())
+        if u.total_tokens:
+            cr = estimate_cost(u, transport=pc.transport, provider=cfg.default_provider, model=pc.model)
+            extra = f" · {format_tokens(u.cache_read_tokens)} cache" if u.cache_read_tokens else ""
+            console.print(f"  [dim]tokens[/] {format_tokens(u.input_tokens)} in · "
+                          f"{format_tokens(u.output_tokens)} out{extra}   [dim]custo[/] {cr.label}")
+    except Exception:  # noqa: BLE001
+        pass
     t = _T(title="Providers (auth)", border_style="#3d3e50")
     t.add_column("provider", style="bold")
     t.add_column("modelo")

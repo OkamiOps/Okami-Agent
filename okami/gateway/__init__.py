@@ -401,6 +401,12 @@ class AgentEndpoint:
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             task = self.run_task(self.cfg, self.ws, text, **kw)
+            stats = getattr(task, "stats", None) or {}     # tokens do turno (custo §A5)
+            if stats.get("usage"):
+                try:
+                    self.store.add_usage(chat_id, stats["usage"], served_by=stats.get("served_by", ""))
+                except Exception:  # noqa: BLE001 — contabilidade nunca quebra o turno
+                    pass
             reply = task.result or task.reason or f"({task.state.value})"
             self._append_turn(chat_id, s, "AGENTE", reply)  # fecha o par → não é mais "interrompida"
             s.resume_attempts = 0                          # concluiu → zera a guarda de resume

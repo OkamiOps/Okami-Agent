@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 
 from okami.config import ProviderConfig
+from okami.llm.usage import Completion, normalize_usage
 
 
 def _split_model(pc: ProviderConfig, model: str | None) -> str:
@@ -64,7 +65,7 @@ _CLAUDE_THINK = {"minimal": "", "low": "", "medium": "think", "high": "think har
 
 
 def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
-                        overrides: dict | None = None) -> str:
+                        overrides: dict | None = None) -> Completion:
     binary = claude_binary()
     if not binary:
         raise RuntimeError("CLI 'claude' não encontrado no PATH. Instale/logue o Claude Code.")
@@ -86,10 +87,13 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     out = r.stdout.strip()
     try:
         obj = json.loads(out)
-        # --output-format json: {"type":"result","result":"...", ...}
-        return obj.get("result") or obj.get("text") or out
+        # --output-format json: {"type":"result","result":"...","usage":{...}}
+        text = obj.get("result") or obj.get("text") or out
+        usage = normalize_usage(obj.get("usage"), transport="claude_cli")
+        return Completion(text=text, usage=usage, provider=pc.name, model=model_short)
     except json.JSONDecodeError:
-        return out
+        return Completion(text=out, usage=normalize_usage(None, transport="claude_cli"),
+                          provider=pc.name, model=model_short)
 
 
 # --------------------------------------------------------------------- codex_oauth
@@ -102,15 +106,16 @@ CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 _CODEX_TERMINAL = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 
-def _codex_sse_text(lines) -> str:
-    """Acumula o texto de saída de um stream SSE da Responses API do Codex.
+def _codex_sse(lines) -> tuple[str, dict | None]:
+    """Parseia o stream SSE da Responses API do Codex → (texto, usage).
 
-    Fonte primária: deltas `response.output_text.delta`. Fallback: `output` do `response.completed`.
-    Robustez (estilo Hermes `codex_runtime`): exige um evento TERMINAL; stream cortado sem texto
-    nem terminal → RuntimeError (vira retry/failover, não turno vazio). `lines` = iterável bytes/str.
+    Texto: deltas `response.output_text.delta` (fallback: `output` do terminal). USAGE: capturado do
+    evento terminal (`response.usage`) — keystone de custo, antes a gente jogava fora. Robustez (Hermes
+    `codex_runtime`): exige TERMINAL; corte sem texto nem terminal → RuntimeError (vira retry/failover).
     """
     chunks: list[str] = []
     final = ""
+    usage: dict | None = None
     saw_terminal = False
     incomplete_reason = ""
     for raw in lines:
@@ -130,7 +135,9 @@ def _codex_sse_text(lines) -> str:
             chunks.append(obj.get("delta", ""))
         elif t in _CODEX_TERMINAL:
             saw_terminal = True
-            out = (obj.get("response") or {}).get("output", []) or []
+            resp = obj.get("response") or {}
+            usage = resp.get("usage") or usage                 # ← tokens (custo §A2)
+            out = resp.get("output", []) or []
             texts = [
                 c.get("text", "")
                 for it in out if isinstance(it, dict)
@@ -140,11 +147,10 @@ def _codex_sse_text(lines) -> str:
             if texts:
                 final = "".join(texts)
             if t == "response.failed":
-                err = (obj.get("response") or obj).get("error") or obj.get("error") or obj
+                err = (resp or obj).get("error") or obj.get("error") or obj
                 raise RuntimeError(f"codex stream falhou: {err}")
             if t == "response.incomplete":
-                incomplete_reason = ((obj.get("response") or {}).get("incomplete_details")
-                                     or {}).get("reason", "") or "incompleto"
+                incomplete_reason = (resp.get("incomplete_details") or {}).get("reason", "") or "incompleto"
         elif t == "error":
             raise RuntimeError(f"codex stream erro: {obj.get('error') or obj}")
     text = "".join(chunks) or final
@@ -153,7 +159,12 @@ def _codex_sse_text(lines) -> str:
             raise RuntimeError("codex: stream encerrou sem evento terminal (resposta vazia)")
         if incomplete_reason:
             raise RuntimeError(f"codex: resposta incompleta sem texto ({incomplete_reason})")
-    return text
+    return text, usage
+
+
+def _codex_sse_text(lines) -> str:
+    """Só o texto (wrapper p/ compat/teste)."""
+    return _codex_sse(lines)[0]
 
 
 def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
@@ -193,14 +204,17 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     req.add_header("Accept", "text/event-stream")
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
-            return _codex_sse_text(resp)
+            text, usage = _codex_sse(resp)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:300]
         raise RuntimeError(f"codex HTTP {e.code}: {detail}") from e
+    return Completion(text=text, usage=normalize_usage(usage, transport="codex_oauth"),
+                      provider=pc.name, model=model_short)
 
 
 # --------------------------------------------------------------------- minimax_oauth
-def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None) -> str:
+def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
+                           overrides: dict | None = None) -> Completion:
     """MiniMax via OAuth token plan: usa o access_token do store como bearer no LiteLLM."""
     from okami.llm import oauth
     token = oauth.get_valid_token(pc.name, pc.oauth)
@@ -213,16 +227,18 @@ def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str 
         kw["api_base"] = pc.api_base
     kw.update(pc.params)
     resp = litellm.completion(**kw)
-    return resp.choices[0].message.content or ""
+    return Completion(text=resp.choices[0].message.content or "",
+                      usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
+                      provider=pc.name, model=model or pc.model)
 
 
 def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
-             overrides: dict | None = None) -> str | None:
-    """Retorna o texto via transport não-litellm, ou None se for litellm (segue no LiteLLM)."""
+             overrides: dict | None = None):
+    """Resultado via transport não-litellm (`Completion`), ou None se for litellm (segue no LiteLLM)."""
     if pc.transport == "claude_cli":
         return claude_cli_complete(pc, messages, model, overrides)
     if pc.transport == "codex_oauth":
         return codex_oauth_complete(pc, messages, model, overrides)
     if pc.transport == "minimax_oauth":
-        return minimax_oauth_complete(pc, messages, model)
+        return minimax_oauth_complete(pc, messages, model, overrides)
     return None

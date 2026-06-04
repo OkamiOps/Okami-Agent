@@ -90,6 +90,24 @@ class TranscriptStore:
             self._save_store(store)
         return e
 
+    def add_usage(self, chat_id, usage: dict, *, served_by: str = "") -> dict:
+        """Acumula os tokens do turno nos metadados da sessão (sob lock cross-process). `usage` é o
+        dict de `CanonicalUsage.to_dict()`. Custo é DERIVADO na hora de mostrar (preço muda retroativo)."""
+        if not usage:
+            return self.entry(chat_id)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with _FileLock(self._store_path()):
+            store = self.load_store()
+            e = store.setdefault(str(chat_id), {})
+            acc = e.setdefault("usage", {})
+            for k, v in usage.items():
+                acc[k] = int(acc.get(k, 0)) + int(v or 0)
+            if served_by:
+                e["served_by"] = served_by
+            e["updated_at"] = self._clock()
+            self._save_store(store)
+        return e
+
     def ids(self) -> list[str]:
         return list(self.load_store().keys())
 

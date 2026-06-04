@@ -17,6 +17,7 @@ import litellm
 from okami.llm import errors as _err
 from okami.llm import transports
 from okami.llm.retry import jittered_backoff
+from okami.llm.usage import Completion, as_completion, normalize_usage
 from okami.config import OkamiConfig, ProviderConfig
 
 
@@ -147,7 +148,7 @@ def complete(
     messages = _build_messages(prompt, system)
     via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
-        return via
+        return as_completion(via).text
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     return resp.choices[0].message.content or ""
 
@@ -162,18 +163,20 @@ def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict |
     return None
 
 
-def _complete_one(pc, messages, model, response_schema, overrides) -> str:
+def _complete_one(pc, messages, model, response_schema, overrides) -> Completion:
     via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
-        return via
+        return as_completion(via)
     rf = _response_format(pc, response_schema)
     if rf is not None:
         overrides.setdefault("response_format", rf)
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
-    return resp.choices[0].message.content or ""
+    return Completion(text=resp.choices[0].message.content or "",
+                      usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
+                      provider=pc.name, model=_effective_model(pc, model))
 
 
-def complete_messages(
+def complete_messages_ex(
     cfg: OkamiConfig,
     messages: list[dict],
     *,
@@ -183,11 +186,11 @@ def complete_messages(
     _tried: set | None = None,
     _sleep=time.sleep,
     **overrides,
-) -> str:
-    """Completa a partir de uma lista de mensagens (harness §3). Robustez (dor nº1 do usuário):
-    classifica o erro p/ decidir a alavanca (rotacionar chave vs back off vs failover vs comprimir),
-    espera com jitter entre tentativas, parqueia chave em 429, e trata RESPOSTA VAZIA como falha
-    (não como sucesso) — senão o harness vê turno em branco → 'violação de Action-or-Terminate'."""
+) -> Completion:
+    """Completa a partir de uma lista de mensagens (harness §3) e devolve um `Completion` (texto +
+    usage + provider/model que REALMENTE respondeu). Robustez (dor nº1): classifica o erro p/ a
+    alavanca (rotacionar chave vs back off vs failover), espera com jitter, parqueia chave em 429,
+    e trata RESPOSTA VAZIA como falha (não sucesso) — senão o harness vê turno em branco."""
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
     attempts = max(1, len(pc.key_pool()))
@@ -198,10 +201,12 @@ def complete_messages(
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            result = _complete_one(pc, messages, model, response_schema, ov)
-            if not (result or "").strip():           # vazio = falha de provider, entra no retry/failover
+            res = as_completion(_complete_one(pc, messages, model, response_schema, ov))
+            if not res.text.strip():                  # vazio = falha de provider, entra no retry/failover
                 raise EmptyResponse("resposta vazia do provider")
-            return result
+            if not res.provider:                      # garante served-by mesmo no caminho legado/teste
+                res.provider = pc.name
+            return res
         except Exception as e:  # noqa: BLE001
             last_exc = e
             ce = _err.classify(e)
@@ -219,11 +224,16 @@ def complete_messages(
         for fb in (pc.fallback or []):
             if fb not in tried and fb in cfg.providers:
                 try:
-                    return complete_messages(cfg, messages, provider=fb, response_schema=response_schema,
-                                             _tried=tried, _sleep=_sleep, **overrides)
+                    return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
+                                                _tried=tried, _sleep=_sleep, **overrides)
                 except Exception:  # noqa: BLE001
                     continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")
+
+
+def complete_messages(cfg: OkamiConfig, messages: list[dict], **kwargs) -> str:
+    """Compat: só o texto. Quem quer usage/served-by usa `complete_messages_ex`."""
+    return complete_messages_ex(cfg, messages, **kwargs).text
 
 
 def stream_complete(

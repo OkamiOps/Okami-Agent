@@ -1,106 +1,114 @@
-# Okami — Auditoria Hermes + OpenClaw → plano de melhorias
+# Okami — Plano de robustez (auditoria profunda Hermes + OpenClaw)
 
-> Varredura profunda do código real do **Hermes** (`NousResearch/hermes-agent`, harness de produção) e do
-> **OpenClaw** (`czl9707/build-your-own-openclaw`, referência rodável de 18 passos + o OpenClaw original),
-> mapeada arquivo-a-arquivo pro nosso código. Gerado em 2026-06-04 por 6 agentes paralelos (harness,
-> estabilidade, effort/params/providers, setup/config, terminal/TUI, joias diversas).
+> 2ª varredura **funda e pronta-pra-codar** do código real do **Hermes** (`NousResearch/hermes-agent`,
+> harness de produção) e do **OpenClaw** (`czl9707/build-your-own-openclaw` + instalação real do OpenClaw
+> em disco + issues do openclaw/openclaw). 6 agentes paralelos, cada um com spec arquivo:linha. Substitui
+> a 1ª versão (mais rasa). Objetivo: **robusto, não de garagem.** Atualizado 2026-06-04.
 
-## O que NÃO regredir (Okami já está à frente)
-- **Action-or-Terminate** + **exit criteria verificados** (`check_exit`): "concluído" é asserção do harness,
-  não do modelo. Nenhuma das duas referências verifica conclusão. É a nossa melhor ideia.
-- **Protocolo JSON agnóstico de modelo** (paridade com fraco/local) — manter como *fallback documentado*
-  quando ligarmos tool-calling nativo. As duas referências assumem modelo forte com tool-calling nativo.
-- **Scan de segurança de skills** (`skills/skill_security.py`) — mais completo que qualquer um dos dois.
-- **Crash recovery** (transcript append-only + `resume_interrupted` + guarda anti-loop) — paridade ou melhor.
-- **Gateway channel-agnóstico**, **go/no-go**, **banner/status bar**, **descoberta de modelos ao vivo**,
-  **roteamento de segredo por formato da chave**, **herança de config por-agente**.
+## ⛓️ O KEYSTONE (faz primeiro — destrava 3 ondas de uma vez)
+Hoje `complete_messages`/transports devolvem **`str` cru** e jogam fora o `usage`. Introduzir **um objeto
+de resultado** `Completion(text, tool_calls, usage, finish_reason)` destrava:
+- **Onda 3 (nativo)** precisa de `tool_calls` + `finish_reason`.
+- **Onda 4 (custo)** precisa de `usage` (que o SSE do codex **já entrega** e a gente descarta).
+- **Onda 4 (caching)** medir cache precisa de `usage.cache_read`.
+- **Onda 4 (compaction por token)** precisa de `usage.prompt_tokens` (hoje é char-based, model-blind).
+- **Fallback** mostrar "quem respondeu" precisa do provider/model efetivo.
+
+`okami/llm/usage.py` (novo): `CanonicalUsage` (input/output/cache_read/cache_write/reasoning) + `Completion`
++ `normalize_usage(raw, transport)` + tabela de preço + `estimate_cost` com **modo "incluído"** p/ assinatura.
+
+## 🚫 O que NÃO regredir (Okami já à frente das duas referências)
+Action-or-Terminate · exit criteria verificados · protocolo JSON p/ paridade (fallback) · skill security ·
+transcript append-only com torn-line recovery + `_FileLock` (O_EXCL) · checkpoints/rollback · go/no-go
+fail-closed · jittered backoff · key pool · surrogate scrub · empty-response→failover · `escalate_to` manual.
+
+## 🚫 O que NÃO construir (gold-plating — ausente nas duas referências)
+Router por custo/capacidade · idempotency keys · dedup de request in-flight · resume de stream parcial.
+(Confirmado: nem Hermes nem OpenClaw têm. Não inventar.)
 
 ---
 
-## ONDA 1 — Estabilidade da chamada ao modelo + effort completo  ⭐ (começar por aqui)
-*Pequeno, alto impacto, conserta os erros reais (o turno que morre no codex). Quase tudo S/M.*
+# ORDEM DE IMPLEMENTAÇÃO (por dependência)
 
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+**Fase A — Keystone:** `Completion` + `usage` + custo (Onda 4 parcial). *Destrava o resto.*
+**Fase B — Onda 3 nativo (codex):** usa `tool_calls` do `Completion`.
+**Fase C — Onda 4 resto:** caching (reorder estático→dinâmico + `cache_control`), compaction por token.
+**Fase D — Onda 5 tools:** `edit_file`, budget de resultado, mtime guard, `doctor --fix`, hot-reload.
+**Fase E — Fallback robusto:** chain `{provider,model}`, eager, `reset_at`, served-by, stream failover.
+**Fase F — Gaps de produção:** durabilidade de config, audit log, env do MCP, scheduler lock, etc.
+
+---
+
+## FASE A — Custo / tokens (o que você cobrou)  ⭐
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 1.1 | **Codex SSE: terminal-event-or-raise.** Se o stream acaba sem `response.completed/incomplete/failed` E sem texto → **levantar erro** (não `return ""`). Sintetizar dos deltas; tratar `response.incomplete` (truncado). | Hermes `agent/codex_runtime.py` `_consume_codex_event_stream` | `transports.py` `_codex_sse_text` retorna `""` silencioso → harness vê "sem ação" → viola Action-or-Terminate → **turno morre** (o bug que te pegou) | S |
-| 1.2 | **Resposta vazia = falha de provider.** `complete_messages`: `if not result.strip(): raise` → entra na rotação/failover (hoje só retry em exceção). | Hermes `conversation_loop.py` (eager fallback) | `providers.py` trata vazio como sucesso | M |
-| 1.3 | **Classificador de erro** (`okami/llm/errors.py`): 401→rotaciona · 429→rotaciona+failover · **529/503→back off+troca provider (NÃO rotaciona)** · 400/content-policy→falha rápido (não queima o pool). | Hermes `error_classifier.py` (`ClassifiedError`, 16 categorias) | `providers.py` rotaciona chave em **qualquer** erro | M |
-| 1.4 | **Backoff com jitter** entre retries/rotações (só p/ erro retriável), em incrementos pequenos checando `cancel`. | Hermes `retry_utils.py` `jittered_backoff(base=5,max=120)` | `providers.py` faz retry em loop apertado **sem espera** (martela o rate-limit) | S |
-| 1.5 | **Cooldown por chave** (429 → chave parada 1h ou até `Retry-After`); `_rotate_key` pula chaves em cooldown. | Hermes `credential_pool.py` (`EXHAUSTED_TTL_429=1h`) + `nous_rate_guard` | `_rotate_key` é round-robin puro, sem saúde | M |
-| 1.6 | **Effort unificado por transport** (`reasoning_param(pc, effort)`): codex→`reasoning.effort` (temos) · **Anthropic→`thinking.budget_tokens`** (tabela `xhigh=32k…low=4k`) · `claude_cli`→diretiva no prompt. | Hermes `anthropic_adapter.py` `THINKING_BUDGET` | **hoje "high" no `claude_cli` é silenciosamente ignorado** | M |
-| 1.7 | Timeout na rota LiteLLM (`providers.py`); watchdog de TTFB no stream do codex (aborta se N s sem frame); scrub de surrogates UTF-16 antes do `json.dumps`. | Hermes `stream_diag.py`, `message_sanitization.py` | sem timeout no litellm; stream pode pendurar 300s; 1 char ruim no histórico trava todo turno | S–M |
+| A1 | `okami/llm/usage.py`: `CanonicalUsage`, `normalize_usage` (codex/litellm/anthropic), `Completion` | Hermes `usage_pricing.py` | novo | M |
+| A2 | Capturar `usage` no `_codex_sse_text` (já está no `response.completed`!) → `(text, usage)` | Hermes `codex_runtime.py` | `transports.py` | S |
+| A3 | Thread `Completion` por `complete_messages_ex`/`_complete_one`/`dispatch` (mantém `->str` p/ os testes) | Hermes `conversation_loop.py` | `providers.py` | M |
+| A4 | Tabela de preço + `estimate_cost` com **`subscription_included`→$0/"incluído"** (codex/claude) | Hermes `usage_pricing.py` `resolve_billing_route` | `usage.py` | S |
+| A5 | Acumular usage por sessão (`add_usage` sob `_FileLock`) + mostrar em `okami status` + status bar | Hermes `SessionDB.update_token_counts`, `insights.py` | `gateway/sessions.py`, `cli.py`, `tui.py` | M |
+| A6 | `okami insights` (tokens/custo/cache-hit ratio/tool ranking) | Hermes `insights.py` | `cli.py` | M |
+> Pega-ratão: codex/OpenAI reportam `prompt_tokens` **incluindo cache** → `input = max(0, total - cache_read - cache_write)`. Anthropic já vem separado. Persistir TOKENS, custo é derivado (preço muda retroativo).
 
----
-
-## ONDA 2 — Terminal vivo (ligar eventos que já emitimos)  ⭐
-*Plumbing puro, risco baixo, impacto percebido enorme. O harness JÁ emite os eventos; o chat só não se inscreve.*
-
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+## FASE B — Onda 3: tool-calling nativo (codex)  ⭐
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 2.1 | **Display de tool-call ao vivo**: passar `on_event` no chat (o `okami task` já renderiza) → spinner + "⚙ run_shell pytest… (3s)" por passo. Mata o "espera 30s e cospe tudo". | Hermes `ui-tui` tool trail; OpenClaw tool cards | `gateway._run` passa `on_event=None`; chat só imprime `task.result` no fim | S–M |
-| 2.2 | **Streaming token-a-token** da resposta: `complete_messages_streamed(on_delta)` acumula a string (parse intacto) e emite deltas; só na "fala" (`respond`). | Hermes `message.delta`→`message.complete` | `stream_complete` já existe (usado no `okami run`), **não ligado ao harness** | M |
-| 2.3 | **Ctrl-C aborta a geração** (1º Ctrl-C = cancela run via `s.cancel`; 2º = sai). Mid-token no loop de streaming. | OpenClaw Esc=abort / Ctrl-C=clear | `/stop` só entre passos; Ctrl-C sai do REPL | S–M |
-| 2.4 | **Renderizar Markdown/código** nas respostas (somos um agente de código!). Stream cru ao vivo → re-render Markdown no fim. | Hermes `markdown.tsx` | `terminal.py` imprime texto cru | S |
-| 2.5 | **`prompt_toolkit`** no input: histórico (↑), multiline, autocomplete de slash. | Hermes `textInput.tsx`, `useCompletion.ts` | `console.input` single-line, sem histórico/menu | M |
-| 2.6 | Status bar **ao vivo** + tokens/custo + nível `/think`/yolo; `/model` e `/agent` trocam em runtime. | Hermes `StatusRule`; OpenClaw footer | bar impressa 1x por prompt; trocar modelo exige reabrir | M |
+| B1 | `Tool.to_openai_schema()` + `openai_tools(registry)` + flag `mutating` (read tools=False) | OpenClaw `tools/base.py` | `core/tools.py` | S |
+| B2 | codex: mandar `tools` no payload (shape flat `{type:function,name,...}`) + coletar `function_call` items do SSE (`response.output_item.done`) + converter tool-result→`function_call_output` | Hermes `codex_responses_adapter.py` | `transports.py` | M |
+| B3 | Harness: branch nativo — `if res.tool_calls:` monta `Action`(+`call_id`), `_invoke_one` compartilhado, `parse_action` fica de fallback. Multi-tool: sequencial; paralelo só se TODAS read-only (ThreadPool 8) | OpenClaw `core/agent.py`, Hermes `tool_executor.py` | `core/harness.py` | L |
+| B4 | `_repair_tool_call_arguments` (escada de fixes, nunca crasha) | Hermes `message_sanitization.py` | `llm/repair.py` (novo) | S |
+| B5 | Modo nativo **tira o menu do prompt** (mantém guidance de voz) — gate por `capability.tool_mode: native` (só no codex) | Hermes `prompt_builder.py` | `core/harness.py` | S |
+> **Claude (`claude_cli`) NÃO faz nativo** — o `-p` roda o loop interno do Claude Code com as ferramentas DELE; fica no JSON-em-texto (é pra isso que mantivemos o fallback). Nada de tentar Anthropic nativo via CLI (quebra o constraint de auth sancionada).
 
----
-
-## ONDA 3 — Tool-calling nativo + tirar o menu do prompt  ⭐
-*Maior (M), mas sobe confiabilidade E ajuda o "não parecer chatbot".*
-
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+## FASE C — Onda 4: caching + compaction por token
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 3.1 | **Tool-calling nativo como caminho primário**, JSON-em-texto como fallback (modelo fraco/local). `tools=` na API; em modo nativo monta `Action` direto do `tool_calls`. | OpenClaw `01-tools` (branch em `stop_reason`); Hermes `conversation_loop.py` | `parse_action` faz regex em prosa; sem caminho nativo | M |
-| 3.2 | **Apagar o menu de ferramentas + bloco `=== USO INTERNO ===` do prompt** em modo nativo (tools vão nativas). É a vitória mais limpa pro "humano, não chatbot". | Hermes `prompt_builder.py` (não renderiza tools no texto) | `build_system_prompt` despeja tools + 3 frases pedindo pra não recitar | S (depois de 3.1) |
-| 3.3 | **Múltiplas tool calls por turno** (hoje 1 → ler 5 arquivos = 5 round-trips, lento e robótico). Paralelo só se todas read-only. | Hermes `execute_tool_calls_concurrent` (8 workers); OpenClaw `asyncio.gather` | 1 ação por turno | M |
-| 3.4 | **Detecção de "sem progresso" por hash de resultado** (read-only repetido com mesmo output ≥2× → nudge). | Hermes `tool_guardrails.py` (idempotent no-progress) | anti-loop só pega args idênticos / 2-ciclo; circuit breaker só conta falhas | S |
-| 3.5 | Não contar turnos de re-prompt (violação/loop/stall) no `max_steps` (refund). | Hermes `iteration_budget.py` `refund()` | toda correção nossa queima passo | S |
+| C1 | **Reordenar prompt estático→dinâmico** (identidade+manual no topo fixo; recall/histórico/timestamp por ÚLTIMO). Vale p/ TODOS (codex/OpenAI auto-cacheiam prefixo estável) | OpenClaw `prompt_builder.py` | `core/harness.py`, `memory/files.py` | M |
+| C2 | `okami/core/prompt_caching.py`: `apply_anthropic_cache_control` (system + últimas 3 não-system, 4 breakpoints) — **só litellm→anthropic** | Hermes `prompt_caching.py` | novo | S |
+| C3 | Compaction por TOKEN (`usage.prompt_tokens >= ctx*0.75`) com `protect_head=3`/`tail=6`; trunca tool-results ANTES de sumarizar; prompt de resumo de 5 seções; anti-thrashing | Hermes `context_engine.py`, OpenClaw `context_guard.py` | `memory/compaction.py`, `gateway/__init__.py` | M |
+> Caching só rende de fato no caminho litellm→Anthropic; `claude_cli` achata em string `-p` (sem markers). Codex/OpenAI auto-cacheiam → o reorder (C1) é a vitória universal. Mede com `cache_read/(cache_read+input)` (depende da Fase A).
 
----
-
-## ONDA 4 — Prompt caching + custo + modelos auxiliares
-*ROI de custo gigante (~75% nos tokens de entrada). Trio coeso: cachear + medir o cache.*
-
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+## FASE D — Onda 5: tools + config
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 4.1 | **Reordenar o system prompt estático→dinâmico** (timestamp/canal/recall por último) → prefixo cacheável estável. | OpenClaw `13-multi-layer-prompts` `prompt_builder.py` | montamos com persona/memória interleaved | S |
-| 4.2 | **`cache_control` (Anthropic)**: breakpoint após o bloco estático + 3 no fim do histórico. ~75% de economia em multi-turno. | Hermes `prompt_caching.py` (`system_and_3`) | **zero** `cache_control` no código | S |
-| 4.3 | **`LLMResult(text, usage, finish_reason)`** em vez de `str` nos transports → destrava custo/tokens (hoje jogamos fora o `usage` que o SSE do codex já entrega). | Hermes adapters normalizam usage | transports devolvem `str` cru | M |
-| 4.4 | **Contabilidade de custo/tokens** + view tipo `/insights` (buckets input/output/cache-read/write; modo "incluído" p/ assinatura = $0). | Hermes `usage_pricing.py`, `insights.py` | sem observabilidade de custo | M |
-| 4.5 | **Modelos auxiliares baratos por tarefa** (compaction/summary/title/vision → tier weak/local). Hoje queima codex/claude resumindo. | Hermes `auxiliary:` + `auxiliary_client.py` | substrato existe (`tier`), nada roteia | L (S por tarefa) |
-| 4.6 | **Model aliases** (nome amigável → provider/model). | Hermes `model_aliases:` | só por nome de provider | S |
+| D1 | **`edit_file`** (string-replace com **gate de unicidade** `len(matches)>1 and not replace_all`) + re-leitura pós-escrita | Hermes `fuzzy_match.py` | `core/tools.py` | S |
+| D2 | **Budget de tool-result**: `maybe_persist_tool_result` (output grande → `.okami/tool-results/<id>.txt` + preview+path; `read_file`=∞) + `enforce_turn_budget` (200k) | Hermes `tool_result_storage.py` | `core/tool_result_budget.py` (novo), `harness.py` | M |
+| D3 | **mtime stale-guard** (read_files guarda mtime; bloqueia overwrite de arquivo mudado em disco/por subagente) | Hermes `file_state.py` | `core/tools.py` | S |
+| D4 | **`doctor --fix`** (cria .env 0600, dirs/SOUL [nunca sobrescreve SOUL existente], WAL checkpoint, migrate, probes paralelos) + lista numerada + exit≠0 | Hermes `doctor.py` | `cli.py` | M |
+| D5 | **YAML hot-reload** (watchdog + valida-antes-de-trocar + **debounce** + `on_reload` callback + RLock + cache mtime) | OpenClaw `08-config-hot-reload` | `config.py` | M |
+| D6 | **🔴 chmod 0600 no `.env`** + **denylist de env** (`LD_PRELOAD`/`PATH`/`PYTHONPATH`/`EDITOR`…) no `config set` — vuln viva hoje (RCE via .env) | Hermes `config.py` `_ENV_VAR_NAME_DENYLIST` | `cli.py` | S |
+| D7 | `config migrate` + `config_version` + backup de config corrompido (`.corrupt.<ts>.bak`, opera no dict CRU, não no expandido) | Hermes `config.py` | `config.py`, `cli.py` | M |
 
----
-
-## ONDA 5 — Camada de tools + setup/config robusto
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+## FASE E — Fallback robusto (o que você cobrou)  ⭐
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 5.1 | **Tool `edit` (string-replace)** — mais barato e cache-friendly que reescrever arquivo inteiro. | OpenClaw `builtin_tools.py` `edit` | só `write_file` (overwrite total) | S |
-| 5.2 | **Budget de resultado de tool + persistência no sandbox** (output grande → arquivo + preview + path; budget agregado por turno 200k). | Hermes `tool_result_storage.py` | output sem guarda → estoura contexto | M |
-| 5.3 | **Guarda de stale-read por mtime** (upgrade do `read_files`): detecta arquivo mudado em disco / por subagente antes de overwrite. | Hermes `file_state.py` | `read_files` nunca expira → overwrite com conteúdo velho | S–M |
-| 5.4 | **`okami doctor --fix`** (cria `.env` 0600, recria config, stubs faltando) + lista numerada + exit≠0. | Hermes `doctor.py` | doctor é só leitura | M |
-| 5.5 | **YAML hot-reload** (`watchdog` + valida-antes-de-trocar + **debounce** + callback pro gateway reler). | OpenClaw `08-config-hot-reload` | sem watcher (era meta na arquitetura) | M |
-| 5.6 | **`config migrate`** + `config_version` + backup de config corrompido (`.corrupt.<ts>.bak`). | Hermes `config.py` / `doctor.py` | sem versão/migrate/backup | M |
-| 5.7 | **Denylist de segredo** (`LD_PRELOAD`/`PATH`/…) + **chmod 0600** no `.env`. | Hermes `config.py` | `config set LD_PRELOAD …` escreveria vetor de injeção | S |
-| 5.8 | Doctor mais fundo (Python/venv, shadowing env↔yaml, dirs, SOUL/VOICE presentes, SQLite) + probes em paralelo. | Hermes `doctor.py` | probes seriais, sem checks de FS/identidade | M |
-| 5.9 | `okami init` zero-config (detecta provider pronto → escreve mínimo e roda) + guia non-TTY. | Hermes `setup.py` | sem caminho zero-config | S–M |
+| E1 | **Chain `fallback_chain: list[{provider, model}]`** — inclui "modelo alternativo no mesmo provider"; itera os alvos passando provider+model | Hermes `agent_init.py` | `config.py`, `providers.py` | M |
+| E2 | **Eager** em `EmptyResponse`/`overloaded`: NÃO queima todas as chaves num provider morto — avança a chain na hora | Hermes `conversation_loop.py`, openclaw #49696 | `providers.py` | S |
+| E3 | **🔴 `stream_complete` ganha classify→retry→fallback** (hoje 529 no stream só explode) | openclaw #49696 | `providers.py` | M |
+| E4 | Honrar **`reset_at` do header** (`x-ratelimit-reset-*`/`retry-after`) em vez do 1h fixo | Hermes `nous_rate_guard.py` | `errors.py`, `providers.py` | S |
+| E5 | **Mostrar quem respondeu** ("respondido por minimax — codex sobrecarregado") | Hermes `conversation_loop.py` | `providers.py`, `runner.py` | S |
+| E6 | **Two-strikes 429** (retenta a mesma chave 1x, rotaciona na 2ª) + status DEAD vs EXHAUSTED (401-perm=DEAD) + TTL 401=5min/429=1h | Hermes `credential_pool.py` | `providers.py`, `errors.py` | M |
+| E7 | **Cooldown por provider** (overloaded) checado ANTES de disparar; guarda de provider-mismatch antes de parquear chave | Hermes `credential_pool.py` | `providers.py` | S |
+| E8 | Estado de rate-limit **cross-process** (`.okami/rate_limits/<provider>.json`, escrita atômica) — gateway compartilha chaves entre scheduler+sessões+grupos | Hermes `nous_rate_guard.py` | novo `llm/ratestate.py` | M |
+| E9 | Aliases estáticos de provider/model (`claude`→anthropic, `opus`→…) | Hermes `agent_runtime_helpers.py` | `config.py` | S |
 
----
-
-## ONDA 6 — Polimento multi-agente / ergonomia
-| # | O que | Fonte | Nosso arquivo / gap | I/E |
+## FASE F — Gaps de produção ("não-de-garagem")
+| # | O que | Fonte | Arquivo | I/E |
 |---|---|---|---|---|
-| 6.1 | **`@`-referências** (`@file:x.py:40-80`, `@diff`, `@git:3`, `@url:`) com budget 25/50% + blocklist de path sensível. | Hermes `context_references.py` | sem injeção inline de contexto | M |
-| 6.2 | **Trajectory JSONL** (sucesso/falha) p/ replay/eval → alimenta o `learning/`. | Hermes `trajectory.py` | sem log de trajetória estruturado | S |
-| 6.3 | **Semáforo de concorrência por agente** no `spawn` (cap de fan-out). | OpenClaw `16-concurrency-control` | `spawn` sem cap | S |
-| 6.4 | **Subagente: retorna `session_id`** + lista de agentes como `enum` no schema (anti-alucinação). | OpenClaw `15-agent-dispatch` | `spawn` devolve só string | M |
-| 6.5 | **SKILL.md com template/inline-shell** (`${VAR}`, `` !`cmd` ``) expandido no load (via scanner). | Hermes `skill_preprocessing.py` | `use_skill` devolve corpo cru | S–M |
-| 6.6 | Compaction: **truncar tool-results antes de sumarizar** (mais barato que ir direto pro LLM). | OpenClaw `context_guard.py` | vamos direto ao resumo | S |
+| F1 | **Durabilidade de config**: escrita atômica + `.bak.N` rotativo + `.last-good` + quarentena `.clobbered.<ts>` + version stamp | OpenClaw real em disco | `config.py`, `cli.py` | M |
+| F2 | **Audit log** de aprovações (tool, args-digest, categoria, risco, decisão, ator, ts → `.okami/audit.jsonl`) + modo `dry_run`/`defer` | OpenClaw `exec-approvals.json` | `core/approval.py`, `gateway` | S-M |
+| F3 | **🔴 MCP sanitiza env**: hoje passa `os.environ` INTEIRO (tokens/chaves) pros servidores MCP de terceiros — anula a proteção do `run_shell` | nosso `mcp.py:97` | `integrations/mcp.py` | S |
+| F4 | **Scheduler write-lock** (`_FileLock` no `cron.json`; race com o chat) + iniciar scheduler mesmo sem job no boot | nosso `scheduler.py`/`gateway` | `gateway/__init__.py` | S |
+| F5 | OAuth **multi-perfil** (`provider:email`) + refresh-ahead (background) + contadores de cota | OpenClaw `auth.profiles`, Hermes `credential_pool.py` | `llm/oauth.py` | M-L |
+| F6 | **Skill lockfile** (SHA-256 por skill; verifica no load) — supply-chain | OpenClaw `skills-lock.json` | `skills/__init__.py` | S-M |
+| F7 | Logging estruturado (`.okami/okami.log.jsonl` + `trace_id` por turno) | Hermes `insights.py`/`trajectory.py` | novo `logging` | M |
+| F8 | Shutdown gracioso (SIGTERM → drena sessões busy → flush) | nosso `gateway` | `gateway/__init__.py` | S-M |
+| F9 | Trajectory JSONL (sucesso/falha) → alimenta o learning | Hermes `trajectory.py` | `learning/` | S |
+| F10 | Dedup de update (Telegram redelivery por `update_id`) | — | `gateway/__init__.py` | S |
 
 ---
 
-## Sequência recomendada
-**Onda 1** (conserta os erros reais + completa effort) → **Onda 2** (terminal vivo, plumbing barato) →
-**Onda 3** (nativo + tira o menu = confiabilidade + "humano") → **Onda 4** (caching+custo) →
-**Onda 5** (tools/config) → **Onda 6** (polimento). Ondas 1 e 2 são pequenas e atacam dor imediata.
+## Sequência recomendada (commits)
+A (keystone+custo) → B (nativo codex) → C (caching) → D1-D3+D6 (tools+segurança) → E (fallback robusto)
+→ D4-D5-D7 (doctor/hot-reload/migrate) → F (gaps de produção). Cada fase = 1 commit testado e verificado ao vivo.
+Os 🔴 (D6 denylist/.env perms, E3 stream failover, F3 MCP env) são segurança/robustez — prioridade dentro da fase.
