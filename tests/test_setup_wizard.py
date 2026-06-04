@@ -139,6 +139,26 @@ def test_provider_add_selects_model_and_merges_without_clobber(tmp_path, monkeyp
     assert "modelo" in res.output and "gpt-5.5" in res.output   # diz qual modelo ficou
 
 
+def test_setup_sections_cover_whole_product(tmp_path, monkeypatch):
+    """O setup não é só provider: voz, aprovação, aprendizado e persona são seções próprias."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n  lmstudio: {model: openai/x, api_key: lm, tier: local}\n",
+        encoding="utf-8")
+
+    def local():
+        return yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
+
+    assert runner.invoke(app, ["setup", "voice"], input="2\n").exit_code == 0      # 2=ouvir(STT)
+    assert local()["voice"]["stt"]["enabled"] is True
+    assert runner.invoke(app, ["setup", "approvals"], input="3\n").exit_code == 0  # 3=yolo
+    assert local()["approvals"]["mode"] == "yolo"
+    assert runner.invoke(app, ["setup", "learning"], input="y\ny\n").exit_code == 0
+    assert local()["learning"]["auto_skill"] is True and local()["learning"]["auto_tune"] is True
+    assert runner.invoke(app, ["setup", "persona"], input="n\n").exit_code == 0
+    assert local()["persona"]["observe"] is False
+
+
 def test_help_command_lists_groups():
     res = runner.invoke(app, ["help"])
     assert res.exit_code == 0

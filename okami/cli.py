@@ -707,7 +707,8 @@ def _detect_environment(existing: dict | None = None) -> list["_Detected"]:
     return found
 
 
-_SETUP_SECTIONS = ("provider", "default", "memory", "agent", "identity", "channel")
+_SETUP_SECTIONS = ("provider", "default", "memory", "agent", "identity", "channel",
+                   "voice", "approvals", "security", "learning", "persona")
 
 
 @app.command()
@@ -758,7 +759,8 @@ def setup(
     console.print(Panel(f"{head}\n\n[dim]okami.yaml:[/dim] {loc / 'okami.yaml'}\n"
                         f"[dim]overrides:[/dim] {loc / 'okami.local.yaml'}\n[dim]segredos (.env):[/dim] {loc / '.env'}\n"
                         f"[dim]agentes:[/dim]   {loc / 'agents'}\n\n"
-                        "[dim]Pule pra uma seção: okami setup provider|memory|identity|channel[/dim]",
+                        "[dim]Pule pra uma seção: okami setup "
+                        "provider|memory|agent|channel|voice|approvals|learning|persona[/dim]",
                         border_style="#ff7527", title="Configuration"))
 
     def step_provider() -> None:
@@ -851,6 +853,56 @@ def setup(
         else:
             console.print("[dim]beleza — fale com ele por: okami chat[/dim]")
 
+    def step_voice() -> None:
+        cur = local.get("voice") or {}
+        cur_mode = ("both" if (cur.get("tts") or {}).get("enabled")
+                    else "stt" if (cur.get("stt") or {}).get("enabled") else "off")
+        pick = menu.select("Voz (áudio no chat/Telegram)?", [
+            ("off", "Desligada", "só texto (default)"),
+            ("stt", "Ouvir", "transcreve áudio recebido — Whisper local"),
+            ("both", "Ouvir + falar", "transcreve e responde em áudio — Edge TTS"),
+        ], default=cur_mode)
+        if pick == "off":
+            local.pop("voice", None)
+        else:
+            v = {"stt": {"enabled": True, "model": "base"}}
+            if pick == "both":
+                v["tts"] = {"enabled": True, "backend": "edge", "voice": "pt-BR-AntonioNeural"}
+            local["voice"] = v
+            console.print(r'[dim]requer: pip install "okami-agent\[voice]"[/dim]')
+        save_local()
+        console.print(f"[green]✓ voz:[/green] {pick}")
+
+    def step_approvals() -> None:
+        cur = (local.get("approvals") or {}).get("mode", "manual")
+        pick = menu.select("Aprovação de ações sensíveis (.env, git push, rm -rf)?", [
+            ("manual", "Manual", "pergunta antes de cada ação sensível (mais seguro)"),
+            ("smart", "Inteligente", "auto-aprova risco baixo, pergunta o resto"),
+            ("yolo", "YOLO", "auto-aprova tudo — cuidado"),
+        ], default=cur)
+        local["approvals"] = {**(local.get("approvals") or {}), "mode": pick}
+        save_local()
+        console.print(f"[green]✓ aprovação:[/green] {pick}")
+
+    def step_learning() -> None:
+        cur = local.get("learning") or {}
+        skill = menu.confirm("Auto-skill? (destila skills de tarefas bem-sucedidas, escaneadas p/ segurança)",
+                             default=bool(cur.get("auto_skill")))
+        tune = menu.confirm("Auto-tune? (calibra o capability profile do modelo pelos stats de uso)",
+                            default=bool(cur.get("auto_tune")))
+        local["learning"] = {**cur, "auto_skill": skill, "auto_tune": tune}
+        save_local()
+        console.print(f"[green]✓ aprendizado:[/green] auto-skill={'on' if skill else 'off'} · "
+                      f"auto-tune={'on' if tune else 'off'}")
+
+    def step_persona() -> None:
+        cur = local.get("persona") or {}
+        observe = menu.confirm("Persona evolutiva? (aprende seu jeito — palavrão, apelido, tom — e adapta sozinho)",
+                               default=cur.get("observe", True))
+        local["persona"] = {**cur, "observe": observe}
+        save_local()
+        console.print(f"[green]✓ persona evolutiva:[/green] {'on' if observe else 'off'}")
+
     def step_quick() -> None:
         """RÁPIDO (estilo Hermes/OpenClaw): detecta o que você já tem → provider + modelo → agente.
         2-3 decisões e tá conversando."""
@@ -892,7 +944,9 @@ def setup(
         console.print(f"[green]✓ agente padrão 'okami'[/green] [dim]({(Path('agents') / 'okami').resolve()})[/dim]")
 
     steps = {"provider": step_provider, "default": step_provider, "memory": step_memory,
-             "agent": step_agent, "identity": step_agent, "channel": step_channel}
+             "agent": step_agent, "identity": step_agent, "channel": step_channel,
+             "voice": step_voice, "approvals": step_approvals, "security": step_approvals,
+             "learning": step_learning, "persona": step_persona}
     if section:                                   # pulo direto pra uma seção (sem fork)
         steps[section]()
         if section in ("provider", "default"):
@@ -902,14 +956,12 @@ def setup(
     # FORK Rápido vs Completo no PRIMEIRO prompt (a maior melhoria, validada em Hermes E OpenClaw)
     mode = menu.select("Como configurar?", [
         ("quick", "Rápido", "provider + modelo (recomendado) — detecta o que você já tem"),
-        ("full", "Completo", "provider · memória · identidade · canal"),
+        ("full", "Completo", "provider · memória · identidade · canal · voz · segurança · aprendizado"),
     ], default="quick")
     if mode == "full":
-        step_provider()
-        step_login()
-        step_memory()
-        step_agent()
-        step_channel()
+        for fn in (step_provider, step_login, step_memory, step_agent, step_channel,
+                   step_voice, step_approvals, step_learning, step_persona):
+            fn()
     else:
         step_quick()
 
