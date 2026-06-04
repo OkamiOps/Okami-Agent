@@ -1,17 +1,17 @@
 # Atalhos de dev (Linux/macOS). No Windows, use o venv direto (ver README).
 .PHONY: install install-global setup test run doctor lint docker-build docker-test docker-run
 
-install:
-	python3 -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
+install:               ## dev: venv + deps via uv (a partir do pyproject)
+	uv sync
 
-install-global:        ## instala + comando `okami` global (igual ao curl | bash)
+install-global:        ## instala o comando `okami` global e isolado (igual ao curl | bash)
 	./scripts/install.sh
 
 setup:                 ## wizard de configuração (provider/memória/identidade/canal)
 	okami setup
 
 test:
-	pytest -q
+	uv run pytest -q
 
 doctor:
 	okami doctor

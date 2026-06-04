@@ -1,60 +1,41 @@
 #!/usr/bin/env bash
-# Okami Agent — instalador para Linux / macOS / WSL.
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/okami-agent/main/scripts/install.sh | bash
-# ou, dentro do repo já clonado:  ./scripts/install.sh
+# Okami Agent — instalador (Linux / macOS / WSL). Único pré-requisito: git.
+#   curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.sh | bash
 #
-# Detecta o que falta (Python 3.11+, venv) e prepara um comando `okami` global.
-# Inspirado no install.sh do Hermes (deps automáticas + comando global).
+# O `uv` é o motor: instala o próprio Python, cria o venv isolado e as deps numa tacada.
+# Você NÃO precisa de Python instalado. Sem dor de long-path (o uv usa um diretório curto).
 set -euo pipefail
 
-REPO_URL="${OKAMI_REPO:-https://github.com/okami-agent/okami-agent.git}"
-DEST="${OKAMI_HOME:-$HOME/.okami-agent}"
-BIN_DIR="${OKAMI_BIN:-$HOME/.local/bin}"
-PYTHON="${OKAMI_PYTHON:-python3}"
-
-say()  { printf '\033[1;36m›\033[0m %s\n' "$*"; }
-ok()   { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
+REPO_URL="${OKAMI_REPO:-https://github.com/OkamiOps/Okami-Agent.git}"
+say()  { printf '\033[1;36m› %s\033[0m\n' "$*"; }
+ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-# 1) Python 3.11+ -----------------------------------------------------------
-have_py() { command -v "$1" >/dev/null 2>&1 && "$1" -c 'import sys;exit(0 if sys.version_info>=(3,11) else 1)' 2>/dev/null; }
-if ! have_py "$PYTHON"; then
-  for c in python3.13 python3.12 python3.11 python3; do have_py "$c" && PYTHON="$c" && break; done
+# 1) uv — instala se faltar (cuida de Python + venv + deps)
+if ! command -v uv >/dev/null 2>&1; then
+  say "instalando o uv (gerencia Python + venv)…"
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
-have_py "$PYTHON" || die "preciso de Python 3.11+ (instale via apt/brew/pyenv e rode de novo)."
-ok "Python: $($PYTHON --version)"
+command -v uv >/dev/null 2>&1 || die "uv não entrou no PATH — reabra o terminal e rode de novo."
+ok "uv $(uv --version | awk '{print $2}')"
 
-# 2) Código (repo local OU clona) ------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../pyproject.toml" ]; then
-  DEST="$(cd "$SCRIPT_DIR/.." && pwd)"; say "usando o repo local em $DEST"
-elif [ -d "$DEST/.git" ]; then
-  say "atualizando $DEST"; git -C "$DEST" pull --ff-only || true
+# 2) código — repo local (se rodando de dentro dele) OU clona
+SDIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "$SDIR" ] && [ -f "$SDIR/../pyproject.toml" ]; then
+  SRC="$(cd "$SDIR/.." && pwd)"; say "usando o repo local: $SRC"
+elif [ -d "${OKAMI_HOME:-$HOME/.okami-agent}/.git" ]; then
+  SRC="${OKAMI_HOME:-$HOME/.okami-agent}"; say "atualizando $SRC"; git -C "$SRC" pull --ff-only || true
 else
-  command -v git >/dev/null 2>&1 || die "git é necessário para clonar (instale o git)."
-  say "clonando em $DEST"; git clone --depth 1 "$REPO_URL" "$DEST"
+  command -v git >/dev/null 2>&1 || die "git é necessário para clonar."
+  SRC="${OKAMI_HOME:-$HOME/.okami-agent}"; say "clonando em $SRC"; git clone --depth 1 "$REPO_URL" "$SRC"
 fi
 
-# 3) venv + instalação ------------------------------------------------------
-say "criando venv e instalando…"
-"$PYTHON" -m venv "$DEST/.venv"
-# shellcheck disable=SC1091
-. "$DEST/.venv/bin/activate"
-pip install --quiet --upgrade pip
-pip install --quiet -e "$DEST"
-ok "Okami instalado ($(okami version 2>/dev/null || echo '?'))"
+# 3) instala o `okami` como ferramenta GLOBAL isolada (uv baixa um Python compatível se faltar)
+say "instalando o okami…"
+uv tool install --force "$SRC"
+uv tool update-shell >/dev/null 2>&1 || true     # garante o bin do uv no PATH
 
-# 4) comando global `okami` -------------------------------------------------
-mkdir -p "$BIN_DIR"
-cat > "$BIN_DIR/okami" <<EOF
-#!/usr/bin/env bash
-exec "$DEST/.venv/bin/okami" "\$@"
-EOF
-chmod +x "$BIN_DIR/okami"
-ok "comando criado: $BIN_DIR/okami"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) say "adicione ao PATH:  export PATH=\"$BIN_DIR:\$PATH\"  (no seu ~/.bashrc/~/.zshrc)";;
-esac
-
-printf '\n'; ok "pronto! agora rode:  \033[1mokami setup\033[0m   (e depois  okami chat)"
+ok "pronto!"
+printf '\n  Agora rode:  \033[1mokami setup\033[0m   (e depois  okami chat)\n'
+printf '  Se "okami" não for encontrado, reabra o terminal.\n'

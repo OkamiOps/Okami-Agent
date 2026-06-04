@@ -20,53 +20,46 @@ Toda a configuração é por menu de seta (`okami setup`, `okami provider add`):
 Config + providers via LiteLLM + CLI `okami run`. Providers: **LMStudio** (local, já funciona),
 **Codex/GPT**, **Claude**, **MiniMax**, **MiMo** (aguardando chaves/ids).
 
-## Setup
+## Instalação
 
-Roda em **Linux, macOS, Windows e Docker** (código 100% `pathlib`/stdlib; portabilidade
-verificada com a suíte de testes rodando em container Linux).
+**O único pré-requisito é o `git`.** O instalador usa o [uv](https://docs.astral.sh/uv/) como motor —
+ele baixa o Python, cria o ambiente isolado e instala tudo. **Você não precisa de Python instalado**,
+e não tem dor de cabeça com long-path no Windows (o uv usa um diretório curto).
 
-### Instalação em 1 comando
-
-**Linux / macOS / WSL** (detecta Python 3.11+, cria venv e o comando `okami`):
+**Linux / macOS / WSL:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/okami-agent/okami-agent/main/scripts/install.sh | bash
-# ou, dentro do repo já clonado:  ./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.sh | bash
 ```
 
-**Windows (PowerShell)** — cria o venv num caminho curto (`C:\okv`) p/ evitar o limite de 260 chars do OneDrive:
+**Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/okami-agent/okami-agent/main/scripts/install.ps1 | iex
-# ou, dentro do repo:  .\scripts\install.ps1
+irm https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.ps1 | iex
 ```
 
-Depois, **configure e converse** (sem editar YAML na mão):
+Depois (reabra o terminal se `okami` não for achado):
 ```bash
-okami setup     # wizard: provider + login + memória + identidade + canal
-okami chat      # conversa no terminal (sessão persiste; /help p/ comandos)
+okami setup     # configura em 2-3 cliques (detecta seus providers)
+okami chat      # conversa no terminal
 ```
 
-### Manual (dev)
-
-<details><summary>Linux/macOS</summary>
+<details><summary>Dev (rodar do código, sem instalar global)</summary>
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env        # atalhos: make install | make test | make doctor
+uv sync                       # cria o venv + deps a partir do pyproject
+uv run okami doctor           # roda sem ativar nada
+# ou, editável global:  uv tool install -e .
 ```
+Sem uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`
+(no Windows, use um caminho curto p/ o venv — ex. `C:\okv` — por causa do long-path do litellm.)
 </details>
 
-<details><summary>Windows</summary>
-
-```powershell
-python -m venv C:\okv          # caminho curto evita o limite de 260 chars no OneDrive
-C:\okv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-copy .env.example .env
+### Docker (qualquer SO)
+```bash
+docker compose build
+docker compose run --rm okami doctor
+docker compose run --rm okami task "crie hello.txt" -e file_exists:hello.txt
 ```
-> Alternativas ao caminho curto: habilitar *Long Paths* no Windows, mover o repo p/
-> `C:\dev\Okami-Agent`, **ou usar Docker** (abaixo) — que ignora o problema.
-</details>
+> Para um LMStudio na máquina host, aponte `api_base` para `http://host.docker.internal:PORT/v1`.
 
 ### Docker (qualquer SO)
 ```bash
