@@ -204,8 +204,10 @@ _PROFANITY = {"caralho", "porra", "puta", "puto", "putaquepariu", "pqp", "fdp", 
               "vsf", "viado", "corno", "arrombado", "bosta", "cu"}
 _PROF_RE = re.compile(r"\b(" + "|".join(sorted(_PROFANITY, key=len, reverse=True)) + r")\b")
 _NICK_RE = re.compile(r"\b(?:me chama de|pode me chamar de|me chame de)\s+([\wÀ-ÿ]{2,20})", re.IGNORECASE)
-_STYLE_RE = re.compile(r"\b(seja|fala|fale|responde|responda|escreve|escreva|para de|pare de|menos|mais)\b",
-                       re.IGNORECASE)
+# Verbos de PREFERÊNCIA de estilo. NÃO inclui "responde/responda/escreve/escreva": esses são quase
+# sempre COMANDO pontual ("responda apenas: oi"), não preferência durável — poluíam a VOICE. Um pedido
+# de estilo de resposta ("responde mais curto") ainda casa via "mais"/"menos".
+_STYLE_RE = re.compile(r"\b(seja|fala|fale|para de|pare de|menos|mais)\b", re.IGNORECASE)
 
 
 def extract_signals(user_text: str) -> list[Signal]:
@@ -241,7 +243,11 @@ def extract_signals(user_text: str) -> list[Signal]:
                           min_count=2, section="Postura técnica"))
 
     # Pedido EXPLÍCITO de estilo ("seja mais X", "para de Y") → comportamento direto (na hora).
-    if _STYLE_RE.search(low) and len(user_text) <= 160:
+    # Guarda: pula COMANDO pontual de conteúdo (tem ":"/aspas/"apenas"/demonstrativo) — senão a
+    # tarefa do momento ("responda apenas: oi") virava "traço de estilo" permanente na VOICE.
+    content_spec = (":" in user_text or '"' in user_text or "'" in user_text
+                    or re.search(r"\b(apenas|somente|isso|isto|esse|essa|aquilo)\b", low) is not None)
+    if _STYLE_RE.search(low) and len(user_text) <= 160 and not content_spec:
         directive = re.sub(r"\s+", " ", user_text).strip().rstrip(".")
         txt = directive[:1].upper() + directive[1:]
         out.append(Signal(f"estilo:{_fold(directive)[:40]}", "voice", txt, min_count=1,

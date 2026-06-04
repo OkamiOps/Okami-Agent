@@ -33,7 +33,7 @@ def test_terminal_chat_roundtrip_persists_session():
     ch, ep = _ep(ws)
     ep.handle("terminal", "oi")
     replies = [t for _, t in ch.sent]
-    assert any(t.startswith("✅") and "eco: oi" in t for t in replies)
+    assert any("eco: oi" in t for t in replies)       # papo: resposta limpa, sem selo ✅ robótico
     # reabrir (novo endpoint, mesmo ws) → o transcript append-only retoma a conversa
     _, ep2 = _ep(ws)
     hist = ep2.session("terminal").history

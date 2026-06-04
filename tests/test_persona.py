@@ -91,6 +91,16 @@ def test_extract_signals_profanity_nickname_sarcasm():
     assert any(s.key == "sarcasmo" for s in persona.extract_signals("gosto de sarcasmo"))
 
 
+def test_extract_signals_ignores_oneoff_command_keeps_real_style():
+    """Comando pontual de conteúdo NÃO vira traço de estilo; preferência de maneira ainda vira."""
+    # "responda apenas: oi" é tarefa do momento → NÃO polui a VOICE (bug que poluiu de verdade)
+    assert not [s for s in persona.extract_signals("responda apenas: oi") if s.key.startswith("estilo:")]
+    assert not [s for s in persona.extract_signals('escreve "olá" e nada mais') if s.key.startswith("estilo:")]
+    # já um pedido de MANEIRA de resposta continua sendo capturado
+    assert any(s.key.startswith("estilo:") for s in persona.extract_signals("responde mais curto"))
+    assert any(s.key.startswith("estilo:") for s in persona.extract_signals("para de me bajular"))
+
+
 def test_observe_profanity_is_gradual_then_auto_commits(tmp_path):
     # inferido (min_count=2): 1ª observação só acumula; 2ª promove SOZINHO (sem aprovação)
     assert persona.observe(tmp_path, "porra, bora") == []

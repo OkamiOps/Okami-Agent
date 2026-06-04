@@ -340,7 +340,12 @@ class AgentEndpoint:
             self._append_turn(chat_id, s, "AGENTE", reply)  # fecha o par → não é mais "interrompida"
             s.resume_attempts = 0                          # concluiu → zera a guarda de resume
             self._save_meta(chat_id, s)
-            prefix = {"COMPLETE": "✅ ", "BLOCKED": "⚠ ", "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
+            # Papo casual (respond puro, sem critério nem ação com efeito) NÃO leva prefixo robótico —
+            # é conversa, não "tarefa concluída". Só decora quando houve trabalho de verdade.
+            chatty = (task.state.name == "COMPLETE" and not task.exit_criteria
+                      and not any(s.effect for s in task.steps))
+            prefix = "" if chatty else {"COMPLETE": "✅ ", "BLOCKED": "⚠ ",
+                                        "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
             self.channel.send(chat_id, prefix + reply)
             self._maybe_voice(chat_id, reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)

@@ -51,7 +51,23 @@ def test_message_runs_task_and_replies():
     ep.handle("7", "crie x")
     texts = [t for _, t in ep.channel.sent]
     assert any("pensando" in t for t in texts)
-    assert any(t.startswith("✅") and "feito: crie x" in t for t in texts)
+    assert any("feito: crie x" in t for t in texts)   # papo: resposta limpa, sem selo ✅ robótico
+
+
+def test_real_task_keeps_completion_seal():
+    """Tarefa de verdade (passo com efeito) MANTÉM o ✅ — só o papo casual perde o selo."""
+    from okami.core import Step
+
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "arquivo criado"
+        t.steps = [Step(1, "write_file", {}, "ok", effect=True)]   # houve trabalho real
+        return t
+
+    ep = _ep(runner=runner)
+    ep.handle("7", "crie x")
+    texts = [t for _, t in ep.channel.sent]
+    assert any(t.startswith("✅") and "arquivo criado" in t for t in texts)
 
 
 def test_session_history_continuity():

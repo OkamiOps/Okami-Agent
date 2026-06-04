@@ -56,7 +56,7 @@ def test_audio_message_is_transcribed_and_handled():
     ep.poll_once()
     texts = [t for _, t in ch.sent]
     assert any("ouvi" in t and "previsão" in t for t in texts)        # transcreveu
-    assert any(t.startswith("✅") and "previsão do tempo" in t for t in texts)   # respondeu à transcrição
+    assert any("previsão do tempo" in t for t in texts)   # respondeu à transcrição (papo: sem selo ✅)
 
 
 def test_reply_is_also_sent_as_voice_when_tts_on():

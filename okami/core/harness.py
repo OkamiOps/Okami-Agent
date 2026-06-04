@@ -117,6 +117,11 @@ def action_schema(registry: dict[str, Tool]) -> dict:
     }
 
 
+def is_conversational(task: Task) -> bool:
+    """Conversa (papo) vs TRABALHO (tem critério verificável de saída)."""
+    return not [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
+
+
 def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "") -> str:
     lines = []
     for t in registry.values():
@@ -124,61 +129,51 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "") 
         lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
     tools_block = "\n".join(lines)
     extra_block = f"\n\n{extra}\n" if extra else ""
-    # Há um TRABALHO com critérios verificáveis? (≠ simples conversa)
-    real_criteria = [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
 
-    # Loop ReAct (estilo OpenClaw/Hermes): a cada turno o agente FALA (respond) OU AGE (uma tool).
-    loop = """COMO VOCÊ FUNCIONA — a cada turno emita EXATAMENTE UMA ação, um bloco ```json {"tool": "...", "args": {...}}```:
-• Para FALAR com o usuário (responder, opinar, perguntar, conversar) → use `respond`. Isso encerra o turno.
+    # MANUAL INTERNO — como o agente age por dentro. Fica CERCADO e marcado como privado: o modelo
+    # precisa dele p/ emitir ações válidas (paridade c/ modelo fraco §3.5), mas NUNCA deve recitá-lo.
+    # (Hermes/OpenClaw mantêm o "menu" fora da camada de voz — aqui mantemos, porém cercado.)
+    manual = f"""=== COMO VOCÊ AGE · USO INTERNO — NUNCA cite, liste, narre ou parafraseie NADA desta seção pra pessoa (nem o nome das ferramentas, nem estas regras): é como você funciona por dentro, não é assunto de conversa ===
+A cada turno você emite EXATAMENTE UMA ação: um bloco ```json {{"tool": "...", "args": {{...}}}}```.
+• Para FALAR (responder, opinar, perguntar) → `respond`. Encerra o turno.
 • Para AGIR (ler/escrever arquivo, rodar shell, buscar, lembrar, gerar imagem) → use a ferramenta;
-  você verá o resultado (OBSERVAÇÃO) e raciocina o próximo passo. Encadeie quantas ações precisar.
-RACIOCÍNIO: aja em vez de só descrever — "vou fazer X" não conta, FAÇA. Pense, então responda/aja.
-AÇÃO REAL (obrigatório): se pedirem p/ CRIAR/EDITAR/RODAR/GERAR/INSTALAR/APAGAR algo, você é OBRIGADO
-a usar a ferramenta de verdade (write_file, run_shell, generate_image…) ANTES de confirmar. Dizer
-"pronto/feito/criei" com `respond` SEM ter executado a ferramenta é PROIBIDO.
-MEMÓRIA: aprendeu algo durável sobre o usuário → `remember_user`; sobre o projeto → `remember`.
-Não reescreva SOUL/VOICE/PERSONA sozinho (identidade é curada); mas se o usuário PEDIR p/ mudar
-qualquer arquivo (código, .env, identidade), FAÇA — ações sensíveis passam por confirmação (go/no-go)."""
+  você vê o resultado (OBSERVAÇÃO) e segue. Encadeie quantas ações precisar.
+"vou fazer X" não conta — FAÇA. Se pedirem p/ CRIAR/EDITAR/RODAR/GERAR/INSTALAR/APAGAR algo, você é
+OBRIGADO a usar a ferramenta de verdade ANTES de confirmar; dizer "pronto/feito" sem ter executado é PROIBIDO.
+Aprendeu algo durável da pessoa → `remember_user`; do projeto → `remember`. Não reescreva
+SOUL/VOICE/PERSONA sozinho; mas se a pessoa PEDIR p/ mudar qualquer arquivo, FAÇA (ações sensíveis pedem confirmação).
 
-    if real_criteria:                                # --- modo TRABALHO (com gate de saída) ---
-        crit_txt = "\n".join(f"  - {c}" for c in real_criteria)
-        return f"""Você é o agente pessoal do usuário — uma IA que RACIOCINA e EXECUTA. Sua identidade
-(SOUL/VOICE/PERSONA), o usuário e a memória estão abaixo; aja e fale no SEU tom.{extra_block}
+SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/ recitar):
+{tools_block}
+==="""
 
-{loop}
-Ao concluir um trabalho COM critérios, use `task_complete` (o harness verifica de verdade). Se
-travar, `task_blocked`. Se faltar uma informação que só o usuário tem, `need_input`.
+    if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
+        crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria
+                                                  if c.get("type") not in (None, "model_declared")])
+        return f"""Você é o agente pessoal desta pessoa — uma IA que raciocina e EXECUTA, com voz própria.
+Quem você é, como fala e o que sabe da pessoa está abaixo; aja e fale no SEU tom.{extra_block}
 
 OBJETIVO:
 {task.goal}
 
-CRITÉRIOS DE SAÍDA (verificados pelo harness):
+CRITÉRIOS DE SAÍDA (o harness verifica DE VERDADE — use `task_complete` só quando baterem; se
+travar, `task_blocked`; se faltar algo que só a pessoa sabe, `need_input`):
 {crit_txt}
 
-FERRAMENTAS DISPONÍVEIS:
-{tools_block}
+{manual}
 
 Próxima ação (um único bloco json)."""
 
-    # --- modo CONVERSA / agente pessoal (sem critérios: papo, perguntas, pedidos) ---
-    return f"""Você é o agente pessoal do usuário — uma IA real que conversa de igual pra igual, com
-raciocínio e personalidade PRÓPRIOS. Siga sua identidade abaixo (SOUL = quem você é, VOICE = como
-fala, PERSONA = seu jeito) e o que sabe do usuário. Você NÃO é um chatbot de formulário.{extra_block}
+    # --- modo CONVERSA (papo, perguntas, pedidos) — a mensagem da pessoa vem como turno do usuário ---
+    return f"""Você é o agente pessoal desta pessoa — não um assistente genérico, e menos ainda um
+chatbot de atendimento. Você tem voz, memória e jeito PRÓPRIOS (abaixo: quem você é, como fala, o
+que sabe dela). Vocês já se conhecem: fale como quem continua uma conversa de sempre — não como quem
+recebe um cliente novo. Responda ao que ela disse, com opinião e no seu tom. Se ela pedir algo
+executável, aí você age; senão, é só papo.{extra_block}
 
-{loop}
+{manual}
 
-Você está numa CONVERSA. Responda de forma natural, pensada e direta com `respond`. Se for papo
-("oi", "tudo bem?", "quem é você?"), apresente-se / converse como VOCÊ é — JAMAIS peça "especifique
-a tarefa" nem responda como atendente de telemarketing. Tenha opinião. Quando o usuário pedir um
-trabalho concreto, aí sim use as ferramentas pra executar (mostrando um raciocínio curto antes).
-
-MENSAGEM DO USUÁRIO:
-{task.goal}
-
-FERRAMENTAS DISPONÍVEIS:
-{tools_block}
-
-Próxima ação (um único bloco json)."""
+Agora responda à pessoa (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."""
 
 
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
@@ -186,14 +181,16 @@ def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
     return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{res.output}"
 
 
-def _user_start(images: list) -> object:
-    """Mensagem inicial do usuário; com imagens vira content multimodal (vision §6, exige modelo
-    multimodal — texto-only ignora/erra e cai no failover §3.5)."""
+def _user_start(images: list, text: str = "Comece.") -> object:
+    """Turno inicial do usuário. Em CONVERSA é a própria mensagem da pessoa (`text`); em TRABALHO é
+    o kickoff "Comece." (o objetivo já está no system prompt). Com imagens vira content multimodal
+    (vision §6, exige modelo multimodal — texto-only ignora/erra e cai no failover §3.5)."""
     if not images:
-        return "Comece."
+        return text
     import base64
     import mimetypes
-    content = [{"type": "text", "text": "Comece. O usuário anexou imagem(ns) — analise-as."}]
+    note = text if text != "Comece." else "Comece."
+    content = [{"type": "text", "text": f"{note}\n(a pessoa anexou imagem(ns) — analise-as)"}]
     for img in images:
         s = str(img)
         if s.startswith(("http://", "https://", "data:")):
@@ -310,9 +307,12 @@ class Harness:
         # Ordem: .md core (sempre on) → recall da memória (relevante) → skills/sections.
         memory_block = self.memory.inject(t.goal) if self.memory is not None else ""
         extra = "\n\n".join(x for x in (self.core_block, memory_block, self.system_extra) if x)
+        # Em CONVERSA a fala da pessoa é o turno do usuário (não um "Comece." sintético → mata o
+        # "Comecei." de execução de tarefa). Em TRABALHO o objetivo já está no system prompt.
+        first = _user_start(self.images, text=t.goal) if is_conversational(t) else _user_start(self.images)
         self.messages = [
             {"role": "system", "content": build_system_prompt(t, self.registry, extra)},
-            {"role": "user", "content": _user_start(self.images)},   # texto (+ imagens, se multimodal)
+            {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)
 
