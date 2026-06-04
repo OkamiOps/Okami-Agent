@@ -80,17 +80,30 @@ class HonchoMemory(Memory):
         return [MemoryItem(text=text, kind="summary", source="honcho", score=1.0)] if text else []
 
     def inject(self, query: str = "", limit: int = 5) -> str:
+        # Duas camadas (estilo Hermes): (1) contexto base do session.context() +
+        # (2) dialética SEMPRE-ON no nível da PESSOA (não só da tarefa). É o que faz a resposta soar
+        # ancorada em QUEM é a pessoa, não genérica. Cold start vs sessão em andamento usam queries
+        # diferentes (strings do Hermes). Por cima, a dialética específica da tarefa (query).
         block = ""
         try:
             ctx = self.session.context()
             block = _text_of(ctx) if not hasattr(ctx, "to_prompt") else ctx.to_prompt()
         except Exception:  # noqa: BLE001
             block = ""
-        if query:
-            hit = self._dialectic(query)
-            if hit:
+        cold = self.count() == 0
+        person_q = ("Quem é essa pessoa? Quais as preferências, objetivos e jeito de trabalhar dela?"
+                    if cold else
+                    "Dado o que já foi conversado nesta sessão, que contexto sobre essa pessoa é o mais "
+                    "relevante agora (nível técnico, tom que prefere, o que ela já decidiu)?")
+        for q in (person_q, query):                  # pessoa primeiro; depois a tarefa
+            if not q:
+                continue
+            hit = self._dialectic(q)
+            if hit and hit not in block:
                 block = (block + "\n" + hit).strip()
-        return f"MEMÓRIA (Honcho — user-model):\n{block}" if block else ""
+        # Header de USO (não rótulo passivo): convida o modelo a se ancorar sem recitar.
+        return ("O que você já sabe dessa pessoa (use pra calibrar nível/tom e respeitar o que ela já "
+                f"decidiu — não recite):\n{block}") if block else ""
 
     def recent(self, limit: int = 10) -> list[MemoryItem]:
         try:

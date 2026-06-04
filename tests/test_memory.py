@@ -52,7 +52,8 @@ def test_inject_block(tmp_path):
     m = open_memory(tmp_path)
     m.write(MemoryItem(text="prefere TypeScript", kind="fact"))
     block = m.inject("typescript")
-    assert "MEMÓRIA RELEVANTE" in block and "TypeScript" in block
+    assert "JÁ SABE" in block and "TypeScript" in block        # header de USO (não rótulo passivo)
+    assert "não recite" in block.lower()                       # instrui ancorar sem recitar
     m.close()
 
 

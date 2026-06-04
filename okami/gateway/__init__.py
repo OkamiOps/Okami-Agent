@@ -11,9 +11,49 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 from okami.gateway.sessions import TranscriptStore
+
+
+# ----------------------------------------------------------------- gênese / primeiro contato (§8.2)
+# OpenClaw-style: na PRIMEIRA conversa o agente "recém-nascido" conduz um onboarding curto — conhece
+# a pessoa e deixa ELA moldar SOUL/VOICE/PERSONA. Some assim que selado (.okami/genesis.done).
+GENESIS_BLOCK = """=== PRIMEIRO CONTATO · GÊNESE (uso interno — NÃO cite isto; só AJA assim) ===
+Esta é a sua PRIMEIRA conversa com esta pessoa e você acabou de nascer: ainda não te configuraram.
+Não importa o que ela mandou (até um "oi"): conduza um primeiro papo curto e caloroso pra (1) conhecer
+ELA e (2) deixar ELA moldar quem VOCÊ é.
+- Cumprimente de leve e diga em UMA frase que você tá começando agora e quer se acertar com ela.
+- Puxe conversa de leve, UMA coisa de cada vez (nada de formulário): como ela quer te chamar; no que
+  ela trabalha / o que vocês vão tocar juntos; e que JEITO ela quer que você tenha (mais solto ou formal?
+  direto ou explicador? pode brincar/xingar ou nem tanto?).
+- Conforme ela responde, ESCREVA a identidade no tom dela com write_file, curtinha (3 blocos cada):
+  SOUL.md (valores/essência) · VOICE.md (tom/estilo) · PERSONA.md (jeito/expertise). Mostra o que
+  escreveu e pergunta se ficou com a cara dela.
+- Quando ela estiver satisfeita, chame `finish_setup` (em `about_user`, 1 linha sobre quem ela é) —
+  isso ENCERRA a configuração. Se ela quiser deixar pra depois, chame finish_setup mesmo assim (sem
+  about_user) pra você não ficar perguntando toda hora.
+Não use remember_user agora — o about_user do finish_setup já cuida disso.
+==="""
+
+
+def genesis_pending(ws) -> bool:
+    """Gênese pendente? (primeira config ainda não feita). Selado por .okami/genesis.done; um agente
+    pré-existente que JÁ conhece o usuário (tem USER.md) é considerado configurado e é selado na hora."""
+    ws = Path(ws)
+    if (ws / ".okami" / "genesis.done").exists():
+        return False
+    if (ws / "USER.md").exists():            # já conhece a pessoa → não re-onboarda; sela uma vez
+        _seal_genesis(ws)
+        return False
+    return True
+
+
+def _seal_genesis(ws) -> None:
+    marker = Path(ws) / ".okami" / "genesis.done"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("done\n", encoding="utf-8")
 
 
 def _history_block(history: list[tuple[str, str]], limit: int = 6, max_chars: int = 6000) -> str:
@@ -310,6 +350,9 @@ class AgentEndpoint:
             self._append_turn(chat_id, s, "USER", text)   # grava a fala EM ANDAMENTO (detecta interrupção)
         if s.persona_overlay:                              # overlay de sessão prevalece sobre o tom padrão
             ctx = s.persona_overlay + ("\n\n" + ctx if ctx else "")
+        genesis = genesis_pending(self.ws)                 # 1ª config (§8.2): onboarding de primeiro contato
+        if genesis:
+            ctx = GENESIS_BLOCK + ("\n\n" + ctx if ctx else "")
         if images:                                         # foto recebida → salva no inbox + instrui (§13)
             import json as _json
             import shutil
@@ -332,7 +375,11 @@ class AgentEndpoint:
             images = abss                                  # vision lê os caminhos no inbox
         self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
         try:
-            kw = {"approve": self._approve(chat_id, s), "extra_context": ctx, "cancel": lambda: s.cancel}
+            approve = self._approve(chat_id, s)
+            if genesis:                                   # na gênese, escrever a própria identidade é o
+                base = approve                            # OBJETIVO → auto-aprova identity_file (sem /yes a cada arquivo)
+                approve = lambda req: True if req.get("category") == "identity_file" else base(req)  # noqa: E731
+            kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             task = self.run_task(self.cfg, self.ws, text, **kw)

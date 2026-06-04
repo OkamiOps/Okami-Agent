@@ -45,7 +45,8 @@ class Memory:
         items = [i for i in items if i.kind in relevant] or items
         if not items:
             return ""
-        lines = ["MEMÓRIA RELEVANTE (de sessões/contexto anterior):"]
+        lines = ["O QUE VOCÊ JÁ SABE (use pra ancorar a resposta no contexto real — não recite isto "
+                 "nem diga 'na memória consta'):"]
         lines += [f"- {i.text.strip()[:200]}" for i in items]
         return "\n".join(lines)
 

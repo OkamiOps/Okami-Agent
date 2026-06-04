@@ -62,6 +62,19 @@ def test_respond_is_conversational_terminal(tmp_path):
     assert "Okami" in r.result and "especifique" not in r.result.lower()   # conversa, não telemarketing
 
 
+def test_conversation_prose_without_json_is_accepted_as_reply(tmp_path):
+    """Em papo (sem ação pedida), prosa sem envelope JSON É a resposta — não vira 'violação' feia."""
+    r = Harness(Script(["Tô de boa, e você? 🙂"]), Task(goal="e aí, tudo certo?"), tmp_path).run()
+    assert r.state == TaskState.COMPLETE and "de boa" in r.result
+
+
+def test_action_request_still_requires_action_not_loose_prose(tmp_path):
+    """Mas se PEDIRAM ação, prosa solta NÃO basta — Action-or-Terminate mantém o piso (modo tarefa)."""
+    r = Harness(Script(["já já eu crio", "deixa comigo", "tô fazendo"]),
+                Task(goal="crie um arquivo x.txt"), tmp_path).run()
+    assert r.state == TaskState.FAILED
+
+
 def test_action_request_blocks_lazy_respond_then_executes(tmp_path):
     """Pedido com verbo de ação: se o modelo só fala (respond) sem executar, o backstop re-prompta
     e ele acaba usando a ferramenta de verdade (paridade com modelo fraco)."""

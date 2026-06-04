@@ -97,5 +97,7 @@ def test_honcho_write_recall_inject_mocked():
     assert m.count() == 1                       # add_messages chamado
     hits = m.recall("preferências")             # dialética → insight sintetizado
     assert hits and "modo escuro" in hits[0].text and hits[0].kind == "summary"
-    block = m.inject("preferências")            # context (user-model) + dialética
-    assert "Honcho" in block and "user-model" in block
+    block = m.inject("preferências")            # camada base (context) + dialética SEMPRE-ON (pessoa+tarefa)
+    assert "user-model" in block                # session.context() (camada base)
+    assert "modo escuro" in block               # dialética disparou no nível da pessoa, não só da tarefa
+    assert "recite" in block.lower()            # header de USO ("não recite"), não rótulo passivo

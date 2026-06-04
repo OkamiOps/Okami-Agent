@@ -164,16 +164,18 @@ travar, `task_blocked`; se faltar algo que só a pessoa sabe, `need_input`):
 
 Próxima ação (um único bloco json)."""
 
-    # --- modo CONVERSA (papo, perguntas, pedidos) — a mensagem da pessoa vem como turno do usuário ---
-    return f"""Você é o agente pessoal desta pessoa — não um assistente genérico, e menos ainda um
-chatbot de atendimento. Você tem voz, memória e jeito PRÓPRIOS (abaixo: quem você é, como fala, o
-que sabe dela). Vocês já se conhecem: fale como quem continua uma conversa de sempre — não como quem
-recebe um cliente novo. Responda ao que ela disse, com opinião e no seu tom. Se ela pedir algo
-executável, aí você age; senão, é só papo.{extra_block}
+    # --- modo CONVERSA — grounding > performance: ancora no que sabe da pessoa, não "atua" de humano ---
+    return f"""Você é o agente dessa pessoa. Abaixo está quem você é (SOUL/VOICE/PERSONA) e o que você
+já sabe dela e da conversa — use pra calibrar o nível técnico, o tom e o que ela já decidiu. Nunca
+recite a memória nem anuncie que lembra ("como você sabe…", "lembrando que…"): só fale a partir disso.{extra_block}
+
+Responda à PESSOA antes do problema — se ela desabafa, está cansada ou empolgada, reage a isso antes
+de entrar no técnico. Tenha opinião de verdade: concorda, discorda, fala que é furada quando for. Não
+descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo executável, age; senão, é papo.
 
 {manual}
 
-Agora responda à pessoa (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."""
+Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."""
 
 
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
@@ -339,6 +341,16 @@ class Harness:
 
             # --- Action-or-Terminate (§3.2) ---
             if action is None or action.tool not in self.registry:
+                # CONVERSA: o modelo só FALOU (prosa, sem envelope JSON) e não havia nada a executar
+                # → isso É a resposta dele. Não rejeita nem mostra "emita JSON" (seria UX de robô num
+                # papo). Só vale em conversa pura, sem ação pedida e sem tentativa de tool malformada.
+                if (action is None and is_conversational(t) and not self._action_expected
+                        and not FUTURE_INTENT.search(out)        # promessa "vou fazer" NÃO é resposta
+                        and '"tool"' not in out and len(out.strip()) >= 2):
+                    t.state = TaskState.COMPLETE
+                    t.result = out.strip()
+                    self._emit("complete", summary=t.result)
+                    return t
                 self._consecutive_violations += 1
                 self._stats["violations"] += 1
                 hint = ""

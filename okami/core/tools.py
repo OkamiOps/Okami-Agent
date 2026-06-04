@@ -191,6 +191,24 @@ class RememberUser(Tool):
         return ToolResult(True, f"USER.md += {args['text'][:80]}", effect=True)
 
 
+class FinishSetup(Tool):
+    name = "finish_setup"
+    description = ("Encerra a CONFIGURAÇÃO INICIAL (gênese) do agente — chame SÓ na primeira conversa, "
+                  "quando a pessoa estiver satisfeita com sua identidade (ou se ela quiser deixar p/ depois). "
+                  "Em 'about_user', passe 1 linha sobre quem ela é (vai pro USER.md).")
+    args_schema = {"about_user": "(opc) o que aprendeu sobre a pessoa, p/ o USER.md"}
+
+    def run(self, args, ctx):
+        from okami.memory import files as _f
+        about = (args.get("about_user") or "").strip()
+        if about:
+            _f.append_user(ctx.workspace, about)
+        marker = ctx.workspace / ".okami" / "genesis.done"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("done\n", encoding="utf-8")
+        return ToolResult(True, "configuração inicial concluída ✓", effect=True)
+
+
 class UseSkill(Tool):
     name = "use_skill"
     description = "Carrega o procedimento de uma skill do CATÁLOGO (siga-o à risca). Use quando a tarefa casar com uma skill."
@@ -298,6 +316,6 @@ class NeedInput(Tool):
 
 def default_registry() -> dict[str, Tool]:
     tools = [Respond(), ReadFile(), WriteFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
-             RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
+             RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(), FinishSetup(),
              TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

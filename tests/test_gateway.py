@@ -54,6 +54,26 @@ def test_message_runs_task_and_replies():
     assert any("feito: crie x" in t for t in texts)   # papo: resposta limpa, sem selo ✅ robótico
 
 
+def test_genesis_block_injected_on_first_contact_then_gone(tmp_path):
+    """1ª conversa de um agente novo → bloco de gênese no contexto; selado → some."""
+    captured = {}
+
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None):
+        captured["ctx"] = extra_context
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "oi!"
+        return t
+
+    ep = AgentEndpoint("dev", cfg=None, ws=str(tmp_path), channel=FakeChannel(), run_task=runner,
+                       approval_mode="manual", spawn=lambda fn: fn())
+    ep.handle("1", "oi")
+    assert "PRIMEIRO CONTATO" in captured["ctx"]               # gênese conduz o 1º papo
+    (tmp_path / ".okami").mkdir(exist_ok=True)
+    (tmp_path / ".okami" / "genesis.done").write_text("done\n", encoding="utf-8")
+    ep.handle("1", "e aí")
+    assert "PRIMEIRO CONTATO" not in captured["ctx"]           # selado → não onboarda de novo
+
+
 def test_real_task_keeps_completion_seal():
     """Tarefa de verdade (passo com efeito) MANTÉM o ✅ — só o papo casual perde o selo."""
     from okami.core import Step
