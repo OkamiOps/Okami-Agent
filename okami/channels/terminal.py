@@ -22,12 +22,24 @@ class TerminalChannel(Channel):
         self.sent: list[tuple[str, str]] = []   # histórico de saídas (útil em teste)
         self.allow_chats = allow_chats
 
+    # Prefixos que ENVOLVEM uma resposta do agente (corpo pode ter markdown/código).
+    _REPLY_MARKS = {"✅", "⚠", "❌", "❓"}
+    # Notificações de sistema de 1 linha (não renderizar como markdown).
+    _SYS_MARKS = {"💭", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
+
     # --- saída -----------------------------------------------------------------
     def _print(self, text: str) -> None:
-        if self._console is not None:
-            self._console.print(self._render(text))
-        else:  # pragma: no cover - fallback sem rich
+        if self._console is None:  # pragma: no cover - fallback sem rich
             print(text)
+            return
+        head = text[:1]
+        is_reply = head in self._REPLY_MARKS or head not in self._SYS_MARKS   # fala do agente, não sistema
+        body = text[1:].strip() if head in self._REPLY_MARKS else text
+        if is_reply and ("```" in body or "\n" in body.strip()):             # código/lista → Markdown
+            from rich.markdown import Markdown
+            self._console.print(Markdown(body))
+        else:
+            self._console.print(self._render(text))
 
     @staticmethod
     def _render(text: str) -> str:

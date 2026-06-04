@@ -59,5 +59,14 @@ def test_status_bar_gauge_scales_with_ctx():
 
 def test_help_table_lists_core_commands():
     out = _render(tui.help_table())
-    for c in ("/help", "/new", "/feedback", "/persona", "/exit"):
+    for c in ("/help", "/new", "/feedback", "/persona", "/exit", "/think"):
         assert c in out
+
+
+def test_event_line_renders_steps_and_skips_noise():
+    step = tui.event_line({"kind": "step", "tool": "read_file", "args": {"path": "foo.py"}, "ok": True})
+    assert step is not None and "read_file" in _render(step) and "foo.py" in _render(step)
+    loop = tui.event_line({"kind": "loop", "repeats": 3})
+    assert loop is not None and "loop" in _render(loop).lower()
+    assert tui.event_line({"kind": "start", "goal": "x"}) is None       # ruído: não mostra no chat
+    assert tui.event_line({"kind": "complete", "summary": "y"}) is None  # a resposta já vai pelo canal

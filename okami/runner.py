@@ -37,6 +37,7 @@ def run_task(
     cancel: Callable[[], bool] | None = None,
     depth: int = 0,
     images: list[str] | None = None,
+    reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)
@@ -67,13 +68,16 @@ def run_task(
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1, emit=emit)
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
+    eff = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+
     def generate(messages, schema=None):
-        return prov.complete_messages(cfg, messages, provider=provider, model=model, response_schema=schema)
+        return prov.complete_messages(cfg, messages, provider=provider, model=model,
+                                      response_schema=schema, **eff)
 
     escalate = None
     if escalate_to:
         def escalate(messages, schema=None):  # noqa: F811
-            return prov.complete_messages(cfg, messages, provider=escalate_to, response_schema=schema)
+            return prov.complete_messages(cfg, messages, provider=escalate_to, response_schema=schema, **eff)
 
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
     all_skills = skillmod.load_skills(Path(skills_dir))

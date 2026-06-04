@@ -29,7 +29,8 @@ def test_credential_pool_rotates_then_failover(monkeypatch):
         return "ok-b"
 
     monkeypatch.setattr(prov, "_complete_one", fake_one)
-    assert prov.complete_messages(cfg, [{"role": "user", "content": "x"}]) == "ok-b"
+    assert prov.complete_messages(cfg, [{"role": "user", "content": "x"}],
+                                  _sleep=lambda s: None) == "ok-b"   # sem backoff real no teste
     assert used == ["k1", "k2"]                                # rotacionou as 2 chaves antes do failover
 
 

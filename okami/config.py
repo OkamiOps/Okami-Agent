@@ -61,6 +61,10 @@ class ProviderConfig(BaseModel):
     chars_per_token: float = 4.0    # estimativa p/ converter tokens↔chars
     capability: CapabilityProfile = Field(default_factory=CapabilityProfile)
     params: dict[str, Any] = Field(default_factory=dict)
+    # Esforço de raciocínio p/ modelos reasoning (gpt-5/codex, o-series, etc.): "minimal"|"low"|
+    # "medium"|"high" (alguns aceitam mais). Vazio = default do modelo. Vai pro litellm
+    # (reasoning_effort) e pro transport do codex (reasoning.effort). Trocável por sessão com /think.
+    reasoning_effort: str = ""
     notes: str | None = None
 
     def resolved_key(self) -> str | None:

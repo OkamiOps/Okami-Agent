@@ -416,7 +416,7 @@ class Harness:
                     self._fingerprints.append(fp)
                     step_n += 1
                     t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False))
-                    self._emit("step", n=step_n, tool=action.tool, ok=False, effect=False)
+                    self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                     self.messages.append({"role": "user", "content":
                         f"AÇÃO NEGADA (go/no-go): o usuário recusou — {sens.reason}. Proponha "
                         "alternativa, peça confirmação com outra abordagem, ou declare task_blocked."})
@@ -427,7 +427,7 @@ class Harness:
                     "before_tool", {"tool": action.tool, "args": action.args}):
                 step_n += 1
                 t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False))
-                self._emit("step", n=step_n, tool=action.tool, ok=False, effect=False)
+                self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                 self.messages.append({"role": "user", "content":
                     f"AÇÃO BLOQUEADA por um hook de política: '{action.tool}'. Tente outra "
                     "abordagem ou declare task_blocked."})
@@ -441,7 +441,7 @@ class Harness:
                 res = ToolResult(False, f"erro na tool {action.tool}: {e}")
             step_n += 1
             t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
-            self._emit("step", n=step_n, tool=action.tool, ok=res.ok, effect=res.effect)
+            self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect)
             if self.hooks is not None:
                 self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
 

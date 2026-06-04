@@ -794,6 +794,23 @@ def setup(
             local["default_provider"] = pick
         save_local()
         console.print(f"[green]✓ default:[/green] {local.get('default_provider', cur)}")
+        # Esforço de raciocínio (think) do provider default — só faz sentido em modelo reasoning.
+        dp = local.get("default_provider") or cur
+        if dp and dp in provs:
+            cur_eff = (provs[dp] or {}).get("reasoning_effort", "")
+            eff = menu.select(f"Think (esforço de raciocínio) do '{dp}'", [
+                ("", "default do modelo", ""), ("minimal", "minimal", "rápido/barato"),
+                ("low", "low", ""), ("medium", "medium", ""),
+                ("high", "high", "mais raciocínio, mais lento/caro")], default=cur_eff)
+            if eff != cur_eff:
+                raw2 = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+                pd = raw2.setdefault("providers", {}).setdefault(dp, {})
+                pd["reasoning_effort"] = eff if eff else None
+                if not eff:
+                    pd.pop("reasoning_effort", None)
+                cfg_path.write_text(_yaml.safe_dump(raw2, allow_unicode=True, sort_keys=False),
+                                    encoding="utf-8")
+                console.print(f"[green]✓ think:[/green] {eff or 'default'}")
 
     def step_login() -> None:
         try:
@@ -1468,7 +1485,14 @@ def chat(
 
     ch = TerminalChannel(name, console=console)
     mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
-    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode)
+    from okami import tui as _tui
+
+    def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
+        line = _tui.event_line(e)
+        if line is not None:
+            console.print(line)
+
+    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event)
     cid = "terminal"
     if new:
         ep.session(cid).history.clear()
@@ -1533,7 +1557,17 @@ def chat(
             continue
         t0 = _time.time()
         ep.handle(cid, line)
-        _wait_for_turn(ep, cid)
+        try:
+            _wait_for_turn(ep, cid)
+        except KeyboardInterrupt:                  # Ctrl-C DURANTE o turno = aborta a geração (não sai)
+            s = ep.sessions.get(cid)
+            if s and s.busy:
+                s.cancel = True
+                console.print("[yellow]⏹ cancelando…[/yellow]")
+                try:
+                    _wait_for_turn(ep, cid)        # espera o harness parar no próximo passo
+                except KeyboardInterrupt:
+                    pass
         last_elapsed = _time.time() - t0
 
 
@@ -2175,8 +2209,10 @@ def status() -> None:
     persona_on = (cfg.persona or {}).get("observe", True)
     learn = cfg.learning or {}
     voice_on = bool((cfg.voice or {}).get("stt") or (cfg.voice or {}).get("tts"))
+    think = pc.reasoning_effort or "—"
     body = (f"[bold #ff7527]agente[/] {default_agent}   "
-            f"[bold #ff7527]modelo[/] {pc.model} [dim]({cfg.default_provider})[/dim]\n"
+            f"[bold #ff7527]modelo[/] {pc.model} [dim]({cfg.default_provider})[/dim]   "
+            f"[dim]think[/] {think}\n"
             f"[dim]memória[/] {cfg.memory.get('backend', 'sqlite-fts5')}   "
             f"[dim]aprovação[/] {appr}   "
             f"[dim]persona[/] {'on' if persona_on else 'off'}   "

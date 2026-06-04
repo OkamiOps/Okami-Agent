@@ -74,6 +74,29 @@ def test_genesis_block_injected_on_first_contact_then_gone(tmp_path):
     assert "PRIMEIRO CONTATO" not in captured["ctx"]           # selado → não onboarda de novo
 
 
+def test_on_event_threaded_into_run_task(tmp_path):
+    """O chat liga progresso ao vivo: AgentEndpoint(on_event=…) chega no run_task."""
+    captured = {}
+
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, on_event=None, **kw):
+        captured["on_event"] = on_event
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "ok"
+        return t
+
+    sink = []
+
+    def my_on_event(e):
+        sink.append(e)
+
+    ep = AgentEndpoint("dev", cfg=None, ws=str(tmp_path), channel=FakeChannel(), run_task=runner,
+                       approval_mode="manual", spawn=lambda fn: fn(), on_event=my_on_event)
+    (tmp_path / ".okami").mkdir(exist_ok=True)
+    (tmp_path / ".okami" / "genesis.done").write_text("done\n", encoding="utf-8")   # pula gênese
+    ep.handle("1", "oi")
+    assert captured["on_event"] is my_on_event          # progresso threadado pro harness
+
+
 def test_real_task_keeps_completion_seal():
     """Tarefa de verdade (passo com efeito) MANTÉM o ✅ — só o papo casual perde o selo."""
     from okami.core import Step

@@ -154,6 +154,45 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     return Group(Align.center(banner(version)), Align.center(tag), Align.center(rule), panel, tips)
 
 
+def _args_preview(args: dict) -> str:
+    """1 linha curta dos args de uma tool (path/cmd/query) p/ o display ao vivo."""
+    if not isinstance(args, dict):
+        return ""
+    for k in ("path", "cmd", "query", "url", "name", "text", "goal"):
+        v = args.get(k)
+        if isinstance(v, str) and v:
+            v = v.replace("\n", " ")
+            return v[:60] + ("…" if len(v) > 60 else "")
+    return ""
+
+
+def event_line(e: dict) -> Text | None:
+    """Linha ao vivo p/ um evento do harness (tool-call, loop, compaction…). None = não mostrar.
+
+    É o que faz o terminal sentir VIVO: em vez de 'pensando…' por 30s e cuspir tudo, mostra cada
+    passo enquanto acontece. Mesmos eventos que o `okami task` já renderiza — agora no chat também."""
+    k = e.get("kind")
+    if k == "step":
+        prev = _args_preview(e.get("args") or {})
+        mark = f"[{CYAN}]✓[/]" if e.get("ok") else f"[red]✗[/]"
+        t = Text.from_markup(f"  {mark} [{SOFT}]{e['tool']}[/]" + (f" [{MUTE}]{prev}[/]" if prev else ""))
+        return t
+    if k == "approval_request":
+        return Text.from_markup(f"  [{ORANGE}]⚠ aprovação:[/] [{SOFT}]{e.get('reason', '')}[/]")
+    if k == "loop":
+        return Text.from_markup(f"  [{ORANGE}]⟲ loop detectado[/] [{MUTE}](x{e.get('repeats', '?')})[/]")
+    if k == "stall":
+        return Text.from_markup(f"  [{ORANGE}]… sem progresso, mudando de abordagem[/]")
+    if k == "escalate":
+        return Text.from_markup(f"  [{MAGENTA}]⬆ escalando p/ modelo mais forte[/] [{MUTE}]({e.get('why', '')})[/]")
+    if k == "compact":
+        return Text.from_markup(f"  [{CYAN}]⊟ compactando contexto[/] [{MUTE}]({e.get('promoted', 0)} → memória)[/]")
+    if k == "complete_rejected":
+        miss = ", ".join(e.get("missing", []))
+        return Text.from_markup(f"  [{ORANGE}]✗ ainda falta:[/] [{SOFT}]{miss}[/]")
+    return None
+
+
 def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     """Barra de status compacta (impressa antes de cada prompt) — modelo · contexto · trocas · tempo."""
     bar_len = 12
@@ -183,6 +222,7 @@ def help_table() -> Table:
         ("/yolo · /normal", "liga/desliga auto-aprovação de ações sensíveis"),
         ("/feedback <texto>", "molda o jeito do agente falar (evolui VOICE/PERSONA)"),
         ("/persona <preset>", "muda o tom só nesta sessão (/persona off volta)"),
+        ("/think <nível>", "esforço de raciocínio: minimal·low·medium·high (/think off = default)"),
         ("/undo", "reverte a última evolução de identidade"),
         ("/retry", "retoma uma tarefa interrompida"),
         ("/exit", "sai do chat (ou Ctrl-D)"),

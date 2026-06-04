@@ -81,6 +81,7 @@ class Session:
         self.cancel = False
         self.persona_overlay = ""        # persona TEMPORÁRIA da sessão (/persona) — não grava
         self.resume_attempts = 0         # guarda anti-loop de auto-resume (Hermes #7536)
+        self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
 
     def interrupted(self) -> bool:
         """Tarefa interrompida = histórico termina numa fala do USER sem resposta do AGENTE."""
@@ -93,7 +94,8 @@ class AgentEndpoint:
     def __init__(self, agent_id: str, cfg, ws, channel, run_task: Callable,
                  approval_mode: str = "manual", approval_timeout: float = 120.0,
                  max_history_chars: int = 6000, stt=None, tts=None, spawn: Callable | None = None,
-                 auto_resume: bool = False, max_sessions: int = 500):
+                 auto_resume: bool = False, max_sessions: int = 500, on_event: Callable | None = None):
+        self.on_event = on_event             # progresso ao vivo (tool-calls/loop/compact) — chat liga, Telegram não
         self.agent_id = agent_id
         self.cfg = cfg
         self.ws = ws
@@ -123,6 +125,7 @@ class AgentEndpoint:
             s.yolo = bool(e.get("yolo", False))
             s.persona_overlay = e.get("persona_overlay", "")
             s.resume_attempts = int(e.get("resume_attempts", 0))
+            s.reasoning_effort = e.get("reasoning_effort", "")
             self.sessions[cid] = s
         return self.sessions[cid]
 
@@ -135,7 +138,7 @@ class AgentEndpoint:
     def _save_meta(self, chat_id, s: Session) -> None:
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
-                                resume_attempts=s.resume_attempts)
+                                resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort)
 
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
@@ -165,7 +168,8 @@ class AgentEndpoint:
     def _help(self) -> str:
         return (f"Sou o agente '{self.agent_id}'. Manda a tarefa.\n"
                 "Comandos: /new · /status · /stop · /retry (retoma tarefa interrompida) · /yolo · /normal · "
-                "/feedback <como agir> · /undo · /persona <preset|off> (tom só desta sessão) · /help")
+                "/feedback <como agir> · /undo · /persona <preset|off> (tom só desta sessão) · "
+                "/think <minimal|low|medium|high|off> (raciocínio) · /help")
 
     def _evolve(self, chat_id, note: str) -> None:
         """Feedback EXPLÍCITO de estilo → evolui VOICE/PERSONA na hora (auto, sem go/no-go). §8."""
@@ -317,6 +321,16 @@ class AgentEndpoint:
             self.channel.send(chat_id, f"🎨 anotei o gosto (atrai={len(prof.attractors)}, "
                                        f"repele={len(prof.repulsors)}).")
             return
+        if low.startswith("/think"):                   # esforço de raciocínio desta sessão (gpt-5/codex)
+            arg = text[len("/think"):].strip().lower()
+            if arg in ("", "off", "auto", "default"):
+                s.reasoning_effort = ""
+                self.channel.send(chat_id, "🧠 think no default do modelo. Níveis: minimal·low·medium·high.")
+            else:
+                s.reasoning_effort = arg
+                self.channel.send(chat_id, f"🧠 think = {arg} (vale nesta sessão).")
+            self._save_meta(chat_id, s)
+            return
         if low.startswith("/persona"):                 # overlay TEMPORÁRIO de sessão (estilo /personality)
             from okami.learning import persona
             arg = text[len("/persona"):].strip()
@@ -380,6 +394,10 @@ class AgentEndpoint:
                 base = approve                            # OBJETIVO → auto-aprova identity_file (sem /yes a cada arquivo)
                 approve = lambda req: True if req.get("category") == "identity_file" else base(req)  # noqa: E731
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
+            if self.on_event is not None:                 # progresso ao vivo (tool-calls, loop, compaction…)
+                kw["on_event"] = self.on_event
+            if s.reasoning_effort:                        # /think desta sessão → vence o default do provider
+                kw["reasoning_effort"] = s.reasoning_effort
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             task = self.run_task(self.cfg, self.ws, text, **kw)

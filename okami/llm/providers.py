@@ -8,12 +8,35 @@ o capability profile adaptativo (§3.5).
 
 from __future__ import annotations
 
+import re
+import time
 from collections.abc import Iterator
 
 import litellm
 
+from okami.llm import errors as _err
 from okami.llm import transports
+from okami.llm.retry import jittered_backoff
 from okami.config import OkamiConfig, ProviderConfig
+
+
+class EmptyResponse(RuntimeError):
+    """Provider devolveu resposta vazia — tratado como falha (retry/failover), não como sucesso."""
+
+
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def _sanitize_messages(messages: list[dict]) -> list[dict]:
+    """Remove surrogates UTF-16 soltos que estouram `json.dumps` (ex.: histórico de modelo
+    byte-level). Um char ruim no transcript não pode travar TODO turno até o /new."""
+    out = []
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str) and _SURROGATE.search(c):
+            m = {**m, "content": _SURROGATE.sub("", c)}
+        out.append(m)
+    return out
 
 # Tolera params não suportados por um provider específico e reduz ruído de log.
 litellm.drop_params = True
@@ -79,20 +102,36 @@ def _kwargs(
     if key:
         kw["api_key"] = key
     kw.update(pc.params)
-    kw.update(overrides)
+    if pc.reasoning_effort:                          # esforço de raciocínio (litellm normaliza por provider)
+        kw["reasoning_effort"] = pc.reasoning_effort
+    kw.update(overrides)                             # override por chamada (/think) vence o default
+    kw.setdefault("timeout", 600)                    # NUNCA pendurar p/ sempre numa conexão travada
     return kw
 
 
 _key_cursor: dict[str, int] = {}      # rotação round-robin do pool de chaves por provider
+_key_cooldown: dict[str, float] = {}  # chave -> epoch até quando está parada (tomou 429)
 
 
-def _rotate_key(pc: ProviderConfig) -> str | None:
-    pool = pc.key_pool()
+def _available_pool(pc: ProviderConfig, now: float) -> list[str]:
+    """Chaves não-parqueadas; se TODAS em cooldown, devolve o pool cheio (não trava)."""
+    return [k for k in pc.key_pool() if _key_cooldown.get(k, 0.0) <= now] or pc.key_pool()
+
+
+def _rotate_key(pc: ProviderConfig, now: float | None = None) -> str | None:
+    now = time.time() if now is None else now
+    pool = _available_pool(pc, now)
     if len(pool) <= 1:
         return pool[0] if pool else None
     i = _key_cursor.get(pc.name, 0) % len(pool)
     _key_cursor[pc.name] = i + 1                  # avança → distribui carga / sai de uma chave em 429
     return pool[i]
+
+
+def _park_key(key: str | None, ce, now: float | None = None, ttl: float = 3600.0) -> None:
+    """429 numa chave → parqueia por `ttl` (default 1h) p/ não distribuí-la de novo na hora."""
+    if key and ce.reason == "rate_limit":
+        _key_cooldown[key] = (time.time() if now is None else now) + ttl
 
 
 def complete(
@@ -106,7 +145,7 @@ def complete(
 ) -> str:
     pc = cfg.provider(provider)
     messages = _build_messages(prompt, system)
-    via = transports.dispatch(pc, messages, model)
+    via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
         return via
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
@@ -124,7 +163,7 @@ def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict |
 
 
 def _complete_one(pc, messages, model, response_schema, overrides) -> str:
-    via = transports.dispatch(pc, messages, model)
+    via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
         return via
     rf = _response_format(pc, response_schema)
@@ -142,30 +181,48 @@ def complete_messages(
     model: str | None = None,
     response_schema: dict | None = None,
     _tried: set | None = None,
+    _sleep=time.sleep,
     **overrides,
 ) -> str:
-    """Completa a partir de uma lista de mensagens (harness §3). FAILOVER (estilo Hermes): se o
-    provider falhar, tenta os `fallback:` dele (outro provider) — robustez é a dor nº1 do usuário."""
+    """Completa a partir de uma lista de mensagens (harness §3). Robustez (dor nº1 do usuário):
+    classifica o erro p/ decidir a alavanca (rotacionar chave vs back off vs failover vs comprimir),
+    espera com jitter entre tentativas, parqueia chave em 429, e trata RESPOSTA VAZIA como falha
+    (não como sucesso) — senão o harness vê turno em branco → 'violação de Action-or-Terminate'."""
+    messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
-    pool = pc.key_pool()
+    attempts = max(1, len(pc.key_pool()))
     last_exc: Exception | None = None
-    for _ in range(max(1, len(pool))):           # credential pool: rotaciona a chave em rate-limit/erro
+    do_fallback = True
+    for attempt in range(1, attempts + 1):
         ov = dict(overrides)
-        if pool:
+        if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            return _complete_one(pc, messages, model, response_schema, ov)
+            result = _complete_one(pc, messages, model, response_schema, ov)
+            if not (result or "").strip():           # vazio = falha de provider, entra no retry/failover
+                raise EmptyResponse("resposta vazia do provider")
+            return result
         except Exception as e:  # noqa: BLE001
             last_exc = e
-    # esgotou o pool de chaves → FAILOVER p/ outro provider (estilo Hermes)
+            ce = _err.classify(e)
+            if ce.rotate_key:
+                _park_key(ov.get("_api_key"), ce)     # 429 → parqueia a chave
+            if not ce.retryable:                      # 400/content-policy/auth-perm → não insiste
+                do_fallback = ce.fallback
+                break
+            do_fallback = do_fallback or ce.fallback
+            if attempt < attempts:                    # ainda há chave → espera (jitter) e tenta de novo
+                _sleep(jittered_backoff(attempt))
+    # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
     tried = (_tried or set()) | {pc.name}
-    for fb in (pc.fallback or []):
-        if fb not in tried and fb in cfg.providers:
-            try:
-                return complete_messages(cfg, messages, provider=fb, response_schema=response_schema,
-                                         _tried=tried, **overrides)
-            except Exception:  # noqa: BLE001
-                continue
+    if do_fallback:
+        for fb in (pc.fallback or []):
+            if fb not in tried and fb in cfg.providers:
+                try:
+                    return complete_messages(cfg, messages, provider=fb, response_schema=response_schema,
+                                             _tried=tried, _sleep=_sleep, **overrides)
+                except Exception:  # noqa: BLE001
+                    continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")
 
 
@@ -180,7 +237,7 @@ def stream_complete(
 ) -> Iterator[str]:
     pc = cfg.provider(provider)
     messages = _build_messages(prompt, system)
-    via = transports.dispatch(pc, messages, model)
+    via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:  # transports CLI/OAuth não streamam: devolve de uma vez
         yield via
         return

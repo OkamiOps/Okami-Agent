@@ -55,3 +55,27 @@ def test_codex_sse_raises_on_failure_event():
     lines = ['data: {"type":"response.failed","response":{"error":{"message":"x"}}}']
     with pytest.raises(RuntimeError):
         transports._codex_sse_text(lines)
+
+
+def test_kwargs_includes_reasoning_effort_and_call_override_wins():
+    from okami.llm import providers
+    pc = ProviderConfig(name="codex", model="x", reasoning_effort="high")
+    kw = providers._kwargs(pc, [], stream=False, model=None)
+    assert kw["reasoning_effort"] == "high"                 # default do provider (think)
+    kw2 = providers._kwargs(pc, [], stream=False, model=None, reasoning_effort="low")
+    assert kw2["reasoning_effort"] == "low"                 # override por chamada (/think) vence
+
+
+def test_dispatch_threads_reasoning_effort_to_codex(monkeypatch):
+    captured = {}
+
+    def fake_codex(pc, messages, model, overrides=None):
+        captured["effort"] = (overrides or {}).get("reasoning_effort") or pc.reasoning_effort
+        return "ok"
+
+    monkeypatch.setattr(transports, "codex_oauth_complete", fake_codex)
+    pc = ProviderConfig(name="codex", model="x", transport="codex_oauth", reasoning_effort="high")
+    transports.dispatch(pc, [], None, {"reasoning_effort": "minimal"})
+    assert captured["effort"] == "minimal"                  # /think override
+    transports.dispatch(pc, [], None, None)
+    assert captured["effort"] == "high"                     # cai no default do provider
