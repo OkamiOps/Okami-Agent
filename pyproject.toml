@@ -15,6 +15,7 @@ dependencies = [
     "questionary>=2.0",      # menus interativos (seta ↑↓) no setup/provider; fallback numerado embutido
     "prompt_toolkit>=3.0",   # REPL concorrente do `okami chat` (digita enquanto trabalha; patch_stdout)
     "textual>=0.80",         # TUI de tela cheia do `okami chat --tui` (regiões fixas, mouse, scroll, status pinado)
+    "pillow>=10",            # render do logo REAL da Okami como arte de terminal (half-block); degrada p/ lobo geométrico
 ]
 
 [project.optional-dependencies]

@@ -91,8 +91,59 @@ _WOLF = [
 
 
 def _wolf_hero() -> Group:
-    """Lobo geométrico no gradiente da marca — o 'hero' do painel (como a caduceus do Hermes)."""
+    """Lobo geométrico no gradiente da marca — fallback se o PNG/Pillow não estiver disponível."""
     return _grad_lines(_WOLF)
+
+
+from functools import lru_cache  # noqa: E402
+
+
+@lru_cache(maxsize=4)
+def _emblem_hero(cols: int = 50):
+    """O LOGO REAL da Okami (emblema lobo+circuito) renderizado em half-block (cor de verdade).
+
+    Cada caractere ▀/▄ carrega 2 pixels (fg=cima, bg=baixo) → cor cheia + 2× a resolução vertical;
+    transparente (fora do logo) fica no fundo do terminal. Pillow ausente / PNG sumiu → None (cai no lobo)."""
+    try:
+        from PIL import Image
+    except Exception:  # noqa: BLE001 — sem Pillow: o chamador usa o lobo geométrico
+        return None
+    png = Path(__file__).parent / "assets" / "okami_logo.png"
+    if not png.exists():
+        return None
+    try:
+        im = Image.open(png).convert("RGBA")
+        w0, h0 = im.size
+        em = im.crop((0, 0, w0, int(h0 * 0.63)))       # só o EMBLEMA (acima do wordmark "OKAMI")
+        em = em.crop(em.getbbox())                      # corta o transparente em volta
+        w, h = em.size
+        rows = max(1, round(cols * (h / w) / 2))        # /2: cada linha = 2 px (half-block)
+        em = em.resize((cols, rows * 2), Image.LANCZOS)
+        px = em.load()
+        lines = []
+        for y in range(rows):
+            t = Text(no_wrap=True)
+            for x in range(cols):
+                tr, tg, tb, ta = px[x, 2 * y]
+                br, bg, bb, ba = px[x, 2 * y + 1]
+                top, bot = ta > 70, ba > 70
+                if top and bot:
+                    t.append("▀", style=f"#{tr:02x}{tg:02x}{tb:02x} on #{br:02x}{bg:02x}{bb:02x}")
+                elif top:
+                    t.append("▀", style=f"#{tr:02x}{tg:02x}{tb:02x}")
+                elif bot:
+                    t.append("▄", style=f"#{br:02x}{bg:02x}{bb:02x}")
+                else:
+                    t.append(" ")
+            lines.append(t)
+        return Group(*lines)
+    except Exception:  # noqa: BLE001 — qualquer pepino no decode → fallback
+        return None
+
+
+def hero(cols: int = 50):
+    """O hero do startup: logo REAL se der, senão o lobo geométrico no gradiente."""
+    return _emblem_hero(cols) or _wolf_hero()
 
 # Buckets p/ agrupar as tools por domínio (como o "Available Tools" do Hermes).
 _TOOL_BUCKETS = [
@@ -156,7 +207,7 @@ def banner(version: str) -> Group:
 
 
 def _meta_block(model: str, provider: str, cwd: Path, session: str, agent: str) -> Group:
-    """Coluna da esquerda: hero (lobo geométrico) + estado da sessão — como a caduceus do Hermes."""
+    """Coluna da esquerda do painel: estado da sessão (o hero agora é o logo, acima do painel)."""
     info = Text()
     info.append(f" {agent}", style=f"bold {ORANGE}")
     info.append("   ● operacional", style="green")
@@ -164,7 +215,7 @@ def _meta_block(model: str, provider: str, cwd: Path, session: str, agent: str) 
     info.append(f"\n {provider}", style=MUTE)
     info.append(f"\n {cwd}", style=CYAN)
     info.append(f"\n sessão: {session}", style=DIM)
-    return Group(_wolf_hero(), Text(""), info)
+    return Group(info)
 
 
 def _tools_skills(tools: list[str], skills: list) -> Group:
@@ -209,8 +260,8 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
                   style=MUTE, justify="center")
     panel = Panel(Group(grid, Text(""), footer), border_style=ORANGE,
                   title=f"[bold {ORANGE}]Okami Agent[/] [{DIM}]v{version}[/]", title_align="center")
-    tag = Text()                                        # tagline do logo (laranja→magenta da marca)
-    tag.append(" CUSTOM SOLUTIONS", style=ORANGE)
+    tag = Text(justify="center")                        # tagline do logo (laranja→magenta da marca)
+    tag.append("CUSTOM SOLUTIONS", style=ORANGE)
     tag.append(" · ", style=DIM)
     tag.append("AI INNOVATION", style=MAGENTA)
     tips = Text()
@@ -219,7 +270,9 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     if resumed:
         tips.append(f"\n↻ retomando conversa ({resumed} trocas anteriores)", style=MUTE)
     tips.append("\n✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.", style=MUTE)
-    return Group(banner(version), tag, Text(""), panel, tips)
+    # Hero = LOGO REAL (emblema) centralizado → wordmark em gradiente → tagline → painel → dicas.
+    return Group(Align.center(hero(50)), Text(""), Align.center(banner(version)),
+                 tag, Text(""), panel, tips)
 
 
 def _args_preview(args: dict) -> str:
