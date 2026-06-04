@@ -265,7 +265,7 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     header = Table.grid(padding=(0, 3))               # LOGO | (wordmark + tagline + sessão), centrados na vertical
     header.add_column(justify="left", vertical="middle")
     header.add_column(justify="left", vertical="middle")
-    header.add_row(hero(24), right)
+    header.add_row(hero(36), right)
 
     footer = Text(f"{len(tools)} ferramentas · {len(skills)} skills · /help para comandos",
                   style=MUTE, justify="center")
