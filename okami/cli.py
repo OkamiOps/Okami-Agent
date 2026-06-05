@@ -1836,6 +1836,41 @@ def gateway(
 
 
 @app.command()
+def serve(
+    port: int = typer.Option(8765, "-p", "--port"),
+    host: str = typer.Option("127.0.0.1", "--host", help="127.0.0.1 (local) por padrão; 0.0.0.0 expõe à rede."),
+) -> None:
+    """Sobe a API HTTP (POST /chat com Bearer token). Requer OKAMI_API_TOKEN no .env (fail-closed)."""
+    import os
+    from okami.agents import effective_config, load_agents
+    from okami.api import serve as _serve
+    from okami.config import load_raw
+    from okami.runner import run_task as _rt
+
+    cfg = _load()
+    token = os.getenv("OKAMI_API_TOKEN")
+    if not token:
+        console.print("[red]✗ defina OKAMI_API_TOKEN:[/red] okami config set OKAMI_API_TOKEN <um-token-secreto>")
+        raise typer.Exit(1)
+
+    def run(agent_id: str, message: str):
+        graw, _ = load_raw()
+        spec = load_agents().get(agent_id)
+        c, ws = (effective_config(graw, spec), spec.dir) if spec else (cfg, Path("workspaces/default"))
+        ws.mkdir(parents=True, exist_ok=True)
+        return _rt(c, ws, message)
+
+    srv = _serve(port, token, run, host=host)
+    console.print(f"[green]🌐 API no ar[/green] http://{host}:{port}  "
+                  f"[dim](POST /chat · Authorization: Bearer …)[/dim]")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
+        console.print("[dim]API parada.[/dim]")
+
+
+@app.command()
 def room(
     message: str = typer.Argument(..., help="Mensagem do usuário ao grupo (use @id para mencionar)."),
     group: int = typer.Option(0, "--group", "-g", help="Índice do grupo em okami.yaml (groups)."),
