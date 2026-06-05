@@ -63,8 +63,15 @@ def render_launchd(argv: list[str], workdir: str, log: str, okami_home: str, lab
 
 
 def _systemd_argv(argv: list[str]) -> str:
-    """ExecStart systemd-safe: cada arg com espaço/aspas vai entre aspas (path com espaço não quebra)."""
-    return " ".join(f'"{a}"' if (" " in a or '"' in a or "'" in a) else a for a in argv)
+    """ExecStart systemd-safe: arg com espaço/aspas vai entre aspas, ESCAPANDO `\\` e `"` internos
+    (estilo systemd) — path com espaço OU caractere especial não quebra a unit."""
+    out = []
+    for a in argv:
+        if " " in a or '"' in a or "'" in a or "\\" in a:
+            out.append('"' + a.replace("\\", "\\\\").replace('"', '\\"') + '"')
+        else:
+            out.append(a)
+    return " ".join(out)
 
 
 def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str) -> str:

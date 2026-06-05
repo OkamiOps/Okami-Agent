@@ -375,15 +375,26 @@ def config_edit(base: bool = typer.Option(False, "--base", help="Abre o okami.ya
 
 
 @config_app.command("check")
-def config_check() -> None:
+def config_check(
+    json_out: bool = typer.Option(False, "--json", help="Saída JSON (pra script/CI) — igual a doctor/policy."),
+) -> None:
     """Valida que a config carrega e aponta o que falta (lite doctor)."""
+    import json as _json
     try:
         cfg = _load()
     except Exception as e:  # noqa: BLE001
-        console.print(f"[red]✗ config inválida:[/red] {e}")
+        if json_out:
+            console.print_json(_json.dumps({"ok": False, "config_loads": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            console.print(f"[red]✗ config inválida:[/red] {e}")
         raise typer.Exit(1)
-    console.print("[green]✓ config carrega[/green]")
     pc = cfg.provider()
+    if json_out:
+        console.print_json(_json.dumps({"ok": bool(pc.ready), "config_loads": True,
+                                        "default_provider": cfg.default_provider, "model": pc.model,
+                                        "ready": bool(pc.ready)}, ensure_ascii=False))
+        raise typer.Exit(0 if pc.ready else 2)
+    console.print("[green]✓ config carrega[/green]")
     s = "[green]pronto[/green]" if pc.ready else "[yellow]falta auth/chave[/yellow]"
     console.print(f"  default_provider: [bold]{cfg.default_provider}[/bold] ({pc.model}) — {s}")
     if not pc.ready:

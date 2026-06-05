@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+def _voice_dir() -> Path:
+    """Workdir do áudio na CASA (~/.okami/voice), não espalhado como .okami no CWD."""
+    from okami.home import okami_home
+    return okami_home() / "voice"
+
+
 @dataclass
 class VoiceBridge:
     transcribe: Callable[[Path], str]            # áudio → texto (STT)
@@ -20,7 +26,7 @@ class VoiceBridge:
     synthesize: Callable[[str, Path], Path]      # texto → arquivo de áudio (TTS)
     record: Optional[Callable[[], Path]] = None  # mic → arquivo (hardware; None = sem captura)
     play: Optional[Callable[[Path], None]] = None  # arquivo → alto-falante (hardware)
-    workdir: Path = field(default_factory=lambda: Path(".okami") / "voice")
+    workdir: Path = field(default_factory=lambda: _voice_dir())
 
     def handle_audio(self, audio_in) -> tuple[str, str, Path | None]:
         """Um turno a partir de um ARQUIVO de áudio: transcreve, responde, sintetiza (e toca se houver player).
@@ -60,7 +66,7 @@ def record_mic(seconds: float = 6.0, samplerate: int = 16000, out: Path | None =
     """Captura `seconds` do microfone para um WAV (precisa de sounddevice + soundfile)."""
     import sounddevice as sd
     import soundfile as sf
-    dst = Path(out or (Path(".okami") / "voice" / "in.wav"))
+    dst = Path(out or (_voice_dir() / "in.wav"))
     dst.parent.mkdir(parents=True, exist_ok=True)
     audio = sd.rec(int(seconds * samplerate), samplerate=samplerate, channels=1)
     sd.wait()

@@ -12,6 +12,14 @@ _YAML = ("default_provider: lmstudio\nproviders:\n"
          "  lmstudio: {model: openai/x, api_key: lm, tier: local}\n")
 
 
+def test_config_check_json(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
+    res = runner.invoke(app, ["config", "check", "--json"])
+    assert '"config_loads": true' in res.output and '"default_provider": "lmstudio"' in res.output
+    assert '"model"' in res.output                          # consistente com doctor/policy --json
+
+
 def test_is_secret_key_and_coerce():
     assert _is_secret_key("OPENAI_API_KEY") and _is_secret_key("MIMO_API_KEY")
     assert not _is_secret_key("memory.backend") and not _is_secret_key("approvals.mode")

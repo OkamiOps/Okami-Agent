@@ -176,7 +176,8 @@ def doctor(
             ok, _msg = _ping_models(pc.api_base)
             host = pc.api_base.replace("https://", "").replace("http://", "")
             ep = Text()
-            ep.append_text(_ui.dot("ok" if ok else "fail"))
+            # default falhando = erro (vermelho); opcional falhando (auth ruim/401) = aviso (amber), não alarme.
+            ep.append_text(_ui.dot("ok" if ok else ("fail" if is_default else "warn")))
             ep.append(f" {host}", style=_ui.MUTE)
         elif not pc.ready:
             ep = Text("não configurado", style=_ui.MUTE)

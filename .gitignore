@@ -28,3 +28,5 @@ okami.local.yaml
 *.bak[0-9][0-9]
 *.last-good
 policy-conformance.json
+# artefatos de probe/comparação locais (sujeira de workspace, não versionar)
+repo_compare_*.json

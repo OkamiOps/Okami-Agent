@@ -57,7 +57,8 @@ def learn(
         console.print("[dim]use --allow-exec se confiar na origem; prefira git/caminho local (estáticos).[/dim]")
         raise typer.Exit(2)
 
-    quarantine = Path(".okami") / "quarantine"
+    from okami.home import okami_home
+    quarantine = okami_home() / "quarantine"           # na CASA, não espalha .okami no CWD
     shutil.rmtree(quarantine, ignore_errors=True)
     console.print(f"[dim]baixando para quarentena:[/dim] {quarantine}")
     try:

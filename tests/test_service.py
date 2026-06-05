@@ -44,6 +44,7 @@ def test_systemd_argv_quotes_paths_with_spaces():
     unit = service.render_systemd(["/opt/my okami/bin/okami", "gateway", "--foreground"],
                                   "/proj", "/h/.okami/logs/g.log", "/h/.okami")
     assert 'ExecStart="/opt/my okami/bin/okami" gateway --foreground' in unit   # path com espaço entre aspas
+    assert service._systemd_argv(['/x/a"b\\c']) == '"/x/a\\"b\\\\c"'            # aspas e barra escapadas
 
 
 def test_gateway_files_live_in_home_not_cwd(monkeypatch, tmp_path):

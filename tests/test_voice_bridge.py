@@ -7,6 +7,12 @@ from pathlib import Path
 from okami.voice.bridge import VoiceBridge
 
 
+def test_voice_workdir_in_home_not_cwd(monkeypatch, tmp_path):
+    from okami.voice.bridge import _voice_dir
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path / "home"))
+    assert _voice_dir() == tmp_path / "home" / "voice"      # na casa, não .okami no CWD
+
+
 def _bridge(tmp_path, *, transcript, reply="resposta do agente"):
     synth_calls, play_calls = [], []
 
