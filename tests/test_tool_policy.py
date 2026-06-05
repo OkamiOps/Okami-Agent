@@ -168,6 +168,24 @@ def test_mcp_worker_dangerous_requires_isolation():
     assert set(iso) == {"srv__run_cmd", "srv__read"}
 
 
+def test_mcp_allow_does_not_bypass_worker_isolation():
+    # #P1: allow comum NÃO libera MCP de efeito sem isolamento real (era o buraco em mcp_denied).
+    from okami.core.tool_policy import filter_mcp_registry
+    tools = {"srv__run_cmd": _FakeMcp("srv__run_cmd", {"shell"})}
+    allow_cfg = {"surfaces": {"paperclip-worker": {"allow": ["srv__run_cmd"]}}}
+    # allow + SEM isolamento → AINDA removida (gate vence o allow)
+    assert filter_mcp_registry(dict(tools), "paperclip-worker", config=allow_cfg) == {}
+    # só a flag grotesca por superfície libera sem isolamento:
+    unsafe = {"surfaces": {"paperclip-worker": {"unsafe_allow_without_isolation": True}}}
+    assert "srv__run_cmd" in filter_mcp_registry(dict(tools), "paperclip-worker", config=unsafe)
+    # ou a flag do sandbox (deploy inteiro):
+    assert "srv__run_cmd" in filter_mcp_registry(
+        dict(tools), "paperclip-worker", sandbox={"unsafe_allow_host_shell_without_isolation": True})
+    # com isolamento real, o allow funciona normalmente:
+    assert "srv__run_cmd" in filter_mcp_registry(
+        dict(tools), "paperclip-worker", config=allow_cfg, sandbox={"require_isolation": True})
+
+
 def test_paperclip_manager_no_execution():
     reg = filter_registry(default_registry(), "paperclip-manager")
     for t in ("run_shell", "process_start", "process_write", "process_kill", "spawn"):

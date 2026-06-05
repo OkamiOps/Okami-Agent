@@ -146,17 +146,23 @@ def mcp_denied(tool, surface: str, *, config=None, sandbox=None) -> bool:
     from okami.integrations.mcp import DANGEROUS_CAPS
     name = getattr(tool, "name", "")
     cfg = ((config or {}).get("surfaces") or {}).get(surface) or {}
-    if name in set(cfg.get("allow") or []):          # deploy abriu esta tool MCP explícito
+    danger = set(getattr(tool, "capabilities", set()) or set()) & DANGEROUS_CAPS
+    # #P1: gate de isolamento ANTES do allow — uma tool MCP de EFEITO (shell/write/network) num worker
+    # Paperclip remoto roda em processo SEPARADO → FURA o sandbox. `allow` comum NÃO libera isso (era o
+    # buraco); só a flag grotesca (unsafe_allow_*_without_isolation), igual ao gate das tools nativas.
+    if danger and surface in _PAPERCLIP_EXEC_SURFACES and not _sandbox_isolated(sandbox):
+        if not _isolation_override(sandbox, cfg):
+            return True
+    if name in set(cfg.get("allow") or []):          # allow vence o resto (mas NÃO o gate de isolamento acima)
         return False
     if name in set(cfg.get("deny") or []):
         return True
     if surface in _MCP_OWNER_SURFACES:               # máquina do dono → MCP livre
         return False
-    danger = set(getattr(tool, "capabilities", set()) or set()) & DANGEROUS_CAPS
     if not danger:
         return False                                 # MCP só-leitura passa em QUALQUER superfície
-    if surface in _PAPERCLIP_EXEC_SURFACES:          # worker: MCP de efeito exige isolamento real (fura sandbox)
-        return not _sandbox_isolated(sandbox)
+    if surface in _PAPERCLIP_EXEC_SURFACES:          # worker isolado (passou o gate acima) → permitido
+        return False
     return True                                      # demais superfícies remotas: nada de efeito via MCP sem allow
 
 

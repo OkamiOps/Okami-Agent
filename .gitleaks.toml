@@ -12,7 +12,6 @@ regexes = [
   '''pragma: allowlist secret''',   # mesma convenção do scanner rápido: linha marcada é fake auditável
 ]
 paths = [
-  '''tests/.*''',                   # fixtures de teste contêm vetores fake (o scanner rápido já cobre tests/)
   '''.*\.example\..*''',            # exemplos versionados (okami.local.example.yaml etc.)
   '''okami/skills/.*scanner.*''',   # o detector de skills carrega padrões de exemplo
 ]
