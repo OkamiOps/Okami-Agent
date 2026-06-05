@@ -547,10 +547,14 @@ class Harness:
             sens = approval.classify(action.tool, action.args)
             if sens is not None:
                 self._emit("approval_request", tool=action.tool, reason=sens.reason, category=sens.category)
-                req = {"tool": action.tool, "args": action.args, "reason": sens.reason,
-                       "category": sens.category, "risk": sens.risk}
+                import hashlib
+                args_hash = hashlib.sha256(
+                    json.dumps(action.args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+                ).hexdigest()[:16]               # amarra a aprovação aos ARGS EXATOS (#1/#9): não vale p/ outra ação
+                req = {"tool": action.tool, "args": action.args, "args_hash": args_hash,
+                       "reason": sens.reason, "category": sens.category, "risk": sens.risk}
                 approved = self.approve(req)
-                self._audit(event="approval", tool=action.tool, category=sens.category,
+                self._audit(event="approval", tool=action.tool, args_hash=args_hash, category=sens.category,
                             risk=sens.risk, args=self._args_brief(action.args),
                             decision="allow" if approved else "deny")
                 if not approved:

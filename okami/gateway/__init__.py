@@ -359,14 +359,21 @@ class AgentEndpoint:
             nonce = secrets.token_hex(4)                 # amarra o botão a ESTE pedido (P1.3 anti-stale)
             q: queue.Queue = queue.Queue()
             self._pending[str(chat_id)] = (q, nonce)
+            brief = ""                                   # mostra QUAL ação (tool + arg-chave) — #1/#9 target binding
+            for _k in ("path", "cmd", "url", "name"):
+                _v = (req.get("args") or {}).get(_k)
+                if isinstance(_v, str) and _v:
+                    brief = f" · {_k}={_v[:80]}"
+                    break
+            ask = f"⚠ Aprovar [{req.get('tool', '?')}]{brief}\n{req['reason']} (risco={req.get('risk', '?')})"
             _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
             if _sa:
                 try:
-                    _sa(chat_id, f"⚠ Aprovar: {req['reason']}?", nonce=nonce)
+                    _sa(chat_id, ask, nonce=nonce)
                 except TypeError:                        # canal sem suporte a nonce → compat
-                    _sa(chat_id, f"⚠ Aprovar: {req['reason']}?")
+                    _sa(chat_id, ask)
             else:
-                self.channel.send(chat_id, f"⚠ Aprovar: {req['reason']}? (/yes ou /no)")
+                self.channel.send(chat_id, ask + " (/yes ou /no)")
             try:
                 ans = q.get(timeout=self.approval_timeout)
             except queue.Empty:
