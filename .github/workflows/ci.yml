@@ -24,6 +24,8 @@ jobs:
         run: uv sync --frozen --extra dev --extra voice
       - name: Tests
         run: uv run pytest -q
+      - name: Policy conformance (GATE) — okami.policy.yaml vs config
+        run: uv run okami policy check
       - name: Build wheel + sdist
         run: uv build
       - name: Smoke — installed package runs outside the checkout

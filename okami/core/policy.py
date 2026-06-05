@@ -23,7 +23,8 @@ DEFAULT_POLICY: dict = {
     "mcp": {"max_trust": "reviewed"},                      # 'trusted' fica acima do teto
     "secrets": {"forbid_literal_in_yaml": True},
     "gateway": {"require_token": True, "forbid_public_bind": True},
-    "sandbox": {"forbid_forced_local_on_exposed": True},   # backend:local explícito numa instalação exposta = warn
+    # backend:local explícito numa instalação exposta = warn; require_isolation_on_exposed = exige Docker real
+    "sandbox": {"forbid_forced_local_on_exposed": True, "require_isolation_on_exposed": False},
     "tools": {"require_metadata": True},                   # toda tool com ToolSpec (risk/sensitivity)
     "retention": {"require": False},                       # warn se nada de retenção/quota configurado
 }
@@ -117,13 +118,20 @@ def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | Non
             f.append(Finding(f"policy.mcp.{name}", "fail", f"MCP '{name}' trust={lvl} acima do teto {max_trust}.",
                              f"baixe p/ {max_trust} (+ manifesto por-tool)."))
 
-    # sandbox: forced local em instalação exposta -----------------------------
-    if (policy.get("sandbox") or {}).get("forbid_forced_local_on_exposed", True):
-        sb = dict(getattr(cfg, "sandbox", None) or {})
-        exposed = bool(getattr(cfg, "gateway", None) or {}) or bool(channels)
-        if exposed and sb.get("backend") == "local":
-            f.append(Finding("policy.sandbox", "warn", "backend:local EXPLÍCITO numa instalação exposta "
-                             "→ desliga o auto-harden por superfície.", "remova o backend fixo ou use profile: hardened."))
+    # sandbox: forced local + isolamento exigido em instalação exposta --------
+    sbpol = policy.get("sandbox") or {}
+    sb = dict(getattr(cfg, "sandbox", None) or {})
+    exposed = bool(getattr(cfg, "gateway", None) or {}) or bool(channels)
+    if sbpol.get("forbid_forced_local_on_exposed", True) and exposed and sb.get("backend") == "local":
+        f.append(Finding("policy.sandbox", "warn", "backend:local EXPLÍCITO numa instalação exposta "
+                         "→ desliga o auto-harden por superfície.", "remova o backend fixo ou use profile: hardened."))
+    if sbpol.get("require_isolation_on_exposed", False) and exposed:   # #P1.2: ambiente hostil
+        from okami.core.sandbox import SandboxPolicy
+        strict = bool(SandboxPolicy.from_config(sb).require_isolation) or str(sb.get("profile", "")) == "hardened-strict"
+        if not strict:
+            f.append(Finding("policy.sandbox.isolation", "fail", "superfície exposta SEM isolamento obrigatório "
+                             "→ run_shell/process podem degradar p/ local (sem Docker).",
+                             "sandbox.require_isolation: true (ou profile: hardened-strict)."))
 
     # tools.require_metadata --------------------------------------------------
     if (policy.get("tools") or {}).get("require_metadata", True):

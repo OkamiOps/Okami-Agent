@@ -81,6 +81,33 @@ def test_approval_mode_policy(tmp_path):
     assert _levels(f)["policy.approvals"] == "fail"
 
 
+def test_require_isolation_on_exposed(tmp_path):
+    # #P1.2: policy exige isolamento real em superfície exposta; sandbox sem strict → fail
+    pol = {**DEFAULT_POLICY, "sandbox": {"require_isolation_on_exposed": True}}
+    chans = {("(global)", "telegram"): {"token": "x", "allow_chats": [1]}}
+    f = evaluate(_cfg(sandbox={}), pol, channels=chans, base_yaml=tmp_path / "n.yaml")
+    assert _levels(f)["policy.sandbox.isolation"] == "fail"
+    # com require_isolation no sandbox → conforme
+    f2 = evaluate(_cfg(sandbox={"require_isolation": True}), pol, channels=chans, base_yaml=tmp_path / "n.yaml")
+    assert "policy.sandbox.isolation" not in _levels(f2)
+
+
+def test_project_ships_authored_policy_and_is_self_conformant():
+    """O projeto VERSIONA um okami.policy.yaml real E passa na própria política (sem FAIL)."""
+    from pathlib import Path as _P
+
+    from okami.config import load_config
+    from okami.core.lint import summarize
+    from okami.core.policy import evaluate, load_policy
+    root = _P(__file__).resolve().parent.parent
+    assert (root / "okami.policy.yaml").exists(), "falta o okami.policy.yaml autorado"
+    policy, source = load_policy(root / "okami.policy.yaml")
+    cfg = load_config(root / "okami.yaml")
+    findings = evaluate(cfg, policy, base_yaml=root / "okami.yaml")
+    s = summarize(findings)
+    assert s["ok"], f"o projeto não passa na própria policy: {[vars(x) for x in findings if x.level == 'fail']}"
+
+
 def test_collect_channels_global_and_agent():
     raw = {"channels": {"telegram": {"token": "g"}}}
     agents = {"bot": SimpleNamespace(raw={"channels": {"slack": {"token": "s"}}})}

@@ -33,3 +33,24 @@ def test_auto_degrades_to_local_without_docker(monkeypatch):
     monkeypatch.setattr(sandbox.shutil, "which", lambda *_: None)   # sem docker
     p = effective_sandbox({}, "telegram")
     assert p.backend == "auto" and p.effective_backend() == "local"  # endurece, mas não quebra
+
+
+def test_require_isolation_forces_docker_on_exposed():
+    # #P1.2 estrito: exposto exige Docker (backend docker EXPLÍCITO → recusa se faltar, não degrada)
+    p = effective_sandbox({"require_isolation": True}, "telegram")
+    assert p.backend == "docker"
+    assert effective_sandbox({"profile": "hardened-strict"}, "api").backend == "docker"
+
+
+def test_require_isolation_does_not_brick_cli():
+    # CLI = máquina do dono → não força Docker mesmo com require_isolation
+    assert effective_sandbox({"require_isolation": True}, "cli").backend == "local"
+
+
+def test_strict_exposed_without_docker_refuses_shell(tmp_path, monkeypatch):
+    from okami.core import sandbox
+    from okami.core.sandbox import run_sandboxed
+    monkeypatch.setattr(sandbox.shutil, "which", lambda *_: None)   # sem docker
+    pol = effective_sandbox({"require_isolation": True}, "telegram")
+    res = run_sandboxed("echo oi", tmp_path, pol)
+    assert res.returncode == 126 and "DESABILITADO" in res.output    # recusa, NÃO roda local

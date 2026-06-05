@@ -1,0 +1,42 @@
+# okami.policy.yaml — POSTURA de conformance autoritativa do Okami (não é scaffold; é a política real).
+# Avalie com: `okami policy check`  (a CI roda isso como GATE). Sem segredo aqui — só regras.
+#
+# Filosofia: assinatura-only (Claude/Codex via OAuth/CLI, nunca pay-as-you-go), deny-by-default em
+# canal, segredo só em .env (${ENV} no YAML), MCP de terceiro não-confiável passa por go/no-go, e
+# superfície exposta deve rodar com isolamento real. Veja docs/ARCHITECTURE.md.
+
+approvals:
+  mode_allow: [manual, smart]          # yolo/off reprovam — ação sensível sempre passa por go/no-go
+
+providers:
+  allow: [lmstudio, codex, claude, minimax, mimo]   # só os providers homologados do projeto
+
+models:
+  allow:                               # refs LiteLLM permitidas (globs)
+    - "openai/*"                        # lmstudio/minimax/mimo (OpenAI-compat)
+    - "openai-codex/*"                  # codex (Responses API, assinatura)
+    - "claude-subscription/*"           # claude CLI (assinatura)
+
+channels:
+  allow: [telegram, slack, discord, mattermost]     # canais suportados
+  forbid_open_ingress: true            # allow_all=true (ingress aberto) REPROVA → use allow_chats
+
+mcp:
+  max_trust: reviewed                  # 'trusted' (bypassa o gate por capability) fica acima do teto
+
+secrets:
+  forbid_literal_in_yaml: true         # segredo real em texto no YAML versionável REPROVA
+
+gateway:
+  require_token: true                  # API HTTP exige OKAMI_API_TOKEN (fail-closed)
+  forbid_public_bind: true             # bind 0.0.0.0 sem token REPROVA
+
+sandbox:
+  forbid_forced_local_on_exposed: true # backend:local fixo numa instalação exposta = aviso
+  require_isolation_on_exposed: false  # true em ambiente hostil: exposto SEM Docker = REPROVA (não degrada)
+
+tools:
+  require_metadata: true               # toda tool com ToolSpec (categoria/risco/sensibilidade)
+
+retention:
+  require: false                       # true exige bloco retention/cleanup (rode `okami clean --deep` no cron)

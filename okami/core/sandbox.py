@@ -41,6 +41,7 @@ class SandboxPolicy:
     fsize_mb: int = 0                # rlimit FSIZE                 (0 = não setar)
     image: str = "python:3.11-slim"  # imagem do backend docker
     egress_allow: tuple = ()         # allowlist de egress (hosts) via proxy filtrante (#5)
+    require_isolation: bool = False   # estrito (#P1.2): exposto SEM Docker → shell/process DESABILITADO (não degrada)
 
     @classmethod
     def from_config(cls, d: dict | None) -> "SandboxPolicy":
@@ -54,8 +55,11 @@ class SandboxPolicy:
         Campos explícitos sempre vencem o atalho do profile."""
         d = d or {}
         p = cls()
-        if str(d.get("profile", "")).lower() == "hardened" and d.get("backend") is None:
+        prof = str(d.get("profile", "")).lower()
+        if prof in ("hardened", "hardened-strict") and d.get("backend") is None:
             p.backend = "auto"          # postura endurecida → exige isolamento real (docker) quando houver
+        if prof == "hardened-strict" or d.get("require_isolation"):
+            p.require_isolation = True  # #P1.2: hardened-strict NÃO degrada p/ local em superfície exposta
         for k in ("backend", "mode", "network", "timeout", "max_output",
                   "mem_mb", "cpu_seconds", "nproc", "fsize_mb", "image"):
             if d.get(k) is not None:
@@ -97,8 +101,11 @@ def effective_sandbox(cfg_sandbox, surface: str = "") -> "SandboxPolicy":
     raw = dict(cfg_sandbox or {})
     p = SandboxPolicy.from_config(raw)
     explicit = ("backend" in raw) or ("profile" in raw)
-    if not explicit and surface in EXPOSED_SURFACES:
-        p.backend = "auto"
+    exposed = surface in EXPOSED_SURFACES
+    if exposed and p.require_isolation:
+        p.backend = "docker"        # #P1.2 estrito: exige Docker; sem Docker → run_shell/process DESABILITADO
+    elif exposed and not explicit:
+        p.backend = "auto"          # dev-friendly: endurece, mas degrada p/ local se não houver Docker
     return p
 
 

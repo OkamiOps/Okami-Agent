@@ -44,6 +44,13 @@ def test_no_informative_marker_left():
     assert "Informativo por enquanto" not in _CI.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(not _CI.exists(), reason="ci.yml ausente")
+def test_policy_conformance_is_a_gate():
+    text = _CI.read_text(encoding="utf-8")
+    gate = [ln for ln in text.splitlines() if "okami policy check" in ln]
+    assert gate and all("|| true" not in ln for ln in gate), "policy check precisa ser gate"
+
+
 def test_codeql_workflow_pinned_by_sha():
     cq = _ROOT / ".github" / "workflows" / "codeql.yml"
     if not cq.exists():
