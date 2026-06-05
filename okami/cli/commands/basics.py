@@ -74,11 +74,10 @@ def list_providers(
 
     from okami.cli import _ui
     console.print()
-    console.print(_ui.banner(__version__))
+    console.print(_ui.masthead(__version__, right="providers"))
     console.print()
-    console.print(_ui.section("Providers"))
     t = _ui.data_table(
-        ("", {"width": 2, "no_wrap": True}),
+        ("", {"width": 1, "no_wrap": True}),
         ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
         ("modelo", {"style": _ui.SOFT}),
         ("tier", {"style": _ui.MUTE, "no_wrap": True}),
@@ -89,8 +88,8 @@ def list_providers(
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
         state = _ui.badge("ready", "pronto") if pc.ready else _ui.badge("missing", "falta auth")
         t.add_row(mark, name, pc.model, pc.tier, pc.transport, state)
-    console.print(t)
-    console.print()
+    console.print(_ui.panel(t, title=f"Providers ({len(cfg.providers)})",
+                            subtitle="★ default", accent=_ui.MAGENTA))
     console.print(_ui.footer("Próximos passos:", [
         ("okami provider add", "adiciona um modelo do catálogo (23 presets)"),
         ("okami provider default <id>", "troca o provider padrão"),
@@ -139,26 +138,25 @@ def doctor(
     from rich.text import Text
 
     from okami.cli import _ui
+    from okami.cli._shared import _disk_renderable
     cfg = _load()
+    sysinfo = f"{platform.system()} {platform.release()} · Python {platform.python_version()}"
     console.print()
-    console.print(_ui.banner(__version__))
-    console.print(_ui.fields([("sistema", Text(f"{platform.system()} {platform.release()} · "
-                                               f"Python {platform.python_version()}", style=_ui.MUTE))], label_w=10))
+    console.print(_ui.masthead(__version__, right=sysinfo))
     console.print()
+    cards = []
 
-    # --- ◆ providers (auth + endpoint) ---
-    console.print(_ui.section("Providers"))
+    # ◆ Providers (auth + endpoint ping) ---------------------------------------
     pt = _ui.data_table(
-        ("", {"width": 2, "no_wrap": True}),
+        ("", {"width": 1, "no_wrap": True}),
         ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
-        ("transporte", {"style": _ui.MUTE, "no_wrap": True}),
         ("auth", {"no_wrap": True}),
-        ("endpoint", {"style": _ui.MUTE, "overflow": "ellipsis", "no_wrap": True, "max_width": 46}),
+        ("endpoint", {"style": _ui.MUTE, "overflow": "ellipsis", "no_wrap": True, "max_width": 30}),
     )
     for name, pc in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
         if pc.transport in ("codex_oauth", "minimax_oauth"):
-            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge("missing", f"okami login {name}")
+            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge("missing", f"login {name}")
         elif pc.transport == "claude_cli":
             auth = _ui.badge("ready", "CLI claude") if pc.ready else _ui.badge("missing", "instale o CLI")
         elif pc.api_key_env:
@@ -173,38 +171,32 @@ def doctor(
             host = pc.api_base.replace("https://", "").replace("http://", "")
             ep = Text()
             ep.append_text(_ui.dot("ok" if ok else "fail"))
-            ep.append(f"  {host} · {msg[:34]}", style=_ui.MUTE)
-        pt.add_row(mark, name, pc.transport, auth, ep)
-    console.print(pt)
-    console.print()
+            ep.append(f" {host}", style=_ui.MUTE)
+        pt.add_row(mark, name, auth, ep)
+    cards.append(_ui.panel(pt, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
-    # --- memória ---
+    # ◆ Memória ----------------------------------------------------------------
     mem = cfg.memory or {}
     emb = mem.get("embedder") or {}
     emb_v = Text("desligado", style=_ui.MUTE)
     if emb.get("enabled", True) and emb.get("model"):
         from okami.memory import OpenAICompatEmbedder
         ok = OpenAICompatEmbedder(emb.get("api_base", "http://localhost:1234/v1"), emb["model"]).available()
-        emb_v = _ui.badge("ok", emb.get("api_base", "")) if ok else _ui.badge("warn", "offline → BM25")
-    fl = mem.get("files", {})
+        emb_v = _ui.badge("ok", "online") if ok else _ui.badge("warn", "offline → BM25")
     mem_rows = [
-        ("backend", Text(mem.get("backend", "sqlite-fts5"), style=_ui.FG)),
+        ("backend", Text(mem.get("backend", "sqlite-fts5"), style=f"bold {_ui.FG}")),
         ("embedder", emb_v),
         ("honcho", Text((mem.get("honcho") or {}).get("base_url", "—"), style=_ui.SOFT)),
-        ("arquivos .md", Text("SOUL · VOICE · PERSONA · AGENTS · USER · MEMORY", style=_ui.SOFT)),
-        ("limites (chars)", Text(f"soul {fl.get('soul', 6000)} · voice {fl.get('voice', 6000)} · "
-                                 f"persona {fl.get('persona', 6000)} · user {fl.get('user', 4000)}", style=_ui.MUTE)),
+        ("arquivos", Text("SOUL · VOICE · PERSONA · USER · MEMORY", style=_ui.SOFT)),
     ]
-    console.print()
-    console.print(_ui.section("Memória"))
-    console.print(_ui.fields(mem_rows, label_w=16))
+    cards.append(_ui.panel(_ui.fields(mem_rows, label_w=10), title="Memória", accent=_ui.CYAN))
 
-    # --- ambiente / toolchain ---
+    # ◆ Ambiente / toolchain ---------------------------------------------------
     tools_line = Text()
     for tool in ("git", "uv", "node", "docker", "claude", "rg"):
         path = shutil.which(tool)
         tools_line.append_text(_ui.dot("ok" if path else "off"))
-        tools_line.append(f" {tool}   ", style=_ui.SOFT if path else _ui.MUTE)
+        tools_line.append(f" {tool}  ", style=_ui.SOFT if path else _ui.MUTE)
     try:
         _c = sqlite3.connect(":memory:")
         _c.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
@@ -224,8 +216,8 @@ def doctor(
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", {}) or {})
     sb_v = Text()
-    sb_v.append(f"{sb.backend} · {sb.mode} · net {'on' if sb.network_on else 'off'}   ", style=_ui.FG)
-    sb_v.append_text(_ui.badge("ok", "isolamento real") if sb.backend == "docker"
+    sb_v.append(f"{sb.backend}·{sb.mode} ", style=_ui.FG)
+    sb_v.append_text(_ui.badge("ok", "isolado") if sb.backend == "docker"
                      else _ui.badge("warn", "cercas locais"))
     from okami.integrations.mcp import servers_of
     srv = servers_of(getattr(cfg, "mcp", None))
@@ -234,21 +226,15 @@ def doctor(
         ("SQLite FTS5", _ui.badge("ok", "híbrida") if fts_ok else _ui.badge("warn", "LIKE (sem FTS5)")),
         ("codex auth", _ui.badge("ok", "logado") if codex_auth else _ui.badge("missing", "okami login codex")),
         (".env global", env_v),
-        ("MCP", Text(f"{len(srv)} servidor(es): {', '.join(list(srv)[:6])}" if srv else "nenhum",
-                     style=_ui.SOFT if srv else _ui.MUTE)),
+        ("MCP", Text(f"{len(srv)} servidor(es)" if srv else "nenhum", style=_ui.SOFT if srv else _ui.MUTE)),
         ("sandbox", sb_v),
     ]
-    console.print()
-    console.print(_ui.section("Ambiente"))
-    console.print(_ui.fields(env_rows, label_w=16))
+    cards.append(_ui.panel(_ui.fields(env_rows, label_w=12), title="Ambiente", accent=_ui.ORANGE))
 
-    # --- ◆ disco (uso por área + quota) ---
-    from okami.cli._shared import _disk_renderable
-    console.print()
-    console.print(_ui.section("Disco"))
-    console.print(_disk_renderable(cfg))
+    # ◆ Disco (medidores) ------------------------------------------------------
+    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True), title="Disco", accent=_ui.MAGENTA))
 
-    console.print()
+    console.print(_ui.grid(cards, width=console.width))
     console.print(_ui.footer("Próximos passos:", [
         ("okami doctor --lint", "lint de postura de segurança"),
         ("okami clean --deep --dry-run", "prévia da poda de disco (quota versionada)"),

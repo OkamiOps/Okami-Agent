@@ -11,10 +11,11 @@ from __future__ import annotations
 import rich.box as _box
 from rich.console import Group
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from okami.tui import CYAN, DIM, FG, MAGENTA, MUTE, ORANGE, SOFT, _grad_color  # paleta da marca
+from okami.tui import CYAN, DIM, FG, MAGENTA, MUTE, ORANGE, SOFT, TAGLINE, _grad_color  # paleta da marca
 
 # semânticas (verde/âmbar/vermelho) fora da paleta de marca, p/ estado
 GREEN = "#3fb950"
@@ -22,8 +23,9 @@ AMBER = "#ffb86c"
 RED = "#ff5555"
 
 __all__ = ["ORANGE", "CYAN", "MAGENTA", "FG", "SOFT", "MUTE", "DIM", "GREEN", "AMBER", "RED",
-           "header", "banner", "section", "fields", "footer", "card", "kv", "kv_grid", "badge",
-           "dot", "data_table", "hint", "gradient", "stack"]
+           "header", "banner", "masthead", "section", "rule", "fields", "footer", "card", "panel",
+           "grid", "meter", "meter_rows", "kv", "kv_grid", "badge", "dot", "data_table", "hint",
+           "gradient", "stack"]
 
 # estado → (cor, símbolo). Cobre os status que os comandos usam (auth/doctor/policy/lint).
 _STATE = {
@@ -68,12 +70,36 @@ def banner(version: str = "", tagline: str = "IA com soberania para PMEs", *, ic
     return t
 
 
+def masthead(version: str = "", *, tagline: str = "", right: str = "", icon: str = "🐺") -> Panel:
+    """Barra-título EMOLDURADA (largura cheia): 🐺 + wordmark OKAMI espaçado em gradiente + versão à
+    esquerda; tagline/estado à direita. É o topo dos painéis (status/doctor/config) — dá moldura à página."""
+    left = Text(no_wrap=True, overflow="ellipsis")
+    left.append(f"{icon}  ", style=ORANGE)
+    left.append_text(gradient("OKAMI"))
+    if version:
+        left.append(f"   v{version}", style=MUTE)
+    rt = Text(right or tagline or TAGLINE, no_wrap=True, overflow="ellipsis",
+              style=SOFT if right else ORANGE, justify="right")
+    bar = Table.grid(expand=True)
+    bar.add_column(justify="left", ratio=3)
+    bar.add_column(justify="right", ratio=2)
+    bar.add_row(left, rt)
+    return Panel(bar, box=_box.ROUNDED, border_style=ORANGE, padding=(0, 2))
+
+
 def section(title: str, *, accent: str = CYAN) -> Text:
     """Cabeçalho de seção estilo Hermes/OpenClaw: `◆ Título` (diamante de acento)."""
     t = Text()
     t.append("◆ ", style=f"bold {accent}")
     t.append(title, style=f"bold {accent}")
     return t
+
+
+def rule(title: str = "", *, accent: str = DIM) -> Rule:
+    """Régua horizontal fina (com título opcional em acento) — separa blocos sem o peso de um card."""
+    if title:
+        return Rule(Text(title, style=f"bold {accent}"), style=accent, align="left")
+    return Rule(style=accent)
 
 
 def fields(rows, *, indent: int = 2, label_w: int = 0, label_style: str = MUTE, value_style: str = FG) -> Table:
@@ -129,11 +155,70 @@ def kv(rows, **kw) -> Table:
     return kv_grid(rows, **kw)
 
 
-def card(body, *, title: str = "", subtitle: str = "", accent: str = ORANGE, pad=(1, 2)) -> Panel:
-    """Card arredondado com borda dim e título em acento — o container padrão dos comandos."""
-    return Panel(body, box=_box.ROUNDED, border_style=DIM, padding=pad,
+def card(body, *, title: str = "", subtitle: str = "", accent: str = ORANGE, pad=(1, 2),
+         border: str = "") -> Panel:
+    """Card arredondado com borda dim e título em acento — o container padrão dos comandos.
+    `border` força a cor da borda (default = DIM discreto; passe um acento p/ destacar o card)."""
+    return Panel(body, box=_box.ROUNDED, border_style=(border or DIM), padding=pad,
                  title=(_title(title, accent) if title else None), title_align="left",
                  subtitle=(Text(subtitle, style=MUTE) if subtitle else None), subtitle_align="right")
+
+
+def panel(body, *, title: str = "", subtitle: str = "", accent: str = CYAN, pad=(1, 2)) -> Panel:
+    """Card de SEÇÃO do dashboard: título `◆ Título` no acento + borda no MESMO acento (suave).
+    É a peça que vai na grade de colunas — dá a cada bloco uma moldura clara, sem virar texto solto."""
+    head = Text()
+    head.append("◆ ", style=f"bold {accent}")
+    head.append(title, style=f"bold {accent}")
+    return Panel(body, box=_box.ROUNDED, border_style=accent, padding=pad,
+                 title=head if title else None, title_align="left",
+                 subtitle=(Text(subtitle, style=MUTE) if subtitle else None), subtitle_align="right")
+
+
+def grid(cards, *, cols: int = 2, width: int = 0, gutter: int = 1):
+    """Arruma `cards` (painéis/renderables) numa GRADE de `cols` colunas, RESPONSIVA à largura.
+    Terminal estreito (width<96) → empilha em 1 coluna. Painéis curtos alinham no topo da linha."""
+    cards = [c for c in cards if c is not None]
+    if width and width < 96:
+        cols = 1
+    g = Table.grid(expand=True, padding=(0, gutter, 1, gutter))
+    for _ in range(cols):
+        g.add_column(ratio=1, overflow="fold")
+    for i in range(0, len(cards), cols):
+        chunk = list(cards[i:i + cols])
+        while len(chunk) < cols:
+            chunk.append("")
+        g.add_row(*chunk)
+    return g
+
+
+def meter(ratio: float, *, width: int = 14, color: str = "") -> Text:
+    """Barra horizontal █░ com cor por LIMIAR (verde<70% · âmbar<90% · vermelho≥90%) ou cor fixa."""
+    r = 0.0 if ratio != ratio else max(0.0, min(1.0, ratio))   # NaN-safe
+    filled = round(r * width)
+    c = color or (GREEN if r < 0.7 else AMBER if r < 0.9 else RED)
+    t = Text()
+    t.append("█" * filled, style=c)
+    t.append("░" * (width - filled), style=DIM)
+    return t
+
+
+def meter_rows(rows, *, bar_width: int = 14, label_w: int = 0) -> Table:
+    """Linhas com MEDIDOR: `label  ████░░░  valor  flag`. `rows`: [(label, ratio, valor, flag?, color?)].
+    valor/flag podem ser str ou Text; ratio∈[0,1] define a barra (cor por limiar, ou `color` fixa)."""
+    g = Table.grid(padding=(0, 2, 0, 0))
+    g.add_column(justify="left", style=MUTE, no_wrap=True, min_width=label_w)
+    g.add_column(no_wrap=True)                       # barra
+    g.add_column(justify="right", style=FG, no_wrap=True)
+    g.add_column(no_wrap=True)                       # flag
+    for row in rows:
+        label, ratio, value = row[0], row[1], row[2]
+        flag = row[3] if len(row) > 3 else Text("")
+        color = row[4] if len(row) > 4 else ""
+        g.add_row(label, meter(ratio, width=bar_width, color=color),
+                  value if isinstance(value, Text) else Text(str(value), style=FG),
+                  flag if isinstance(flag, Text) else Text(str(flag), style=MUTE))
+    return g
 
 
 def _title(title: str, accent: str) -> Text:

@@ -343,9 +343,8 @@ def tools() -> None:
     from okami.core.tools import default_registry
     names = set(default_registry())
     console.print()
-    console.print(_ui.banner(__version__))
+    console.print(_ui.masthead(__version__, right=f"{len(names)} ferramentas"))
     console.print()
-    console.print(_ui.section(f"Ferramentas ({len(names)})"))
     t = _ui.data_table(
         ("ferramenta", {"style": f"bold {_ui.MAGENTA}", "no_wrap": True}),
         ("categoria", {"style": _ui.MUTE, "no_wrap": True}),
@@ -359,11 +358,10 @@ def tools() -> None:
             t.add_row("", "", "", "")                 # respiro entre categorias
         for s in specs:
             t.add_row(s.name, cat, s.tier, _ui.badge(_state.get(s.danger, "dim"), s.danger))
-    console.print(t)
+    console.print(_ui.panel(t, title="Ferramentas por categoria", accent=_ui.MAGENTA))
     drift = missing(names)
     if drift:
         console.print(f"[yellow]⚠ sem metadata no registry:[/yellow] {', '.join(drift)}")
-    console.print()
     console.print(_ui.footer("Por superfície:", [
         ("okami status", "vê a postura de canais & sandbox"),
         ("okami doctor --lint", "lint de exposição (quem roda o quê)"),
@@ -405,9 +403,13 @@ def status(
         import json as _json
         console.print_json(_json.dumps(payload, ensure_ascii=False))
         raise typer.Exit(0)
+    import os as _os
+
     from rich.text import Text
 
+    from okami import __version__
     from okami.cli import _ui
+    from okami.cli._shared import _disk_renderable
     default_agent = (cfg.agents or {}).get("default", "—")
     pc = cfg.provider()
     appr = (cfg.approvals or {}).get("mode", "manual")
@@ -415,50 +417,48 @@ def status(
     learn = cfg.learning or {}
     voice_on = bool((cfg.voice or {}).get("stt") or (cfg.voice or {}).get("tts"))
     think = pc.reasoning_effort or "—"
+    from okami.core.lint import lint_posture, summarize
+    cs = summarize(lint_posture(cfg))
+    cc = cs["counts"]
 
-    import os as _os
+    # masthead: estado-resumo à direita (conforme / N falhas) -------------------
+    right = "● tudo conforme" if cs["ok"] else f"✗ {cc['fail']} falha(s) de conformance"
+    console.print()
+    console.print(_ui.masthead(__version__, right=right))
+    console.print()
 
-    from okami import __version__
-    console.print()
-    console.print(_ui.banner(__version__))
-    console.print()
+    cards = []
 
     # ◆ Sessão -----------------------------------------------------------------
-    console.print(_ui.section("Sessão"))
-    model_v = Text(pc.model, style=f"bold {_ui.CYAN}")
-    model_v.append(f"   {cfg.default_provider} · {pc.tier}", style=_ui.MUTE)
+    model_v = Text(pc.model, style=f"bold {_ui.CYAN}", overflow="fold")
+    model_v.append(f"\n{cfg.default_provider} · {pc.tier}", style=_ui.MUTE)
     toggles = Text()
     for lbl, on in (("persona", persona_on), ("voz", voice_on), ("auto-skill", learn.get("auto_skill"))):
         toggles.append_text(_ui.dot("on" if on else "off"))
-        toggles.append(f" {lbl}   ", style=_ui.SOFT if on else _ui.MUTE)
-    console.print(_ui.fields([
+        toggles.append(f" {lbl}  ", style=_ui.SOFT if on else _ui.MUTE)
+    cards.append(_ui.panel(_ui.fields([
         ("agente", Text(default_agent, style=f"bold {_ui.FG}")),
         ("modelo", model_v),
         ("raciocínio", think),
         ("memória", cfg.memory.get("backend", "sqlite-fts5")),
         ("aprovação", _ui.badge("ok" if appr in ("manual", "smart") else "warn", appr)),
         ("recursos", toggles),
-    ], label_w=12))
-    console.print()
+    ], label_w=11), title="Sessão", accent=_ui.ORANGE))
 
     # ◆ Providers --------------------------------------------------------------
-    console.print(_ui.section("Providers"))
     t = _ui.data_table(
-        ("", {"width": 2, "no_wrap": True}),
+        ("", {"width": 1, "no_wrap": True}),
         ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
-        ("modelo", {"style": _ui.SOFT}),
-        ("tier", {"style": _ui.MUTE, "no_wrap": True}),
+        ("modelo", {"style": _ui.SOFT, "overflow": "ellipsis", "max_width": 18}),
         ("estado", {"no_wrap": True}),
     )
     for name, p in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
         state = _ui.badge("ready", "pronto") if p.ready else _ui.badge("missing", "falta auth")
-        t.add_row(mark, name, p.model, p.tier, state)
-    console.print(t)
-    console.print()
+        t.add_row(mark, name, p.model, state)
+    cards.append(_ui.panel(t, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
     # ◆ Canais & Gateway -------------------------------------------------------
-    console.print(_ui.section("Canais & Gateway"))
     raw, channels = _collect_channels()
     ch_rows = []
     for (owner, ctype), conf in (channels or {}).items():
@@ -468,67 +468,57 @@ def status(
             st = _ui.badge("ok", f"allowlist ({len(conf['allow_chats'])})")
         else:
             st = _ui.badge("off", "deny-by-default")
-        ch_rows.append((ctype + ("" if owner == "(global)" else f" · {owner}"), st))
+        ch_rows.append((ctype + ("" if owner == "(global)" else f"·{owner}"), st))
     if not ch_rows:
-        ch_rows.append(("canais", Text("nenhum — DM local via okami chat", style=_ui.MUTE)))
+        ch_rows.append(("canais", Text("nenhum — DM local (okami chat)", style=_ui.MUTE)))
     host = (cfg.gateway or {}).get("host", "127.0.0.1")
     api_tok = bool(_os.getenv("OKAMI_API_TOKEN"))
     api_v = Text()
     api_v.append_text(_ui.dot("ok" if (host in ("127.0.0.1", "localhost") or api_tok) else "warn"))
-    api_v.append(f"  bind {host} · token {'set' if api_tok else 'OFF'}", style=_ui.SOFT)
-    ch_rows.append(("API HTTP", api_v))
-    console.print(_ui.fields(ch_rows, label_w=18))
-    console.print()
+    api_v.append(f" {host} · token {'set' if api_tok else 'OFF'}", style=_ui.SOFT)
+    ch_rows.append(("API", api_v))
+    cards.append(_ui.panel(_ui.fields(ch_rows, label_w=14), title="Canais & Gateway", accent=_ui.CYAN))
 
-    # ◆ MCP --------------------------------------------------------------------
+    # ◆ MCP + Conformance ------------------------------------------------------
     from okami.integrations.mcp import _trust_of, servers_of
     srv = servers_of(cfg.mcp)
-    console.print(_ui.section("MCP"))
-    if srv:
-        console.print(_ui.fields([(n, Text(f"trust={_trust_of(c or {})}", style=_ui.SOFT))
-                                  for n, c in srv.items()], label_w=18))
-    else:
-        console.print(_ui.fields([("servidores", Text("nenhum configurado", style=_ui.MUTE))], label_w=18))
-    console.print()
-
-    # ◆ Conformance + Uso ------------------------------------------------------
-    from okami.core.lint import lint_posture, summarize
-    cs = summarize(lint_posture(cfg))
-    cc = cs["counts"]
-    console.print(_ui.section("Conformance (lint)"))
-    cf = Text("  ")
+    cf = Text()
     cf.append_text(_ui.badge("ok", "conforme") if cs["ok"] else _ui.badge("fail", f"{cc['fail']} falha(s)"))
-    cf.append(f"    {cc['pass']} ok · {cc['warn']} avisos · {cc['fail']} falhas", style=_ui.MUTE)
-    console.print(cf)
-    try:                                              # tokens/custo acumulados do agente default (§A5)
+    cf.append(f"  {cc['pass']} ok · {cc['warn']} avisos", style=_ui.MUTE)
+    mcp_rows = [("conformance", cf)]
+    if srv:
+        for n, c in srv.items():
+            mcp_rows.append((f"mcp·{n}", Text(f"trust={_trust_of(c or {})}", style=_ui.SOFT)))
+    else:
+        mcp_rows.append(("mcp", Text("nenhum servidor", style=_ui.MUTE)))
+    cards.append(_ui.panel(_ui.fields(mcp_rows, label_w=14), title="MCP & Conformance", accent=_ui.ORANGE))
+
+    # ◆ Disco (medidores) ------------------------------------------------------
+    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True), title="Disco", accent=_ui.MAGENTA))
+
+    # ◆ Uso (tokens/custo) -----------------------------------------------------
+    try:
         from okami.gateway.sessions import TranscriptStore
         from okami.llm.usage import estimate_cost, format_tokens, summarize_store
         ws = Path("agents") / default_agent if default_agent and default_agent != "—" else Path(".")
         u = summarize_store(TranscriptStore(ws).load_store())
         if u.total_tokens:
             cr = estimate_cost(u, transport=pc.transport, provider=cfg.default_provider, model=pc.model)
-            extra = f" · {format_tokens(u.cache_read_tokens)} cache" if u.cache_read_tokens else ""
-            console.print()
-            console.print(_ui.section("Uso"))
-            usage = Text("  ")
+            usage = Text()
             usage.append(f"{format_tokens(u.input_tokens)} in", style=_ui.FG)
-            usage.append(f" · {format_tokens(u.output_tokens)} out{extra}", style=_ui.SOFT)
-            usage.append(f"   custo {cr.label}", style=_ui.MAGENTA)
-            console.print(usage)
+            usage.append(f" · {format_tokens(u.output_tokens)} out", style=_ui.SOFT)
+            if u.cache_read_tokens:
+                usage.append(f" · {format_tokens(u.cache_read_tokens)} cache", style=_ui.MUTE)
+            usage.append(f"\ncusto {cr.label}", style=_ui.MAGENTA)
+            cards.append(_ui.panel(usage, title="Uso", accent=_ui.CYAN))
     except Exception:  # noqa: BLE001
         pass
 
-    # ◆ Disco ------------------------------------------------------------------
-    from okami.cli._shared import _disk_renderable
-    console.print()
-    console.print(_ui.section("Disco"))
-    console.print(_disk_renderable(cfg))
-
-    console.print()
+    console.print(_ui.grid(cards, width=console.width))
     console.print(_ui.footer("Próximos passos:", [
         ("okami chat", "conversa no terminal"),
         ("okami doctor", "diagnóstico de config/chaves/conectividade"),
-        ("okami auth", "credenciais · okami policy check --strict — prontidão de GA"),
+        ("okami policy check --strict", "prontidão de GA"),
     ]))
     console.print()
 

@@ -46,11 +46,11 @@ def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _disk_renderable(cfg, *, root: str = ".", top: int = 6):
+def _disk_renderable(cfg, *, root: str = ".", top: int = 6, as_meters: bool = False):
     """Renderable da seção `◆ Disco`: uso por área (bytes/arquivos), total e aviso de quota.
 
-    Compartilhado por `status` e `doctor`. Devolve um Group do Rich (tabela das maiores áreas +
-    linha de total) ou um Text discreto se o workspace ainda não tem nada gravado."""
+    Compartilhado por `status` e `doctor`. `as_meters=True` desenha BARRAS de uso (proporcionais à
+    maior área, cor por quota); senão uma tabela. Devolve um Text discreto se o .okami/ está vazio."""
     from rich.text import Text
 
     from okami.cli import _ui
@@ -58,8 +58,27 @@ def _disk_renderable(cfg, *, root: str = ".", top: int = 6):
     rep = disk_report(root, retention=getattr(cfg, "retention", None))
     areas = rep["areas"]
     if not areas:
-        return Text("  sem dados ainda — .okami/ vazio", style=_ui.MUTE)
+        return Text("sem dados ainda — .okami/ vazio (nada a podar)", style=_ui.MUTE)
     rows = sorted(areas.items(), key=lambda kv: kv[1]["bytes"], reverse=True)[:top]
+    peak = max((a["bytes"] for _, a in rows), default=1) or 1
+
+    total = Text()
+    total.append(f"total {fmt_bytes(rep['bytes_total'])}", style=f"bold {_ui.FG}")
+    if rep["over_quota"]:
+        total.append(f"   ▲ {len(rep['over_quota'])} acima da quota — okami clean --deep", style=_ui.AMBER)
+    else:
+        total.append("   · okami clean --deep poda o que envelheceu", style=_ui.MUTE)
+
+    if as_meters:                                     # barras: comprimento ∝ tamanho; cor por quota
+        mrows = []
+        for key, a in rows:
+            color = _ui.RED if a["over_quota"] else (_ui.MAGENTA if a["prunable"] else _ui.DIM)
+            flag = _ui.badge("warn", "quota") if a["over_quota"] else Text("durável", style=_ui.DIM) \
+                if not a["prunable"] else Text("")
+            mrows.append((key, a["bytes"] / peak, fmt_bytes(a["bytes"]), flag, color))
+        meters = _ui.meter_rows(mrows, bar_width=12, label_w=12)
+        return _ui.stack(meters, total)
+
     t = _ui.data_table(("área", {"style": f"bold {_ui.FG}", "no_wrap": True}),
                        ("tam.", {"justify": "right", "style": _ui.MAGENTA, "no_wrap": True}),
                        ("arquivos", {"justify": "right", "style": _ui.MUTE, "no_wrap": True}),
@@ -68,12 +87,6 @@ def _disk_renderable(cfg, *, root: str = ".", top: int = 6):
         flag = _ui.badge("warn", f"> quota {int(a['quota_mb'])}MB") if a["over_quota"] else (
             Text("durável", style=_ui.DIM) if not a["prunable"] else Text(""))
         t.add_row(key, fmt_bytes(a["bytes"]), str(a["files"]), flag)
-    total = Text("  ")
-    total.append(f"total {fmt_bytes(rep['bytes_total'])}", style=f"bold {_ui.FG}")
-    if rep["over_quota"]:
-        total.append(f"   ▲ {len(rep['over_quota'])} área(s) acima da quota — okami clean --deep", style=_ui.AMBER)
-    else:
-        total.append("   · okami clean --deep poda sessions/checkpoints/tool_outputs", style=_ui.MUTE)
     return _ui.stack(t, total)
 
 

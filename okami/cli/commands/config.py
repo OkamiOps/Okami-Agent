@@ -190,27 +190,26 @@ def _render_config_view(diff: bool = False) -> None:
     from okami import __version__
     from okami.cli import _ui
     console.print()
-    console.print(_ui.banner(__version__))
+    console.print(_ui.masthead(__version__, right="config efetiva"))
     console.print()
-    console.print(_ui.section("Arquivos"))
-    console.print(_files_fields())
-    console.print()
-    console.print(_ui.section("Resumo"))
-    console.print(_summary_fields())
-    console.print()
+    # grade: Arquivos | Resumo (lado a lado em terminal largo; empilha no estreito)
+    console.print(_ui.grid([
+        _ui.panel(_files_fields(), title="Arquivos", accent=_ui.CYAN, subtitle="segredo só no .env"),
+        _ui.panel(_summary_fields(), title="Resumo", accent=_ui.ORANGE),
+    ], width=console.width))
+    # YAML efetivo (ou overrides) em card largo
     if diff:
         p = Path("okami.local.yaml")
-        console.print(_ui.section("Overrides"))
         if not p.exists():
-            console.print(_ui.hint("sem overrides — okami.local.yaml não existe"))
+            console.print(_ui.panel(_ui.hint("sem overrides — okami.local.yaml não existe"),
+                                    title="Overrides", accent=_ui.MAGENTA))
         else:
             body = Syntax(p.read_text(encoding="utf-8"), "yaml", theme="ansi_dark", background_color="default")
-            console.print(_ui.card(body, title="okami.local.yaml"))
+            console.print(_ui.panel(body, title="Overrides", subtitle="okami.local.yaml", accent=_ui.MAGENTA))
     else:
-        console.print(_ui.section("Efetiva"))
         body = Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark", background_color="default")
-        console.print(_ui.card(body, title="okami.yaml + overrides", subtitle="segredos mascarados"))
-    console.print()
+        console.print(_ui.panel(body, title="Efetiva", subtitle="okami.yaml + overrides · segredos mascarados",
+                                accent=_ui.MAGENTA))
     console.print(_ui.footer("Próximos passos:", [
         ("okami config set <k> <v>", "segredo→.env · resto→okami.local.yaml"),
         ("okami config get <k>", "lê um valor resolvido"),
