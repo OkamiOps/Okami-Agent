@@ -349,7 +349,11 @@ class AgentEndpoint:
                 return False
             q: queue.Queue = queue.Queue()
             self._pending[str(chat_id)] = q
-            self.channel.send(chat_id, f"⚠ Aprovar: {req['reason']}? (/yes ou /no)")
+            _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
+            if _sa:
+                _sa(chat_id, f"⚠ Aprovar: {req['reason']}?")
+            else:
+                self.channel.send(chat_id, f"⚠ Aprovar: {req['reason']}? (/yes ou /no)")
             try:
                 ans = q.get(timeout=self.approval_timeout)
             except queue.Empty:

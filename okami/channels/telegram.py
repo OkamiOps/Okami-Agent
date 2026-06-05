@@ -91,6 +91,18 @@ class TelegramClient:
         except Exception:  # noqa: BLE001 — typing é best-effort
             pass
 
+    def send_approval(self, chat_id, text: str) -> dict:
+        """Aprovação com BOTÕES inline (✅/❌) — a resposta volta por callback_query (sem digitar /yes)."""
+        kb = {"inline_keyboard": [[{"text": "✅ Aprovar", "callback_data": "okapprove:yes"},
+                                   {"text": "❌ Negar", "callback_data": "okapprove:no"}]]}
+        return self._call("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": kb})
+
+    def answer_callback(self, callback_id: str, text: str = "") -> None:
+        try:
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
+        except Exception:  # noqa: BLE001
+            pass
+
     def download_file(self, file_id: str) -> str:
         """Baixa um arquivo (voz/áudio) para um temp e devolve o caminho."""
         fp = self._call("getFile", {"file_id": file_id}).get("result", {}).get("file_path")
@@ -135,6 +147,18 @@ class TelegramChannel(Channel):
         out = []
         for u in self.client.get_updates(offset=self._offset, timeout=30):
             self._offset = u["update_id"] + 1
+            cq = u.get("callback_query")                   # clique num botão inline (aprovação)
+            if cq:
+                self.client.answer_callback(cq.get("id", ""))   # tira o "spinner" do botão
+                data = cq.get("data") or ""
+                chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
+                frm = str((cq.get("from") or {}).get("id"))
+                if chat is None or not data.startswith("okapprove:"):
+                    continue
+                if self.allow and frm not in self.allow and not self.allow_all:  # auth POR CLICADOR
+                    continue
+                out.append(Inbound("telegram", str(chat), text="/yes" if data.endswith(":yes") else "/no"))
+                continue
             msg = u.get("message") or {}
             chat = (msg.get("chat") or {}).get("id")
             if chat is None:
@@ -165,6 +189,9 @@ class TelegramChannel(Channel):
 
     def send_typing(self, chat_id) -> None:
         self.client.send_chat_action(chat_id, "typing")
+
+    def send_approval(self, chat_id, text: str) -> None:
+        self.client.send_approval(chat_id, text)
 
     def send_audio(self, chat_id, audio_path) -> None:
         self.client.send_audio(chat_id, audio_path)

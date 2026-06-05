@@ -49,3 +49,31 @@ def test_channel_send_typing(monkeypatch):
                         lambda m, p, **k: (actions.append((m, p.get("action"))), {})[1])
     ch.send_typing("1")
     assert ("sendChatAction", "typing") in actions
+
+
+# ----------------------------------------------------------------- aprovação por botão inline
+def test_callback_query_becomes_yes(monkeypatch):
+    ch = TelegramChannel("tok", allow_chats=["55"])
+    upd = [{"update_id": 1, "callback_query": {"id": "cb", "data": "okapprove:yes",
+            "from": {"id": 55}, "message": {"chat": {"id": 99}}}}]
+    monkeypatch.setattr(ch.client, "get_updates", lambda **k: upd)
+    monkeypatch.setattr(ch.client, "answer_callback", lambda *a, **k: None)
+    inb = ch.poll()
+    assert len(inb) == 1 and inb[0].text == "/yes" and inb[0].chat_id == "99"
+
+
+def test_callback_query_unauthorized_clicker_ignored(monkeypatch):
+    ch = TelegramChannel("tok", allow_chats=["55"])
+    upd = [{"update_id": 1, "callback_query": {"id": "cb", "data": "okapprove:no",
+            "from": {"id": 999}, "message": {"chat": {"id": 99}}}}]   # 999 não está na allowlist
+    monkeypatch.setattr(ch.client, "get_updates", lambda **k: upd)
+    monkeypatch.setattr(ch.client, "answer_callback", lambda *a, **k: None)
+    assert ch.poll() == []
+
+
+def test_send_approval_inline_buttons(monkeypatch):
+    c = TelegramClient("tok")
+    cap = {}
+    monkeypatch.setattr(c, "_call", lambda m, p, **k: (cap.update(method=m, params=p), {})[1])
+    c.send_approval("1", "aprovar X?")
+    assert cap["method"] == "sendMessage" and "inline_keyboard" in cap["params"]["reply_markup"]
