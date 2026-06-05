@@ -23,3 +23,10 @@ def test_does_not_mangle_normal_text():
     plain = "li o arquivo path=src/main.py e rodei pytest -q (3 passaram)"
     assert redact(plain) == plain
     assert redact("") == "" and redact(None) is None
+
+
+def test_numeric_counts_of_sensitive_named_fields_are_not_masked():
+    # contagens (não-segredo) com nome sensível NÃO viram «redacted» — senão corrompe o JSON do event log
+    assert redact('"tokens_in": 2650') == '"tokens_in": 2650'
+    assert redact("session_count=42") == "session_count=42"
+    assert "hunter2" not in redact("password=hunter2")     # valor com letra (segredo) ainda mascara

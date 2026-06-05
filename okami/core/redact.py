@@ -16,7 +16,8 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     # O sep tolera aspas (estilo JSON: "password": "x") entre o nome e o = / :.
     (re.compile(
         r'(?i)(\b[A-Z0-9_]*(?:API[_-]?KEY|ACCESS[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|'
-        r'CREDENTIAL|PRIVATE[_-]?KEY|SESSION|COOKIE|AUTH)[A-Z0-9_]*\b)(["\']?\s*[=:]\s*["\']?)([^\s"\',;]+)'),
+        r'CREDENTIAL|PRIVATE[_-]?KEY|SESSION|COOKIE|AUTH)[A-Z0-9_]*\b)(["\']?\s*[=:]\s*["\']?)'
+        r'((?=[^\s"\',;]*[A-Za-z])[^\s"\',;]+)'),     # valor PRECISA ter letra: não mascara contagem (tokens_in: 2650)
      lambda m: f"{m.group(1)}{m.group(2)}{_MASK}"),
     (re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._\-]{8,}'), f"Bearer {_MASK}"),
     (re.compile(r'\bsk-[A-Za-z0-9_\-]{16,}\b'), f"sk-{_MASK}"),          # OpenAI-style

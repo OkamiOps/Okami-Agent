@@ -467,6 +467,13 @@ class Harness:
                     continue                      # tenta no modelo mais forte (resiliência, não crash)
                 return self._fail(t, f"provider falhou: {fail.reason}")
             comp = as_completion(out)              # tolera str (JSON-em-texto) E Completion (nativo)
+            _u = comp.usage                         # usage POR CHAMADA no trajeto (P2 observabilidade)
+            self.events.emit("llm_call", provider=comp.provider, model=comp.model,
+                             finish_reason=getattr(comp, "finish_reason", ""),
+                             tokens_in=getattr(_u, "input_tokens", 0),
+                             tokens_out=getattr(_u, "output_tokens", 0),
+                             cache=getattr(_u, "cache_read_tokens", 0),
+                             tool_call=bool(comp.tool_calls))
             self.messages.append({"role": "assistant", "content": comp.text})
             action = _action_from_tool_calls(comp.tool_calls) or parse_action(comp.text)
 

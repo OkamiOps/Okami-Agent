@@ -49,6 +49,13 @@ def events(
         extra = {k: v for k, v in e.items() if k not in ("seq", "ts", "type")}
         brief = "  ".join(f"[dim]{k}=[/dim]{str(v)[:60]}" for k, v in extra.items())
         console.print(f"[dim]{e.get('seq', '?'):>3} {hhmm}[/dim] [bold #ff7527]{e.get('type', '?')}[/bold #ff7527] {brief}")
+    calls = [e for e in evs if e.get("type") == "llm_call"]      # resumo de usage por-chamada (P2)
+    if calls:
+        ti = sum(int(e.get("tokens_in", 0) or 0) for e in calls)
+        to = sum(int(e.get("tokens_out", 0) or 0) for e in calls)
+        traces = {e.get("trace") for e in evs if e.get("trace")}
+        console.print(f"[dim]── {len(calls)} chamada(s) LLM · {ti:,} tok in · {to:,} tok out"
+                      f"{f' · {len(traces)} turno(s)' if traces else ''} ──[/dim]")
 
 
 @app.command()
