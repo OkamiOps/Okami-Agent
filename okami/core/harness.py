@@ -414,9 +414,18 @@ class Harness:
         t = self.task
         t.state = TaskState.IN_PROGRESS
         t.stats = self._stats  # acumulado por referência → usado na reflexão/auto-aprimoramento (§7)
-        # Ordem: .md core (sempre on) → recall da memória (relevante) → skills/sections.
-        memory_block = self.memory.inject(t.goal) if self.memory is not None else ""
-        extra = "\n\n".join(x for x in (self.core_block, memory_block, self.system_extra) if x)
+        # Context Engine (§P2 #9): UMA camada decide o contexto, com orçamento e citação de origem.
+        # Identidade/core é PROTEGIDA (nunca truncada); memória/skills cabem no que sobra. Ordem
+        # preservada (core → memória → skills) → sob tamanhos normais a saída é idêntica à de antes.
+        from okami.core.context import ContextEngine
+        eng = ContextEngine(budget_chars=self.budget.max_context_chars)
+        eng.add("core", self.core_block, protected=True)        # SOUL/VOICE/PERSONA + AGENTS/USER/MEMORY
+        if self.memory is not None:
+            eng.add("memory", self.memory.inject(t.goal))       # recall já vem citado (#11)
+        eng.add("skills", self.system_extra)
+        extra, _ctx_manifest = eng.build()
+        self.events.emit("context", sections=_ctx_manifest,
+                         total_chars=sum(m["chars"] for m in _ctx_manifest))
         # Em CONVERSA a fala da pessoa é o turno do usuário (não um "Comece." sintético → mata o
         # "Comecei." de execução de tarefa). Em TRABALHO o objetivo já está no system prompt.
         first = _user_start(self.images, text=t.goal) if is_conversational(t) else _user_start(self.images)
