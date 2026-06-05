@@ -24,8 +24,8 @@ class TerminalChannel(Channel):
 
     # Prefixos que ENVOLVEM uma resposta do agente (corpo pode ter markdown/código).
     _REPLY_MARKS = {"✅", "⚠", "❌", "❓"}
-    # Notificações de sistema de 1 linha (não renderizar como markdown).
-    _SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
+    # Notificações de sistema de 1 linha (não renderizar como markdown). "·" = rodapé de custo (dim).
+    _SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶", "·"}
 
     # --- saída -----------------------------------------------------------------
     def _print(self, text: str) -> None:
@@ -56,7 +56,7 @@ class TerminalChannel(Channel):
     @staticmethod
     def _render(text: str) -> str:
         """Colore os prefixos de status do AgentEndpoint p/ ficar legível no terminal."""
-        marks = {"✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan", "▶": "dim",
+        marks = {"✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan", "▶": "dim", "·": "dim",
                  "🧬": "magenta", "🎨": "magenta", "🎭": "magenta", "⏰": "blue", "↻": "blue",
                  "🧹": "dim", "⏹": "yellow", "⚡": "yellow", "🔒": "dim", "🚫": "red"}
         head = text[:1]

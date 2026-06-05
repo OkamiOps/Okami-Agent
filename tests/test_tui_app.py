@@ -37,6 +37,28 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
+def test_ctrl_c_copies_selection_to_clipboard(tmp_path):
+    # Copiar texto no CLI: com seleção (arraste do mouse), ^C copia (mouse segue ligado).
+    out = {}
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.screen.get_selected_text = lambda: "trecho selecionado pra copiar"   # simula seleção
+            copied = {}
+            app.copy_to_clipboard = lambda txt: copied.setdefault("txt", txt)
+            app.action_ctrl_c()
+            await pilot.pause()
+            out["copied"] = copied.get("txt")
+            out["notes"] = [v for k, v in app.transcript if k == "note"]
+
+    asyncio.run(scenario())
+    assert out["copied"] == "trecho selecionado pra copiar"
+    assert any("copiado" in n for n in out["notes"])
+
+
 def test_tui_roundtrip_user_and_agent_appear(tmp_path):
     out = {}
 

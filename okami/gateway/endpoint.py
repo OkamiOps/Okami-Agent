@@ -475,7 +475,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             parts = prompt.split(maxsplit=1)
             sub = parts[0].lower() if parts else ""
             if sub == "status":                        # /background status → lista persistida (durável)
-                self.channel.send(chat_id, self._background_status())
+                self.channel.send(chat_id, self._background_status(queued=len(s.queued)))
                 return
             if sub in ("cancel", "kill", "stop"):      # /background cancel <id> → para a tarefa
                 self.channel.send(chat_id, self._background_cancel(parts[1].strip() if len(parts) > 1 else ""))
@@ -483,9 +483,14 @@ class AgentEndpoint(EndpointCommandsMixin):
             if sub in ("log", "logs", "tail"):         # /background log <id> [linhas] → progresso ao vivo
                 self.channel.send(chat_id, self._background_log(parts[1].strip() if len(parts) > 1 else ""))
                 return
+            if sub in ("--process", "--proc", "-p"):   # promove a PROCESSO OS (servidor/build) → kill real
+                self.channel.send(chat_id, self._background_as_process(
+                    chat_id, parts[1].strip() if len(parts) > 1 else "", yolo=s.yolo))
+                return
             if not prompt:
-                self.channel.send(chat_id, "uso: /background <tarefa> · /background status · "
-                                  "/background log <id> · /background cancel <id>. Rodo em paralelo e aviso no fim.")
+                self.channel.send(chat_id, "uso: /background <tarefa> · /background --process <cmd> "
+                                  "(servidor/build) · /background status · /background log <id> · "
+                                  "/background cancel <id>. Rodo em paralelo e aviso no fim.")
                 return
             self._spawn_background(chat_id, prompt, yolo=s.yolo)
             return
@@ -537,6 +542,28 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _turn_footer(self, s: "Session", stats: dict, elapsed: float) -> str:
+        """Rodapé de custo por resposta: `· ctx N% · X tok (in↑ out↓) · Ys`. Sóbrio, 1 linha, dim."""
+        from okami.llm.usage import CanonicalUsage, format_tokens
+        parts: list[str] = []
+        try:                                              # ctx %: quão cheia está a janela do modelo
+            pc = self.cfg.provider() if self.cfg else None
+            if pc:
+                from okami.llm.providers import context_window_tokens
+                budget = max(1, int(context_window_tokens(pc) * (pc.chars_per_token or 4.0)))
+                used = sum(len(t) for _, t in s.history)
+                parts.append(f"ctx {min(100, round(100 * used / budget))}%")
+        except Exception:  # noqa: BLE001 — footer é cosmético, nunca quebra o turno
+            pass
+        u = CanonicalUsage.from_dict((stats or {}).get("usage") or {})
+        if u.total_tokens:
+            tok = f"{format_tokens(u.total_tokens)} tok ({format_tokens(u.input_tokens)}↑ {format_tokens(u.output_tokens)}↓)"
+            if u.cache_read_tokens:
+                tok += f" · {format_tokens(u.cache_read_tokens)} cache"
+            parts.append(tok)
+        parts.append(f"{elapsed:.1f}s")
+        return "· " + "  ·  ".join(parts) if parts else ""
+
     def _pm(self):
         from okami.core.processes import ProcessManager
         return ProcessManager(self.ws)
@@ -561,11 +588,13 @@ class AgentEndpoint(EndpointCommandsMixin):
             out.append(f"  {icon.get(st, '·')} {p['id']} [{st}{tail}]{flag} {(p.get('cmd') or '')[:48]}")
         return "\n".join(out)
 
-    def _background_status(self) -> str:
-        """Visão UNIFICADA: tarefas /background (agente, cancel cooperativo) + processos OS (kill real)."""
+    def _background_status(self, *, queued: int = 0) -> str:
+        """Visão UNIFICADA: fila da sessão + tarefas /background (cancel cooperativo) + processos OS (kill real)."""
         import datetime as _dt
         jobs = self._bgreg.list(15)
         out: list[str] = []
+        if queued:                                       # mensagens enfileiradas (digitou enquanto ocupado)
+            out.append(f"⏳ fila desta sessão: {queued} aguardando")
         if jobs:
             icon = {"running": "▶", "done": "✅", "failed": "❌", "interrupted": "⏸", "cancelled": "⏹"}
             out.append("📋 tarefas /background (durável — sobrevive a restart):")
@@ -584,6 +613,31 @@ class AgentEndpoint(EndpointCommandsMixin):
             out.append(self._fmt_processes(procs))
         return "\n".join(out)
 
+    def _background_as_process(self, chat_id, cmd: str, *, yolo: bool) -> str:
+        """/background --process <cmd>: sobe um servidor/build como PROCESSO OS (kill real), não thread.
+        Comando sensível/destrutivo direto do chat só com /yolo — senão fail-closed (DNA de segurança)."""
+        if not cmd:
+            return ("uso: /background --process <comando> (ex.: npm run dev) — sobe como PROCESSO OS, "
+                    "com kill REAL (/process kill <id>) e log paginado (/process log <id>).")
+        from okami.core.approval import classify
+        sens = classify("process_start", {"cmd": cmd})
+        if sens and not yolo:                            # destrutivo/sensível sem yolo → NEGA
+            return (f"🚫 recusei: {sens.reason} (risco {sens.risk}). Comando sensível direto do chat só com "
+                    "/yolo nesta sessão — ou peça pra MIM rodar (aí passa pelo go/no-go).")
+        try:
+            from okami.core.sandbox import SandboxPolicy
+            pol = SandboxPolicy.from_config((self.cfg.sandbox if self.cfg else None) or {})
+        except Exception:  # noqa: BLE001
+            pol = None
+        try:
+            meta = self._pm().start(cmd, pol, notify=True)   # notify → aviso quando terminar
+        except ValueError as e:                          # sandbox bloqueou (sensível/docker exigido)
+            return f"✗ não subiu: {e}"
+        except Exception as e:  # noqa: BLE001
+            return f"✗ falha ao subir o processo: {e}"
+        return (f"⚙ processo {meta['id']} no ar (PID {meta['pid']}) — kill real: /process kill {meta['id']} · "
+                f"log: /process log {meta['id']}. Te aviso quando terminar.")
+
     def _process_status(self) -> str:
         try:
             procs = self._pm().list()
@@ -595,16 +649,24 @@ class AgentEndpoint(EndpointCommandsMixin):
         return self._fmt_processes(procs)
 
     def _process_log(self, arg: str) -> str:
+        """/process log <id> [linhas] [offset]. Sem offset = ÚLTIMAS N linhas; com offset = a partir dela.
+        Mostra a faixa (X–Y de Z) e um link explícito p/ a PRÓXIMA página."""
         toks = arg.split()
         if not toks:
-            return "uso: /process log <id> [linhas] (ids em /process status)."
+            return "uso: /process log <id> [linhas] [offset]. Ex.: /process log ab12 40 0 (do começo)."
         pid = toks[0]
-        n = int(toks[1]) if len(toks) > 1 and toks[1].isdigit() else 30
-        page = self._pm().log_page(pid, offset=-n, limit=n)
+        n = int(toks[1]) if len(toks) > 1 and toks[1].lstrip("-").isdigit() else 30
+        explicit = len(toks) > 2 and toks[2].lstrip("-").isdigit()
+        offset = int(toks[2]) if explicit else -n        # default: as últimas N linhas
+        page = self._pm().log_page(pid, offset=offset, limit=n)
         if not page["lines"]:
-            return f"📄 processo {pid}: sem log ainda (ou id inexistente)."
-        rng = f"linhas {page['offset'] + 1}–{page['offset'] + page['shown']} de {page['total']}"
-        return f"📄 processo {pid} ({rng}):\n" + "\n".join("  " + ln for ln in page["lines"])
+            return f"📄 processo {pid}: sem log nessa faixa (ou id inexistente)."
+        start, end, total = page["offset"] + 1, page["offset"] + page["shown"], page["total"]
+        out = [f"📄 processo {pid} — linhas {start}–{end} de {total}:"]
+        out += ["  " + ln for ln in page["lines"]]
+        if end < total:                                  # próxima página explícita
+            out.append(f"… +{total - end} linha(s): /process log {pid} {n} {end}")
+        return "\n".join(out)
 
     def _process_kill(self, arg: str) -> str:
         toks = arg.split()
@@ -756,7 +818,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             kw.setdefault("surface", self.surface)        # tool policy por superfície (P1.4)
+            _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             task = self.run_task(self.cfg, self.ws, text, **kw)
+            _elapsed = time.time() - _t0
             stats = getattr(task, "stats", None) or {}     # tokens do turno (custo §A5)
             if stats.get("usage"):
                 try:
@@ -774,6 +838,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             prefix = "" if chatty else {"COMPLETE": "✅ ", "BLOCKED": "⚠ ",
                                         "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
             self.channel.send(chat_id, prefix + reply)
+            footer = self._turn_footer(s, stats, _elapsed)   # linha de custo: ctx · tokens · tempo
+            if footer:
+                self.channel.send(chat_id, footer)
             self._react(chat_id, {"COMPLETE": "👍", "BLOCKED": "👎",
                                   "NEEDS_INPUT": "🤔"}.get(task.state.name, "👎"))
             if not s.voice_off:                          # /voice off muta o áudio nesta sessão

@@ -38,10 +38,10 @@ except Exception:  # noqa: BLE001 — sem textual: o chamador cai no REPL
 # Prefixos que ENVOLVEM uma resposta do agente vs. notificações de sistema de 1 linha (espelha o
 # TerminalChannel pra renderização consistente entre REPL e TUI).
 _REPLY_MARKS = {"✅", "⚠", "❌", "❓"}
-_SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
+_SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶", "·"}
 _SYS_COLOR = {"💭": "dim", "🧠": "dim", "🧬": "magenta", "🎨": "magenta", "🎭": "magenta", "⏰": "blue",
               "↻": "blue", "🧹": "dim", "⏹": "yellow", "⚡": "yellow", "🔒": "dim", "🚫": "red",
-              "🔊": "cyan", "▶": "dim", "✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan"}
+              "🔊": "cyan", "▶": "dim", "·": "dim", "✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan"}
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
@@ -160,7 +160,8 @@ if _HAS_TEXTUAL:
                 yield Static("⚠ aprovar a ação pendente?", id="approval-label")
                 yield Button("Aprovar", id="approve", variant="success")
                 yield Button("Negar", id="deny", variant="error")
-            yield Input(placeholder="fala comigo…   ↵ envia · /help · Ctrl-D sai", id="input")
+            yield Input(placeholder="fala comigo…   ↵ envia · arraste p/ selecionar + ^C copia · /help · ^D sai",
+                        id="input")
             yield Static("", id="status")
 
         def on_mount(self) -> None:
@@ -445,6 +446,18 @@ if _HAS_TEXTUAL:
 
         # ---- ações -----------------------------------------------------------
         def action_ctrl_c(self) -> None:
+            try:                                          # tem texto SELECIONADO (arraste o mouse) → COPIA
+                sel = self.screen.get_selected_text() or ""
+            except Exception:  # noqa: BLE001
+                sel = ""
+            if sel.strip():
+                try:
+                    self.copy_to_clipboard(sel)
+                    self.clear_selection()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.sink_note(f"📋 copiado ({len(sel)} chars)")
+                return
             inp = self.query_one("#input", Input)
             if self._busy():
                 s = self.ep.sessions.get(self._cid)

@@ -168,6 +168,58 @@ def test_process_brief_feeds_activity_panel():
     panel = tui.activity_panel(bg={}, busy=False, queued=0, procs=ep.process_brief())
     txt = panel.plain if hasattr(panel, "plain") else str(panel)
     assert "processos" in txt and pid in txt
+    ProcessManager(ep.ws).kill(pid)
+
+
+def test_turn_footer_shows_time_and_tokens():
+    # Toda resposta do agente ganha um rodapé de custo: `· ... · Ys` (e tokens quando há usage).
+    def runner(cfg, ws, goal, **kw):
+        t = _ok_task(goal)
+        t.stats = {"usage": {"input": 2100, "output": 500}}
+        return t
+    ep = _ep(runner=runner)
+    ep.handle("7", "faz um resumo")
+    footers = [t for _, t in ep.channel.sent if t.startswith("· ")]
+    assert footers, "faltou o rodapé de custo"
+    assert footers[-1].rstrip().endswith("s")          # tempo de resposta
+    assert "tok" in footers[-1] and "2.6K" in footers[-1]   # tokens do turno (in+out)
+
+
+def test_turn_footer_absent_for_slash_command():
+    ep = _ep()
+    ep.handle("7", "/usage")                            # comando não passa por _run → sem rodapé
+    assert not [t for _, t in ep.channel.sent if t.startswith("· ")]
+
+
+def test_background_promote_to_process_and_gates_destructive():
+    from okami.core.processes import ProcessManager
+    ep = _ep()
+    ep.handle("7", "/background --process sleep 30")    # servidor/build → PROCESSO OS real
+    msg = [t for _, t in ep.channel.sent][-1]
+    assert "processo" in msg and "/process kill" in msg
+    ep.handle("7", "/background --process rm -rf /tmp/abc")   # destrutivo sem yolo → NEGA (fail-closed)
+    assert any("recusei" in t for _, t in ep.channel.sent)
+    for p in ProcessManager(ep.ws).list():             # limpa o sleep
+        ProcessManager(ep.ws).kill(p["id"])
+
+
+def test_background_status_shows_session_queue():
+    ep = _ep()
+    ep.session("7").queued.append(("mensagem na fila", None))
+    ep.handle("7", "/background status")
+    assert any("fila desta sessão: 1" in t for _, t in ep.channel.sent)
+
+
+def test_process_log_pagination_range_and_next_page():
+    from okami.core.processes import ProcessManager
+    ep = _ep()
+    pm = ProcessManager(ep.ws)
+    pid = pm.start("seq 50")["id"]
+    pm.wait(pid, timeout=5)
+    ep.handle("7", f"/process log {pid} 10 0")          # primeiras 10 de 50 + link da próxima
+    msg = [t for _, t in ep.channel.sent][-1]
+    assert "linhas 1–10 de 50" in msg
+    assert f"/process log {pid} 10 10" in msg           # próxima página explícita
 
 
 def test_title_sets_shows_in_status_and_persists():
