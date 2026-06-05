@@ -11,6 +11,49 @@ from okami.cli._shared import (
 )
 
 
+auth_app = typer.Typer(invoke_without_command=True,
+                       help="Perfis de AUTH (metadata, sem segredo): `okami auth` lista; `auth status --json`.")
+app.add_typer(auth_app, name="auth")
+
+
+@auth_app.callback(invoke_without_command=True)
+def auth_main(ctx: typer.Context) -> None:
+    """`okami auth` sem subcomando = lista os perfis de autenticação (tipo, status, onde mora)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    auth_list()
+
+
+@auth_app.command("list")
+def auth_list() -> None:
+    """Lista os perfis de auth — tipo (oauth/cli/api_key), status, e ONDE mora a credencial (sem o valor)."""
+    from okami.core.auth_profiles import build_auth_profiles
+    profs = build_auth_profiles(_load())
+    t = Table(title="perfis de auth", border_style="#3d3e50", header_style="bold #ff7527")
+    for col in ("provider", "tipo", "tier", "assinatura", "status", "credencial (onde)"):
+        t.add_column(col)
+    sm = {"ready": "[green]ready[/green]", "missing": "[red]missing[/red]", "expired": "[yellow]expired[/yellow]"}
+    for p in profs:
+        star = " [bold #ff7527]★[/]" if p["default"] else ""
+        t.add_row(p["name"] + star, p["kind"], p["tier"],
+                  "✓" if p["subscription"] else "—", sm.get(p["status"], p["status"]), p["location"])
+    console.print(t)
+    console.print("[dim]★ = default_provider · assinatura ✓ = OAuth/CLI (nunca pay-as-you-go)[/dim]")
+
+
+@auth_app.command("status")
+def auth_status(json_out: bool = typer.Option(False, "--json", help="Saída JSON (monitoramento/CI).")) -> None:
+    """Status dos perfis de auth (machine-readable com --json)."""
+    from okami.core.auth_profiles import build_auth_profiles
+    profs = build_auth_profiles(_load())
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps({"profiles": profs}, ensure_ascii=False))
+        raise typer.Exit(0 if all(p["status"] != "missing" or not p["default"] for p in profs) else 1)
+    for p in profs:
+        console.print(f"{p['name']}: {p['status']} ({p['kind']}, {p['location']})")
+
+
 policy_app = typer.Typer(help="Conformance de POLÍTICA/postura (#12): `okami policy check` (CI/pre-deploy).")
 app.add_typer(policy_app, name="policy")
 
