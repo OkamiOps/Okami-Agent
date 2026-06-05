@@ -48,19 +48,19 @@ def test_once_runs_only_after_target_and_once():
 def test_scheduler_add_list_remove(tmp_path):
     s = Scheduler(str(tmp_path), clock=lambda: 1000.0)
     j = s.add("1h", "resumir o dia", agent="cto", target="-100")
-    assert j["id"] == "resumir-o-dia" and j["kind"] == "interval"
+    assert j["id"] == "resumir-dia" and j["kind"] == "interval"   # id de TÓPICO curto (sem o filler 'o')
     assert len(s.load()) == 1
     j2 = s.add("1h", "resumir o dia")                # id colide → sufixo
-    assert j2["id"] == "resumir-o-dia-2"
-    assert s.remove("resumir-o-dia") is True and len(s.load()) == 1
+    assert j2["id"] == "resumir-dia-2"
+    assert s.remove("resumir-dia") is True and len(s.load()) == 1
 
 
 def test_tick_runs_due_and_marks(tmp_path):
     s = Scheduler(str(tmp_path), clock=lambda: 5000.0)
-    s.add("1h", "tarefa A")
+    s.add("1h", "backup diario")
     ran = []
     out = s.tick(lambda job: ran.append(job["id"]) or "ok")
-    assert ran == ["tarefa-a"] and out == [("tarefa-a", "ok")]
+    assert ran == ["backup-diario"] and out == [("backup-diario", "ok")]
     assert s.load()[0]["last_run"] == 5000.0          # marcou o run
     assert s.tick(lambda job: "again") == []          # agora não vence de novo (intervalo 1h)
 

@@ -22,7 +22,9 @@ _UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:24] or "job"
+    """Id CURTO de cron job a partir do prompt — tópico, não a frase literal do usuário (core.naming)."""
+    from okami.core.naming import short_name
+    return short_name(text, fallback="job")
 
 
 def _parse_interval(spec: str) -> int | None:

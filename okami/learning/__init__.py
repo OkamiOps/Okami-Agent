@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-import unicodedata
 from pathlib import Path
 
 from okami.core import Task, TaskState
@@ -60,40 +59,11 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40]
 
 
-# Fillers conversacionais (PT-BR + EN) que NÃO devem entrar no nome de uma skill — eles transformavam
-# a frase literal do usuário ("agora vou pedir pra voce…") num nome horrível. Tiramos e ficamos só com
-# as palavras de CONTEÚDO.
-_SKILL_STOP = frozenset({
-    # PT-BR
-    "a", "o", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "e", "ou", "que",
-    "se", "em", "no", "na", "nos", "nas", "ao", "aos", "por", "pra", "para", "com", "sem", "eu", "voce",
-    "vc", "me", "te", "lhe", "agora", "aqui", "ali", "ai", "ja", "vou", "vai", "vamos", "quero", "queria",
-    "quer", "pode", "poderia", "consegue", "conseguir", "faz", "fazer", "feito", "ver", "veja", "ve",
-    "entao", "mais", "muito", "isso", "esse", "essa", "este", "esta", "isto", "ser", "estar", "pedir",
-    "peco", "favor", "legal", "bom", "boa", "oi", "ola", "obrigado", "seu", "sua", "meu", "minha",
-    "nosso", "nossa", "tudo", "coisa", "sobre", "depois", "antes", "tipo", "assim", "la", "ne", "so",
-    "tem", "ter", "deu", "vamo", "preciso", "gostaria", "outros", "outro", "outra", "melhorou",
-    # EN
-    "the", "an", "of", "and", "or", "to", "in", "on", "for", "with", "please", "can", "could", "you",
-    "i", "now", "here", "this", "that", "is", "be", "do", "make", "let", "want", "would", "my", "your",
-    "me", "we", "us", "it", "some", "thing", "stuff", "about",
-})
-
-
-def _skill_name(text: str, *, tools: list[str] | None = None, max_words: int = 4, max_len: int = 32) -> str:
-    """Nome de skill CURTO e bom (kebab-case): tira acento, remove fillers conversacionais e fica só
-    com as palavras de CONTEÚDO (≤max_words). NUNCA a frase literal do usuário. Fallback: a tool dominante."""
-    norm = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode()
-    tokens = re.findall(r"[a-z0-9]+", norm.lower())
-    # mantém palavras de conteúdo (≥2 chars: preserva 'ci'/'ui'/'db'/'go'); fillers de 2 chars já estão no stop.
-    words = [t for t in tokens if len(t) >= 2 and t not in _SKILL_STOP]
-    if not words:                                          # tudo era filler de 1 char → usa o que sobrou
-        words = [t for t in tokens if t not in _SKILL_STOP]
-    if not words and tools:                                # fallback: nomeia pela tool dominante (ex.: "shell-task")
-        top = max(set(tools), key=tools.count)
-        words = [re.sub(r"[^a-z0-9]+", "-", top.lower()), "task"]
-    name = "-".join(words[:max_words])[:max_len].strip("-")
-    return name or "skill"
+def _skill_name(text: str, *, tools: list[str] | None = None) -> str:
+    """Nome de skill CURTO e bom (kebab-case, ≤3 palavras): delega ao core.naming.short_name —
+    tira acento, remove filler conversacional, descarta verbo genérico p/ ficar no tópico."""
+    from okami.core.naming import short_name
+    return short_name(text, tools=tools, fallback="skill")
 
 
 def distill_skill(task: Task, model_name: str = "?") -> dict | None:
