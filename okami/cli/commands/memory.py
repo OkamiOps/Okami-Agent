@@ -71,9 +71,15 @@ def memory_list(
     m = _open_mem(workspace)
     items = m.recent(20)
     total = m.count()
-    fts = m.fts
+    fts = getattr(m, "fts", None)                    # P2: LayeredMemory não tem .fts → não quebra
+    health = m.health()                              # P2: saúde por camada (Honcho pode estar morto)
     m.close()
-    console.print(f"[dim]{total} itens · FTS5={'on' if fts else 'LIKE (sem FTS5)'}[/dim]")
+    fts_label = "" if fts is None else f" · FTS5={'on' if fts else 'LIKE'}"
+    console.print(f"[dim]{total} itens{fts_label}[/dim]")
+    for h in (health.get("layers") or [health]):     # avisa camada degradada (ex.: honcho offline)
+        if not h.get("ok", True):
+            console.print(f"[yellow]⚠ camada {h.get('backend')}: {h.get('failures')} falha(s)"
+                          + (f' — {h["last_error"][:60]}' if h.get("last_error") else "") + "[/yellow]")
     for i in items:
         console.print(f"- [dim][{i.kind}][/dim] {i.text[:160]}")
 

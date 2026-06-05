@@ -11,7 +11,23 @@ from okami.memory.embeddings import Embedder, OpenAICompatEmbedder
 from okami.memory.sqlite_fts5 import SqliteFTS5Memory
 
 __all__ = ["Memory", "MemoryItem", "SqliteFTS5Memory", "Embedder", "OpenAICompatEmbedder",
-           "make_embedder", "open_memory", "compaction", "files"]
+           "make_embedder", "open_memory", "save_turn", "compaction", "files"]
+
+
+def save_turn(mem, text: str, *, source: str, cfg_memory: dict | None) -> bool:
+    """Alimenta a memória com a fala BRUTA do turno — SÓ se `memory.save_messages: true` (#P2).
+
+    Default OFF de propósito: o Okami trata memória como semântica cirúrgica (remember/learning), não
+    despeja toda conversa. Quem quer Honcho entendendo a conversa viva liga save_messages. Passa pelo
+    filtro de segredo (prepare) — fala com chave/token NÃO é persistida."""
+    if mem is None or not (cfg_memory or {}).get("save_messages"):
+        return False
+    from okami.memory.policy import prepare
+    item = prepare(text, source=source, kind="turn", force=True)   # 'turn' é específico; force pula trivial, NÃO segredo
+    if item is None:
+        return False
+    mem.write(item)
+    return True
 
 
 def make_embedder(cfg: dict | None) -> Embedder | None:
@@ -80,6 +96,7 @@ def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
             workspace=hc.get("workspace_id") or hc.get("workspace") or "okami",   # workspace_id é o nome do SDK
             session_id=hc.get("session", "default"),
             user_peer=hc.get("user_peer", "user"), assistant_peer=hc.get("assistant_peer", "okami"),
+            required=bool(hc.get("required")),   # P2: falha vira aviso ALTO em vez de silêncio
         )
 
     raise ValueError(f"backend de memória desconhecido: {backend}")

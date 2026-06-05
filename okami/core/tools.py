@@ -325,7 +325,9 @@ class RememberUser(Tool):
 
     def run(self, args, ctx):
         from okami.memory import files as _f
-        _f.append_user(ctx.workspace, args["text"])
+        if not _f.append_user(ctx.workspace, args["text"]):    # recusou (segredo) → não finge sucesso
+            return ToolResult(True, "(não anotei — parece conter um segredo; não guardo isso no USER.md)",
+                              effect=False)
         return ToolResult(True, f"USER.md += {args['text'][:80]}", effect=True)
 
 

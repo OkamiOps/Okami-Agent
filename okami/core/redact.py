@@ -38,6 +38,13 @@ def redact(text: str) -> str:
     return text
 
 
+def looks_secret(text: str) -> bool:
+    """True se `text` contém um padrão de segredo conhecido (= o redator mexeria nele).
+
+    Usado para RECUSAR persistência (memória/USER.md) — segredo não vira contexto durável."""
+    return bool(text) and isinstance(text, str) and redact(text) != text
+
+
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 
 

@@ -70,6 +70,11 @@ def prepare(text: str, source: str = "", kind: str | None = None, *, force: bool
     t = (text or "").strip()
     if not t:
         return None
+    from okami.core.redact import looks_secret
+    if looks_secret(t):                              # P1: SEGREDO não vira memória de longo prazo —
+        from okami import log                        # recusa (nem com force) p/ não vazar p/ sqlite/Honcho/holo
+        log.warn("memory: recusei persistir conteúdo com cara de segredo (chave/token).")
+        return None
     k = kind if kind in _SPECIFIC else classify(t, source)
     if not force and not should_persist(t, k):
         return None

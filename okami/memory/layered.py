@@ -69,6 +69,17 @@ class LayeredMemory(Memory):
                 pass
         return total
 
+    def health(self) -> dict:
+        """Agrega a saúde de cada camada (P2). `ok=False` se uma camada `required` falhou."""
+        layers = []
+        for b in self.backends:
+            try:
+                layers.append(b.health())
+            except Exception:  # noqa: BLE001
+                layers.append({"backend": type(b).__name__, "ok": True, "failures": 0})
+        bad_required = [h for h in layers if h.get("required") and not h.get("ok", True)]
+        return {"backend": "layered", "ok": not bad_required, "layers": layers}
+
     def forget(self, max_items: int = 500) -> int:
         n = 0
         for b in self.backends:

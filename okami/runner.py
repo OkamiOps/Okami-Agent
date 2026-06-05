@@ -158,6 +158,9 @@ def run_task(
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
         t.stats["served_by"] = _acc["served"]             # quem realmente respondeu (§E5)
         hooks.fire("after_task", {"goal": goal, "state": t.state.value, "result": t.result or ""})
+        from okami.memory import save_turn                # P2: save_messages (default OFF) alimenta a memória
+        save_turn(mem, goal, source="user", cfg_memory=cfg.memory)           # com a conversa bruta (Honcho user-model)
+        save_turn(mem, t.result or "", source="agent", cfg_memory=cfg.memory)
         try:
             learning.apply(mem, t, model_name=model or "default")
             learning.record_run(ws, tune_key, t.stats)    # §7: acumula stats p/ auto-tune do modelo

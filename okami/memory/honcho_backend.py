@@ -30,15 +30,27 @@ def _text_of(obj) -> str:
 class HonchoMemory(Memory):
     def __init__(self, base_url: str | None = None, api_key: str | None = None,
                  workspace: str = "okami", user_peer: str = "user",
-                 assistant_peer: str = "okami", session_id: str = "default", client=None):
+                 assistant_peer: str = "okami", session_id: str = "default", client=None,
+                 required: bool = False):
+        self._failures = 0           # P2: saúde mínima — uma camada "importante" não pode morrer em silêncio
+        self._last_error = ""
+        self.required = required     # honcho.required: true → falha vira aviso ALTO (doctor/memory list)
         self._client = client or self._make_client(base_url, api_key, workspace)
         self.user = self._client.peer(user_peer)
         self.assistant = self._client.peer(assistant_peer)
         self.session = self._client.session(session_id)
         try:
             self.session.add_peers([self.user, self.assistant])
-        except Exception:  # noqa: BLE001 — já adicionados / versão diferente
-            pass
+        except Exception as e:  # noqa: BLE001 — já adicionados / versão diferente
+            self._fail(e)
+
+    def _fail(self, e: Exception) -> None:
+        self._failures += 1
+        self._last_error = f"{type(e).__name__}: {e}"[:200]
+
+    def health(self) -> dict:
+        return {"backend": "honcho", "ok": self._failures == 0, "failures": self._failures,
+                "last_error": self._last_error, "required": self.required}
 
     @staticmethod
     def _make_client(base_url, api_key, workspace):
@@ -61,8 +73,8 @@ class HonchoMemory(Memory):
         peer = self.assistant if item.source in ("agent", "task", "okami") else self.user
         try:
             self.session.add_messages([peer.message(item.text)])
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            self._fail(e)        # P2: registra a falha (Honcho morto não passa mais despercebido)
         return 0
 
     def _ask(self, peer, query: str, *, target=None) -> str:
@@ -82,7 +94,8 @@ class HonchoMemory(Memory):
                 return _text_of(chat(query, **kw))
             except TypeError:
                 continue                                          # kwarg não suportado nessa versão → tenta menos
-            except Exception:  # noqa: BLE001 — erro de runtime do SDK → desiste deste peer
+            except Exception as e:  # noqa: BLE001 — erro de runtime do SDK → desiste deste peer
+                self._fail(e)
                 return ""
         return ""
 
@@ -108,7 +121,8 @@ class HonchoMemory(Memory):
                 return ctx.to_prompt() if hasattr(ctx, "to_prompt") else _text_of(ctx)
             except TypeError:
                 continue
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                self._fail(e)
                 return ""
         return ""
 
@@ -140,7 +154,8 @@ class HonchoMemory(Memory):
     def recent(self, limit: int = 10) -> list[MemoryItem]:
         try:
             msgs = list(self.session.messages())
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            self._fail(e)
             return []
         items = [MemoryItem(text=_text_of(m), kind="turn", source="honcho") for m in msgs[-limit:]]
         return list(reversed(items))
@@ -148,5 +163,6 @@ class HonchoMemory(Memory):
     def count(self) -> int:
         try:
             return len(list(self.session.messages()))
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            self._fail(e)
             return 0

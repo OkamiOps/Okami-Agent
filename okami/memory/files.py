@@ -67,23 +67,29 @@ def read_memory_md(workspace: Path, cap: int = DEFAULT_CAP) -> str:
     return read_capped(workspace, "MEMORY.md", cap)
 
 
-def _append_bullet(workspace: Path, name: str, text: str, title: str, header: str) -> None:
+def _append_bullet(workspace: Path, name: str, text: str, title: str, header: str) -> bool:
+    from okami.core.redact import looks_secret
+    if looks_secret(text):                           # P1: USER.md/MEMORY.md vão SEMPRE pro prompt → sem segredo
+        from okami import log
+        log.warn(f"memory: recusei escrever conteúdo com cara de segredo em {name}.")
+        return False
     p = _path(workspace, name)
     line = f"- {text.strip()}"
     if not p.exists():
         p.write_text(f"# {title}\n\n{header}\n{line}\n", encoding="utf-8", newline="\n")
-        return
+        return True
     content = p.read_text(encoding="utf-8", errors="ignore")
     if line in content:  # dedup simples
-        return
+        return True
     if header not in content:
         content += f"\n{header}\n"
     p.write_text(content.rstrip() + f"\n{line}\n", encoding="utf-8", newline="\n")
+    return True
 
 
-def append_fact(workspace: Path, text: str) -> None:
-    _append_bullet(workspace, "MEMORY.md", text, "MEMORY", _FACTS_HEADER)
+def append_fact(workspace: Path, text: str) -> bool:
+    return _append_bullet(workspace, "MEMORY.md", text, "MEMORY", _FACTS_HEADER)
 
 
-def append_user(workspace: Path, text: str) -> None:
-    _append_bullet(workspace, "USER.md", text, "USER", "## Sobre o usuário")
+def append_user(workspace: Path, text: str) -> bool:
+    return _append_bullet(workspace, "USER.md", text, "USER", "## Sobre o usuário")
