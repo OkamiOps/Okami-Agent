@@ -36,6 +36,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("process_log", "processo"),
     ToolSpec("process_list", "processo"),
     ToolSpec("process_write", "processo", danger="sensitive"),
+    ToolSpec("process_signal", "processo", danger="sensitive"),
     ToolSpec("process_kill", "processo", danger="sensitive"),
     ToolSpec("remember", "memória"),
     ToolSpec("recall_memory", "memória"),

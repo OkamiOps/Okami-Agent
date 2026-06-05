@@ -218,8 +218,15 @@ class ProcessManager:
         chunk = [redact(strip_ansi(ln)) for ln in lines[offset:offset + max(1, limit)]]
         return {"lines": chunk, "total": total, "offset": offset, "shown": len(chunk)}
 
+    @staticmethod
+    def _watch_spec(entry):
+        """Normaliza um item de `watch`: 'ERRO' (1 strike) ou {pattern, strikes} → (pattern, strikes)."""
+        if isinstance(entry, dict):
+            return str(entry.get("pattern", "")), max(1, int(entry.get("strikes", 1) or 1))
+        return str(entry), 1
+
     def watch_hits(self, pid_id: str) -> list[str]:
-        """Quais `watch` patterns (regex) já apareceram no log do processo."""
+        """Quais `watch` patterns já bateram o limiar de strikes no log do processo."""
         meta = self._read_meta(pid_id)
         pats = (meta or {}).get("watch") or []
         if not pats:
@@ -227,13 +234,57 @@ class ProcessManager:
         p = self._logf(pid_id)
         text = p.read_text(encoding="utf-8", errors="ignore") if p.exists() else ""
         out = []
-        for pat in pats:
+        for entry in pats:
+            pat, strikes = self._watch_spec(entry)
+            if not pat:
+                continue
             try:
-                if re.search(pat, text):
+                if len(re.findall(pat, text)) >= strikes:
                     out.append(pat)
             except re.error:
                 pass
         return out
+
+    def drain_watch(self) -> list[dict]:
+        """Watch patterns que ACABARAM de bater o limiar — dispara UMA vez por padrão (rate-limit por strike).
+
+        Cada padrão notifica só na 1ª vez que cruza `strikes` (registrado em meta.watch_fired) → sem flood.
+        Devolve [{kind:'watch', id, pattern, count, strikes, cmd}]."""
+        out: list[dict] = []
+        if not self.dir.exists():
+            return out
+        for f in sorted(self.dir.glob("*.json")):
+            meta = self._read_meta(f.stem)
+            pats = (meta or {}).get("watch") or []
+            if not pats:
+                continue
+            fired = set((meta or {}).get("watch_fired") or [])
+            p = self._logf(f.stem)
+            text = p.read_text(encoding="utf-8", errors="ignore") if p.exists() else ""
+            changed = False
+            for entry in pats:
+                pat, strikes = self._watch_spec(entry)
+                if not pat or pat in fired:
+                    continue
+                try:
+                    n = len(re.findall(pat, text))
+                except re.error:
+                    continue
+                if n >= strikes:
+                    out.append({"kind": "watch", "id": meta["id"], "pattern": pat, "count": n,
+                                "strikes": strikes, "cmd": meta.get("cmd", "")})
+                    fired.add(pat)
+                    changed = True
+            if changed:
+                meta["watch_fired"] = sorted(fired)
+                self._write_meta(f.stem, meta)
+        return out
+
+    def drain_notifications(self) -> list[dict]:
+        """Fila unificada (#P1.4): conclusões (notify_on_complete) + watch hits — cada uma entregue 1x."""
+        notes = [{"kind": "complete", **st} for st in self.drain_completed()]
+        notes.extend(self.drain_watch())
+        return notes
 
     def wait(self, pid_id: str, timeout: float = 30.0) -> dict:
         deadline = time.time() + timeout
@@ -274,6 +325,52 @@ class ProcessManager:
             except OSError:
                 pass
         return ok
+
+    _SIGNALS = {"TERM": signal.SIGTERM, "INT": signal.SIGINT, "HUP": signal.SIGHUP,
+                "KILL": signal.SIGKILL, "QUIT": signal.SIGQUIT, "USR1": signal.SIGUSR1,
+                "USR2": signal.SIGUSR2, "CONT": signal.SIGCONT, "STOP": signal.SIGSTOP}
+
+    def signal(self, pid_id: str, name: str = "TERM") -> bool:
+        """Manda um sinal arbitrário p/ o grupo do processo (#P1.4 lifecycle): TERM/INT/HUP/KILL/USR1…"""
+        meta = self._read_meta(pid_id)
+        if not meta:
+            return False
+        sig = self._SIGNALS.get(name.upper().lstrip("SIG"))
+        if sig is None:
+            return False
+        if meta.get("backend") == "docker" and meta.get("container"):
+            try:
+                subprocess.run(["docker", "kill", f"--signal={name.upper().lstrip('SIG')}", meta["container"]],
+                               capture_output=True, timeout=15)
+                return True
+            except (OSError, subprocess.SubprocessError):
+                return False
+        try:
+            os.killpg(os.getpgid(meta["pid"]), sig)
+            return True
+        except OSError:
+            try:
+                os.kill(meta["pid"], sig)
+                return True
+            except OSError:
+                return False
+
+    def reconcile(self) -> int:
+        """Recovery de órfão (#P1.4): processo MORTO sem exitfile (crash/restart do gateway) → grava o
+        marcador de saída p/ o estado virar durável (não fica 'running' fantasma). Devolve quantos."""
+        fixed = 0
+        if not self.dir.exists():
+            return 0
+        for f in sorted(self.dir.glob("*.json")):
+            pid_id = f.stem
+            if self._exitf(pid_id).exists():
+                continue
+            st = self.poll(pid_id)          # poll reapa zumbi + reconcilia (morto sem exit → exited)
+            if st.get("status") == "exited" and not self._exitf(pid_id).exists():
+                code = st.get("exit_code")
+                self._exitf(pid_id).write_text(str(code if code is not None else -1), encoding="utf-8")
+                fixed += 1
+        return fixed
 
     # ----------------------------------------------------------------- list / notify / prune
     def list(self) -> list[dict]:

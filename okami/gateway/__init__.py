@@ -728,18 +728,22 @@ class AgentEndpoint:
         return True, (", ".join(changed) if changed else "sem mudanças aplicáveis em quente")
 
     def _notify_completed_processes(self) -> None:
-        """notify_on_complete (#1/#8): avisa no chat os processos com notify=True que terminaram."""
+        """Fila de notificações de processo (#1/#8/#P1.4): conclusão + watch hits, avisa no chat."""
         chat = getattr(self, "_last_chat", None)
         if not chat:
             return
         try:
             from okami.core.processes import ProcessManager
-            done = ProcessManager(self.ws).drain_completed()
+            notes = ProcessManager(self.ws).drain_notifications()
         except Exception:  # noqa: BLE001
             return
-        for st in done:
-            self.channel.send(chat, f"✅ processo {st['id']} terminou (exit={st.get('exit_code')}): "
-                              f"{str(st.get('cmd', ''))[:60]}")
+        for n in notes:
+            if n.get("kind") == "watch":
+                self.channel.send(chat, f"👁 processo {n['id']}: padrão «{n['pattern']}» apareceu "
+                                  f"({n['count']}×): {str(n.get('cmd', ''))[:50]}")
+            else:
+                self.channel.send(chat, f"✅ processo {n['id']} terminou (exit={n.get('exit_code')}): "
+                                  f"{str(n.get('cmd', ''))[:60]}")
 
     def loop(self) -> None:
         try:                                            # SIGHUP → hot-reload (convenção de daemon)
@@ -747,6 +751,11 @@ class AgentEndpoint:
             _sig.signal(_sig.SIGHUP, lambda *_: setattr(self, "_reload_req", True))
         except (ValueError, AttributeError, OSError):
             pass                                        # não-main-thread / sem SIGHUP (Windows)
+        try:                                            # #P1.4: recovery de órfão no boot (processo morto sem exit)
+            from okami.core.processes import ProcessManager
+            ProcessManager(self.ws).reconcile()
+        except Exception:  # noqa: BLE001
+            pass
         while self.running:
             try:
                 if getattr(self, "_reload_req", False):

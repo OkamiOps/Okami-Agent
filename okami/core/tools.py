@@ -558,6 +558,21 @@ class ProcessKill(Tool):
         return ToolResult(ok, f"processo {args['id']} {'morto' if ok else 'não encontrado'}", effect=ok)
 
 
+class ProcessSignal(Tool):
+    name = "process_signal"
+    description = ("Manda um sinal p/ um processo em background (lifecycle): TERM/INT/HUP/KILL/USR1/USR2/"
+                  "CONT/STOP/QUIT. Ex.: HUP p/ recarregar, INT p/ Ctrl-C, USR1 p/ sinal custom.")
+    args_schema = {"id": "id do processo", "signal": "nome do sinal (default TERM)"}
+    required = ("id",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        name = str(args.get("signal", "TERM"))
+        ok = ProcessManager(ctx.workspace).signal(args["id"], name)
+        return ToolResult(ok, f"sinal {name.upper()} → {args['id']}" if ok
+                          else f"falhou (sinal inválido / processo inexistente): {name}", effect=ok)
+
+
 # Tools terminais: o loop trata especialmente, mas elas existem para schema/parse.
 class Respond(Tool):
     name = "respond"
@@ -594,7 +609,7 @@ class NeedInput(Tool):
 def default_registry() -> dict[str, Tool]:
     tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(),
              ProcessStart(), ProcessPoll(), ProcessWait(), ProcessLog(), ProcessKill(), ProcessList(),
-             ProcessWrite(),
+             ProcessWrite(), ProcessSignal(),
              RememberFact(), RecallMemory(), RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}
