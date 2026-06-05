@@ -553,10 +553,7 @@ class Harness:
                     sens = approval.Sensitive(f"MCP {action.tool} ({', '.join(sorted(_caps))})", "mcp_capability", _risk)
             if sens is not None:
                 self._emit("approval_request", tool=action.tool, reason=sens.reason, category=sens.category)
-                import hashlib
-                args_hash = hashlib.sha256(
-                    json.dumps(action.args, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-                ).hexdigest()[:16]               # amarra a aprovação aos ARGS EXATOS (#1/#9): não vale p/ outra ação
+                args_hash = approval.args_hash(action.args)   # amarra a aprovação aos ARGS EXATOS (#1/#7/#9)
                 req = {"tool": action.tool, "args": action.args, "args_hash": args_hash,
                        "reason": sens.reason, "category": sens.category, "risk": sens.risk}
                 approved = self.approve(req)

@@ -66,3 +66,22 @@ def test_gateway_stale_click_without_pending_is_noop():
     ep = _bare_ep()
     ep.handle("7", "/yes:old")                        # clique dup/stale sem nada pendente
     assert any("nada pendente" in m for m in ep.channel.sent)
+
+
+def test_gateway_persistent_single_use(tmp_path):
+    """#7: 2º clique no MESMO botão é recusado pelo store durável (não re-executa a ação)."""
+    import queue as _q
+
+    from okami.gateway.approvals import ApprovalStore
+    ep = _bare_ep()
+    ep.approvals = ApprovalStore(tmp_path)
+    ep.surface = "telegram"
+    ep.approvals.create(approval_id="non1", tool="run_shell", args_hash="h", risk="high",
+                        category="c", surface="telegram", chat_id="7", ttl=300)
+    q: _q.Queue = _q.Queue()
+    ep._pending["7"] = (q, "non1")
+    ep.handle("7", "/yes:non1")                        # 1º clique consome
+    assert q.get_nowait() == "/yes"
+    ep._pending["7"] = (q, "non1")                     # botão reenviado/reclicado
+    ep.handle("7", "/yes:non1")                        # 2º clique → recusado (single-use)
+    assert q.empty() and any("inválida" in m for m in ep.channel.sent)

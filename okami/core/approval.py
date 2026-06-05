@@ -10,9 +10,21 @@ go/no-go. Modelo de aprovação:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Callable
+
+
+def args_hash(args: dict) -> str:
+    """Hash canônico dos ARGS de uma ação — amarra a aprovação aos args EXATOS (#1/#7/#9).
+
+    Mesma canonicalização no harness (pede) e no ApprovalStore (consome): muda 1 byte do arg →
+    hash diferente → a aprovação daquela ação não vale p/ outra."""
+    return hashlib.sha256(
+        json.dumps(args or {}, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    ).hexdigest()[:16]
 
 # (regex, categoria, risco) por tipo de ação.
 _FILE_RULES = [

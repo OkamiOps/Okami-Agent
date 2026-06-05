@@ -112,6 +112,8 @@ class AgentEndpoint:
         self.auto_resume = auto_resume       # retomar tarefa interrompida no boot (com guarda anti-loop)
         self.max_sessions = max_sessions
         self.store = TranscriptStore(ws)     # 2 camadas: metadados + transcript append-only (§13)
+        from okami.gateway.approvals import ApprovalStore
+        self.approvals = ApprovalStore(ws)   # aprovação como objeto persistente single-use (#7)
         self.sessions: dict[str, Session] = {}
         self._pending: dict[str, queue.Queue] = {}
         self._img: dict[str, str] = {}       # imagem pendente por chat (vision §6)
@@ -356,7 +358,13 @@ class AgentEndpoint:
             if self.approval_mode == "off":                # "off" = não pergunta → NEGA sensível (fail-closed)
                 return False
             import secrets
-            nonce = secrets.token_hex(4)                 # amarra o botão a ESTE pedido (P1.3 anti-stale)
+            nonce = secrets.token_hex(8)                 # = approval_id; amarra o botão a ESTE pedido (P1.3 anti-stale)
+            from okami.core.approval import args_hash as _ahash
+            self.approvals.create(                       # #7: registro durável single-use (sobrevive a restart)
+                approval_id=nonce, tool=req.get("tool", "?"),
+                args_hash=req.get("args_hash") or _ahash(req.get("args") or {}),
+                risk=req.get("risk", "high"), category=req.get("category", ""),
+                surface=self.surface, chat_id=str(chat_id), ttl=self.approval_timeout)
             q: queue.Queue = queue.Queue()
             self._pending[str(chat_id)] = (q, nonce)
             brief = ""                                   # mostra QUAL ação (tool + arg-chave) — #1/#9 target binding
@@ -378,6 +386,7 @@ class AgentEndpoint:
                 ans = q.get(timeout=self.approval_timeout)
             except queue.Empty:
                 ans = "/no"
+                self.approvals.expire_if_pending(nonce)  # sem resposta → marca expirado no registro
             finally:
                 self._pending.pop(str(chat_id), None)
             ok = ans.strip().lower() in ("/yes", "yes", "sim", "y", "ok")
@@ -398,6 +407,13 @@ class AgentEndpoint:
             if got and want and got != want:           # nonce velho/errado = clique stale → IGNORA
                 self.channel.send(chat_id, "⌛ esse botão expirou (outra ação aconteceu). Use /yes ou /no.")
                 return
+            store = getattr(self, "approvals", None)   # ausente em endpoint bare (alguns testes/compat)
+            if want and store is not None:             # #7: consome o registro durável (single-use + expiração)
+                decision = "approved" if verb.strip().lower() in ("/yes", "yes", "sim", "y", "ok") else "denied"
+                res = store.consume(want, decision)
+                if not res.ok and res.reason != "desconhecido":   # já usado / expirado → recusa (não re-executa)
+                    self.channel.send(chat_id, f"⌛ aprovação inválida ({res.reason}). Use /yes ou /no de novo.")
+                    return
             q.put(verb)
             return
         if text.partition(":")[0].lower() in ("/yes", "/no"):   # aprovação sem nada pendente (clique dup/stale)
