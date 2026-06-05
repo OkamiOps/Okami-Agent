@@ -43,6 +43,20 @@ def _crud_store(workspace: str, global_: bool):
                       embedder=make_embedder(cfg.memory.get("embedder")), config=cfg.memory)
 
 
+def _parse_id(raw: str, global_flag: bool) -> tuple[int, bool]:
+    """'g1' / 'global:1' → casa · 'project:1' / '1' → projeto. Desambigua o #id que a `list` mostra."""
+    s = str(raw).strip().lower().lstrip("#")
+    for pre in ("global:", "casa:"):
+        if s.startswith(pre):
+            return int(s[len(pre):]), True
+    for pre in ("project:", "projeto:", "workspace:", "ws:"):
+        if s.startswith(pre):
+            return int(s[len(pre):]), False
+    if s.startswith("g") and s[1:].isdigit():
+        return int(s[1:]), True
+    return int(s), global_flag
+
+
 @mem_app.command("add")
 def memory_add(
     text: str = typer.Argument(..., help="Fato a guardar."),
@@ -102,20 +116,22 @@ def memory_list(
             console.print(f"[yellow]⚠ camada {h.get('backend')}: {h.get('failures')} falha(s)"
                           + (f' — {h["last_error"][:60]}' if h.get("last_error") else "") + "[/yellow]")
     for i in items:
-        idp = f"[dim]#{i.id}[/dim] " if i.id is not None else ""
+        gp = "g" if (i.scope or "").startswith("global") else ""    # global #N vs projeto #N → prefixo p/ desambiguar
+        idp = f"[dim]{gp}#{i.id}[/dim] " if i.id is not None else ""
         sc = "" if (i.scope or "workspace") == "workspace" else f" [dim]<{i.scope}>[/dim]"
         console.print(f"- {idp}[dim][{i.kind}][/dim] {i.text[:150]}{sc}")
 
 
 @mem_app.command("forget")
 def memory_forget(
-    item_id: int = typer.Argument(..., help="#id do item (ver `okami memory list`)."),
+    item_id: str = typer.Argument(..., help="#id do item (ver `okami memory list`; use g1/global:1 p/ a casa)."),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
     """Esquece um item — some do retrieval e NÃO volta via recall."""
-    store = _crud_store(workspace, global_)
-    ok = store.forget_item(item_id)
+    n, g = _parse_id(item_id, global_)
+    store = _crud_store(workspace, g)
+    ok = store.forget_item(n)
     store.close()
     console.print("[green]✓ esquecido[/green]" if ok else f"[red]✗ id #{item_id} não encontrado[/red]")
     if not ok:
@@ -124,13 +140,14 @@ def memory_forget(
 
 @mem_app.command("archive")
 def memory_archive(
-    item_id: int = typer.Argument(..., help="#id do item."),
+    item_id: str = typer.Argument(..., help="#id do item (use g1/global:1 p/ a casa)."),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
     """Arquiva um item — some do retrieval, mas marcado 'archived' (intencional)."""
-    store = _crud_store(workspace, global_)
-    ok = store.archive_item(item_id)
+    n, g = _parse_id(item_id, global_)
+    store = _crud_store(workspace, g)
+    ok = store.archive_item(n)
     store.close()
     console.print("[green]✓ arquivado[/green]" if ok else f"[red]✗ id #{item_id} não encontrado[/red]")
     if not ok:
@@ -139,15 +156,16 @@ def memory_archive(
 
 @mem_app.command("explain")
 def memory_explain(
-    item_id: int = typer.Argument(..., help="#id do item."),
+    item_id: str = typer.Argument(..., help="#id do item (use g1/global:1 p/ a casa)."),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
     """Por que/quando esta memória apareceu: metadados + últimas recuperações (retrieval_logs)."""
     import datetime as _dt
 
-    store = _crud_store(workspace, global_)
-    info = store.explain(item_id)
+    n, g = _parse_id(item_id, global_)
+    store = _crud_store(workspace, g)
+    info = store.explain(n)
     store.close()
     if not info:
         console.print(f"[red]✗ id #{item_id} não encontrado[/red]")

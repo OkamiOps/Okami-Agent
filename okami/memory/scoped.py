@@ -67,15 +67,53 @@ class ScopedMemory(Memory):
                 pass
         return n
 
-    # ── CRUD por id: tenta o projeto, depois a casa (o id pertence a um dos dois) ──
-    def forget_item(self, item_id: int) -> bool:
-        return bool(self.project.forget_item(item_id) or self.global_.forget_item(item_id))
+    # ── CRUD por id COM NAMESPACE: ids são por-store (projeto #1 e casa #1 coexistem). Aceita
+    #    'global:1' / 'project:1' (= 'workspace:1') / '1'. Id CRU ambíguo (existe nos DOIS) → recusa
+    #    e exige namespace, em vez de adivinhar e mexer na memória errada. ──
+    def _resolve(self, item_id) -> tuple:
+        s = str(item_id).strip().lower()
+        if ":" in s:
+            ns, _, num = s.rpartition(":")
+            if not num.isdigit():
+                return None, None
+            n = int(num)
+            if ns in ("global", "casa", "g"):
+                return self.global_, n
+            if ns in ("project", "projeto", "workspace", "ws", "p"):
+                return self.project, n
+            return None, None
+        if not s.lstrip("-").isdigit():
+            return None, None
+        n = int(s)
+        in_p = self.project.explain(n) is not None
+        in_g = self.global_.explain(n) is not None
+        if in_p and in_g:
+            return None, None                              # ambíguo → exige namespace
+        return (self.project if in_p else self.global_ if in_g else None), n
 
-    def archive_item(self, item_id: int) -> bool:
-        return bool(self.project.archive_item(item_id) or self.global_.archive_item(item_id))
+    def is_ambiguous(self, item_id) -> bool:
+        """True se o id CRU existe nos dois stores (precisa de namespace global:/project:)."""
+        s = str(item_id).strip()
+        if ":" in s or not s.lstrip("-").isdigit():
+            return False
+        n = int(s)
+        return self.project.explain(n) is not None and self.global_.explain(n) is not None
 
-    def explain(self, item_id: int) -> dict | None:
-        return self.project.explain(item_id) or self.global_.explain(item_id)
+    def forget_item(self, item_id) -> bool:
+        store, n = self._resolve(item_id)
+        return bool(store and store.forget_item(n))
+
+    def archive_item(self, item_id) -> bool:
+        store, n = self._resolve(item_id)
+        return bool(store and store.archive_item(n))
+
+    def explain(self, item_id) -> dict | None:
+        store, n = self._resolve(item_id)
+        if store is None:
+            if self.is_ambiguous(item_id):                 # ambíguo ≠ inexistente: avisa qual namespace usar
+                return {"ambiguous": True, "hint": f"use project:{item_id} ou global:{item_id}"}
+            return None
+        return store.explain(n)
 
     def export(self) -> list[dict]:
         return list(self.project.export()) + list(self.global_.export())

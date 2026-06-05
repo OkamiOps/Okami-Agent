@@ -144,6 +144,29 @@ def test_open_memory_global_layer(tmp_path, monkeypatch):
     assert any("zzz" in i.text for i in g.recent(10)) and not any("www" in i.text for i in g.recent(10))
 
 
+def test_scoped_id_collision_requires_namespace(tmp_path):
+    proj = SqliteFTS5Memory(tmp_path / "p.db", clock=lambda: 1.0)
+    glob = SqliteFTS5Memory(tmp_path / "g.db", clock=lambda: 1.0)
+    pid = proj.write(MemoryItem(text="fato do projeto"))            # id 1
+    gid = glob.write(MemoryItem(text="pref global", scope="global"))  # também id 1
+    assert pid == gid == 1                                          # COLISÃO de id entre stores
+    sm = ScopedMemory(proj, glob)
+    assert sm.is_ambiguous(1) and sm.forget_item(1) is False        # id cru ambíguo → NÃO adivinha
+    assert sm.explain(1).get("ambiguous") is True
+    assert sm.forget_item("global:1") is True                       # namespace resolve a casa
+    assert glob.explain(1)["status"] == "forgotten" and proj.explain(1)["status"] == "active"
+    assert sm.forget_item("project:1") is True and proj.explain(1)["status"] == "forgotten"
+
+
+def test_cli_parse_id_namespaces():
+    from okami.cli.commands.memory import _parse_id
+    assert _parse_id("1", False) == (1, False)
+    assert _parse_id("g1", False) == (1, True)            # g1 → casa
+    assert _parse_id("global:2", False) == (2, True)
+    assert _parse_id("project:3", True) == (3, False)     # namespace vence o --global
+    assert _parse_id("#1", True) == (1, True)             # sem prefixo respeita --global
+
+
 def test_global_not_layered_when_stores_collide(tmp_path, monkeypatch):
     # se o store do projeto e o global apontam pro MESMO diretório, não layer (evita duplicar o arquivo)
     monkeypatch.setenv("OKAMI_HOME", str(tmp_path / "proj" / ".okami"))
