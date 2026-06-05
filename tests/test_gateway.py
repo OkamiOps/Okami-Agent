@@ -455,8 +455,11 @@ def test_harden_command_sets_require_isolation(tmp_path, monkeypatch):
     res = CliRunner().invoke(app, ["harden"])
     assert res.exit_code == 0
     local = _yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
-    assert local["sandbox"]["require_isolation"] is True
-    # --off remove
+    assert local["sandbox"]["profile"] == "hardened-strict"          # postura nomeada (= o que o --strict aceita)
+    # e o perfil de fato força isolamento em superfície exposta (runtime, não só o check)
+    from okami.core.sandbox import effective_sandbox
+    assert effective_sandbox(local["sandbox"], "telegram").backend == "docker"
+    # --off remove o perfil (e não deixa sandbox vazio)
     CliRunner().invoke(app, ["harden", "--off"])
     local2 = _yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
-    assert "require_isolation" not in (local2.get("sandbox") or {})
+    assert (local2.get("sandbox") or {}).get("profile") != "hardened-strict"

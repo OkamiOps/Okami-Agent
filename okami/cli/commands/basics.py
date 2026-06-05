@@ -260,8 +260,9 @@ def doctor(
 def harden(
     off: bool = typer.Option(False, "--off", help="Desliga o isolamento estrito (volta ao dev-friendly)."),
 ) -> None:
-    """Liga o ISOLAMENTO ESTRITO p/ exposição pública (#2): superfície exposta SEM Docker → run_shell/
-    process DESABILITADOS, não degradam pro host. Grava sandbox.require_isolation no okami.local.yaml.
+    """Aplica o perfil HARDENED-STRICT — a postura recomendada p/ produção pública/GA (#2): superfície
+    exposta SEM Docker → run_shell/process DESABILITADOS, não degradam pro host. Grava
+    `sandbox.profile: hardened-strict` no okami.local.yaml (o `okami policy check --strict` passa).
 
     Use ANTES de expor o gateway publicamente ('qualquer um manda mensagem'). CLI/dev local não muda."""
 
@@ -270,16 +271,22 @@ def harden(
     data = read_yaml_resilient(p, default={}) or {}
     sb = dict(data.get("sandbox") or {})
     if off:
-        sb.pop("require_isolation", None)
+        if str(sb.get("profile", "")) == "hardened-strict":
+            sb.pop("profile", None)
+        sb.pop("require_isolation", None)            # limpa também o flag legado de versões antigas do harden
     else:
-        sb["require_isolation"] = True
-    data["sandbox"] = sb
+        sb["profile"] = "hardened-strict"            # postura NOMEADA (vence em runtime e no check estrito)
+        sb.pop("require_isolation", None)            # o profile já implica isolamento — evita config redundante
+    if sb:
+        data["sandbox"] = sb
+    else:
+        data.pop("sandbox", None)                    # não deixa um `sandbox: {}` vazio depois do --off
     secure_write_yaml(p, data)
     if off:
-        console.print("[yellow]⚠ isolamento estrito DESLIGADO[/yellow] — superfície exposta volta a degradar "
+        console.print("[yellow]⚠ perfil hardened-strict DESLIGADO[/yellow] — superfície exposta volta a degradar "
                       "p/ local sem Docker (dev-friendly). NÃO recomendado p/ uso público.")
         return
-    console.print("[green]✓ isolamento estrito LIGADO[/green] [dim](sandbox.require_isolation: true em "
+    console.print("[green]✓ perfil hardened-strict LIGADO[/green] [dim](sandbox.profile: hardened-strict em "
                   "okami.local.yaml)[/dim]")
     from okami.core.sandbox import SandboxPolicy
     has_docker = SandboxPolicy.from_config({"backend": "auto"}).effective_backend() == "docker"

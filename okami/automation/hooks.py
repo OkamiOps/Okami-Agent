@@ -53,8 +53,9 @@ class HookManager:
                 env[nm] = os.environ[nm]
         try:
             # hook = comando do operador (config confiável), não input do modelo.
-            r = subprocess.run(cmd, shell=True, cwd=str(self.root), env=env,  # noqa: S602  # nosec B602  # nosemgrep
-                               input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+            r = subprocess.run(  # nosec B602
+                cmd, shell=True, cwd=str(self.root), env=env,  # noqa: S602  # nosemgrep — operador, não modelo
+                input=json.dumps(payload), capture_output=True, text=True, timeout=30)
             if r.stdout.strip():
                 self.emit(f"[hook {event}] {r.stdout.strip()[:200]}")
             return r.returncode == 0

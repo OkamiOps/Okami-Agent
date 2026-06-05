@@ -121,6 +121,10 @@ def test_strict_gate_fails_exposed_without_isolation(tmp_path):
     ok = evaluate(_cfg(sandbox={"require_isolation": True}), strict_policy(DEFAULT_POLICY),
                   channels=chans, base_yaml=tmp_path / "n.yaml")
     assert "policy.sandbox.isolation" not in _levels(ok)
+    # e o perfil NOMEADO (o que `okami harden` grava) também satisfaz o gate de GA
+    okp = evaluate(_cfg(sandbox={"profile": "hardened-strict"}), strict_policy(DEFAULT_POLICY),
+                   channels=chans, base_yaml=tmp_path / "n.yaml")
+    assert "policy.sandbox.isolation" not in _levels(okp)
 
 
 def test_strict_cli_flag(tmp_path, monkeypatch):

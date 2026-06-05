@@ -74,10 +74,10 @@ jobs:
         run: uv sync --frozen --extra dev
       - name: Ruff — estilo + regras (GATE; versão travada no uv.lock)
         run: uv run ruff check okami tests
-      - name: Bandit — HIGH severity é GATE (use `# nosec <ID>` justificado p/ exceções)
-        run: uv run bandit -r okami --severity-level high --confidence-level medium -q
-      - name: Bandit — relatório MEDIUM+ (informativo, não bloqueia)
-        run: uv run bandit -r okami --severity-level medium -q || true
+      - name: Bandit — HIGH severity é GATE (postura versionada em pyproject [tool.bandit])
+        run: uv run bandit -r okami -c pyproject.toml --severity-level high --confidence-level medium -q
+      - name: Bandit — MEDIUM+ agora também é GATE (triado p/ zero; exceções só via `# nosec <ID>` justificado)
+        run: uv run bandit -r okami -c pyproject.toml --severity-level medium -q
       - name: pip-audit — CVE high/critical é GATE
         run: |
           # --no-hashes: o pacote editável (-e .) não pode exigir hash; pip-audit pula o self-package.

@@ -231,7 +231,7 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                 env = {**env, **proxy.proxy_env()}  # curl/pip/npm/requests passam pelo filtro
             # shell=True é o PROPÓSITO do sandbox local (rodar o comando); a defesa é o backend docker, não evitar shell.
             r = subprocess.run(  # nosec B602
-                cmd, shell=True, cwd=str(workspace), capture_output=True, text=True,  # nosemgrep — sandbox (ver # nosec acima)
+                cmd, shell=True, cwd=str(workspace), capture_output=True, text=True,  # nosemgrep — sandbox (B602 liberado na linha de cima)
                 timeout=policy.timeout, env=env, preexec_fn=_rlimit_preexec(policy),
             )
     except subprocess.TimeoutExpired:
