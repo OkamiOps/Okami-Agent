@@ -52,6 +52,27 @@ def events(
 
 
 @app.command()
+def tools() -> None:
+    """Lista as ferramentas do agente (categoria · tier · sensibilidade) — registro declarativo (#14)."""
+    from okami.core.tool_registry import by_category, missing
+    from okami.core.tools import default_registry
+    names = set(default_registry())
+    t = Table(title="[bold #ff7527]Ferramentas do Okami[/]", box=None, padding=(0, 2, 0, 0))
+    t.add_column("ferramenta", style="bold #ff39d1")
+    t.add_column("categoria")
+    t.add_column("tier")
+    t.add_column("sensibilidade")
+    _dc = {"safe": "green", "sensitive": "yellow", "dangerous": "red"}
+    for cat, specs in by_category(names).items():
+        for s in specs:
+            t.add_row(s.name, cat, s.tier, f"[{_dc.get(s.danger, 'white')}]{s.danger}[/]")
+    console.print(t)
+    drift = missing(names)
+    if drift:
+        console.print(f"[yellow]⚠ sem metadata no registry:[/yellow] {', '.join(drift)}")
+
+
+@app.command()
 def status() -> None:
     """Visão resolvida (estilo hermes/openclaw status): agente, modelo, providers, memória, toggles."""
     from rich.panel import Panel

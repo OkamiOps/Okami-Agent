@@ -194,9 +194,13 @@ class AgentEndpoint:
         return line
 
     def _tools_text(self) -> str:
+        from okami.core.tool_registry import by_category
         from okami.core.tools import default_registry
-        names = [n for n in default_registry() if not n.startswith("task_") and n != "need_input"]
-        return "🧰 ferramentas: " + ", ".join(sorted(names))
+        names = {n for n in default_registry() if not n.startswith("task_") and n != "need_input"}
+        lines = ["🧰 ferramentas:"]
+        for cat, specs in by_category(names).items():
+            lines.append(f"• {cat}: " + ", ".join(s.name for s in specs))
+        return "\n".join(lines)
 
     def _config_text(self) -> str:
         import yaml as _yaml
