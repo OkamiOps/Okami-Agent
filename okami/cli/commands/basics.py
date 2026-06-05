@@ -116,18 +116,19 @@ def doctor(
     from okami.cli import _ui
     cfg = _load()
     console.print()
-    console.print(_ui.header("doctor",
-                             f"v{__version__} · {platform.system()} {platform.release()} · Python {platform.python_version()}"))
+    console.print(_ui.banner(__version__))
+    console.print(_ui.fields([("sistema", Text(f"{platform.system()} {platform.release()} · "
+                                               f"Python {platform.python_version()}", style=_ui.MUTE))], label_w=10))
     console.print()
 
-    # --- providers (auth + endpoint) ---
+    # --- ◆ providers (auth + endpoint) ---
+    console.print(_ui.section("Providers"))
     pt = _ui.data_table(
         ("", {"width": 2, "no_wrap": True}),
         ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
         ("transporte", {"style": _ui.MUTE, "no_wrap": True}),
         ("auth", {"no_wrap": True}),
         ("endpoint", {"style": _ui.MUTE, "overflow": "ellipsis", "no_wrap": True, "max_width": 46}),
-        title="providers",
     )
     for name, pc in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
@@ -169,7 +170,9 @@ def doctor(
         ("limites (chars)", Text(f"soul {fl.get('soul', 6000)} · voice {fl.get('voice', 6000)} · "
                                  f"persona {fl.get('persona', 6000)} · user {fl.get('user', 4000)}", style=_ui.MUTE)),
     ]
-    console.print(_ui.card(_ui.kv(mem_rows), title="memória", accent=_ui.CYAN))
+    console.print()
+    console.print(_ui.section("Memória"))
+    console.print(_ui.fields(mem_rows, label_w=16))
 
     # --- ambiente / toolchain ---
     tools_line = Text()
@@ -210,7 +213,16 @@ def doctor(
                      style=_ui.SOFT if srv else _ui.MUTE)),
         ("sandbox", sb_v),
     ]
-    console.print(_ui.card(_ui.kv(env_rows), title="ambiente", accent=_ui.MAGENTA))
+    console.print()
+    console.print(_ui.section("Ambiente"))
+    console.print(_ui.fields(env_rows, label_w=16))
+    console.print()
+    console.print(_ui.footer("Próximos passos:", [
+        ("okami doctor --lint", "lint de postura de segurança"),
+        ("okami doctor --fix", "conserta lock órfão / perms do .env / temp"),
+        ("okami login <provider>", "autenticar provider de assinatura"),
+    ]))
+    console.print()
 
     if fix:
         from okami.config import global_env_path
