@@ -4,6 +4,22 @@
 > clonados e lidos arquivo:linha por 6 agentes (terminal/TUI · slash commands · Telegram × 2 repos).
 > Objetivo: tornar o terminal **profissional** (não "garagem") e fechar o gap de **comandos `/`** e Telegram.
 > Datado 2026-06-05. Refs ficam em `/tmp/okami-refs/{hermes-agent,openclaw}` (clones rasos).
+>
+> **⚠️ STATUS (atualizado) — este é o documento de PESQUISA (snapshot do gap em 2026-06-05).** Várias
+> jogadas já foram ENTREGUES desde então; onde o texto abaixo diz "somos REPL de linha / Rich+prompt_toolkit",
+> leia como o ponto de partida, não o estado atual:
+> - **FASE 1 (terminal) FEITA:** `okami chat` é hoje um **TUI de tela cheia em [Textual]** (`okami/tui_app.py`)
+>   — regiões fixas (header·log·aprovação·input·status), aprovação por botão, tool-calls ao vivo, mouse/scroll;
+>   o REPL `prompt_toolkit` virou só o **fallback** sem-TTY/`--no-tui`. Os comandos de terminal (`status`/
+>   `doctor`/`config`/…) ganharam um **dashboard composto** (masthead + grade de painéis + medidores).
+> - **FASE 2 (comandos `/`) FEITA:** registro declarativo `okami/commands.py` (`CommandDef`) com category/
+>   aliases/tier/scope; dele saem help, `/commands`, autocomplete, dispatch e "did you mean". Inclui
+>   `/model /models /compact /usage /tools /sessions /config /think /yolo /reload …`.
+> - **FASE 3 (Telegram-produto) PARCIAL:** split >4096, retry/backoff, dedup, typing e **aprovação por
+>   botão inline com nonce** já entregues; streaming-por-edição e reactions seguem no backlog.
+>
+> A análise comparativa abaixo é preservada como registro do raciocínio. Fonte da verdade do estado
+> atual: `README.md` + a auto-memória do projeto.
 
 ## TL;DR — as 3 jogadas estruturais (onde os DOIS repos concordam)
 
@@ -11,7 +27,8 @@
    Hermes = fork do **Ink/React** (`ui-tui/packages/hermes-ink`). OpenClaw = framework próprio **pi-tui**.
    Regiões persistentes (header · log · status · footer · editor): a **entrada é estruturalmente separada
    da saída** → a linha que você digita **nunca** é corrompida por output ao vivo. É a alavanca #1 do
-   "feeling profissional". Nós somos REPL de linha (prompt_toolkit) — bom, mas é o teto da "garagem".
+   "feeling profissional". ~~Nós somos REPL de linha (prompt_toolkit)~~ → **FEITO:** `okami chat` é TUI
+   de tela cheia em **Textual** (regiões fixas, aprovação por botão); o REPL virou fallback `--no-tui`.
 
 2. **Slash commands deles saem de UM registro declarativo** (Hermes `CommandDef`, OpenClaw `defineChatCommand`).
    Desse registro derivam: help, autocomplete, menus nativos (Telegram/Discord), dispatch, "did you mean".
@@ -30,10 +47,13 @@
 ## 1) TERMINAL / TUI
 
 ### Comparação
-| Capacidade | Hermes (Ink) | OpenClaw (pi-tui) | Okami (Rich+prompt_toolkit) |
+> **Nota:** a coluna "Okami" abaixo era o estado em 2026-06-05 (REPL Rich+prompt_toolkit). Hoje o
+> `okami chat` é **Textual** (TUI de tela cheia) — ver banner de status no topo. Tabela mantida como registro.
+
+| Capacidade | Hermes (Ink) | OpenClaw (pi-tui) | Okami (snapshot 06-05 → hoje) |
 |---|---|---|---|
-| Tela cheia (alt-screen, regiões fixas) | ✅ `appLayout.tsx:401` | ✅ `tui.ts:735-754` | ❌ REPL de linha |
-| Entrada não-corrompível por output | ✅ render tree | ✅ render tree | ⚠️ via `patch_stdout` (bom, mas frágil) |
+| Tela cheia (alt-screen, regiões fixas) | ✅ `appLayout.tsx:401` | ✅ `tui.ts:735-754` | ❌→✅ **Textual** (`tui_app.py`) |
+| Entrada não-corrompível por output | ✅ render tree | ✅ render tree | ⚠️→✅ regiões fixas do Textual |
 | Streaming de tokens (in-place) | ✅ `streamingMarkdown.tsx` | ✅ `tui-stream-assembler.ts` | ❌ só no fim do turno |
 | Syntax highlight em código | ✅ 8 langs `syntax.ts` | ✅ `theme.ts`/markdown | ❌ (só no `okami config`) |
 | Diff colorido (intra-linha) | ✅ `markdown.tsx:774` | ✅ `diff.ts:89-163` | ❌ |
