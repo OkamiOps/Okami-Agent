@@ -389,9 +389,9 @@ if _HAS_TEXTUAL:
             from datetime import datetime
             return datetime.now().strftime("%H:%M")
 
-        def _author_line(self, name: str, color: str, emoji: str = "🐺"):
-            # Régua de turno FORTE (avatar+nome+hora que cruza a tela) — não só a corzinha do lado.
-            return _tui.author_rule(name, color=color, emoji=emoji, when=self._now())
+        def _author_line(self, name: str, color: str):
+            # Régua de turno FORTE (barra ▌ + nome + hora que cruza a tela) — não só a corzinha do lado.
+            return _tui.author_rule(name, color=color, when=self._now())
 
         def _agent_block(self, body: str):
             from rich.console import Group
@@ -399,14 +399,14 @@ if _HAS_TEXTUAL:
             from rich.padding import Padding
             from rich.text import Text
             inner = Markdown(body) if body.strip() else Text("(sem resposta)", style="#6c6d80")
-            return Group(Text(""), self._author_line(self._agent, "#ff7527", "🐺"),
+            return Group(Text(""), self._author_line(self._agent, "#ff7527"),
                          Padding(inner, (0, 0, 1, 2)))
 
         def _user_block(self, text: str):
             from rich.console import Group
             from rich.padding import Padding
             from rich.text import Text
-            return Group(Text(""), self._author_line("você", "#00dfe8", "🧑"),
+            return Group(Text(""), self._author_line("você", "#00dfe8"),
                          Padding(Text(text, style="#f4f4f8"), (0, 0, 1, 2)))
 
 

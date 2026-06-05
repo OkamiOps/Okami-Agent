@@ -47,10 +47,10 @@ class TerminalChannel(Channel):
             self._console.print(self._render(text))
 
     def _turn_rule(self):
-        """Régua de turno do agente (🐺 okami · hora) — separação clara no REPL, igual à TUI."""
+        """Régua de turno do agente (▌ okami · hora) — separação clara no REPL, igual à TUI."""
         from datetime import datetime
         from okami import tui as _tui
-        return _tui.author_rule(self.agent_id, color="#ff7527", emoji="🐺",
+        return _tui.author_rule(self.agent_id, color="#ff7527",
                                 when=datetime.now().strftime("%H:%M"))
 
     @staticmethod

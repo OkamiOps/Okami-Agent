@@ -95,7 +95,7 @@ def test_event_line_has_emoji_per_kind():
 
 
 def test_author_rule_is_a_strong_separator():
-    # A régua de turno cruza a tela e carrega avatar + nome + hora (não só a corzinha do lado).
-    out = _render(tui.author_rule("okami", color="#ff7527", emoji="🐺", when="21:36"))
-    assert "🐺" in out and "okami" in out and "21:36" in out
+    # A régua de turno cruza a tela e carrega barra ▌ + nome + hora (sóbria, sem emoji no nome).
+    out = _render(tui.author_rule("okami", color="#ff7527", when="21:36"))
+    assert "▌" in out and "okami" in out and "21:36" in out
     assert "─" in out                                  # régua horizontal de verdade

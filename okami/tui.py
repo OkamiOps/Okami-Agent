@@ -382,12 +382,13 @@ def tool_emoji(tool: str) -> str:
     return "🛠️"
 
 
-def author_rule(name: str, *, color: str, emoji: str, when: str = ""):
-    """Separador de turno FORTE: régua horizontal com avatar+nome+hora que CRUZA a tela. Resolve
-    'a corzinha do lado do nome não basta' — fica óbvio onde um turno termina e o outro começa."""
+def author_rule(name: str, *, color: str, when: str = ""):
+    """Separador de turno FORTE: régua horizontal com a barra ▌ + nome + hora, na cor do autor, que
+    CRUZA a tela. Resolve 'a corzinha do lado do nome não basta' mantendo um visual SÓBRIO/profissional
+    (a barra ▌, não emoji de avatar — emoji no nome passa 'projeto de garagem')."""
     from rich.rule import Rule
     title = Text()
-    title.append(f"{emoji} ", style=color)
+    title.append("▌ ", style=f"bold {color}")
     title.append(name, style=f"bold {color}")
     if when:
         title.append(f"  {when}", style=MUTE)

@@ -35,13 +35,13 @@ def test_terminal_reply_gets_turn_rule_but_system_note_does_not():
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=True, width=80, legacy_windows=False)
     ch = TerminalChannel("okami", console=console)
-    ch.send("t", "✅ pronto, gato")             # resposta do agente → régua de turno 🐺
+    ch.send("t", "✅ pronto, gato")             # resposta do agente → régua de turno ▌
     out = buf.getvalue()
-    assert "🐺" in out and "okami" in out and "─" in out
+    assert "▌" in out and "okami" in out and "─" in out
     buf.truncate(0)
     buf.seek(0)
     ch.send("t", "🧠 okami está pensando…")     # nota de sistema → SEM régua (não polui)
-    assert "🐺" not in buf.getvalue()
+    assert "▌" not in buf.getvalue()
 
 
 def test_terminal_chat_roundtrip_persists_session():
