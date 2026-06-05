@@ -303,7 +303,8 @@ if _HAS_TEXTUAL:
         def _cmd_agents(self) -> None:
             s = self.ep.sessions.get(self._cid)
             self.query_one("#log", RichLog).write(
-                _tui.activity_panel(bg=self.ep._bg, busy=self._busy(), queued=len(s.queued) if s else 0))
+                _tui.activity_panel(bg=self.ep._bg, busy=self._busy(), queued=len(s.queued) if s else 0,
+                                    procs=self.ep.process_brief()))
 
         def _cmd_skin(self, line: str) -> None:
             from rich.text import Text

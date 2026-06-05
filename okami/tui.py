@@ -319,9 +319,11 @@ _DETAIL_LEVELS = ("hidden", "collapsed", "expanded")
 SKINS = ("okami", "nord", "gruvbox", "dracula", "tokyo-night", "monokai", "textual-light")
 
 
-def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 0) -> Text:
-    """Painel /agents (alias /tasks): o que está rodando AGORA — turno atual, /background e fila."""
+def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 0,
+                   procs: list | None = None) -> Text:
+    """Painel /agents (alias /tasks): o que roda AGORA — turno, /background, fila E processos OS."""
     bg = bg or {}
+    procs = procs or []
     t = Text()
     t.append("⚙ atividade\n", style=f"bold {CYAN}")
     t.append("  turno atual: ", style=MUTE)
@@ -332,6 +334,12 @@ def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 
             t.append(f"    ▶ #{bid} {desc}\n", style=SOFT)
     else:
         t.append("  background: nenhum\n", style=MUTE)
+    running = [p for p in procs if p.get("status") == "running"]
+    if procs:                                            # processos OS (servidor/build) — kill real: /process kill
+        t.append(f"  processos ({len(running)} ativos / {len(procs)}):\n", style=MUTE)
+        for p in procs[-8:]:
+            sym = "▶" if p.get("status") == "running" else "✅" if p.get("status") == "exited" else "·"
+            t.append(f"    {sym} {p.get('id', '?')} {(p.get('cmd') or '')[:40]}\n", style=SOFT)
     if queued:
         t.append(f"  fila: {queued} aguardando\n", style="#ffb86c")
     return t

@@ -34,6 +34,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                tier="power"),
     CommandDef("background", "roda uma tarefa em paralelo e avisa quando terminar", "sessão",
                ("bg",), args="<tarefa>"),
+    CommandDef("process", "supervisão de processos OS (servidor/build): status·log·kill imediato", "sessão",
+               ("proc",), args="<status|log|kill|signal> [id]", tier="power"),
     CommandDef("title", "dá um nome à conversa atual (/title <nome>)", "sessão", args="[nome]"),
     CommandDef("exit", "sai do chat", "sessão", ("quit", "sair"), scope="chat", tier="essential"),
     # ---- modelo / raciocínio ----

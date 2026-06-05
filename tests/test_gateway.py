@@ -130,6 +130,46 @@ def test_background_alias_and_requires_prompt():
     assert any("background #1 pronto" in t and "feito: some os numeros" in t for _, t in ep.channel.sent)
 
 
+def test_process_chat_status_log_and_kill_real_process():
+    # /process supervisiona PROCESSOS OS de verdade (kill imediato), unificado com /background.
+    from okami.core.processes import ProcessManager
+    ep = _ep()
+    pm = ProcessManager(ep.ws)
+    pid = pm.start("echo hello-proc; sleep 30")["id"]
+    ep.handle("7", "/process status")
+    out = [t for _, t in ep.channel.sent]
+    assert any(pid in t and "kill imediato" in t for t in out)
+    # /background status agora mostra TAMBÉM os processos (visão unificada do review)
+    ep.handle("7", "/background status")
+    assert any("⚙ processos" in t and pid in t for _, t in ep.channel.sent)
+    # kill REAL (não cooperativo) — o processo morre na hora
+    ep.handle("7", f"/process kill {pid}")
+    assert any("morto" in t and pid in t for _, t in ep.channel.sent)
+    assert pm.poll(pid)["status"] == "exited"
+    ep.handle("7", "/process kill naoexiste")
+    assert any("não existe" in t for _, t in ep.channel.sent)
+
+
+def test_process_chat_log_tails_output():
+    from okami.core.processes import ProcessManager
+    ep = _ep()
+    pm = ProcessManager(ep.ws)
+    pid = pm.start("echo linha-de-log-proc")["id"]
+    pm.wait(pid, timeout=5)
+    ep.handle("7", f"/process log {pid}")
+    assert any("linha-de-log-proc" in t for _, t in ep.channel.sent)
+
+
+def test_process_brief_feeds_activity_panel():
+    from okami import tui
+    from okami.core.processes import ProcessManager
+    ep = _ep()
+    pid = ProcessManager(ep.ws).start("sleep 30")["id"]
+    panel = tui.activity_panel(bg={}, busy=False, queued=0, procs=ep.process_brief())
+    txt = panel.plain if hasattr(panel, "plain") else str(panel)
+    assert "processos" in txt and pid in txt
+
+
 def test_title_sets_shows_in_status_and_persists():
     ep = _ep()
     ep.handle("7", "/title meu projeto okami")

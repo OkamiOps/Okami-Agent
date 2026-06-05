@@ -489,6 +489,23 @@ class AgentEndpoint(EndpointCommandsMixin):
                 return
             self._spawn_background(chat_id, prompt, yolo=s.yolo)
             return
+        if low.split(maxsplit=1)[0] in ("/process", "/proc", "/procs"):   # supervisão de PROCESSOS OS — kill REAL
+            rest = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            pp = rest.split(maxsplit=1)
+            psub = pp[0].lower() if pp else ""
+            parg = pp[1].strip() if len(pp) > 1 else ""
+            if psub in ("", "status", "list", "ls", "ps"):
+                self.channel.send(chat_id, self._process_status())
+            elif psub in ("log", "logs", "tail"):
+                self.channel.send(chat_id, self._process_log(parg))
+            elif psub in ("kill", "stop", "term"):
+                self.channel.send(chat_id, self._process_kill(parg))
+            elif psub in ("signal", "sig"):
+                self.channel.send(chat_id, self._process_signal(parg))
+            else:
+                self.channel.send(chat_id, "uso: /process status · /process log <id> [linhas] · "
+                                  "/process kill <id> · /process signal <id> <SINAL>. (kill imediato, real)")
+            return
         from okami.automation.scheduler import Scheduler, infer_commitment   # §11: "me lembra de X amanhã" → agenda
         ic = infer_commitment(text, time.time())
         if ic:
@@ -520,18 +537,92 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _pm(self):
+        from okami.core.processes import ProcessManager
+        return ProcessManager(self.ws)
+
+    def process_brief(self) -> list[dict]:
+        """Lista de processos OS p/ o painel /agents (best-effort, nunca lança)."""
+        try:
+            return self._pm().list()
+        except Exception:  # noqa: BLE001
+            return []
+
+    @staticmethod
+    def _fmt_processes(procs: list[dict]) -> str:
+        """Bloco de processos OS (servidor/build longo) — kill IMEDIATO, ao contrário do background cooperativo."""
+        icon = {"running": "▶", "exited": "✅", "unknown": "·"}
+        out = ["⚙ processos (OS real — kill imediato: /process kill <id>):"]
+        for p in procs[-15:]:
+            st = p.get("status", "?")
+            ec = p.get("exit_code")
+            tail = f" → exit {ec}" if st == "exited" and ec is not None else ""
+            flag = " 🔌" if p.get("interactive") else ""
+            out.append(f"  {icon.get(st, '·')} {p['id']} [{st}{tail}]{flag} {(p.get('cmd') or '')[:48]}")
+        return "\n".join(out)
+
     def _background_status(self) -> str:
+        """Visão UNIFICADA: tarefas /background (agente, cancel cooperativo) + processos OS (kill real)."""
         import datetime as _dt
         jobs = self._bgreg.list(15)
-        if not jobs:
-            return "▶ nenhuma tarefa /background ainda."
-        icon = {"running": "▶", "done": "✅", "failed": "❌", "interrupted": "⏸"}
-        out = ["📋 tarefas /background (durável — sobrevive a restart):"]
-        for j in jobs:
-            when = (_dt.datetime.fromtimestamp(j["started_at"]).strftime("%d/%m %H:%M")
-                    if j.get("started_at") else "?")
-            out.append(f"  {icon.get(j.get('state'), '·')} #{j['id']} [{when}] {(j.get('prompt') or '')[:60]}")
+        out: list[str] = []
+        if jobs:
+            icon = {"running": "▶", "done": "✅", "failed": "❌", "interrupted": "⏸", "cancelled": "⏹"}
+            out.append("📋 tarefas /background (durável — sobrevive a restart):")
+            for j in jobs:
+                when = (_dt.datetime.fromtimestamp(j["started_at"]).strftime("%d/%m %H:%M")
+                        if j.get("started_at") else "?")
+                out.append(f"  {icon.get(j.get('state'), '·')} #{j['id']} [{when}] {(j.get('prompt') or '')[:60]}")
+        else:
+            out.append("▶ nenhuma tarefa /background ainda.")
+        try:
+            procs = self._pm().list()
+        except Exception:  # noqa: BLE001
+            procs = []
+        if procs:                                        # mostra TAMBÉM os processos relevantes (pedido do review)
+            out.append("")
+            out.append(self._fmt_processes(procs))
         return "\n".join(out)
+
+    def _process_status(self) -> str:
+        try:
+            procs = self._pm().list()
+        except Exception:  # noqa: BLE001
+            procs = []
+        if not procs:
+            return ("⚙ nenhum processo OS agora. Servidores/builds longos que o agente sobe (process_start) "
+                    "aparecem aqui — com kill imediato (/process kill <id>), diferente do background cooperativo.")
+        return self._fmt_processes(procs)
+
+    def _process_log(self, arg: str) -> str:
+        toks = arg.split()
+        if not toks:
+            return "uso: /process log <id> [linhas] (ids em /process status)."
+        pid = toks[0]
+        n = int(toks[1]) if len(toks) > 1 and toks[1].isdigit() else 30
+        page = self._pm().log_page(pid, offset=-n, limit=n)
+        if not page["lines"]:
+            return f"📄 processo {pid}: sem log ainda (ou id inexistente)."
+        rng = f"linhas {page['offset'] + 1}–{page['offset'] + page['shown']} de {page['total']}"
+        return f"📄 processo {pid} ({rng}):\n" + "\n".join("  " + ln for ln in page["lines"])
+
+    def _process_kill(self, arg: str) -> str:
+        toks = arg.split()
+        if not toks:
+            return "uso: /process kill <id> (ids em /process status)."
+        pid = toks[0]
+        if self._pm().poll(pid).get("status") == "unknown":
+            return f"✗ processo {pid} não existe (veja /process status)."
+        ok = self._pm().kill(pid)
+        return f"🛑 processo {pid} morto (SIGTERM no grupo)." if ok else f"✗ não consegui matar {pid}."
+
+    def _process_signal(self, arg: str) -> str:
+        toks = arg.split()
+        if len(toks) < 2:
+            return "uso: /process signal <id> <SINAL> (ex.: HUP, KILL, USR1, STOP, CONT)."
+        pid, name = toks[0], toks[1].upper().lstrip("SIG")
+        ok = self._pm().signal(pid, name)
+        return f"📶 sinal {name} → {pid}." if ok else f"✗ não consegui sinalizar {pid} (id/sinal inválido?)."
 
     def _background_log(self, arg: str) -> str:
         toks = arg.split()
@@ -554,7 +645,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             return (f"✗ background #{bid} não está rodando agora (já terminou, foi cancelado, ou era de "
                     "outra sessão/processo). Veja /background status.")
         ev.set()
-        return f"⏹ cancelando background #{bid} — para no próximo passo (parada cooperativa, não kill instantâneo)."
+        return (f"⏹ cancelando background #{bid} — para no próximo passo (cooperativo). Se ele subiu um "
+                "servidor/build, veja /process status e mate na hora com /process kill <id>.")
 
     def _spawn_background(self, chat_id, prompt: str, *, yolo: bool = False) -> None:
         """/background: roda `prompt` numa tarefa ISOLADA (não toca no histórico da sessão), em paralelo,

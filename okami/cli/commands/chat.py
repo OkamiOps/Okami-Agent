@@ -119,7 +119,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             continue
         if decision == "agents":                        # cliente: painel de atividade
             sx = ep.sessions.get(cid)
-            console.print(tui.activity_panel(bg=ep._bg, busy=_busy(), queued=len(sx.queued) if sx else 0))
+            console.print(tui.activity_panel(bg=ep._bg, busy=_busy(), queued=len(sx.queued) if sx else 0,
+                                             procs=ep.process_brief()))
             continue
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
             console.print(f"[dim]🎨 {decision} só vale na TUI de tela cheia (rode `okami chat` sem --no-tui).[/dim]")
