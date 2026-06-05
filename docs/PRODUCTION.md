@@ -34,14 +34,14 @@ No CI, o workflow `production-conformance.yml` roda o `--strict` em **dois modos
 Atalho (escreve no `okami.local.yaml`):
 
 ```bash
-okami harden          # liga sandbox.require_isolation: true   (reverter: okami harden --off)
+okami harden          # aplica o perfil hardened-strict (a postura pública/GA)  ·  reverter: okami harden --off
 ```
 
 Ou na mão, no `okami.yaml` / `okami.local.yaml` do ambiente de produção:
 
 ```yaml
 sandbox:
-  require_isolation: true     # ou: profile: hardened-strict
+  profile: hardened-strict    # perfil NOMEADO p/ GA (equiv. a require_isolation: true, e o que o --strict aceita)
   # exposto + sem Docker → run_shell/process_start DESABILITADOS (exit 126), não caem no local
 ```
 
@@ -86,7 +86,7 @@ por área + aviso de quota estourada); `okami clean --deep --dry-run --json` aud
 ## 4. Checklist de GA
 
 - [ ] `okami policy check --strict` passa (0 FAIL).
-- [ ] `sandbox.require_isolation: true` no ambiente exposto, com Docker disponível.
+- [ ] `sandbox.profile: hardened-strict` (via `okami harden`) no ambiente exposto, com Docker disponível.
 - [ ] Canais com `allow_chats` (deny-by-default) — nunca `allow_all: true`.
 - [ ] API com `OKAMI_API_TOKEN` e bind em `127.0.0.1` atrás de proxy/rede privada.
 - [ ] Segredos só em `.env` (`${ENV}` no YAML) — `okami doctor --lint` limpo.
