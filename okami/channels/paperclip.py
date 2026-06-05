@@ -217,7 +217,8 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
         pending.append(req.get("reason", "ação sensível"))
         return False
 
-    task = run_task(cfg, workspace, goal, approve=approve, extra_context=_ctx_block(issue, ctx), emit=emit)
+    task = run_task(cfg, workspace, goal, approve=approve, extra_context=_ctx_block(issue, ctx),
+                    surface="paperclip", emit=emit)
 
     if pending and task.state != TaskState.COMPLETE:
         comment = ("Aguardando confirmação humana p/ ações sensíveis:\n- "

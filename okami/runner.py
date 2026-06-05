@@ -39,6 +39,7 @@ def run_task(
     images: list[str] | None = None,
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
     prelearned_files: list[str] | None = None,  # arquivos já "conhecidos" (não exige read antes de sobrescrever)
+    surface: str = "cli",                        # superfície (cli/telegram/group/paperclip/subagent) → tool policy
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)
@@ -66,7 +67,8 @@ def run_task(
             if spec:
                 graw, _ = load_raw()
                 scfg, sws = effective_config(graw, spec), spec.dir
-        sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1, emit=emit)
+        sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
+                       surface="subagent", emit=emit)   # subagente: surface restrita (não spawna de novo)
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
     eff = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
@@ -111,7 +113,8 @@ def run_task(
                       embedder=make_embedder(cfg.memory.get("embedder")), config=cfg.memory)
     core_block = memfiles.core_block(ws, cfg.memory.get("files", {}))
 
-    registry = default_registry()
+    from okami.core.tool_policy import filter_registry
+    registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None))
     mcp_clients = []
     servers = (cfg.mcp or {}).get("servers")
     if servers:

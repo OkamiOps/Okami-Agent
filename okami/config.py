@@ -142,6 +142,7 @@ class OkamiConfig(BaseModel):
     learning: dict[str, Any] = Field(default_factory=dict)   # {"auto_skill": false} (§7 auto-aprimoramento)
     hooks: dict[str, Any] = Field(default_factory=dict)      # {evento: ["cmd"]} event hooks (§11)
     sandbox: dict[str, Any] = Field(default_factory=dict)    # {"backend": "local|docker", "mode": ...} (§P0 #2)
+    tools: dict[str, Any] = Field(default_factory=dict)      # {"surfaces": {telegram: {deny:[...], allow:[...]}}} (P1.4)
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -217,6 +218,7 @@ def build_config(raw: dict) -> OkamiConfig:
         learning=raw.get("learning") or {},
         hooks=raw.get("hooks") or {},
         sandbox=raw.get("sandbox") or {},
+        tools=raw.get("tools") or {},
     )
 
 

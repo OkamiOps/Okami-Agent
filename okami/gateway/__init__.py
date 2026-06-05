@@ -101,6 +101,8 @@ class AgentEndpoint:
         self.cfg = cfg
         self.ws = ws
         self.channel = channel
+        from okami.core.tool_policy import surface_of
+        self.surface = surface_of(channel)   # CLI/telegram/group/paperclip → tool policy por superfície (P1.4)
         self.run_task = run_task
         self.stt = stt
         self.tts = tts
@@ -590,6 +592,7 @@ class AgentEndpoint:
                 kw["model"] = s.model_override
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
+            kw.setdefault("surface", self.surface)        # tool policy por superfície (P1.4)
             task = self.run_task(self.cfg, self.ws, text, **kw)
             stats = getattr(task, "stats", None) or {}     # tokens do turno (custo §A5)
             if stats.get("usage"):
