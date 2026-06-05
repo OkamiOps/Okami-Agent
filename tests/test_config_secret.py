@@ -64,9 +64,9 @@ def test_config_get_raw_flag_reveals(tmp_path, monkeypatch):
 def test_config_get_secret_valued_innocuous_key(tmp_path, monkeypatch):
     """Mesmo com chave inócua, valor que PARECE segredo (sk-…) é mascarado."""
     monkeypatch.chdir(tmp_path)
-    _write_local(tmp_path, "note: sk-abcdefghijklmnop0123456789\n")
+    _write_local(tmp_path, "note: sk-abcdefghijklmnop0123456789\n")  # pragma: allowlist secret
     res = runner.invoke(app, ["config", "get", "note"])
-    assert res.exit_code == 0 and "sk-abcdefghijklmnop0123456789" not in res.output
+    assert res.exit_code == 0 and "sk-abcdefghijklmnop0123456789" not in res.output  # pragma: allowlist secret
 
 
 def test_config_get_normal_scalar_shown(tmp_path, monkeypatch):

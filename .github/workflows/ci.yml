@@ -25,7 +25,16 @@ jobs:
       - name: Tests
         run: uv run pytest -q
       - name: Policy conformance (GATE) — okami.policy.yaml vs config
-        run: uv run okami policy check
+        # `>` (sem pipe) preserva o exit code do okami → gate de verdade; o JSON vira artefato.
+        run: |
+          uv run okami policy check --json > policy-conformance.json
+          cat policy-conformance.json
+      - name: Upload conformance artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4 (pin por SHA)
+        with:
+          name: policy-conformance
+          path: policy-conformance.json
       - name: Build wheel + sdist
         run: uv build
       - name: Smoke — installed package runs outside the checkout
@@ -39,17 +48,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1 (pin por SHA)
         with:
           fetch-depth: 0
-      - name: Nenhum segredo versionado
-        run: |
-          set -e
-          if git ls-files | grep -E '(^|/)\.env$' ; then echo "::error::.env está versionado"; exit 1; fi
-          if git ls-files | grep -E 'okami\.local\.yaml$' ; then echo "::error::okami.local.yaml está versionado"; exit 1; fi
-          # padrões óbvios de chave em arquivos versionados (ignora locks e exemplos)
-          if git grep -nIE '(sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
-               -- . ':!*.lock' ':!*.example.*' ; then
-            echo "::error::possível segredo versionado"; exit 1
-          fi
-          echo "sem segredos versionados ✓"
+      - name: Nenhum segredo versionado (script compartilhado com o pytest)
+        # Fonte única: scripts/secret-scan.sh (mesmo do tests/test_secret_scan.py). Vetor fake de teste
+        # leva `# pragma: allowlist secret` (explícito/auditável); o resto é scan forte.
+        run: bash scripts/secret-scan.sh
 
   # Hardening de supply-chain (P1.5): agora é GATE (sem `|| true`). Falha a CI se houver problema.
   security:

@@ -18,9 +18,9 @@ def test_emit_and_read_roundtrip(tmp_path):
 
 
 def test_events_are_redacted(tmp_path):
-    EventLog(tmp_path).emit("step", out="OPENAI_API_KEY=sk-abcdefghijklmnop1234")
+    EventLog(tmp_path).emit("step", out="OPENAI_API_KEY=sk-abcdefghijklmnop1234")  # pragma: allowlist secret
     line = (tmp_path / ".okami" / "events.jsonl").read_text(encoding="utf-8")
-    assert "sk-abcdefghijklmnop1234" not in line and "redacted" in line
+    assert "sk-abcdefghijklmnop1234" not in line and "redacted" in line  # pragma: allowlist secret
 
 
 def test_read_missing_is_empty(tmp_path):

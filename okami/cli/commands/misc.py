@@ -404,8 +404,18 @@ def version() -> None:
     console.print(__version__)
 
 
+def _version_cb(value: bool) -> None:
+    if value:
+        console.print(__version__)
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
-def _root(ctx: typer.Context) -> None:
+def _root(
+    ctx: typer.Context,
+    _version: bool = typer.Option(False, "--version", "-V", help="Mostra a versão e sai.",
+                                  callback=_version_cb, is_eager=True),
+) -> None:
     """Okami Agent — CLI. Sem comando, mostra a visão geral."""
     if ctx.invoked_subcommand is None:
         help_cmd()

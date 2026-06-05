@@ -54,9 +54,9 @@ def test_hooks_use_sanitized_env(monkeypatch, tmp_path):
 def test_tool_observation_is_redacted_and_ansi_stripped():
     from okami.core.harness import format_observation
     from okami.core.tools import ToolResult
-    res = ToolResult(True, "\x1b[31mOPENAI_API_KEY=sk-abcdefghijklmnop1234\x1b[0m done")
+    res = ToolResult(True, "\x1b[31mOPENAI_API_KEY=sk-abcdefghijklmnop1234\x1b[0m done")  # pragma: allowlist secret
     obs = format_observation(3, "run_shell", res)
-    assert "\x1b[" not in obs and "sk-abcdefghijklmnop1234" not in obs and "done" in obs
+    assert "\x1b[" not in obs and "sk-abcdefghijklmnop1234" not in obs and "done" in obs  # pragma: allowlist secret
 
 
 def test_run_shell_blocks_sensitive_path_read(tmp_path):
