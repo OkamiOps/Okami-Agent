@@ -11,6 +11,7 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 ou onde você quiser.
 
 ![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
+![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
@@ -496,6 +497,13 @@ No repositório:
 - [docs/PRODUCTION.md](docs/PRODUCTION.md) — checklist de GA + como ligar a postura hostil.
 - [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/STRUCTURE.md](docs/STRUCTURE.md) ·
   [docs/COMPETITIVE_RESEARCH.md](docs/COMPETITIVE_RESEARCH.md) (Hermes × OpenClaw × Okami).
+
+---
+
+## Licença
+
+[MIT](LICENSE) © 2026 OkamiOps. Use, faça fork, lance comercialmente — sem pegadinha, sem garantia.
+É exatamente esse o ponto.
 
 ---
 

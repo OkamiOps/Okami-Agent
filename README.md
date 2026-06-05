@@ -11,6 +11,7 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 or wherever you want.
 
 ![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
+![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
@@ -503,6 +504,13 @@ In the repository:
 - [docs/PRODUCTION.md](docs/PRODUCTION.md) — GA checklist + how to turn on the hostile posture.
 - [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/STRUCTURE.md](docs/STRUCTURE.md) ·
   [docs/COMPETITIVE_RESEARCH.md](docs/COMPETITIVE_RESEARCH.md) (Hermes × OpenClaw × Okami).
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 OkamiOps. Use it, fork it, ship it commercially — no strings attached, no
+warranty. That's the whole point.
 
 ---
 

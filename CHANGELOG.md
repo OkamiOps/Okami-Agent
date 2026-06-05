@@ -45,6 +45,9 @@ Primeiro **alpha público**. 🐺
 - `config check --json`, escape de `systemd` argv, `.okami` fora do CWD (skills/voice), providers
   opcionais em âmbar (sem alarme de 401).
 
+### License
+- O projeto agora é **MIT** ([LICENSE](LICENSE)) — uso/fork/comercial livre, sem garantia.
+
 ### Security
 - Assinatura-only para Claude/Codex (nunca `ANTHROPIC_API_KEY` pay-as-you-go).
 - Segredos só no `.env` (gitignored); `okami.yaml` versionado sem segredo literal.

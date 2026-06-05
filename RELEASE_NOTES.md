@@ -92,6 +92,11 @@ okami setup     # configura em 2-3 cliques
 okami chat      # conversa no terminal
 ```
 
+## 📄 License
+
+**MIT** ([LICENSE](https://github.com/OkamiOps/Okami-Agent/blob/main/LICENSE)) © 2026 OkamiOps — use it,
+fork it, ship it commercially, no strings attached and no warranty.
+
 ## 🔗 Links
 
 - 🌐 Landing: https://okamiagent.com

@@ -3,7 +3,18 @@ name = "okami-agent"
 version = "0.1.0-alpha"
 description = "Okami Agent — reliable, self-improving coding agent with capability parity across LLMs"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "OkamiOps", email = "msant262@gmail.com" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "litellm>=1.50",
     "pyyaml>=6.0",
