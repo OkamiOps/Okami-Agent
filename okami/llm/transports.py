@@ -106,7 +106,7 @@ CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 _CODEX_TERMINAL = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 
-def _codex_sse(lines) -> tuple[str, dict | None]:
+def _codex_sse(lines) -> tuple[str, dict | None, list]:
     """Parseia o stream SSE da Responses API do Codex → (texto, usage).
 
     Texto: deltas `response.output_text.delta` (fallback: `output` do terminal). USAGE: capturado do
@@ -118,6 +118,7 @@ def _codex_sse(lines) -> tuple[str, dict | None]:
     usage: dict | None = None
     saw_terminal = False
     incomplete_reason = ""
+    calls: dict[str, dict] = {}     # function_call NATIVO (Onda 3): item_id -> {id, name, arguments}
     for raw in lines:
         line = raw.decode("utf-8", "ignore") if isinstance(raw, (bytes, bytearray)) else raw
         line = line.strip()
@@ -133,6 +134,16 @@ def _codex_sse(lines) -> tuple[str, dict | None]:
         t = obj.get("type", "")
         if t == "response.output_text.delta":
             chunks.append(obj.get("delta", ""))
+        elif t in ("response.output_item.added", "response.output_item.done"):
+            item = obj.get("item") or {}
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                iid = item.get("id") or item.get("call_id") or str(len(calls))
+                calls[iid] = {"id": item.get("call_id") or item.get("id") or "",
+                              "name": item.get("name", ""), "arguments": item.get("arguments", "") or ""}
+        elif t == "response.function_call_arguments.delta":
+            iid = obj.get("item_id") or ""
+            if iid in calls:
+                calls[iid]["arguments"] += obj.get("delta", "")
         elif t in _CODEX_TERMINAL:
             saw_terminal = True
             resp = obj.get("response") or {}
@@ -144,6 +155,11 @@ def _codex_sse(lines) -> tuple[str, dict | None]:
                 for c in (it.get("content") or [])
                 if isinstance(c, dict) and c.get("type") in ("output_text", "text")
             ]
+            for it in out:                       # function_call no array terminal (autoritativo)
+                if isinstance(it, dict) and it.get("type") == "function_call":
+                    iid = it.get("id") or it.get("call_id") or str(len(calls))
+                    calls[iid] = {"id": it.get("call_id") or it.get("id") or "",
+                                  "name": it.get("name", ""), "arguments": it.get("arguments", "") or ""}
             if texts:
                 final = "".join(texts)
             if t == "response.failed":
@@ -154,17 +170,40 @@ def _codex_sse(lines) -> tuple[str, dict | None]:
         elif t == "error":
             raise RuntimeError(f"codex stream erro: {obj.get('error') or obj}")
     text = "".join(chunks) or final
-    if not text:
+    tool_calls = [c for c in calls.values() if c.get("name")]
+    if not text and not tool_calls:              # tool_call sem texto é resposta VÁLIDA (Onda 3)
         if not saw_terminal:
             raise RuntimeError("codex: stream encerrou sem evento terminal (resposta vazia)")
         if incomplete_reason:
             raise RuntimeError(f"codex: resposta incompleta sem texto ({incomplete_reason})")
-    return text, usage
+    return text, usage, tool_calls
 
 
 def _codex_sse_text(lines) -> str:
     """Só o texto (wrapper p/ compat/teste)."""
     return _codex_sse(lines)[0]
+
+
+def _responses_tools(registry) -> list[dict]:
+    """Schemas das tools no formato da Responses API do codex (function FLAT, sem o wrapper 'function')."""
+    from okami.core.tools import openai_tools
+    out = []
+    for tdef in openai_tools(registry):
+        fn = tdef.get("function", tdef)
+        out.append({"type": "function", "name": fn.get("name", ""),
+                    "description": fn.get("description", ""), "parameters": fn.get("parameters", {})})
+    return out
+
+
+def _toolcalls_to_action_text(tool_calls) -> str:
+    """Converte o PRIMEIRO function_call nativo no protocolo de ação JSON-em-texto que o harness parseia."""
+    tc = tool_calls[0]
+    try:
+        args = json.loads(tc.get("arguments") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    block = json.dumps({"tool": tc.get("name", ""), "args": args}, ensure_ascii=False)
+    return f"```json\n{block}\n```"
 
 
 def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
@@ -192,6 +231,11 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
         "store": False,    # exigido pelo endpoint ("Store must be set to false")
         "stream": True,     # exigido pelo endpoint ("Stream must be set to true")
     }
+    native = bool(getattr(pc, "native_tools", False))   # Onda 3 (opt-in): tool-calling nativo
+    if native:
+        from okami.core.tools import default_registry
+        payload["tools"] = _responses_tools(default_registry())
+        payload["tool_choice"] = "auto"
     effort = (overrides or {}).get("reasoning_effort") or pc.reasoning_effort  # /think > default do provider
     if effort:
         payload["reasoning"] = {"effort": effort}   # think effort (gpt-5/codex): minimal|low|medium|high
@@ -204,11 +248,14 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     req.add_header("Accept", "text/event-stream")
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
-            text, usage = _codex_sse(resp)
+            text, usage, tool_calls = _codex_sse(resp)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:300]
         raise RuntimeError(f"codex HTTP {e.code}: {detail}") from e
-    return Completion(text=text, usage=normalize_usage(usage, transport="codex_oauth"),
+    if native and tool_calls:                    # function_call nativo → protocolo de ação (pipeline atual)
+        text = _toolcalls_to_action_text(tool_calls)
+    return Completion(text=text, tool_calls=tool_calls,
+                      usage=normalize_usage(usage, transport="codex_oauth"),
                       provider=pc.name, model=model_short)
 
 

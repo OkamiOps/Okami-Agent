@@ -81,6 +81,10 @@ class ProviderConfig(BaseModel):
     # "medium"|"high" (alguns aceitam mais). Vazio = default do modelo. Vai pro litellm
     # (reasoning_effort) e pro transport do codex (reasoning.effort). Trocável por sessão com /think.
     reasoning_effort: str = ""
+    # Tool-calling NATIVO (Onda 3): o transport manda os schemas das tools e o modelo emite
+    # function_call estruturado (não JSON-em-texto). EXPERIMENTAL, opt-in por provider — o codex
+    # converte o function_call de volta p/ o protocolo de ação; off = comportamento atual intacto.
+    native_tools: bool = False
     notes: str | None = None
 
     def resolved_key(self) -> str | None:
