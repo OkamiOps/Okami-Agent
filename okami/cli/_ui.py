@@ -22,7 +22,8 @@ AMBER = "#ffb86c"
 RED = "#ff5555"
 
 __all__ = ["ORANGE", "CYAN", "MAGENTA", "FG", "SOFT", "MUTE", "DIM", "GREEN", "AMBER", "RED",
-           "header", "section", "card", "kv", "kv_grid", "badge", "dot", "data_table", "hint", "gradient"]
+           "header", "banner", "section", "fields", "footer", "card", "kv", "kv_grid", "badge",
+           "dot", "data_table", "hint", "gradient", "stack"]
 
 # estado → (cor, símbolo). Cobre os status que os comandos usam (auth/doctor/policy/lint).
 _STATE = {
@@ -56,14 +57,46 @@ def header(title: str, subtitle: str = "", *, icon: str = "🐺") -> Text:
     return t
 
 
-def section(title: str, *, icon: str = "", accent: str = ORANGE) -> Text:
-    """Cabeçalho de seção: `▌ TÍTULO` (barra de acento + caixa-alta sutil)."""
-    t = Text()
-    t.append("▌ ", style=f"bold {accent}")
-    if icon:
-        t.append(f"{icon} ", style=accent)
-    t.append(title.upper(), style=f"bold {SOFT}")
+def banner(version: str = "", tagline: str = "IA com soberania para PMEs", *, icon: str = "🐺") -> Text:
+    """Linha-banner do topo: `🐺 OKAMI v0.0.1 — IA com soberania para PMEs` (wordmark em gradiente)."""
+    t = Text(no_wrap=True, overflow="ellipsis")
+    t.append(f"{icon} ", style=ORANGE)
+    t.append_text(gradient("OKAMI"))
+    if version:
+        t.append(f"  v{version}", style=MUTE)
+    t.append(f"   —   {tagline}", style=ORANGE)
     return t
+
+
+def section(title: str, *, accent: str = CYAN) -> Text:
+    """Cabeçalho de seção estilo Hermes/OpenClaw: `◆ Título` (diamante de acento)."""
+    t = Text()
+    t.append("◆ ", style=f"bold {accent}")
+    t.append(title, style=f"bold {accent}")
+    return t
+
+
+def fields(rows, *, indent: int = 2, label_w: int = 0, label_style: str = MUTE, value_style: str = FG) -> Table:
+    """Key-value FLAT estilo Hermes: `  Label   value` (rótulo à esquerda, sem caixa). v pode ser Text."""
+    g = Table.grid(padding=(0, 2, 0, 0))
+    g.add_column(justify="left", style=label_style, no_wrap=True, min_width=label_w)
+    g.add_column(style=value_style, overflow="fold")
+    pad = " " * indent
+    for k, v in rows:
+        g.add_row(pad + k, v if isinstance(v, Text) else Text(str(v), style=value_style))
+    return g
+
+
+def footer(title: str, items) -> Group:
+    """Rodapé de próximos passos: `título:` + linhas `  comando   — descrição`."""
+    out = [Text(title, style=f"bold {MUTE}")]
+    for cmd, desc in items:
+        line = Text("  ")
+        line.append(cmd, style=CYAN)
+        if desc:
+            line.append(f"   {desc}", style=DIM)
+        out.append(line)
+    return Group(*out)
 
 
 def dot(state: str) -> Text:

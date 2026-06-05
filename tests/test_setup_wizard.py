@@ -69,8 +69,11 @@ def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
     (tmp_path / "okami.yaml").write_text(
         "default_provider: lmstudio\nproviders:\n  lmstudio: {model: openai/x, api_key: lm, tier: local}\n",
         encoding="utf-8")
-    # provider=7(openai) · API key='sk-test' (campo vem ANTES do modelo) · modelo(default) · id · default? não
-    answers = "\n".join(["7", "sk-test", "", "", "n"]) + "\n"
+    # provider=openai (índice do catálogo, robusto a reordenação) · API key='sk-test' (vem ANTES do
+    # modelo) · modelo(default) · id · default? não
+    from okami.provider_catalog import PRESETS
+    idx = [p.key for p in PRESETS].index("openai") + 1
+    answers = "\n".join([str(idx), "sk-test", "", "", "n"]) + "\n"
     res = runner.invoke(app, ["provider", "add"], input=answers)
     assert res.exit_code == 0, res.output
     cfg = yaml.safe_load((tmp_path / "okami.yaml").read_text(encoding="utf-8"))
