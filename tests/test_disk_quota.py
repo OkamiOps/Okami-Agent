@@ -48,3 +48,28 @@ def test_prune_checkpoints_preserves_journal(tmp_path):
     _age(snap, 90)
     removed, freed = prune_checkpoints(tmp_path, days=14, keep=0)
     assert any("snap1" in r for r in removed) and journal.exists() and freed >= 100
+
+
+def test_clean_cli_dry_run_json(tmp_path, monkeypatch):
+    """`okami clean --deep --dry-run --json` reporta por área e NÃO apaga (gateway long-running)."""
+    import json
+
+    from typer.testing import CliRunner
+
+    from okami.cli import app
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n  lmstudio: {model: openai/x, api_key: lm, tier: local}\n"
+        "retention:\n  tool_outputs: {days: 0, keep: 1}\n", encoding="utf-8")
+    d = tmp_path / ".okami" / "tool_outputs"
+    d.mkdir(parents=True)
+    for i in range(5):
+        f = d / f"step_{i}.txt"
+        f.write_text("z" * 2000, encoding="utf-8")
+        _age(f, 10)
+    res = CliRunner().invoke(app, ["clean", "--deep", "--dry-run", "--json"])
+    assert res.exit_code == 0, res.output
+    rep = json.loads(res.output)
+    assert rep["dry_run"] and rep["deep"]
+    assert rep["areas"]["tool_outputs"]["removed"] == 4   # keep=1 → poda 4
+    assert len(list(d.glob("*.txt"))) == 5                # dry-run NÃO apagou

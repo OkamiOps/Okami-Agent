@@ -292,24 +292,46 @@ def replay(
 def clean(
     workspace: str = typer.Option(".", "-w", "--workspace"),
     lock_stale: float = typer.Option(300.0, "--lock-stale", help="Idade (s) p/ considerar um .lock órfão."),
-    deep: bool = typer.Option(False, "--deep", help="Também poda sessões arquivadas e checkpoints antigos (quota)."),
-    days: float = typer.Option(30.0, "--days", help="Idade (dias) p/ podar no --deep."),
-    keep: int = typer.Option(10, "--keep", help="Quantas sessões arquivadas manter (as mais recentes)."),
+    deep: bool = typer.Option(False, "--deep", help="Aplica a RETENÇÃO declarada (sessions/checkpoints/tool_outputs)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Só MOSTRA o que seria removido (não apaga)."),
+    json_out: bool = typer.Option(False, "--json", help="Relatório por área em JSON (cron/monitoramento)."),
 ) -> None:
-    """Faxina de disco (P2): lock órfão + temporários + áudio. `--deep` aplica quota a sessões/checkpoints."""
-    from okami.core.maintenance import clean_workspace
-    rep = clean_workspace(workspace, lock_stale=lock_stale)
-    extra = ""
-    if deep:
-        from okami.core.maintenance import prune_checkpoints, prune_sessions
-        rs, fs = prune_sessions(workspace, days=days, keep=keep)
-        rc, fc = prune_checkpoints(workspace, days=days, keep=keep * 5)
-        rep["bytes_freed"] += fs + fc
-        extra = f", {len(rs)} sessão(ões) arquivada(s), {len(rc)} checkpoint(s)"
-    kb = rep["bytes_freed"] / 1024
-    console.print(f"[green]✓ faxina[/green] [dim]({workspace})[/dim]: "
-                  f"{rep['locks_removed']} lock(s), {rep['temp_removed']} temp, {rep['audio_removed']} áudio{extra} "
-                  f"[dim]· {kb:.1f} KB liberados[/dim]")
+    """Faxina de disco: lock órfão + temp + áudio + processos terminados. `--deep` aplica a quota
+    versionada (bloco `retention:` do okami.yaml); `--dry-run` lista sem apagar; `--json` p/ máquina."""
+    from okami.core.maintenance import fmt_bytes, run_clean
+    ret = None
+    try:                                              # retenção versionada (best-effort: sem config → defaults)
+        ret = (_load().retention or None)
+    except Exception:  # noqa: BLE001
+        pass
+    rep = run_clean(workspace, lock_stale=lock_stale, deep=deep, retention=ret, dry_run=dry_run)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps(rep, ensure_ascii=False))
+        return
+    from rich.text import Text
+
+    from okami.cli import _ui
+    verb = "seria removido" if dry_run else "removido"
+    tag = _ui.badge("warn", "dry-run") if dry_run else _ui.badge("ok", "faxina")
+    console.print()
+    head = Text("  ")
+    head.append_text(tag)
+    head.append(f"   {workspace}" + (" · --deep (quota)" if deep else ""), style=_ui.MUTE)
+    console.print(head)
+    t = _ui.data_table(("área", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+                       ("itens", {"justify": "right", "style": _ui.SOFT}),
+                       ("espaço", {"justify": "right", "style": _ui.MAGENTA}))
+    for area, a in rep["areas"].items():
+        if a["removed"] or a["bytes"]:
+            t.add_row(area, str(a["removed"]), fmt_bytes(a["bytes"]) if a["bytes"] else "—")
+    if rep["items_removed"]:
+        console.print(t)
+    console.print(_ui.fields([("total", Text(f"{rep['items_removed']} item(ns) {verb} · "
+                                            f"{fmt_bytes(rep['bytes_freed'])}", style=_ui.FG))], label_w=8))
+    if not deep:
+        console.print(_ui.hint("okami clean --deep aplica a quota de sessions/checkpoints/tool_outputs"))
+    console.print()
 
 
 @app.command()
@@ -321,8 +343,9 @@ def tools() -> None:
     from okami.core.tools import default_registry
     names = set(default_registry())
     console.print()
-    console.print(_ui.header("tools", f"{len(names)} ferramentas do agente · por categoria"))
+    console.print(_ui.banner(__version__))
     console.print()
+    console.print(_ui.section(f"Ferramentas ({len(names)})"))
     t = _ui.data_table(
         ("ferramenta", {"style": f"bold {_ui.MAGENTA}", "no_wrap": True}),
         ("categoria", {"style": _ui.MUTE, "no_wrap": True}),
@@ -340,6 +363,12 @@ def tools() -> None:
     drift = missing(names)
     if drift:
         console.print(f"[yellow]⚠ sem metadata no registry:[/yellow] {', '.join(drift)}")
+    console.print()
+    console.print(_ui.footer("Por superfície:", [
+        ("okami status", "vê a postura de canais & sandbox"),
+        ("okami doctor --lint", "lint de exposição (quem roda o quê)"),
+    ]))
+    console.print()
 
 
 @app.command()
@@ -357,6 +386,7 @@ def status(
         raise typer.Exit(1)
     if json_out:                                      # caminho máquina (#12): status resolvido p/ monitoramento
         from okami.core.lint import lint_posture, summarize
+        from okami.core.maintenance import disk_report
         from okami.integrations.mcp import servers_of
         pc = cfg.provider()
         payload = {
@@ -370,6 +400,7 @@ def status(
             "channels": sorted((cfg.gateway or {}).keys()),
             "mcp_servers": sorted(servers_of(cfg.mcp)),   # #P1: mcp.servers.<n>, não a chave 'servers'
             "lint": summarize(lint_posture(cfg)),
+            "disk": disk_report(".", retention=cfg.retention),   # uso por área + quota (gateway long-running)
         }
         import json as _json
         console.print_json(_json.dumps(payload, ensure_ascii=False))
@@ -486,6 +517,13 @@ def status(
             console.print(usage)
     except Exception:  # noqa: BLE001
         pass
+
+    # ◆ Disco ------------------------------------------------------------------
+    from okami.cli._shared import _disk_renderable
+    console.print()
+    console.print(_ui.section("Disco"))
+    console.print(_disk_renderable(cfg))
+
     console.print()
     console.print(_ui.footer("Próximos passos:", [
         ("okami chat", "conversa no terminal"),

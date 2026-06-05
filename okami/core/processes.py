@@ -404,8 +404,9 @@ class ProcessManager:
                 out.append(st)
         return out
 
-    def prune(self, ttl_seconds: float = 86400.0) -> list[str]:
-        """Remove (meta+log+exit) processos JÁ TERMINADOS há mais de `ttl_seconds` — cleanup TTL."""
+    def prune(self, ttl_seconds: float = 86400.0, *, dry_run: bool = False) -> list[str]:
+        """Remove (meta+log+exit) processos JÁ TERMINADOS há mais de `ttl_seconds` — cleanup TTL.
+        `dry_run` só LISTA o que seria removido (não apaga) — p/ `okami clean --dry-run`."""
         removed, now = [], time.time()
         if not self.dir.exists():
             return removed
@@ -416,8 +417,9 @@ class ProcessManager:
             exitf = self._exitf(pid_id)
             ts = (exitf.stat().st_mtime if exitf.exists() else f.stat().st_mtime)
             if now - ts > ttl_seconds:
-                for path in (self._meta(pid_id), self._logf(pid_id), self._exitf(pid_id), self._ctrlf(pid_id)):
-                    if path.exists():
-                        path.unlink()
+                if not dry_run:
+                    for path in (self._meta(pid_id), self._logf(pid_id), self._exitf(pid_id), self._ctrlf(pid_id)):
+                        if path.exists():
+                            path.unlink()
                 removed.append(pid_id)
         return removed

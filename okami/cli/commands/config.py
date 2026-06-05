@@ -139,24 +139,84 @@ def _files_card():
     return _ui.card(_ui.kv(rows), title="arquivos", subtitle="segredo só no .env (gitignored)")
 
 
+def _files_fields():
+    """Mesmos arquivos do _files_card, mas no estilo `◆ fields` (flat, sem caixa) p/ a visão nova."""
+    from rich.text import Text
+
+    from okami.cli import _ui
+    rows = []
+    for lbl, p in _config_file_rows():
+        ex = p.exists()
+        loc = str(p if p.is_absolute() else p.resolve())
+        v = Text()
+        v.append_text(_ui.dot("ok" if ex else "off"))
+        v.append(f"  {loc}", style=_ui.SOFT if ex else _ui.MUTE)
+        rows.append((lbl, v))
+    return _ui.fields(rows, label_w=14)
+
+
+def _summary_fields():
+    """`◆ Resumo`: os valores RESOLVIDOS que mais importam (provider/memória/aprovação/sandbox/canais)."""
+    from rich.text import Text
+
+    from okami.cli import _ui
+    try:
+        cfg = _load()
+    except Exception:  # noqa: BLE001
+        return Text("  config não carrega — okami config check", style=_ui.AMBER)
+    pc = cfg.provider()
+    prov_v = Text()
+    prov_v.append(cfg.default_provider, style=f"bold {_ui.FG}")
+    prov_v.append(f" · {pc.model} · {pc.tier}   ", style=_ui.SOFT)
+    prov_v.append_text(_ui.badge("ready", "pronto") if pc.ready else _ui.badge("missing", "falta auth"))
+    appr = (cfg.approvals or {}).get("mode", "manual")
+    from okami.core.sandbox import SandboxPolicy
+    sb = SandboxPolicy.from_config(cfg.sandbox or {})
+    sb_v = Text(f"{sb.backend} · {sb.mode} · net {'on' if sb.network_on else 'off'}", style=_ui.SOFT)
+    nchan = len(cfg.gateway or {})
+    return _ui.fields([
+        ("provider", prov_v),
+        ("memória", Text((cfg.memory or {}).get("backend", "sqlite-fts5"), style=_ui.FG)),
+        ("aprovação", _ui.badge("ok" if appr in ("manual", "smart") else "warn", appr)),
+        ("sandbox", sb_v),
+        ("canais", Text(f"{nchan} no gateway" if nchan else "nenhum — DM local (okami chat)",
+                        style=_ui.SOFT if nchan else _ui.MUTE)),
+    ], label_w=14)
+
+
 def _render_config_view(diff: bool = False) -> None:
     from rich.syntax import Syntax
 
+    from okami import __version__
     from okami.cli import _ui
     console.print()
-    console.print(_ui.header("config", "configuração efetiva"))
+    console.print(_ui.banner(__version__))
     console.print()
-    console.print(_files_card())
+    console.print(_ui.section("Arquivos"))
+    console.print(_files_fields())
+    console.print()
+    console.print(_ui.section("Resumo"))
+    console.print(_summary_fields())
+    console.print()
     if diff:
         p = Path("okami.local.yaml")
+        console.print(_ui.section("Overrides"))
         if not p.exists():
             console.print(_ui.hint("sem overrides — okami.local.yaml não existe"))
-            return
-        body = Syntax(p.read_text(encoding="utf-8"), "yaml", theme="ansi_dark", background_color="default")
-        console.print(_ui.card(body, title="overrides", subtitle="okami.local.yaml"))
-        return
-    body = Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark", background_color="default")
-    console.print(_ui.card(body, title="efetiva", subtitle="okami.yaml + overrides · segredos mascarados"))
+        else:
+            body = Syntax(p.read_text(encoding="utf-8"), "yaml", theme="ansi_dark", background_color="default")
+            console.print(_ui.card(body, title="okami.local.yaml"))
+    else:
+        console.print(_ui.section("Efetiva"))
+        body = Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark", background_color="default")
+        console.print(_ui.card(body, title="okami.yaml + overrides", subtitle="segredos mascarados"))
+    console.print()
+    console.print(_ui.footer("Próximos passos:", [
+        ("okami config set <k> <v>", "segredo→.env · resto→okami.local.yaml"),
+        ("okami config get <k>", "lê um valor resolvido"),
+        ("okami config check", "valida que a config carrega (lite doctor)"),
+    ]))
+    console.print()
 
 
 @config_app.callback(invoke_without_command=True)

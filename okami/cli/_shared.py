@@ -46,6 +46,37 @@ def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _disk_renderable(cfg, *, root: str = ".", top: int = 6):
+    """Renderable da seção `◆ Disco`: uso por área (bytes/arquivos), total e aviso de quota.
+
+    Compartilhado por `status` e `doctor`. Devolve um Group do Rich (tabela das maiores áreas +
+    linha de total) ou um Text discreto se o workspace ainda não tem nada gravado."""
+    from rich.text import Text
+
+    from okami.cli import _ui
+    from okami.core.maintenance import disk_report, fmt_bytes
+    rep = disk_report(root, retention=getattr(cfg, "retention", None))
+    areas = rep["areas"]
+    if not areas:
+        return Text("  sem dados ainda — .okami/ vazio", style=_ui.MUTE)
+    rows = sorted(areas.items(), key=lambda kv: kv[1]["bytes"], reverse=True)[:top]
+    t = _ui.data_table(("área", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+                       ("tam.", {"justify": "right", "style": _ui.MAGENTA, "no_wrap": True}),
+                       ("arquivos", {"justify": "right", "style": _ui.MUTE, "no_wrap": True}),
+                       ("", {"no_wrap": True}))
+    for key, a in rows:
+        flag = _ui.badge("warn", f"> quota {int(a['quota_mb'])}MB") if a["over_quota"] else (
+            Text("durável", style=_ui.DIM) if not a["prunable"] else Text(""))
+        t.add_row(key, fmt_bytes(a["bytes"]), str(a["files"]), flag)
+    total = Text("  ")
+    total.append(f"total {fmt_bytes(rep['bytes_total'])}", style=f"bold {_ui.FG}")
+    if rep["over_quota"]:
+        total.append(f"   ▲ {len(rep['over_quota'])} área(s) acima da quota — okami clean --deep", style=_ui.AMBER)
+    else:
+        total.append("   · okami clean --deep poda sessions/checkpoints/tool_outputs", style=_ui.MUTE)
+    return _ui.stack(t, total)
+
+
 def _persist_always_allow(category: str) -> None:
     """Adiciona uma categoria ao approvals.always_allow em okami.local.yaml (cross-sessão)."""
     import yaml as _yaml

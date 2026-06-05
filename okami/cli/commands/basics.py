@@ -5,7 +5,6 @@ import platform
 import sys
 
 import typer
-from rich.table import Table
 from okami import __version__
 from okami.llm import providers as prov
 from pathlib import Path
@@ -58,20 +57,46 @@ def run(
 
 
 @app.command("providers")
-def list_providers() -> None:
-    """Lista os providers configurados e se estão prontos."""
+def list_providers(
+    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (scripts/CI)."),
+) -> None:
+    """Lista os providers configurados e se estão prontos (★ = default)."""
     cfg = _load()
-    table = Table(title="Okami providers")
-    table.add_column("nome", style="bold")
-    table.add_column("tier")
-    table.add_column("model")
-    table.add_column("api_base")
-    table.add_column("pronto?")
+    if json_out:
+        import json as _json
+        payload = {"default_provider": cfg.default_provider, "providers": {
+            name: {"model": pc.model, "tier": pc.tier, "transport": pc.transport,
+                   "api_base": pc.api_base or None, "ready": bool(pc.ready)}
+            for name, pc in cfg.providers.items()}}
+        console.print_json(_json.dumps(payload, ensure_ascii=False))
+        return
+    from rich.text import Text
+
+    from okami.cli import _ui
+    console.print()
+    console.print(_ui.banner(__version__))
+    console.print()
+    console.print(_ui.section("Providers"))
+    t = _ui.data_table(
+        ("", {"width": 2, "no_wrap": True}),
+        ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+        ("modelo", {"style": _ui.SOFT}),
+        ("tier", {"style": _ui.MUTE, "no_wrap": True}),
+        ("transporte", {"style": _ui.MUTE, "no_wrap": True}),
+        ("estado", {"no_wrap": True}),
+    )
     for name, pc in cfg.providers.items():
-        flag = "[green]sim[/green]" if pc.ready else "[yellow]falta chave[/yellow]"
-        default_mark = " [cyan](default)[/cyan]" if name == cfg.default_provider else ""
-        table.add_row(name + default_mark, pc.tier, pc.model, pc.api_base or "-", flag)
-    console.print(table)
+        mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
+        state = _ui.badge("ready", "pronto") if pc.ready else _ui.badge("missing", "falta auth")
+        t.add_row(mark, name, pc.model, pc.tier, pc.transport, state)
+    console.print(t)
+    console.print()
+    console.print(_ui.footer("Próximos passos:", [
+        ("okami provider add", "adiciona um modelo do catálogo (23 presets)"),
+        ("okami provider default <id>", "troca o provider padrão"),
+        ("okami login <id>", "autentica assinatura/OAuth"),
+    ]))
+    console.print()
 
 
 @app.command()
@@ -216,10 +241,17 @@ def doctor(
     console.print()
     console.print(_ui.section("Ambiente"))
     console.print(_ui.fields(env_rows, label_w=16))
+
+    # --- ◆ disco (uso por área + quota) ---
+    from okami.cli._shared import _disk_renderable
+    console.print()
+    console.print(_ui.section("Disco"))
+    console.print(_disk_renderable(cfg))
+
     console.print()
     console.print(_ui.footer("Próximos passos:", [
         ("okami doctor --lint", "lint de postura de segurança"),
-        ("okami doctor --fix", "conserta lock órfão / perms do .env / temp"),
+        ("okami clean --deep --dry-run", "prévia da poda de disco (quota versionada)"),
         ("okami login <provider>", "autenticar provider de assinatura"),
     ]))
     console.print()
