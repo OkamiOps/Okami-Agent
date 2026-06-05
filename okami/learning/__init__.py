@@ -116,9 +116,29 @@ def distill_skill_llm(cfg, task: Task, provider: str | None = None) -> dict | No
         return None
 
 
+def _render_skill_md(sk: dict, task: Task) -> str:
+    """Empacota a skill destilada com frontmatter — captura a FRASE REAL do pedido como `intent_example`.
+    É isso que faz a skill aprendida ser achável por INTENÇÃO (não só pelo nome) na próxima tarefa
+    parecida — o loop que fecha 'skills difíceis de acionar'. Se o distilador já trouxe frontmatter,
+    respeita (não duplica)."""
+    import yaml
+
+    body = (sk.get("body") or "").strip()
+    if body.startswith("---"):
+        return body + "\n"
+    goal = (task.goal or "").strip()
+    meta = {
+        "name": sk["name"],
+        "description": (sk.get("description") or goal)[:160],
+        "intent_examples": [goal[:200]] if goal else [],   # a frase literal do usuário vira âncora de intenção
+    }
+    return "---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n" + body + "\n"
+
+
 def maybe_write_skill(task: Task, skills_dir: str = "skills", model_name: str = "?", cfg=None) -> str | None:
     """Destila (LLM se `cfg`, senão determinístico) → ESCANEIA (segurança, regra do usuário: skill
-    criada pelo agente é validada antes de ativar) → grava em skills/<name>/SKILL.md. Devolve nome/None."""
+    criada pelo agente é validada antes de ativar) → grava em skills/<name>/SKILL.md COM frontmatter
+    (intent_examples = pedido real → achável por intenção). Devolve nome/None."""
     from okami.skills.skill_security import Severity, scan_text
 
     sk = distill_skill_llm(cfg, task) or distill_skill(task, model_name)
@@ -130,7 +150,7 @@ def maybe_write_skill(task: Task, skills_dir: str = "skills", model_name: str = 
     if f.exists():
         return None                                       # não sobrescreve skill existente
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(sk["body"], encoding="utf-8", newline="\n")
+    f.write_text(_render_skill_md(sk, task), encoding="utf-8", newline="\n")
     return sk["name"]
 
 

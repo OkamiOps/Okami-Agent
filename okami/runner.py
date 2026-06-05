@@ -101,7 +101,10 @@ def run_task(
     if len(safe) != len(all_skills):
         emit("skills bloqueadas pelo scan: " + ", ".join({s.name for s in all_skills} - {s.name for s in safe}))
     routed = skillmod.route(goal, cfg.contracts, safe)
-    catalog = skillmod.catalog(safe, exclude={s.name for s in routed})
+    # Embedder construído UMA vez (probe único) e reaproveitado: ranqueia o catálogo de skills por
+    # INTENÇÃO E alimenta a memória. Sem embedder remoto → o catálogo cai no HRR local (offline).
+    embedder = make_embedder(cfg.memory.get("embedder"))
+    catalog = skillmod.catalog(safe, exclude={s.name for s in routed}, goal=goal, embedder=embedder)
     # Taste model (§9): em tarefa de UI, injeta o GOSTO aprendido (crítico soft) junto às skills.
     from okami.learning import taste as tastemod
     ui_task = bool((cfg.contracts or {}).get("ui")) or any(
@@ -113,7 +116,7 @@ def run_task(
     skills_map = {s.name: s.body for s in safe}
 
     mem = open_memory(ws, backend=cfg.memory.get("backend", "sqlite-fts5"),
-                      embedder=make_embedder(cfg.memory.get("embedder")), config=cfg.memory)
+                      embedder=embedder, config=cfg.memory)
     core_block = memfiles.core_block(ws, cfg.memory.get("files", {}))
 
     from okami.core.tool_policy import filter_registry
