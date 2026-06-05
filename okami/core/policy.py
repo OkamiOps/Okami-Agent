@@ -128,8 +128,8 @@ def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | Non
 
     # mcp.max_trust -----------------------------------------------------------
     max_trust = (policy.get("mcp") or {}).get("max_trust", "reviewed")
-    from okami.integrations.mcp import _trust_of
-    for name, conf in (getattr(cfg, "mcp", None) or {}).items():
+    from okami.integrations.mcp import _trust_of, servers_of
+    for name, conf in servers_of(getattr(cfg, "mcp", None)).items():   # #P1: normaliza mcp.servers.<n>
         lvl = _trust_of(conf or {})
         if _TRUST_RANK.get(lvl, 0) > _TRUST_RANK.get(max_trust, 1):
             f.append(Finding(f"policy.mcp.{name}", "fail", f"MCP '{name}' trust={lvl} acima do teto {max_trust}.",

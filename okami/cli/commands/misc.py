@@ -289,6 +289,7 @@ def status(
         raise typer.Exit(1)
     if json_out:                                      # caminho máquina (#12): status resolvido p/ monitoramento
         from okami.core.lint import lint_posture, summarize
+        from okami.integrations.mcp import servers_of
         pc = cfg.provider()
         payload = {
             "ok": True,
@@ -299,7 +300,7 @@ def status(
             "memory_backend": (cfg.memory or {}).get("backend", "sqlite-fts5"),
             "sandbox": (cfg.sandbox or {}),
             "channels": sorted((cfg.gateway or {}).keys()),
-            "mcp_servers": sorted((cfg.mcp or {}).keys()),
+            "mcp_servers": sorted(servers_of(cfg.mcp)),   # #P1: mcp.servers.<n>, não a chave 'servers'
             "lint": summarize(lint_posture(cfg)),
         }
         import json as _json

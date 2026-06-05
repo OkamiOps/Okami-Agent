@@ -42,3 +42,37 @@ def test_surface_of_maps_channel_classes():
     assert surface_of(TelegramChannel()) == "telegram"
     assert surface_of(GroupChannel()) == "group"
     assert surface_of(TerminalChannel()) == "cli"
+
+
+class _NamedCh:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_surface_of_uses_channel_name():
+    # #P1: channel.name vence o nome da classe (Slack/Discord/Mattermost têm name, não casam classe)
+    assert surface_of(_NamedCh("slack")) == "slack"
+    assert surface_of(_NamedCh("discord")) == "discord"
+    assert surface_of(_NamedCh("mattermost")) == "mattermost"
+    assert surface_of(_NamedCh("telegram")) == "telegram"
+    assert surface_of(_NamedCh("telegram-group")) == "group"
+    assert surface_of(_NamedCh("paperclip")) == "paperclip"
+    assert surface_of(_NamedCh("")) == "cli"
+
+
+def test_real_rest_channels_are_not_cli():
+    # #P1 (bug de segurança): antes SlackChannel etc. caíam em 'cli' e ganhavam shell/processo
+    from okami.channels.discord import DiscordChannel
+    from okami.channels.mattermost import MattermostChannel
+    from okami.channels.slack import SlackChannel
+    assert surface_of(SlackChannel.__new__(SlackChannel)) == "slack"
+    assert surface_of(DiscordChannel.__new__(DiscordChannel)) == "discord"
+    assert surface_of(MattermostChannel.__new__(MattermostChannel)) == "mattermost"
+
+
+def test_remote_rest_channels_deny_shell_and_process():
+    for cname in ("slack", "discord", "mattermost"):
+        reg = filter_registry(default_registry(), surface_of(_NamedCh(cname)))
+        for t in ("run_shell", "process_start", "process_write", "process_signal", "process_kill", "spawn"):
+            assert t not in reg, f"{cname} NÃO pode ter {t} (canal remoto)"
+        assert "read_file" in reg and "respond" in reg and "task_complete" in reg   # mantém o seguro

@@ -71,9 +71,24 @@ def test_channel_type_not_allowed(tmp_path):
 
 
 def test_mcp_trust_ceiling(tmp_path):
-    cfg = _cfg(mcp={"docs": {"trusted": True}})       # trusted > reviewed (teto) → fail
+    cfg = _cfg(mcp={"docs": {"trusted": True}})       # trusted > reviewed (teto) → fail (estrutura flat)
     f = evaluate(cfg, DEFAULT_POLICY, base_yaml=tmp_path / "none.yaml")
     assert _levels(f)["policy.mcp.docs"] == "fail"
+
+
+def test_mcp_nested_servers_structure_detected(tmp_path):
+    """#P1: a estrutura REAL é mcp.servers.<n> — antes o loop pegava ('servers',{}) e o trusted passava."""
+    cfg = _cfg(mcp={"servers": {"evil": {"trusted": True}}})
+    f = evaluate(cfg, DEFAULT_POLICY, base_yaml=tmp_path / "none.yaml")
+    assert _levels(f)["policy.mcp.evil"] == "fail"
+    assert "policy.mcp.servers" not in _levels(f)      # não confunde a chave 'servers' com um servidor
+
+
+def test_lint_mcp_nested_servers(tmp_path):
+    from okami.core.lint import lint_posture
+    cfg = _cfg(mcp={"servers": {"evil": {"trusted": True}}})
+    f = lint_posture(cfg, base_yaml=tmp_path / "none.yaml")
+    assert any(x.check == "mcp.evil.trust" for x in f)
 
 
 def test_approval_mode_policy(tmp_path):

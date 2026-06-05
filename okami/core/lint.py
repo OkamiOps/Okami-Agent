@@ -111,7 +111,8 @@ def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = 
         f.append(Finding("sandbox.backend", "pass", f"sandbox backend={sb.backend} mode={sb.mode}."))
 
     # 4) MCP trust store ------------------------------------------------------
-    for name, conf in (getattr(cfg, "mcp", None) or {}).items():
+    from okami.integrations.mcp import servers_of
+    for name, conf in servers_of(getattr(cfg, "mcp", None)).items():   # #P1: normaliza mcp.servers.<n>
         conf = conf or {}
         if conf.get("trusted") or str(conf.get("trust", "")).lower() == "trusted":
             f.append(Finding(f"mcp.{name}.trust", "warn", f"MCP '{name}' trust=trusted → bypassa o go/no-go por "

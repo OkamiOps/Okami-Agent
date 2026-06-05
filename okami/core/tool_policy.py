@@ -10,30 +10,46 @@ from __future__ import annotations
 
 from okami.core.tool_registry import spec
 
+# Repertório que NENHUM canal remoto deve ter por padrão: shell e gestão de processo + spawn.
+# (process_start/run_shell já caem pelo teto 'dangerous', mas listamos explícito p/ clareza + cobrir
+#  process_write/signal/kill, que são 'sensitive' e passariam pelo teto.)
+_REMOTE_DENY = {"run_shell", "process_start", "process_write", "process_signal", "process_kill", "spawn"}
+
 # Negações default por superfície. cli = máquina do dono → surface completa.
 _DENY_BY_SURFACE: dict[str, set[str]] = {
     "cli": set(),
-    "telegram": {"run_shell"},                       # remoto: nada de shell por padrão
-    "group": {"run_shell", "spawn", "generate_image"},  # grupo: mais restrito ainda
+    "telegram": set(_REMOTE_DENY),                   # remoto: nada de shell/processo/spawn por padrão
+    "group": _REMOTE_DENY | {"generate_image"},      # grupo: mais restrito ainda
     "paperclip": set(),                              # governado pelo approval (defer)
     "subagent": {"spawn"},                           # subagente não spawna (anti-recursão explosiva)
-    "api": {"run_shell"},
+    "api": set(_REMOTE_DENY),
     "cron": set(),
+    "slack": set(_REMOTE_DENY),                      # #P1: canal REST remoto ≠ CLI local
+    "discord": set(_REMOTE_DENY),
+    "mattermost": set(_REMOTE_DENY),
 }
 # Teto de sensibilidade por superfície (defesa extra): remoto não roda 'dangerous' sem opt-in.
-_MAX_DANGER: dict[str, str] = {"telegram": "sensitive", "group": "safe", "api": "sensitive"}
+_MAX_DANGER: dict[str, str] = {"telegram": "sensitive", "group": "safe", "api": "sensitive",
+                               "slack": "sensitive", "discord": "sensitive", "mattermost": "sensitive"}
 _DANGER_RANK = {"safe": 0, "sensitive": 1, "dangerous": 2}
+
+# nome do canal (channel.name) → superfície. Mais confiável que o nome da CLASSE.
+_NAME_TO_SURFACE = {"telegram": "telegram", "telegram-group": "group", "slack": "slack",
+                    "discord": "discord", "mattermost": "mattermost", "paperclip": "paperclip"}
 
 
 def surface_of(channel) -> str:
-    """Mapeia o canal → superfície (pela classe). Default 'cli'."""
-    cls = type(channel).__name__.lower()
-    if "group" in cls:
-        return "group"
-    if "telegram" in cls:
-        return "telegram"
-    if "paperclip" in cls:
-        return "paperclip"
+    """Mapeia o canal → superfície. Usa channel.name (confiável) antes do nome da classe (#P1).
+
+    Antes, Slack/Discord/Mattermost caíam no 'else' → 'cli' → ganhavam shell/processo (bug de surface)."""
+    name = str(getattr(channel, "name", "") or "").lower()
+    if name in _NAME_TO_SURFACE:
+        return _NAME_TO_SURFACE[name]
+    cls = type(channel).__name__.lower()             # fallback pela classe (compat / canais sem .name)
+    for key, surface in (("group", "group"), ("telegram", "telegram"), ("paperclip", "paperclip"),
+                         ("slack", "slack"), ("discord", "discord"), ("mattermost", "mattermost")):
+        if key in cls:
+            return surface
     return "cli"
 
 

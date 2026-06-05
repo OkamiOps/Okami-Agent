@@ -45,6 +45,18 @@ def infer_capabilities(spec: dict) -> set[str]:
     return caps or {"read"}
 
 
+def servers_of(mcp_conf) -> dict:
+    """Normaliza o bloco `mcp:` → {nome: conf}. Canônico é `mcp.servers.<n>`; aceita flat `mcp.<n>` (compat).
+
+    Antes, lint/policy iteravam `cfg.mcp.items()` direto → pegavam ('servers', {...}) em vez de cada
+    servidor → um MCP `trusted` dentro de mcp.servers passava batido (#P1)."""
+    mcp = mcp_conf if isinstance(mcp_conf, dict) else {}
+    srv = mcp.get("servers")
+    if isinstance(srv, dict):
+        return srv
+    return {k: v for k, v in mcp.items() if isinstance(v, dict) and k != "servers"}
+
+
 _TRUST_LEVELS = ("untrusted", "reviewed", "trusted")
 
 
