@@ -669,6 +669,9 @@ class AgentEndpoint:
         while self.running:
             try:
                 self.poll_once()
+                pace = getattr(self.channel, "poll_interval", 0)   # Telegram long-polla (0); REST espera
+                if pace:
+                    time.sleep(pace)
             except Exception:  # noqa: BLE001 — rede instável não derruba o bot
                 time.sleep(3)
 
@@ -774,6 +777,21 @@ def build_group_endpoints(global_raw: dict, agents: dict, groups: list,
     return eps
 
 
+def _build_channel(ctype: str, cc: dict):
+    """Fábrica de canal não-Telegram (#15). KeyError se faltar um campo obrigatório."""
+    common = {"allow_chats": cc.get("allow_chats"), "allow_all": bool(cc.get("allow_all", False))}
+    if ctype == "slack":
+        from okami.channels.slack import SlackChannel
+        return SlackChannel(cc["token"], cc["channel_id"], **common)
+    if ctype == "discord":
+        from okami.channels.discord import DiscordChannel
+        return DiscordChannel(cc["token"], cc["channel_id"], **common)
+    if ctype == "mattermost":
+        from okami.channels.mattermost import MattermostChannel
+        return MattermostChannel(cc["base_url"], cc["token"], cc["channel_id"], **common)
+    raise KeyError(ctype)
+
+
 def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] = lambda m: None,
                     make_channel=None, run_task=None) -> list[AgentEndpoint]:
     from okami.agents import effective_config
@@ -781,34 +799,50 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
     from okami.runner import run_task as _default_run_task
 
     run_task = run_task or _default_run_task
-    eps: list[AgentEndpoint] = []
-    for aid, spec in agents.items():
-        tg = (spec.raw.get("channels") or {}).get("telegram") or {}
-        token = tg.get("token")
-        if not token:
-            continue
-        cfg = effective_config(global_raw, spec)
-        allow_chats, allow_all = tg.get("allow_chats"), bool(tg.get("allow_all", False))
-        if not allow_chats and not allow_all:      # fail-closed: avisa ALTO por que o bot fica mudo
-            emit(f"⚠ [{aid}] Telegram SEM allowlist → deny-by-default (bot não responde ninguém). "
-                 f"Adicione channels.telegram.allow_chats: [<seu_chat_id>] ou allow_all: true (inseguro).")
-        channel = (make_channel or TelegramChannel)(token, allow_chats=allow_chats, allow_all=allow_all)
+
+    def _mk_endpoint(aid, spec, cfg, channel) -> AgentEndpoint:
         # histórico da sessão ~12% da janela do modelo (32K Qwen guarda menos; 200K Claude mais).
         from okami.llm.providers import context_window_tokens
+        from okami.voice import make_stt, make_tts
         pc = cfg.provider()
         hist_chars = max(2000, int(context_window_tokens(pc) * pc.chars_per_token * 0.12))
-        from okami.voice import make_stt, make_tts
         voice = cfg.voice or {}
-        stt = make_stt(voice.get("stt"))
-        tts = make_tts(voice.get("tts"))
         gw = cfg.gateway or {}
-        eps.append(AgentEndpoint(aid, cfg, spec.dir, channel, run_task=run_task,
-                                 approval_mode=(cfg.approvals or {}).get("mode", "manual"),
-                                 max_history_chars=hist_chars, stt=stt, tts=tts,
-                                 auto_resume=bool(gw.get("auto_resume", False)),
-                                 max_sessions=int(gw.get("max_sessions", 500))))
-        emit(f"agente '{aid}' no ar (canal {channel.name}"
-             + (", 🎤 STT" if stt else "") + (", 🔊 TTS" if tts else "") + ")")
+        return AgentEndpoint(aid, cfg, spec.dir, channel, run_task=run_task,
+                             approval_mode=(cfg.approvals or {}).get("mode", "manual"),
+                             max_history_chars=hist_chars,
+                             stt=make_stt(voice.get("stt")), tts=make_tts(voice.get("tts")),
+                             auto_resume=bool(gw.get("auto_resume", False)),
+                             max_sessions=int(gw.get("max_sessions", 500)))
+
+    eps: list[AgentEndpoint] = []
+    for aid, spec in agents.items():
+        chans = spec.raw.get("channels") or {}
+        cfg = None
+        tg = chans.get("telegram") or {}
+        if tg.get("token"):                            # Telegram (mantém make_channel p/ os testes)
+            cfg = effective_config(global_raw, spec)
+            if not tg.get("allow_chats") and not tg.get("allow_all"):   # fail-closed: avisa ALTO
+                emit(f"⚠ [{aid}] Telegram SEM allowlist → deny-by-default (bot não responde ninguém). "
+                     f"Adicione channels.telegram.allow_chats: [<seu_chat_id>] ou allow_all: true (inseguro).")
+            channel = (make_channel or TelegramChannel)(tg["token"], allow_chats=tg.get("allow_chats"),
+                                                        allow_all=bool(tg.get("allow_all", False)))
+            eps.append(_mk_endpoint(aid, spec, cfg, channel))
+            emit(f"agente '{aid}' no ar (canal {channel.name})")
+        for ctype in ("slack", "discord", "mattermost"):     # #15: mais canais, mesma interface
+            cc = chans.get(ctype) or {}
+            if not cc.get("token"):
+                continue
+            try:
+                channel = _build_channel(ctype, cc)
+            except KeyError as e:
+                emit(f"⚠ [{aid}] {ctype}: faltando campo {e} — pulei esse canal.")
+                continue
+            if not cc.get("allow_chats") and not cc.get("allow_all"):
+                emit(f"⚠ [{aid}] {ctype} sem allowlist → só o canal configurado responde (deny-by-default).")
+            cfg = cfg or effective_config(global_raw, spec)
+            eps.append(_mk_endpoint(aid, spec, cfg, channel))
+            emit(f"agente '{aid}' no ar (canal {channel.name})")
     return eps
 
 
