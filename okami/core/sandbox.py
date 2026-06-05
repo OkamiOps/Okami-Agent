@@ -92,6 +92,15 @@ EXPOSED_SURFACES = frozenset({"telegram", "group", "paperclip", "slack", "discor
                               "api", "gateway"})
 
 
+def is_exposed(surface: str) -> bool:
+    """Superfície exposta (remoto/rede)? Cobre TODOS os papéis do Paperclip (#P1).
+
+    Sem isto, o split por papel (paperclip-worker/-manager/…) deixava o worker REMOTO fora do
+    endurecimento por superfície — só o literal 'paperclip' casava. `startswith` fecha esse buraco."""
+    s = str(surface or "")
+    return s in EXPOSED_SURFACES or s.startswith("paperclip")
+
+
 def effective_sandbox(cfg_sandbox, surface: str = "") -> "SandboxPolicy":
     """Política do run_shell/process_start CIENTE DA SUPERFÍCIE (#P1.1).
 
@@ -101,7 +110,7 @@ def effective_sandbox(cfg_sandbox, surface: str = "") -> "SandboxPolicy":
     raw = dict(cfg_sandbox or {})
     p = SandboxPolicy.from_config(raw)
     explicit = ("backend" in raw) or ("profile" in raw)
-    exposed = surface in EXPOSED_SURFACES
+    exposed = is_exposed(surface)
     if exposed and p.require_isolation:
         p.backend = "docker"        # #P1.2 estrito: exige Docker; sem Docker → run_shell/process DESABILITADO
     elif exposed and not explicit:

@@ -93,10 +93,25 @@ def test_paperclip_role_maps_to_surface():
 
 def test_paperclip_default_is_worker_not_full_surface():
     # #P1: antes 'paperclip' era surface COMPLETA; agora default = worker (sem gestão de processo/spawn)
-    reg = filter_registry(default_registry(), "paperclip")
+    # COM isolamento real (Docker/require_isolation), o worker EXECUTA shell/process_start.
+    reg = filter_registry(default_registry(), "paperclip", sandbox={"require_isolation": True})
     assert "run_shell" in reg and "process_start" in reg     # worker EXECUTA (sob sandbox + defer)
     for t in ("process_write", "process_signal", "process_kill", "spawn"):
         assert t not in reg, t                               # mas não gerencia processo nem recursiona
+
+
+def test_paperclip_worker_shell_gated_without_isolation():
+    # #P1 gate: worker remoto SEM isolamento real (sem sandbox/sem Docker) NÃO ganha shell/process_start.
+    reg = filter_registry(default_registry(), "paperclip")           # sandbox=None → não isolado
+    assert "run_shell" not in reg and "process_start" not in reg     # fail-closed
+    assert "read_file" in reg and "respond" in reg                   # leitura/resposta seguem
+    # mas o DEPLOY pode ABRIR explícito via tools.surfaces.paperclip.allow:
+    cfg = {"surfaces": {"paperclip": {"allow": ["run_shell"]}}}
+    reg2 = filter_registry(default_registry(), "paperclip", config=cfg)
+    assert "run_shell" in reg2                                       # allow explícito vence o gate
+    # require_isolation também libera (isolamento real):
+    reg3 = filter_registry(default_registry(), "paperclip-worker", sandbox={"profile": "hardened-strict"})
+    assert "run_shell" in reg3 and "process_start" in reg3
 
 
 def test_paperclip_manager_no_execution():

@@ -16,6 +16,15 @@ def test_exposed_surface_hardens_to_auto():
     assert "telegram" in EXPOSED_SURFACES
 
 
+def test_paperclip_roles_are_exposed():
+    # #P1: o split por papel não pode deixar o worker/manager REMOTO fora do endurecimento por superfície.
+    from okami.core.sandbox import is_exposed
+    for s in ("paperclip-worker", "paperclip-manager", "paperclip-reviewer", "paperclip-external"):
+        assert is_exposed(s), s
+        assert effective_sandbox({}, s).backend == "auto", s
+    assert not is_exposed("cli")
+
+
 def test_explicit_backend_wins_over_surface():
     # operador pôs backend local de propósito → respeita mesmo em superfície exposta
     assert effective_sandbox({"backend": "local"}, "telegram").backend == "local"

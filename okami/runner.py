@@ -114,7 +114,8 @@ def run_task(
     core_block = memfiles.core_block(ws, cfg.memory.get("files", {}))
 
     from okami.core.tool_policy import filter_registry
-    registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None))
+    registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
+                               sandbox=getattr(cfg, "sandbox", None))   # #P1: gate de isolamento no worker
     mcp_clients = []
     servers = (cfg.mcp or {}).get("servers")
     if servers:
