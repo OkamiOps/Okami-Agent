@@ -240,7 +240,8 @@ _TOOL_RESULT_BUDGET = 12_000
 
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
     status = "ok" if res.ok else "ERRO"
-    return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{res.output}"
+    from okami.core.redact import clean_output      # strip ANSI + redact segredo + head/tail (P1.1)
+    return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{clean_output(res.output)}"
 
 
 def _user_start(images: list, text: str = "Comece.") -> object:

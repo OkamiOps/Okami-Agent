@@ -39,6 +39,17 @@ _SHELL_READONLY = {"ls", "find", "grep", "rg", "cat", "head", "tail", "pwd", "ec
                    "whoami", "uname", "hostname", "sort", "uniq", "cut", "diff", "sed"}
 
 
+# Política de leitura sensível (P0.1): o shell NÃO confina o FS de verdade (cwd=workspace, mas
+# `cat ~/.ssh/id_rsa` escapa via expansão). Bloqueia comando que toca segredo conhecido — defesa em
+# profundidade (yolo/docker liberam). Não é à prova de ofuscação, mas mata o `cat .env`/exfil óbvio.
+_SENSITIVE_PATH = re.compile(
+    r"\.env\b|\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
+    r"\.pem\b|\.key\b|/etc/(passwd|shadow)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
+    r"secrets?\.(env|json|ya?ml)",
+    re.IGNORECASE,
+)
+
+
 def shell_has_effect(cmd: str) -> bool:
     """True se o comando MUTA estado (= progresso real); False se for só leitura/inspeção."""
     if _SHELL_MUTATES.search(cmd):
@@ -260,8 +271,13 @@ class RunShell(Tool):
         cmd = args["cmd"]
         eff = shell_has_effect(cmd)   # read-only (ls/grep/cat…) → effect=False (não engana o watchdog)
         policy = ctx.sandbox or default_policy()
-        if getattr(policy, "mode", "") == "read-only" and eff:   # defesa em profundidade (perfil)
+        mode = getattr(policy, "mode", "")
+        if mode == "read-only" and eff:                          # defesa em profundidade (perfil)
             return ToolResult(False, f"sandbox read-only: comando que altera estado bloqueado ({cmd[:80]})",
+                              effect=False)
+        if mode != "yolo" and _SENSITIVE_PATH.search(cmd):       # P0.1: não deixa ler/exfiltrar segredo
+            return ToolResult(False, "sandbox: comando toca caminho sensível (.env/.ssh/.aws/credenciais/"
+                              f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
                               effect=False)
         res = run_sandboxed(cmd, ctx.workspace, policy)
         return ToolResult(res.returncode == 0, f"exit={res.returncode}\n{res.output}", effect=eff)

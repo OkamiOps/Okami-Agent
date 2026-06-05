@@ -161,12 +161,18 @@ def _ctx_block(issue: dict, ctx: dict) -> str:
     return "CONTEXTO PAPERCLIP (continue o trabalho, não repita):\n" + "\n".join(bits)
 
 
+def _auto_approve(mode: str) -> bool:
+    """Quem auto-aprova ação sensível SEM humano: SÓ 'yolo'. 'off'/'defer'/resto = NÃO (fail-closed)."""
+    return mode == "yolo"
+
+
 def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = None, env=None,
                   approve_mode: str = "defer", emit=lambda m: None) -> HeartbeatResult:
     """UMA batida de heartbeat: identifica → pega a issue → checkout → harness → reporta status.
 
     `approve_mode`: 'defer' (ações sensíveis criam interaction request_confirmation e a tarefa fica
-    in_review p/ humano — governança), 'yolo' (auto-aprova tudo) ou 'off' (= yolo).
+    in_review p/ humano — governança), 'yolo' (auto-aprova tudo). 'off' = NÃO auto-aprova (fail-closed,
+    igual ao core/gateway): adia como o defer. SÓ yolo libera ação sensível sem humano (P0.3).
     """
     from okami.core import TaskState
 
@@ -199,7 +205,7 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
     pending: list[str] = []                                  # ações sensíveis adiadas (governança)
 
     def approve(req: dict) -> bool:
-        if approve_mode in ("yolo", "off"):
+        if _auto_approve(approve_mode):        # SÓ yolo auto-aprova — off NÃO (fail-closed, P0.3)
             return True
         # defer: cria uma interação de confirmação e ADIA (não faz a ação sensível agora)
         try:

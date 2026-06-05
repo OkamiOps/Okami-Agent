@@ -35,3 +35,25 @@ def redact(text: str) -> str:
     for rx, repl in _PATTERNS:
         text = rx.sub(repl, text)
     return text
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove escapes ANSI (cor/cursor) — saída de tool não deve poluir o contexto do modelo (P1.1)."""
+    if not text or not isinstance(text, str):
+        return text
+    return _ANSI.sub("", text)
+
+
+def clean_output(text: str, *, head: int = 6000, tail: int = 2000) -> str:
+    """Higieniza saída de tool ANTES do modelo: strip ANSI + redact segredo + truncagem HEAD/TAIL
+    (preserva os dois extremos — o exit code/erro costuma ficar no fim)."""
+    if not text or not isinstance(text, str):
+        return text
+    text = redact(strip_ansi(text))
+    if len(text) <= head + tail + 80:
+        return text
+    omitted = len(text) - head - tail
+    return f"{text[:head]}\n…[{omitted} chars omitidos no meio]…\n{text[-tail:]}"

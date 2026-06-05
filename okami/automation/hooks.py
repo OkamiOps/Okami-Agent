@@ -42,8 +42,15 @@ class HookManager:
         return sorted(p for p in d.glob("*") if p.is_file()) if d.exists() else []
 
     def _run_cmd(self, cmd: str, event: str, payload: dict) -> bool:
-        """Roda um hook de shell; devolve True se passou (exit 0), False se vetou (exit≠0)."""
-        env = {**os.environ, "OKAMI_HOOK_EVENT": event, "OKAMI_HOOK_PAYLOAD": json.dumps(payload)}
+        """Roda um hook de shell; devolve True se passou (exit 0), False se vetou (exit≠0).
+
+        Env SANITIZADO por padrão (P0.2): um hook versionado/injetado NÃO recebe os segredos do
+        ambiente (mesma proteção do run_shell/MCP). Repasse explícito via hooks.env_passthrough."""
+        from okami.core.tools import sanitized_env
+        env = {**sanitized_env(), "OKAMI_HOOK_EVENT": event, "OKAMI_HOOK_PAYLOAD": json.dumps(payload)}
+        for nm in (self.config or {}).get("env_passthrough") or []:    # allowlist explícita (ex.: GITHUB_TOKEN)
+            if nm in os.environ:
+                env[nm] = os.environ[nm]
         try:
             r = subprocess.run(cmd, shell=True, cwd=str(self.root), env=env,  # noqa: S602
                                input=json.dumps(payload), capture_output=True, text=True, timeout=30)

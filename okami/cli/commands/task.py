@@ -12,7 +12,7 @@ from okami.cli._shared import (
 
 @app.command()
 def task(
-    goal: str = typer.Argument(..., help="Objetivo da tarefa."),
+    goal: str = typer.Argument(None, help="Objetivo da tarefa (se vazio, pergunta)."),
     provider: str = typer.Option(None, "--provider", "-p"),
     model: str = typer.Option(None, "--model", "-m"),
     workspace: str = typer.Option("workspaces/default", "--workspace", "-w", help="Diretório de trabalho."),
@@ -24,6 +24,14 @@ def task(
     agent: str = typer.Option(None, "--agent", "-a", help="Rodar como um agente (agents/<id>)."),
 ) -> None:
     """Roda o harness até COMPLETE/BLOCKED/NEEDS_INPUT/FAILED."""
+    if not goal or not goal.strip():            # `okami task` sem objetivo → pergunta (não dá erro seco)
+        import sys
+        if sys.stdin.isatty():
+            goal = (typer.prompt("Qual o objetivo da tarefa?") or "").strip()
+        if not goal or not goal.strip():
+            console.print('[yellow]informe um objetivo:[/yellow] okami task "criar X / consertar Y"   '
+                          "[dim](ou `okami chat` p/ conversar)[/dim]")
+            raise typer.Exit(2)
     if agent:
         from okami.agents import effective_config, load_agents
         from okami.config import load_raw
