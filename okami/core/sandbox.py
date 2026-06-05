@@ -40,6 +40,7 @@ class SandboxPolicy:
     nproc: int = 0                   # rlimit NPROC / docker --pids-limit (0 = não setar local)
     fsize_mb: int = 0                # rlimit FSIZE                 (0 = não setar)
     image: str = "python:3.11-slim"  # imagem do backend docker
+    egress_allow: tuple = ()         # allowlist de egress (hosts) via proxy filtrante (#5)
 
     @classmethod
     def from_config(cls, d: dict | None) -> "SandboxPolicy":
@@ -59,6 +60,9 @@ class SandboxPolicy:
                   "mem_mb", "cpu_seconds", "nproc", "fsize_mb", "image"):
             if d.get(k) is not None:
                 setattr(p, k, d[k])
+        if d.get("egress_allow"):
+            p.egress_allow = tuple(d["egress_allow"])
+            p.network = True            # allowlist de egress implica rede (mas FILTRADA pelo proxy)
         if p.mode == "yolo":
             p.network = True            # yolo = sem freios → rede liberada também
         return p
@@ -176,6 +180,7 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                              "run_shell DESABILITADO (não caio no local inseguro). Instale o Docker, "
                              "ou use backend=auto (cai no local) / backend=local explícito.")
     use_docker = (eff == "docker")
+    proxy = None
     try:
         if use_docker:
             r = subprocess.run(docker_argv(cmd, workspace, policy),
@@ -184,11 +189,19 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
             if env is None:
                 from okami.core.tools import sanitized_env
                 env = sanitized_env()
+            if policy.egress_allow:                 # #5: egress só p/ a allowlist, via proxy filtrante
+                from okami.core.egress_proxy import EgressProxy
+                proxy = EgressProxy(policy.egress_allow)
+                proxy.start()
+                env = {**env, **proxy.proxy_env()}  # curl/pip/npm/requests passam pelo filtro
             r = subprocess.run(
                 cmd, shell=True, cwd=str(workspace), capture_output=True, text=True,
                 timeout=policy.timeout, env=env, preexec_fn=_rlimit_preexec(policy),
             )
     except subprocess.TimeoutExpired:
         return SandboxResult(124, f"timeout ({policy.timeout}s): {cmd}", timed_out=True)
+    finally:
+        if proxy is not None:
+            proxy.stop()
     out = ((r.stdout or "") + (r.stderr or "")).strip() or "(sem saída)"
     return SandboxResult(r.returncode, _cap(out, policy.max_output))
