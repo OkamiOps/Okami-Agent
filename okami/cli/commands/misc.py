@@ -54,29 +54,76 @@ def auth_status(json_out: bool = typer.Option(False, "--json", help="Saída JSON
         console.print(f"{p['name']}: {p['status']} ({p['kind']}, {p['location']})")
 
 
-policy_app = typer.Typer(help="Conformance de POLÍTICA/postura (#12): `okami policy check` (CI/pre-deploy).")
+policy_app = typer.Typer(help="Conformance de POLÍTICA autorada (#P1.3): `okami policy check/init/show`.")
 app.add_typer(policy_app, name="policy")
+
+
+def _collect_channels():
+    """Canais p/ a policy: bloco global `channels` + por-agente (agent.yaml), best-effort."""
+    from okami.config import load_raw
+    from okami.core.policy import collect_channels
+    raw, _ = load_raw()
+    agents = {}
+    try:
+        from okami.agents import load_agents
+        agents = load_agents()
+    except Exception:  # noqa: BLE001
+        agents = {}
+    return raw, collect_channels(raw, agents)
 
 
 @policy_app.command("check")
 def policy_check(
-    json_out: bool = typer.Option(False, "--json", help="Saída JSON (CI)."),
+    json_out: bool = typer.Option(False, "--json", help="Artefato de conformance JSON (CI/pre-deploy)."),
+    policy_file: str = typer.Option(None, "--policy", help="Caminho do okami.policy.yaml (default: auto-descobre)."),
 ) -> None:
-    """Valida a POSTURA (aprovação, segredo, sandbox, MCP trust, exposição). Exit≠0 se houver falha."""
-    from okami.core.lint import lint_posture, summarize
-    findings = lint_posture(_load())
+    """Avalia config+workspace contra a policy AUTORADA (okami.policy.yaml). Exit≠0 se houver falha."""
+    from pathlib import Path as _P
+
+    from okami.core.lint import summarize
+    from okami.core.policy import conformance_artifact, evaluate, load_policy
+    policy, source = load_policy(_P(policy_file) if policy_file else None)
+    raw, channels = _collect_channels()
+    findings = evaluate(_load(), policy, raw=raw, channels=channels)
     s = summarize(findings)
     if json_out:
         import json as _json
-        console.print_json(_json.dumps({"summary": s, "findings": [vars(x) for x in findings]}, ensure_ascii=False))
+        console.print_json(_json.dumps(conformance_artifact(findings, policy_source=source), ensure_ascii=False))
         raise typer.Exit(0 if s["ok"] else 1)
+    console.print(f"[dim]policy: {source}[/dim]")
     icon = {"pass": "[green]✓[/green]", "warn": "[yellow]⚠[/yellow]", "fail": "[red]✗[/red]"}
     for x in findings:
         if x.level != "pass":
             console.print(f"{icon[x.level]} [bold]{x.check}[/bold]: {x.message} [dim]→ {x.fix}[/dim]")
-    verdict = "[green]✓ postura ok[/green]" if s["ok"] else f"[red]✗ {s['counts']['fail']} falha(s) de política[/red]"
-    console.print(verdict)
+    verdict = ("[green]✓ conforme[/green]" if s["ok"]
+               else f"[red]✗ {s['counts']['fail']} falha(s) de conformance[/red]")
+    console.print(f"{verdict} [dim]({s['counts']['warn']} avisos)[/dim]")
     raise typer.Exit(0 if s["ok"] else 1)
+
+
+@policy_app.command("init")
+def policy_init(
+    force: bool = typer.Option(False, "--force", help="Sobrescreve um okami.policy.yaml existente."),
+) -> None:
+    """Cria um okami.policy.yaml inicial (baseline comentada) p/ você autorar a conformance."""
+    from okami.core.policy import scaffold
+    p = Path("okami.policy.yaml")
+    if p.exists() and not force:
+        console.print("[yellow]okami.policy.yaml já existe[/yellow] — use --force p/ sobrescrever.")
+        raise typer.Exit(1)
+    p.write_text(scaffold(), encoding="utf-8")
+    console.print("[green]✓ okami.policy.yaml criado[/green] [dim](edite e rode: okami policy check)[/dim]")
+
+
+@policy_app.command("show")
+def policy_show() -> None:
+    """Mostra a policy EFETIVA (baseline + okami.policy.yaml autorado)."""
+    import yaml as _yaml
+
+    from okami.core.policy import load_policy
+    policy, source = load_policy()
+    console.print(f"[dim]policy: {source}[/dim]")
+    console.print(_yaml.safe_dump(policy, allow_unicode=True, sort_keys=False))
 
 
 @app.command()
