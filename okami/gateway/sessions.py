@@ -12,104 +12,13 @@ O gateway (§13) usa isto: rebuild do histórico = ler a cauda do transcript; gr
 
 from __future__ import annotations
 
-import atexit
 import json
 import os
 import time
 from pathlib import Path
 
-_HELD: set[str] = set()        # locks deste processo (p/ limpar na saída)
-
-
-def _proc_start(pid: int) -> str:
-    """Start-time do processo (Linux /proc, campo 22) p/ detectar PID RECICLADO. '' onde não dá (macOS/Win)."""
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
-            raw = f.read()
-        return raw[raw.rfind(")") + 1:].split()[19]      # após o comm: starttime é o 20º token (campo 22)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _cleanup_held_locks() -> None:
-    """Solta os locks DESTE processo na saída (atexit). Crash/SIGTERM é coberto pelo stale-reclaim."""
-    for lk in list(_HELD):
-        try:
-            if int(json.loads(Path(lk).read_text(encoding="utf-8")).get("pid", -1)) == os.getpid():
-                Path(lk).unlink()
-        except Exception:  # noqa: BLE001
-            pass
-
-
-atexit.register(_cleanup_held_locks)
-
-
-class _FileLock:
-    """Lock cross-platform por arquivo (.lock atômico O_EXCL) — concorrência multi-processo (P0.5).
-
-    O lock guarda o DONO (pid + criação). Rouba o lock só se o dono MORREU (os.kill(pid,0)) ou se está
-    velho demais. Ao soltar, só remove o lock que EU criei (não atropela o de outro). Se não conseguir
-    em `timeout`s, segue mesmo assim — mas AVISA no log (não é mais silencioso)."""
-
-    def __init__(self, target: Path, timeout: float = 10.0, stale: float = 60.0):
-        self.lock = Path(str(target) + ".lock")
-        self.timeout, self.stale = timeout, stale
-        self.acquired = False
-
-    def _owner_alive(self) -> bool:
-        try:
-            info = json.loads(self.lock.read_text(encoding="utf-8"))
-            pid = int(info.get("pid", 0))
-        except Exception:  # noqa: BLE001 — lock recém-criado/meio-escrito (janela entre create e write):
-            return True     # assume VIVO p/ NÃO roubar (evita corrida); `age > stale` ainda reclama o real-órfão
-        if pid <= 0:
-            return False
-        try:
-            os.kill(pid, 0)                               # processo vivo? (POSIX; ProcessLookupError se morto)
-        except ProcessLookupError:
-            return False
-        except OSError:
-            return True                                  # sem permissão p/ sinalizar → existe (conservador)
-        stored, cur = info.get("start", ""), _proc_start(pid)   # anti PID-reuse: start-time diferente = outro proc
-        return not (stored and cur and stored != cur)
-
-    def _age(self) -> float:
-        try:
-            return time.time() - self.lock.stat().st_mtime
-        except OSError:
-            return 0.0
-
-    def __enter__(self):
-        start = time.time()
-        while True:
-            try:
-                fd = os.open(str(self.lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid()),
-                                         "created": time.time()}).encode("utf-8"))
-                os.close(fd)
-                self.acquired = True
-                _HELD.add(str(self.lock))                # registra p/ limpeza na saída (atexit)
-                return self
-            except FileExistsError:
-                if not self._owner_alive() or self._age() > self.stale:   # dono morto OU velho → rouba
-                    try:
-                        self.lock.unlink()
-                    except OSError:
-                        pass
-                    continue
-                if time.time() - start > self.timeout:
-                    from okami.log import warn
-                    warn(f"session lock ocupado >{self.timeout:.0f}s ({self.lock.name}) — seguindo sem lock")
-                    return self                          # best-effort, mas agora REGISTRA
-                time.sleep(0.03)
-
-    def __exit__(self, *exc):
-        if self.acquired:                                # só removo o lock que EU criei
-            _HELD.discard(str(self.lock))
-            try:
-                self.lock.unlink()
-            except OSError:
-                pass
+# Lock promovido p/ o núcleo (okami/core/filelock.py) — re-exportado aqui p/ compat de import.
+from okami.core.filelock import _HELD, _cleanup_held_locks, _FileLock, _proc_start  # noqa: F401
 
 
 class TranscriptStore:
