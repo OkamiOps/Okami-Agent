@@ -27,6 +27,27 @@ def test_provider_failover_to_backup(monkeypatch):
     assert out == "resposta do backup" and calls == ["a", "b"]   # caiu em a → tentou b
 
 
+def test_failover_skips_experimental_provider(monkeypatch):
+    # provider experimental NUNCA entra no failover automático (opt-in só explícito) → vai direto p/ 'c'.
+    import okami.llm.providers as prov
+    cfg = build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "fallback": ["x", "c"]},
+        "x": {"model": "mx", "experimental": True},
+        "c": {"model": "mc"}}})
+    calls = []
+
+    def fake_one(pc, messages, model, schema, overrides):
+        calls.append(pc.name)
+        if pc.name == "a":
+            raise RuntimeError("a caiu")
+        return "ok do c"
+
+    monkeypatch.setattr(prov, "_complete_one", fake_one)
+    out = prov.complete_messages(cfg, [{"role": "user", "content": "oi"}])
+    assert out == "ok do c"
+    assert "x" not in calls and calls == ["a", "c"]   # pulou o experimental, caiu no próximo real
+
+
 def test_failover_raises_if_all_fail(monkeypatch):
     import pytest
 

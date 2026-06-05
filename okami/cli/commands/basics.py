@@ -66,7 +66,8 @@ def list_providers(
         import json as _json
         payload = {"default_provider": cfg.default_provider, "providers": {
             name: {"model": pc.model, "tier": pc.tier, "transport": pc.transport,
-                   "api_base": pc.api_base or None, "ready": bool(pc.ready)}
+                   "api_base": pc.api_base or None, "ready": bool(pc.ready),
+                   "experimental": bool(pc.experimental)}
             for name, pc in cfg.providers.items()}}
         console.print_json(_json.dumps(payload, ensure_ascii=False))
         return
@@ -86,7 +87,12 @@ def list_providers(
     )
     for name, pc in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
-        state = _ui.badge("ready", "pronto") if pc.ready else _ui.badge("missing", "falta auth")
+        if pc.experimental:
+            state = _ui.badge("warn", "experimental")          # opt-in, não "quebrado"
+        elif pc.ready:
+            state = _ui.badge("ready", "pronto")
+        else:
+            state = _ui.badge("missing", "falta auth")
         t.add_row(mark, name, pc.model, pc.tier, pc.transport, state)
     console.print(_ui.panel(t, title=f"Providers ({len(cfg.providers)})",
                             subtitle="★ default", accent=_ui.MAGENTA))
@@ -156,6 +162,11 @@ def doctor(
     for name, pc in cfg.providers.items():
         is_default = name == cfg.default_provider
         mark = Text("★", style=_ui.ORANGE) if is_default else Text(" ")
+        # EXPERIMENTAL: opt-in, fora do failover → não pinga (não alarma com 401/parse de coisa em obras).
+        if pc.experimental and not is_default:
+            pt.add_row(mark, name, _ui.badge("warn", "experimental"),
+                       Text("opt-in · não verificado", style=_ui.MUTE))
+            continue
         # provider NÃO-pronto: é ERRO só se for o default; senão é OPCIONAL (não configurado), sem alarme.
         nrv = "missing" if is_default else "off"
         opt = "" if is_default else " · opcional"

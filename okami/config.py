@@ -75,6 +75,11 @@ class ProviderConfig(BaseModel):
     login_cmd: list[str] | None = None      # CLI oficial p/ delegar login (ex.: codex login --device-auth)
     models: list[str] = Field(default_factory=list)  # ids alternativos disponíveis no plano
     tier: str = "unknown"           # strong | weak | local | unknown  (§3.5)
+    # EXPERIMENTAL/opt-in: integração ainda não verificada de ponta a ponta (auth/endpoint em flux).
+    # NÃO entra no failover automático nem é "pronta de verdade" no doctor — só vale se você escolher
+    # explicitamente (okami provider default <id>). Evita que um 401/parse de provider em obras pareça
+    # produto quebrado. Hoje: minimax (OAuth device — confirmar endpoints) e mimo (parse da API).
+    experimental: bool = False
     fallback: list[str] = Field(default_factory=list)  # providers de backup se este falhar (§3.5 failover)
     context_window: int = 0         # janela do modelo em TOKENS (0 = default por tier) — §6.4
     chars_per_token: float = 4.0    # estimativa p/ converter tokens↔chars

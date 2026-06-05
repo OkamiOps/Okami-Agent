@@ -20,6 +20,20 @@ def test_config_check_json(tmp_path, monkeypatch):
     assert '"model"' in res.output                          # consistente com doctor/policy --json
 
 
+def test_experimental_provider_marked_not_broken(tmp_path, monkeypatch):
+    # provider experimental: aparece como 'experimental' (opt-in), NÃO como 'falta auth'/quebrado.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n"
+        "  lmstudio: {model: openai/x, api_key: lm, tier: local}\n"
+        "  mimo: {model: openai/m, api_key_env: MIMO_API_KEY, experimental: true, tier: weak}\n",
+        encoding="utf-8")
+    out = runner.invoke(app, ["providers"]).output
+    assert "experimental" in out
+    j = runner.invoke(app, ["providers", "--json"]).output
+    assert '"experimental": true' in j
+
+
 def test_is_secret_key_and_coerce():
     assert _is_secret_key("OPENAI_API_KEY") and _is_secret_key("MIMO_API_KEY")
     assert not _is_secret_key("memory.backend") and not _is_secret_key("approvals.mode")

@@ -242,6 +242,8 @@ def complete_messages_ex(
             if fb in tried or fb not in cfg.providers:
                 continue
             fbc = cfg.provider(fb)
+            if fbc.experimental:                          # opt-in só explícito — nunca failover automático
+                continue
             # pula só quem tem requisito de AUTH não atendido (login/CLI/env key) — tomaria 401 na cara.
             # Provider "bare" (litellm via defaults) segue tentável.
             needs_login = fbc.transport in ("codex_oauth", "minimax_oauth", "claude_cli") and not fbc.ready

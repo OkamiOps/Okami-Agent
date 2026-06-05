@@ -178,7 +178,10 @@ def status(
     )
     for name, p in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
-        state = _ui.badge("ready", "pronto") if p.ready else _ui.badge("missing", "falta auth")
+        if p.experimental:
+            state = _ui.badge("warn", "experimental")
+        else:
+            state = _ui.badge("ready", "pronto") if p.ready else _ui.badge("missing", "falta auth")
         t.add_row(mark, name, p.model, state)
     cards.append(_ui.panel(t, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 

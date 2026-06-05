@@ -66,7 +66,7 @@ providers:
     notes: Liste os modelos com 'okami doctor'. Troque o model à vontade.
   codex:
     model: openai-codex/gpt-5.5
-    fallback: [claude, minimax, lmstudio]   # se o codex cair (529/timeout/vazio) → tenta estes, em ordem
+    fallback: [claude, lmstudio]   # se o codex cair (529/timeout/vazio) → tenta estes, em ordem (sem experimentais)
     auth: oauth_subscription
     transport: codex_oauth
     tier: strong
@@ -80,7 +80,7 @@ providers:
     notes: 'Login: okami login codex (device flow; habilite Device Code no ChatGPT).'
   claude:
     model: claude-subscription/claude-opus-4-8
-    fallback: [codex, minimax, lmstudio]
+    fallback: [codex, lmstudio]
     auth: oauth_subscription
     transport: claude_cli
     tier: strong
@@ -93,6 +93,7 @@ providers:
       ANTHROPIC_API_KEY pay-as-you-go (ToS restringe reuse direto do token).
   minimax:
     model: openai/MiniMax-M3
+    experimental: true          # OAuth device flow ainda não verificado ponta-a-ponta → opt-in (não failover)
     fallback: [lmstudio]
     api_base: https://api.minimax.io/v1
     context_window: 1000000
@@ -104,10 +105,11 @@ providers:
       token_url: https://api.minimax.io/oauth/token
       scope: ''
     tier: weak
-    notes: 'Login: `okami login minimax` (device flow OAuth, token plan). Confirmar
-      client_id/endpoints nos docs.'
+    notes: 'EXPERIMENTAL. Login: `okami login minimax` (device flow OAuth). Confirmar
+      client_id/endpoints nos docs antes de promover a suportado.'
   mimo:
     model: openai/mimo-v2.5-pro
+    experimental: true          # parse da API ainda em ajuste → opt-in (não entra no failover automático)
     fallback: [lmstudio]
     api_base: https://platform.xiaomimimo.com/v1
     api_key_env: MIMO_API_KEY
@@ -117,4 +119,4 @@ providers:
     models:
     - mimo-v2.5-pro
     - mimo-v2.5
-    notes: MiMo via API key no .env (MIMO_API_KEY).
+    notes: EXPERIMENTAL. MiMo via API key no .env (MIMO_API_KEY); resposta da API ainda em ajuste.
