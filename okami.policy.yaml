@@ -33,7 +33,10 @@ gateway:
 
 sandbox:
   forbid_forced_local_on_exposed: true # backend:local fixo numa instalação exposta = aviso
-  require_isolation_on_exposed: false  # true em ambiente hostil: exposto SEM Docker = REPROVA (não degrada)
+  # false = dogfood/dev-friendly (sem Docker não quebra a sua máquina). Para DEPLOY PÚBLICO/GA rode
+  # `okami policy check --strict` (postura de produção: exposto SEM Docker REPROVA, não degrada) —
+  # ou ligue isto + `sandbox.require_isolation: true` no okami.yaml. Ver docs/PRODUCTION.md.
+  require_isolation_on_exposed: false
 
 tools:
   require_metadata: true               # toda tool com ToolSpec (categoria/risco/sensibilidade)

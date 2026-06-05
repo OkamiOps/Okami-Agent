@@ -31,12 +31,29 @@ DEFAULT_POLICY: dict = {
 
 _TRUST_RANK = {"untrusted": 0, "reviewed": 1, "trusted": 2}
 
+# Postura de PRODUÇÃO/GA (ambiente hostil/público), aplicada por `okami policy check --strict`.
+# Endurece o que o default deixa frouxo DE PROPÓSITO p/ dogfood — o default segue dev-friendly
+# (sem Docker não quebra a sua máquina). Quem expõe o agente publicamente roda `--strict` no deploy.
+PRODUCTION_OVERLAY: dict = {
+    "sandbox": {"require_isolation_on_exposed": True},   # exposto SEM isolamento real (Docker) → FAIL
+    "retention": {"require": True},                       # exige retenção/quota declarada
+    "gateway": {"require_token": True, "forbid_public_bind": True},
+    "secrets": {"forbid_literal_in_yaml": True},
+    "channels": {"forbid_open_ingress": True},
+    "mcp": {"max_trust": "reviewed"},
+}
+
 
 def _deep_merge(base: dict, over: dict) -> dict:
     out = dict(base)
     for k, v in (over or {}).items():
         out[k] = _deep_merge(out[k], v) if isinstance(out.get(k), dict) and isinstance(v, dict) else v
     return out
+
+
+def strict_policy(policy: dict) -> dict:
+    """Aplica a postura de PRODUÇÃO/GA sobre a policy carregada (#P1.2: ativa o modo hostil sob demanda)."""
+    return _deep_merge(policy, PRODUCTION_OVERLAY)
 
 
 def load_policy(path: Path | None = None) -> tuple[dict, str]:

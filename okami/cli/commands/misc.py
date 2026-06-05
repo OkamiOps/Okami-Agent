@@ -76,13 +76,16 @@ def _collect_channels():
 def policy_check(
     json_out: bool = typer.Option(False, "--json", help="Artefato de conformance JSON (CI/pre-deploy)."),
     policy_file: str = typer.Option(None, "--policy", help="Caminho do okami.policy.yaml (default: auto-descobre)."),
+    strict: bool = typer.Option(False, "--strict", help="Postura de PRODUÇÃO/GA (ambiente hostil/público)."),
 ) -> None:
-    """Avalia config+workspace contra a policy AUTORADA (okami.policy.yaml). Exit≠0 se houver falha."""
+    """Avalia config+workspace contra a policy AUTORADA. `--strict` = posture de produção. Exit≠0 se falha."""
     from pathlib import Path as _P
 
     from okami.core.lint import summarize
-    from okami.core.policy import conformance_artifact, evaluate, load_policy
+    from okami.core.policy import conformance_artifact, evaluate, load_policy, strict_policy
     policy, source = load_policy(_P(policy_file) if policy_file else None)
+    if strict:
+        policy, source = strict_policy(policy), f"{source} + produção (--strict)"
     raw, channels = _collect_channels()
     findings = evaluate(_load(), policy, raw=raw, channels=channels)
     s = summarize(findings)
@@ -116,12 +119,16 @@ def policy_init(
 
 
 @policy_app.command("show")
-def policy_show() -> None:
-    """Mostra a policy EFETIVA (baseline + okami.policy.yaml autorado)."""
+def policy_show(
+    strict: bool = typer.Option(False, "--strict", help="Mostra a postura de PRODUÇÃO/GA (overlay aplicado)."),
+) -> None:
+    """Mostra a policy EFETIVA (baseline + okami.policy.yaml autorado; --strict aplica a postura de produção)."""
     import yaml as _yaml
 
-    from okami.core.policy import load_policy
+    from okami.core.policy import load_policy, strict_policy
     policy, source = load_policy()
+    if strict:
+        policy, source = strict_policy(policy), f"{source} + produção (--strict)"
     console.print(f"[dim]policy: {source}[/dim]")
     console.print(_yaml.safe_dump(policy, allow_unicode=True, sort_keys=False))
 
