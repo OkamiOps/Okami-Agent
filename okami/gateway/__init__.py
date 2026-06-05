@@ -548,6 +548,12 @@ class AgentEndpoint:
                     "o gpt-image-2 é quem gera.")
             ctx = note + ("\n\n" + ctx if ctx else "")
             images = abss                                  # vision lê os caminhos no inbox
+        _typing = getattr(self.channel, "send_typing", None)   # indicador "digitando…" (Telegram)
+        if _typing:
+            try:
+                _typing(chat_id)
+            except Exception:  # noqa: BLE001 — typing nunca quebra o turno
+                pass
         self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
         try:
             approve = self._approve(chat_id, s)

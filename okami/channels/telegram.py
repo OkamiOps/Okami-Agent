@@ -8,10 +8,31 @@ from __future__ import annotations
 import json
 import secrets
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 from okami.channels.base import Channel, Inbound
+
+
+def _split_message(text: str, limit: int = 4000) -> list[str]:
+    """Quebra em pedaços ≤limit preferindo fronteira (parágrafo>linha>frase>espaço>corte duro).
+    Telegram corta em 4096 — ANTES a gente TRUNCAVA (perdia o resto); agora manda tudo, em partes."""
+    text = text or ""
+    if len(text) <= limit:
+        return [text]
+    out, rest = [], text
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(". "), window.rfind(" "))
+        if cut <= 0:
+            cut = limit                       # sem fronteira → corte duro
+        out.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    if rest:
+        out.append(rest)
+    return out
 
 
 class TelegramClient:
@@ -20,12 +41,36 @@ class TelegramClient:
         self.token = token
         self.base = f"{api_base}/bot{token}"
 
-    def _call(self, method: str, params: dict, timeout: float = 35.0) -> dict:
+    def _call(self, method: str, params: dict, timeout: float = 35.0, *, _sleep=time.sleep) -> dict:
+        """POST com RETRY/BACKOFF: 429 respeita retry_after; 5xx/rede instável → backoff; 4xx → erro."""
         data = json.dumps(params).encode("utf-8")
-        req = urllib.request.Request(f"{self.base}/{method}", data=data, method="POST")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
-            return json.loads(r.read().decode("utf-8"))
+        last: Exception | None = None
+        for attempt in range(1, 4):
+            req = urllib.request.Request(f"{self.base}/{method}", data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+                    return json.loads(r.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                last = e
+                if e.code == 429:                         # flood control → espera o que o Telegram pedir
+                    try:
+                        wait = float(json.loads(e.read()).get("parameters", {}).get("retry_after", 1))
+                    except Exception:  # noqa: BLE001
+                        wait = 1.0
+                elif 500 <= e.code < 600:
+                    wait = min(8.0, 2 ** attempt)
+                else:
+                    raise                                  # 4xx (não-429) = erro real, não insiste
+                if attempt < 3:
+                    _sleep(wait)
+            except (urllib.error.URLError, TimeoutError, OSError) as e:   # rede instável
+                last = e
+                if attempt < 3:
+                    _sleep(min(8.0, 2 ** attempt))
+        if last:
+            raise last
+        return {}
 
     def get_me(self) -> dict:
         return self._call("getMe", {}).get("result", {})
@@ -35,8 +80,16 @@ class TelegramClient:
         return res.get("result", [])
 
     def send_message(self, chat_id, text: str) -> dict:
-        # Telegram corta em 4096; deixamos margem.
-        return self._call("sendMessage", {"chat_id": chat_id, "text": text[:4000]})
+        res: dict = {}
+        for chunk in _split_message(text, 4000):          # >4096 → várias partes (não trunca mais)
+            res = self._call("sendMessage", {"chat_id": chat_id, "text": chunk})
+        return res
+
+    def send_chat_action(self, chat_id, action: str = "typing") -> None:
+        try:
+            self._call("sendChatAction", {"chat_id": chat_id, "action": action})
+        except Exception:  # noqa: BLE001 — typing é best-effort
+            pass
 
     def download_file(self, file_id: str) -> str:
         """Baixa um arquivo (voz/áudio) para um temp e devolve o caminho."""
@@ -109,6 +162,9 @@ class TelegramChannel(Channel):
 
     def send(self, chat_id, text: str) -> None:
         self.client.send_message(chat_id, text)
+
+    def send_typing(self, chat_id) -> None:
+        self.client.send_chat_action(chat_id, "typing")
 
     def send_audio(self, chat_id, audio_path) -> None:
         self.client.send_audio(chat_id, audio_path)
