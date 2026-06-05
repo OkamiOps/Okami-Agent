@@ -23,6 +23,14 @@ contracts:
     require_component_source: true
 learning:
   auto_skill: true            # evolutivo: destila skill de tarefa não-trivial (toda skill passa pelo scan §4.5)
+retention:                    # poda/quota de disco (gateway long-running não morre em disco). Operacionalize
+                              # no cron: `okami clean --deep` (ou `--dry-run --json` p/ auditar). Ver docs/PRODUCTION.md.
+  sessions:     {days: 30, keep: 10}     # transcripts ARQUIVADOS (*.reset.jsonl)
+  checkpoints:  {days: 14, keep: 50}     # snapshots (journal.jsonl é preservado sempre)
+  tool_outputs: {days: 7,  keep: 200}    # step_*.txt de output grande (cresce rápido)
+  processes:    {ttl_hours: 24}          # processos em background já terminados
+  audio:        {enabled: true}          # voz/TTS temporário
+  quota_mb:     {tool_outputs: 500, checkpoints: 200, sessions: 200}   # 0/ausente = sem teto; >0 = aviso no status
 voice:                        # Telegram (áudio). Requer deps: uv sync --extra voice
   stt:
     backend: whisper          # áudio recebido → texto (faster-whisper local)
@@ -35,6 +43,8 @@ providers:
   lmstudio:
     model: openai/qwen3.5-4b-mtp
     api_base: http://localhost:4480/v1   # aponte p/ seu LMStudio em okami.local.yaml (não versionado)
+    # PLACEHOLDER local, NÃO é segredo: LMStudio/Ollama ignoram a chave (servidor OpenAI-compat local).
+    # O lint reconhece 'lm-studio' como placeholder documentado (não vira warn). Servidor remoto → ${ENV}.
     api_key: lm-studio
     auth: api_key
     tier: local

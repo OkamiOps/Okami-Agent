@@ -48,10 +48,26 @@ def _header_literal_secret(hv: str) -> bool:
     return len(v) >= 16 and " " not in v and bool(re.search(r"[A-Za-z]", v)) and bool(re.search(r"[0-9]", v))
 
 
+# Placeholders LOCAIS reconhecidos (não-segredo, documentados): LMStudio/Ollama e afins ignoram a chave.
+# Reconhecê-los explicitamente faz o lint PASSAR (não só "warn de dummy") — resolve o ruído do api_key local.
+_PLACEHOLDER_VALUES = frozenset({
+    "lm-studio", "lmstudio", "lm_studio", "ollama", "local", "localhost", "none", "no-auth", "noauth",
+    "not-needed", "not_needed", "notneeded", "dummy", "placeholder", "local-no-auth", "no-key", "nokey",
+    "sk-local", "sk-no-key", "sk-nokey", "test", "x", "-", "n/a", "na",
+})
+
+
+def is_placeholder_value(value: str) -> bool:
+    """True se o valor é um placeholder local DOCUMENTADO (não-segredo) — ex.: 'lm-studio', 'not-needed'."""
+    return str(value).strip().lower() in _PLACEHOLDER_VALUES
+
+
 def _looks_real_secret(value: str) -> bool:
     """Distingue um SEGREDO real (sk-…, JWT, token longo) de um dummy/local ('lm-studio', 'not-needed')."""
     from okami.core.redact import redact
     v = value.strip()
+    if is_placeholder_value(v):                       # placeholder reconhecido → NUNCA é segredo real
+        return False
     if redact(v) != v:                                # bate um padrão conhecido (sk-/JWT/AKIA/ghp_/xox/Bearer)
         return True
     return len(v) >= 16 and bool(re.search(r"[A-Za-z]", v) and re.search(r"[0-9]", v))   # longo + alfanumérico
@@ -98,16 +114,18 @@ def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = 
             raw_base = {}
         leaks = _scan_secret_literals(raw_base)
         real = [p for p, v in leaks if _looks_real_secret(v)]
-        dummy = [p for p, v in leaks if not _looks_real_secret(v)]
+        # dummy DESCONHECIDO = literal não-real e não-placeholder → "confirme que não é segredo" (warn);
+        # placeholder reconhecido (lm-studio/not-needed/…) passa limpo (documentado, não é segredo).
+        unknown = [p for p, v in leaks if not _looks_real_secret(v) and not is_placeholder_value(v)]
         if real:
             f.append(Finding("secrets.in_yaml", "fail",
                              f"segredo REAL em texto no {base.name} (versionável): {', '.join(real[:5])}.",
                              "mova p/ .env e referencie com ${ENV_VAR}."))
-        elif dummy:
+        elif unknown:
             f.append(Finding("secrets.in_yaml", "warn",
-                             f"valor literal em chave sensível no {base.name}: {', '.join(dummy[:5])} "
+                             f"valor literal em chave sensível no {base.name}: {', '.join(unknown[:5])} "
                              "(parece dummy/local — confirme que não é segredo real).",
-                             "se for segredo, use ${ENV_VAR}; se for dummy local, ok."))
+                             "se for segredo, use ${ENV_VAR}; se for dummy/placeholder local, documente o valor."))
         else:
             f.append(Finding("secrets.in_yaml", "pass", f"sem segredo literal no {base.name}."))
 

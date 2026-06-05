@@ -160,11 +160,17 @@ def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | Non
                              "registre em tool_registry.py."))
 
     # retention ---------------------------------------------------------------
+    # Quando a policy EXIGE retenção (strict/produção), ausência é FAIL — não warn. Gateway long-running
+    # sem poda incha o disco até morrer; p/ GA isso é bloqueante, não um aviso ignorável.
     if (policy.get("retention") or {}).get("require", False):
         raw_retention = bool((raw or {}).get("retention") or (raw or {}).get("cleanup"))
         if not raw_retention:
-            f.append(Finding("policy.retention", "warn", "nenhuma retenção/quota declarada.",
-                             "configure retention: (sessions/checkpoints/process_logs/…) ou rode okami clean --deep no cron."))
+            f.append(Finding("policy.retention", "fail", "retenção/quota EXIGIDA mas não declarada (disco "
+                             "incha sem limite num gateway long-running).",
+                             "declare retention: (sessions/checkpoints/tool_outputs/processes) no okami.yaml "
+                             "e operacionalize com cron: okami clean --deep (ver docs/PRODUCTION.md)."))
+        else:
+            f.append(Finding("policy.retention", "pass", "retenção/quota declarada."))
 
     return f
 

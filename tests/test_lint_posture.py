@@ -79,9 +79,18 @@ def test_scan_ignores_url_envname_false_positives():
     assert _scan_secret_literals(node) == []
 
 
-def test_dummy_local_secret_warns_not_fails(tmp_path):
+def test_recognized_placeholder_passes(tmp_path):
+    # placeholder local DOCUMENTADO (lm-studio/not-needed/…) → passa limpo (não é segredo nem warn)
     base = tmp_path / "okami.yaml"
-    base.write_text("providers:\n  lmstudio:\n    api_key: lm-studio\n", encoding="utf-8")   # dummy local
+    base.write_text("providers:\n  lmstudio:\n    api_key: lm-studio\n", encoding="utf-8")
+    f = lint_posture(_cfg(), base_yaml=base)
+    assert _levels(f)["secrets.in_yaml"] == "pass"
+
+
+def test_unknown_dummy_still_warns(tmp_path):
+    # literal não-real e NÃO-reconhecido → ainda pede confirmação (warn), não passa batido
+    base = tmp_path / "okami.yaml"
+    base.write_text("providers:\n  x:\n    api_key: minha-chave-qualquer\n", encoding="utf-8")
     f = lint_posture(_cfg(), base_yaml=base)
     assert _levels(f)["secrets.in_yaml"] == "warn"
 

@@ -1,12 +1,23 @@
 name: Production conformance (strict)
 
-# Gate de PRONTIDÃO para GA (postura de produção/hostil). SEPARADO do ci.yml de propósito: o repo
-# em modo dogfood reprova `--strict` (agentes expostos sem isolamento estrito), então isto NÃO bloqueia
-# o merge — é um artefato de prontidão, rodado sob demanda (antes de um deploy) e semanalmente.
+# Gate de PRONTIDÃO para GA (postura de produção/hostil). SEPARADO do ci.yml de propósito.
+#
+# DOIS MODOS:
+#   • informativo (cron semanal / dispatch sem enforce): roda --strict e SÓ publica o artefato — o
+#     repo em dogfood reprova strict (agentes expostos sem isolamento estrito), então NÃO bloqueia.
+#   • BLOQUEANTE (dispatch com enforce=true, OU push de tag v*): o `--strict` é GATE de verdade — um
+#     deploy/release público só passa se a postura de produção estiver conforme. É o gate de GA.
 on:
-  workflow_dispatch: {}       # manual: rode antes de expor o agente publicamente
+  workflow_dispatch:
+    inputs:
+      enforce:
+        description: "Bloquear o job se a conformance estrita falhar (gate de release)?"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]            # release público → strict é OBRIGATÓRIO (bloqueante)
   schedule:
-    - cron: "0 6 * * 1"       # segunda 06:00 UTC (informativo)
+    - cron: "0 6 * * 1"     # segunda 06:00 UTC (informativo)
 
 permissions:
   contents: read
@@ -21,7 +32,17 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - name: Policy strict — artefato de conformance de GA (informativo, não bloqueia)
+      - name: Decide o modo (tag v* OU enforce=true → bloqueante)
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.enforce }}" = "true" ]; then
+            echo "blocking=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Conformance ESTRITA em modo BLOQUEANTE (release/enforce)."
+          else
+            echo "blocking=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Conformance estrita em modo informativo (dogfood reprova de propósito)."
+          fi
+      - name: Policy strict — gera o artefato (sempre)
         run: |
           uv run okami policy check --strict --json > strict-conformance.json || true
           cat strict-conformance.json
@@ -31,3 +52,8 @@ jobs:
         with:
           name: strict-conformance
           path: strict-conformance.json
+      - name: GATE — falha o job se bloqueante e strict reprovar
+        if: steps.mode.outputs.blocking == 'true'
+        run: |
+          # `>` sem pipe preserva o exit do okami → gate de verdade no modo release/enforce.
+          uv run okami policy check --strict --json > /dev/null

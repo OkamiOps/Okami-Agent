@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# ruff/bandit/pip-audit fixados aqui → `uv run ruff/bandit` reproduz a versão do lock (CI e local iguais).
+dev = ["pytest>=8", "ruff>=0.6", "bandit>=1.7", "pip-audit>=2.7"]
 honcho = ["honcho-ai>=1.0"]
 voice = ["faster-whisper>=1.0", "edge-tts>=6.1"]
 browser = ["playwright>=1.40"]      # browser automation (§13); sem ela, browse cai p/ fetch read-only
