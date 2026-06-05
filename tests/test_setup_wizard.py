@@ -26,6 +26,24 @@ def test_setup_memory_flag_noninteractive(tmp_path, monkeypatch):
     assert data["memory"]["backend"] == "sqlite-fts5"
 
 
+def test_setup_posture_production_applies_hardened_strict(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    res = runner.invoke(app, ["setup", "posture"], input="2\n")    # 2 = Gateway público / produção
+    assert res.exit_code == 0, res.output
+    local = yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
+    assert local["sandbox"]["profile"] == "hardened-strict"
+    assert "hardened-strict" in res.output
+
+
+def test_setup_posture_dev_stays_local(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    res = runner.invoke(app, ["setup", "posture"], input="1\n")    # 1 = Local / dev
+    assert res.exit_code == 0, res.output
+    p = tmp_path / "okami.local.yaml"
+    local = yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
+    assert (local.get("sandbox") or {}).get("profile") != "hardened-strict"
+
+
 def test_setup_wizard_creates_fresh_yaml(tmp_path, monkeypatch):
     """Sem okami.yaml + sem TTY → menus caem no fallback numerado; modo COMPLETO cria tudo do zero."""
     monkeypatch.chdir(tmp_path)

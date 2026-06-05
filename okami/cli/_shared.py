@@ -388,7 +388,7 @@ def _detect_environment(existing: dict | None = None) -> list["_Detected"]:
 
 
 _SETUP_SECTIONS = ("provider", "default", "memory", "agent", "identity", "channel",
-                   "voice", "approvals", "security", "learning", "persona")
+                   "voice", "approvals", "security", "posture", "production", "learning", "persona")
 
 
 def _write_persona_stubs(ws: Path, name: str) -> list[str]:

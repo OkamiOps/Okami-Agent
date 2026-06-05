@@ -60,7 +60,7 @@ def setup(
                         f"[dim]overrides:[/dim] {loc / 'okami.local.yaml'}\n[dim]segredos (.env):[/dim] {loc / '.env'}\n"
                         f"[dim]agentes:[/dim]   {agents_dir()}\n\n"
                         "[dim]Pule pra uma seção: okami setup "
-                        "provider|memory|agent|channel|voice|approvals|learning|persona[/dim]",
+                        "provider|memory|agent|channel|voice|approvals|posture|learning|persona[/dim]",
                         border_style="#ff7527", title="Configuration"))
 
     def step_provider() -> None:
@@ -202,6 +202,33 @@ def setup(
         save_local()
         console.print(f"[green]✓ aprovação:[/green] {pick}")
 
+    def step_posture() -> None:
+        sb = dict(local.get("sandbox") or {})
+        cur = "prod" if sb.get("profile") == "hardened-strict" else "dev"
+        pick = menu.select("Onde o Okami vai rodar?", [
+            ("dev", "Local / dev", "sua máquina; superfície exposta degrada p/ local (aviso, sem bloqueio)"),
+            ("prod", "Gateway público / produção", "isolamento ESTRITO (hardened-strict) — exige Docker"),
+        ], default=cur)
+        if pick == "prod":
+            sb["profile"] = "hardened-strict"            # = okami harden (postura nomeada de GA)
+            sb.pop("require_isolation", None)
+            local["sandbox"] = sb
+            save_local()
+            console.print("[green]✓ produção: perfil hardened-strict ligado[/green] "
+                          "[dim](superfície exposta sem Docker → run_shell/process DESABILITADOS, fail-closed)[/dim]")
+            from okami.core.sandbox import SandboxPolicy
+            if SandboxPolicy.from_config({"backend": "auto"}).effective_backend() != "docker":
+                console.print("[yellow]   Docker NÃO detectado[/yellow] — instale/abra o Docker antes de expor publicamente.")
+        else:
+            if sb.get("profile") == "hardened-strict":
+                sb.pop("profile", None)
+            if sb:
+                local["sandbox"] = sb
+            else:
+                local.pop("sandbox", None)
+            save_local()
+            console.print("[dim]✓ dev: cercas locais (rápido). Antes de expor publicamente: okami harden[/dim]")
+
     def step_learning() -> None:
         cur = local.get("learning") or {}
         skill = menu.confirm("Auto-skill? (destila skills de tarefas bem-sucedidas, escaneadas p/ segurança)",
@@ -266,6 +293,7 @@ def setup(
     steps = {"provider": step_provider, "default": step_provider, "memory": step_memory,
              "agent": step_agent, "identity": step_agent, "channel": step_channel,
              "voice": step_voice, "approvals": step_approvals, "security": step_approvals,
+             "posture": step_posture, "production": step_posture,
              "learning": step_learning, "persona": step_persona}
     if section:                                   # pulo direto pra uma seção (sem fork)
         steps[section]()
@@ -280,7 +308,7 @@ def setup(
     ], default="quick")
     if mode == "full":
         for fn in (step_provider, step_login, step_memory, step_agent, step_channel,
-                   step_voice, step_approvals, step_learning, step_persona):
+                   step_voice, step_approvals, step_posture, step_learning, step_persona):
             fn()
     else:
         step_quick()
