@@ -58,7 +58,7 @@ def test_replay_cli_list_and_detail(tmp_path, monkeypatch):
     assert res.exit_code == 0 and "trace123" in res.output
     # detalhe
     res2 = runner.invoke(app, ["replay", "trace123", "-w", str(tmp_path)])
-    assert res2.exit_code == 0 and "objetivo do turno" in res2.output and "trajetória" in res2.output
+    assert res2.exit_code == 0 and "objetivo do turno" in res2.output and "trace123" in res2.output
     # json
     res3 = runner.invoke(app, ["replay", "trace123", "-w", str(tmp_path), "--json"])
     assert res3.exit_code == 0 and '"trace": "trace123"' in res3.output

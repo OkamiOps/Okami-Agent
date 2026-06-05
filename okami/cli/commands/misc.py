@@ -61,8 +61,15 @@ def auth_status(json_out: bool = typer.Option(False, "--json", help="Saída JSON
         import json as _json
         console.print_json(_json.dumps({"profiles": profs}, ensure_ascii=False))
         raise typer.Exit(0 if all(p["status"] != "missing" or not p["default"] for p in profs) else 1)
+    from rich.text import Text
+
+    from okami.cli import _ui
     for p in profs:
-        console.print(f"{p['name']}: {p['status']} ({p['kind']}, {p['location']})")
+        line = Text("  ")
+        line.append_text(_ui.badge(p["status"]))
+        line.append(f"  {p['name']}", style=f"bold {_ui.FG}")
+        line.append(f"   {p['kind']} · {p['location']}", style=_ui.MUTE)
+        console.print(line)
 
 
 policy_app = typer.Typer(help="Conformance de POLÍTICA autorada (#P1.3): `okami policy check/init/show`.")
@@ -104,14 +111,30 @@ def policy_check(
         import json as _json
         console.print_json(_json.dumps(conformance_artifact(findings, policy_source=source), ensure_ascii=False))
         raise typer.Exit(0 if s["ok"] else 1)
-    console.print(f"[dim]policy: {source}[/dim]")
-    icon = {"pass": "[green]✓[/green]", "warn": "[yellow]⚠[/yellow]", "fail": "[red]✗[/red]"}
-    for x in findings:
-        if x.level != "pass":
-            console.print(f"{icon[x.level]} [bold]{x.check}[/bold]: {x.message} [dim]→ {x.fix}[/dim]")
-    verdict = ("[green]✓ conforme[/green]" if s["ok"]
-               else f"[red]✗ {s['counts']['fail']} falha(s) de conformance[/red]")
-    console.print(f"{verdict} [dim]({s['counts']['warn']} avisos)[/dim]")
+    from rich.text import Text
+
+    from okami.cli import _ui
+    console.print()
+    console.print(_ui.header("policy check", source + (" · produção" if strict else "")))
+    console.print()
+    shown = [x for x in findings if x.level != "pass"]
+    if not shown:
+        console.print(_ui.badge("pass", "nenhum desvio — tudo conforme"))
+    for x in shown:
+        line = Text("  ")
+        line.append_text(_ui.dot(x.level))
+        line.append(f"  {x.check}", style=f"bold {_ui.FG}")
+        line.append(f"   {x.message}", style=_ui.SOFT)
+        console.print(line)
+        if x.fix:
+            console.print(Text("       ").append_text(_ui.hint(x.fix)))
+    console.print()
+    c = s["counts"]
+    verdict = Text("  ")
+    verdict.append_text(_ui.badge("ok", "conforme") if s["ok"] else _ui.badge("fail", f"{c['fail']} falha(s)"))
+    verdict.append(f"    {c['pass']} ok · {c['warn']} avisos · {c['fail']} falhas", style=_ui.MUTE)
+    console.print(verdict)
+    console.print()
     raise typer.Exit(0 if s["ok"] else 1)
 
 
@@ -139,9 +162,20 @@ def policy_show(
     from okami.core.policy import load_policy, strict_policy
     policy, source = load_policy()
     if strict:
-        policy, source = strict_policy(policy), f"{source} + produção (--strict)"
-    console.print(f"[dim]policy: {source}[/dim]")
-    console.print(_yaml.safe_dump(policy, allow_unicode=True, sort_keys=False))
+        policy, source = strict_policy(policy), f"{source} + produção"
+    if not console.is_terminal:                       # pipe → YAML cru (com a fonte como comentário)
+        console.print(f"# policy: {source}")
+        console.print(_yaml.safe_dump(policy, allow_unicode=True, sort_keys=False))
+        return
+    from rich.syntax import Syntax
+
+    from okami.cli import _ui
+    console.print()
+    console.print(_ui.header("policy", "política de conformance efetiva"))
+    console.print()
+    body = Syntax(_yaml.safe_dump(policy, allow_unicode=True, sort_keys=False), "yaml",
+                  theme="ansi_dark", background_color="default")
+    console.print(_ui.card(body, title="policy", subtitle=source))
 
 
 @app.command()
@@ -209,19 +243,30 @@ def replay(
             import json as _json
             console.print_json(_json.dumps({"traces": traces}, ensure_ascii=False))
             return
+        from okami.cli import _ui
+        console.print()
+        console.print(_ui.header("replay", "trajetórias dos turnos recentes"))
+        console.print()
         if not traces:
-            console.print(f"[dim]sem turnos em {ws}/.okami/events.jsonl[/dim]")
+            console.print(_ui.hint(f"sem turnos em {ws}/.okami/events.jsonl"))
             return
-        t = Table(title="turnos (replay)", border_style="#3d3e50", header_style="bold #ff7527")
-        for col in ("trace", "quando", "passos", "llm", "tokens", "desfecho", "objetivo"):
-            t.add_column(col)
+        t = _ui.data_table(
+            ("trace", {"style": f"bold {_ui.CYAN}", "no_wrap": True}),
+            ("quando", {"style": _ui.MUTE, "no_wrap": True}),
+            ("passos", {"justify": "right", "no_wrap": True}),
+            ("llm", {"justify": "right", "no_wrap": True}),
+            ("tokens", {"style": _ui.MUTE, "no_wrap": True}),
+            ("desfecho", {"no_wrap": True}),
+            ("objetivo", {"style": _ui.SOFT, "overflow": "ellipsis", "no_wrap": True}),
+        )
         for s in traces:
             when = (_dt.datetime.fromtimestamp(s["ended_at"]).strftime("%m-%d %H:%M")
                     if s.get("ended_at") else "—")
             t.add_row(s["trace"], when, str(s["steps"]), str(s["llm_calls"]),
-                      f"↑{s['tokens_in']} ↓{s['tokens_out']}", s["outcome"], str(s["goal"])[:48])
+                      f"↑{s['tokens_in']} ↓{s['tokens_out']}", s["outcome"], str(s["goal"]))
         console.print(t)
-        console.print("[dim]→ okami replay <trace> p/ ver a trajetória completa do turno[/dim]")
+        console.print(_ui.hint("okami replay <trace> — trajetória completa do turno"))
+        console.print()
         return
     traj = build_trajectory(ws, trace)
     if json_out:
@@ -231,11 +276,16 @@ def replay(
     if not traj["events"]:
         console.print(f"[yellow]trace '{trace}' não encontrado[/yellow] em {ws}/.okami/events.jsonl")
         raise typer.Exit(1)
+    from okami.cli import _ui
     s = traj["summary"]
-    console.print(f"[bold #ff7527]trajetória {trace}[/] — {s['outcome']} · {s['steps']} passos · "
-                  f"{s['llm_calls']} LLM · ↑{s['tokens_in']} ↓{s['tokens_out']}")
+    console.print()
+    console.print(_ui.header(f"replay {trace}",
+                             f"{s['outcome']} · {s['steps']} passos · {s['llm_calls']} LLM · "
+                             f"↑{s['tokens_in']} ↓{s['tokens_out']}"))
+    console.print()
     for e in traj["events"]:
         console.print(render_line(e))
+    console.print()
 
 
 @app.command()
