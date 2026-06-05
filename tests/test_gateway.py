@@ -67,6 +67,34 @@ def test_background_persisted_and_status():
     assert any("✅ #1" in t and "analise o repo" in t for _, t in ep.channel.sent)
 
 
+def test_background_cancel_stops_running_job():
+    captured = []
+    ep = _ep(spawn=lambda fn: captured.append(fn))       # captura o thunk, não roda ainda
+
+    def _cancel_runner(cfg, ws, goal, *, approve=None, cancel=None, surface=None, **kw):
+        t = Task(goal=goal)
+        if cancel and cancel():                          # respeita o sinal de cancelamento
+            t.state, t.result = TaskState.BLOCKED, ""
+        else:
+            t.state, t.result = TaskState.COMPLETE, "feito"
+        return t
+
+    ep.run_task = _cancel_runner
+    ep.handle("7", "/background tarefa longa")
+    assert ep._bgreg.list()[0]["state"] == "running" and 1 in ep._bg_cancel   # rodando, cancelável
+    ep.handle("7", "/background cancel 1")               # seta o evento
+    assert any("cancelando background #1" in t for _, t in ep.channel.sent)
+    captured[0]()                                         # a thread roda agora → vê cancel=True
+    assert ep._bgreg.list()[0]["state"] == "cancelled"
+    assert any("background #1 cancelado" in t for _, t in ep.channel.sent)
+
+
+def test_background_cancel_unknown_id():
+    ep = _ep()
+    ep.handle("7", "/background cancel 99")
+    assert any("não está rodando" in t for _, t in ep.channel.sent)
+
+
 def test_background_reconcile_marks_orphan_interrupted():
     # job que ficou 'running' (gateway caiu) → vira 'interrupted' no reconcile (boot)
     ep = _ep()
