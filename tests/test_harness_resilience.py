@@ -65,6 +65,34 @@ def test_shrink_retry_happens_only_once_per_episode(tmp_path, monkeypatch):
     assert res.state.name in ("FAILED", "BLOCKED")
 
 
+def test_empty_respond_recovers_prose(tmp_path):
+    # modelo fraco escreve a resposta em PROSA e manda respond com message VAZIO → usa a prosa
+    # (era o bug "pergunta o nome → só (COMPLETE)" mudo).
+    def gen(messages, schema):
+        return 'Meu nome é Minerva, prazer 💜\n{"tool": "respond", "args": {"message": ""}}'
+
+    h = Harness(generate=gen, task=Task(goal="qual seu nome?"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE"
+    assert "Minerva" in (res.result or ""), f"perdeu a fala: {res.result!r}"
+
+
+def test_truly_empty_respond_reprompts_then_answers(tmp_path):
+    # respond vazio SEM prosa → re-pede a resposta 1x → modelo responde de verdade.
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "respond", "args": {"message": ""}}'      # vazio total
+        return '{"tool": "respond", "args": {"message": "Sou a Minerva"}}'
+
+    h = Harness(generate=gen, task=Task(goal="qual seu nome?"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] == 2
+    assert res.state.name == "COMPLETE" and "Minerva" in (res.result or "")
+
+
 def test_wall_clock_budget_stops_cleanly(tmp_path):
     # teto de relógio: estourou → termina BLOCKED com mensagem clara (não trava silencioso).
     def gen(messages, schema):

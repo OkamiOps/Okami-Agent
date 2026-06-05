@@ -14,6 +14,7 @@ from okami.core import approval
 from okami.core.harness.models import Budget, Generate, Step, Task, TaskState
 from okami.core.harness.parsing import (
     FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, action_schema, parse_action,
+    prose_outside_action,
 )
 from okami.core.harness.prompt import (
     _TOOL_RESULT_BUDGET, _user_start, build_system_prompt, check_exit, format_observation,
@@ -84,6 +85,7 @@ class Harness:
         # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
         self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
         self._nudged_action = False
+        self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -267,6 +269,15 @@ class Harness:
 
             # --- Tools terminais ---
             if tool.terminal:
+                # RECUPERA a fala perdida: modelo fraco escreve a resposta em PROSA e manda respond/
+                # task_complete com message/summary VAZIO → usa a prosa (fora do JSON) em vez de virar
+                # '(COMPLETE)' mudo. (Era o bug de "pergunta o nome → só completed".)
+                if action.tool in ("respond", "task_complete"):
+                    _key = "message" if action.tool == "respond" else "summary"
+                    if not str(action.args.get(_key, "")).strip():
+                        _prose = prose_outside_action(comp.text)
+                        if len(_prose) >= 2:
+                            action.args[_key] = _prose
                 result = self._handle_terminal(t, action)
                 if result is not None:
                     return result
@@ -391,8 +402,16 @@ class Harness:
                     "(ex.: write_file p/ criar arquivo, run_shell p/ rodar). Faça a AÇÃO agora "
                     "(um bloco json com a ferramenta certa) — depois confirme com respond."})
                 return None
+            msg = (action.args.get("message") or action.args.get("summary") or "").strip()
+            if not msg and not self._empty_nudged:       # respondeu VAZIO (nem prosa) → pede a resposta 1x
+                self._empty_nudged = True
+                self._emit("violation", n=0, text="respondeu vazio")
+                self.messages.append({"role": "user", "content":
+                    'Sua resposta veio VAZIA. Responda o usuário de verdade no campo message: '
+                    '{"tool": "respond", "args": {"message": "<sua resposta aqui>"}}.'})
+                return None
             t.state = TaskState.COMPLETE
-            t.result = action.args.get("message") or action.args.get("summary") or ""
+            t.result = msg or "(sem resposta)"
             self._emit("complete", summary=t.result)     # sem _extract: conversa não polui a memória
             return t
         if action.tool == "task_blocked":

@@ -95,6 +95,21 @@ def parse_action(text: str) -> Action | None:
     return None
 
 
+def prose_outside_action(text: str) -> str:
+    """A 'fala' livre do modelo SEM os blocos de ação JSON. Recupera a resposta quando o envelope
+    respond/task_complete vem com message VAZIO mas o modelo escreveu a resposta em PROSA (modelo fraco
+    que conversa fora do JSON e manda um respond vazio) — senão a fala se perdia e virava '(COMPLETE)'."""
+    s = _FENCE.sub(" ", text or "")                  # remove blocos ```...```
+    for obj in _balanced_json_objects(s):            # remove objetos JSON que sejam AÇÃO ({"tool": ...})
+        try:
+            d = json.loads(obj)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(d, dict) and isinstance(d.get("tool"), str):
+            s = s.replace(obj, " ", 1)
+    return "\n".join(ln.rstrip() for ln in s.splitlines() if ln.strip()).strip()
+
+
 def action_schema(registry: dict[str, Tool]) -> dict:
     """JSON schema da ação — usado no constrained decoding (§3.5)."""
     return {
