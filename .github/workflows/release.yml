@@ -28,6 +28,9 @@ jobs:
             || uv export --frozen -o reqs.txt 2>/dev/null || : > reqs.txt
           uvx --from cyclonedx-bom cyclonedx-py requirements reqs.txt -o dist/sbom.cdx.json || true
       - name: Provenance (build attestation) das wheels
+        # NÃO-fatal: a attestation exige repo PÚBLICO ou plano pago da org. Em repo privado ela falha
+        # ("Feature not available...") — não pode bloquear o release. Quando o repo virar público, passa.
+        continue-on-error: true
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2 (pin por SHA)
         with:
           subject-path: 'dist/*.whl'
