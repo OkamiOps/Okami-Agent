@@ -83,6 +83,24 @@ def test_empty_response_triggers_failover(monkeypatch):
                                   _sleep=lambda s: None) == "ok-b"
 
 
+def test_fallback_skips_unauthenticated_provider(monkeypatch):
+    # 'b' exige env key ausente → fallback PULA (não toma 401); cai no 'c' (bare, tentável)
+    cfg = build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "fallback": ["b", "c"]},
+        "b": {"model": "mb", "api_key_env": "X_FALLBACK_KEY_AUSENTE"},
+        "c": {"model": "mc"}}})
+    monkeypatch.delenv("X_FALLBACK_KEY_AUSENTE", raising=False)
+    tried = []
+
+    def fake_one(pc, messages, model, schema, overrides):
+        tried.append(pc.name)
+        return "" if pc.name == "a" else f"ok-{pc.name}"      # 'a' vazio → failover
+
+    monkeypatch.setattr(prov, "_complete_one", fake_one)
+    out = prov.complete_messages(cfg, [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert out == "ok-c" and "b" not in tried                 # b pulado (sem auth), c respondeu
+
+
 def test_non_retryable_400_does_not_burn_pool(monkeypatch):
     cfg = build_config({"default_provider": "a",
                         "providers": {"a": {"model": "ma", "api_keys": ["k1", "k2", "k3"]}}})

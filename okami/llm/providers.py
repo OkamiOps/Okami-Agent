@@ -239,12 +239,20 @@ def complete_messages_ex(
     tried = (_tried or set()) | {pc.name}
     if do_fallback:
         for fb in (pc.fallback or []):
-            if fb not in tried and fb in cfg.providers:
-                try:
-                    return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
-                                                _tried=tried, _sleep=_sleep, **overrides)
-                except Exception:  # noqa: BLE001
-                    continue
+            if fb in tried or fb not in cfg.providers:
+                continue
+            fbc = cfg.provider(fb)
+            # pula só quem tem requisito de AUTH não atendido (login/CLI/env key) — tomaria 401 na cara.
+            # Provider "bare" (litellm via defaults) segue tentável.
+            needs_login = fbc.transport in ("codex_oauth", "minimax_oauth", "claude_cli") and not fbc.ready
+            needs_key = bool(fbc.api_key_env) and not fbc.resolved_key()
+            if needs_login or needs_key:
+                continue
+            try:
+                return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
+                                            _tried=tried, _sleep=_sleep, **overrides)
+            except Exception:  # noqa: BLE001
+                continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")
 
 

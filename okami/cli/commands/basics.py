@@ -154,24 +154,32 @@ def doctor(
         ("endpoint", {"style": _ui.MUTE, "overflow": "ellipsis", "no_wrap": True, "max_width": 30}),
     )
     for name, pc in cfg.providers.items():
-        mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
+        is_default = name == cfg.default_provider
+        mark = Text("★", style=_ui.ORANGE) if is_default else Text(" ")
+        # provider NÃO-pronto: é ERRO só se for o default; senão é OPCIONAL (não configurado), sem alarme.
+        nrv = "missing" if is_default else "off"
+        opt = "" if is_default else " · opcional"
         if pc.transport in ("codex_oauth", "minimax_oauth"):
-            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge("missing", f"login {name}")
+            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge(nrv, f"login {name}{opt}")
         elif pc.transport == "claude_cli":
-            auth = _ui.badge("ready", "CLI claude") if pc.ready else _ui.badge("missing", "instale o CLI")
+            auth = _ui.badge("ready", "CLI claude") if pc.ready else _ui.badge(nrv, f"instale o CLI{opt}")
         elif pc.api_key_env:
-            auth = _ui.badge("ready", pc.api_key_env) if pc.resolved_key() else _ui.badge("missing", f"def {pc.api_key_env}")
+            auth = (_ui.badge("ready", pc.api_key_env) if pc.resolved_key()
+                    else _ui.badge(nrv, f"def {pc.api_key_env}{opt}"))
         elif pc.api_key:
             auth = _ui.badge("ok", "literal/dummy")
         else:
             auth = _ui.badge("off", "nenhuma")
+        # só pinga quem DEVERIA estar pronto (default ou autenticado) — não alarma com 401 de opcional.
         ep = Text("—", style=_ui.DIM)
-        if pc.api_base:
-            ok, msg = _ping_models(pc.api_base)
+        if pc.api_base and (is_default or pc.ready):
+            ok, _msg = _ping_models(pc.api_base)
             host = pc.api_base.replace("https://", "").replace("http://", "")
             ep = Text()
             ep.append_text(_ui.dot("ok" if ok else "fail"))
             ep.append(f" {host}", style=_ui.MUTE)
+        elif not pc.ready:
+            ep = Text("não configurado", style=_ui.MUTE)
         pt.add_row(mark, name, auth, ep)
     cards.append(_ui.panel(pt, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
@@ -192,11 +200,16 @@ def doctor(
     cards.append(_ui.panel(_ui.fields(mem_rows, label_w=10), title="Memória", accent=_ui.CYAN))
 
     # ◆ Ambiente / toolchain ---------------------------------------------------
+    # git/uv = essenciais; node/docker/claude/rg = recomendados (não quebram o core se faltarem).
+    _RECOMMENDED = {"node", "docker", "claude", "rg"}
     tools_line = Text()
     for tool in ("git", "uv", "node", "docker", "claude", "rg"):
         path = shutil.which(tool)
-        tools_line.append_text(_ui.dot("ok" if path else "off"))
+        tools_line.append_text(_ui.dot("ok" if path else ("warn" if tool in _RECOMMENDED else "off")))
         tools_line.append(f" {tool}  ", style=_ui.SOFT if path else _ui.MUTE)
+    if not shutil.which("rg"):                       # busca do agente usa grep como fallback — só recomendado
+        tools_line.append("\nrg (ripgrep) ausente — recomendado p/ busca rápida; sem ele o agente usa grep.",
+                          style=_ui.MUTE)
     try:
         _c = sqlite3.connect(":memory:")
         _c.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
