@@ -23,30 +23,43 @@ class Script:
 # ----------------------------------------------------------------- edit_file
 def test_edit_file_unique_replace(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\ny = 2\n")
-    r = EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ToolContext(workspace=tmp_path))
+    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})   # grounding: leu antes
+    r = EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ctx)
     assert r.ok and r.effect
     assert (tmp_path / "a.py").read_text() == "x = 1\ny = 3\n"
 
 
 def test_edit_file_errors(tmp_path):
     (tmp_path / "a.py").write_text("a\na\n")
-    ctx = ToolContext(workspace=tmp_path)
+    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})
     assert EditFile().run({"path": "a.py", "old": "zzz", "new": "q"}, ctx).ok is False     # não achou
     assert EditFile().run({"path": "a.py", "old": "a", "new": "b"}, ctx).ok is False        # ambíguo (2×)
     assert EditFile().run({"path": "nope.py", "old": "a", "new": "b"}, ctx).ok is False     # não existe
 
 
+def test_edit_file_requires_read_first(tmp_path):
+    # #6 grounding: editar arquivo EXISTENTE não-lido é recusado (edição cega por trecho adivinhado)
+    (tmp_path / "a.py").write_text("y = 2\n")
+    r = EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ToolContext(workspace=tmp_path))
+    assert r.ok is False and "read_file" in r.output and (tmp_path / "a.py").read_text() == "y = 2\n"
+    # prelearned_files (em read_files pelo harness) são a exceção confiável:
+    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})
+    assert EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ctx).ok is True
+
+
 def test_edit_file_replace_all(tmp_path):
     (tmp_path / "a.py").write_text("a\na\n")
-    r = EditFile().run({"path": "a.py", "old": "a", "new": "b", "replace_all": True},
-                       ToolContext(workspace=tmp_path))
+    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})
+    r = EditFile().run({"path": "a.py", "old": "a", "new": "b", "replace_all": True}, ctx)
     assert r.ok and (tmp_path / "a.py").read_text() == "b\nb\n"
 
 
 def test_edit_file_on_identity_blocked_without_approver(tmp_path):
     """edit_file em SOUL.md é sensível → sem approver, NEGADO (não edita). Prova que classify cobre edit_file."""
     (tmp_path / "SOUL.md").write_text("essência antiga")
-    Harness(Script([J("edit_file", path="SOUL.md", old="antiga", new="nova"),
+    # lê ANTES (passa o grounding) → quem bloqueia é a APROVAÇÃO sensível, não o grounding
+    Harness(Script([J("read_file", path="SOUL.md"),
+                    J("edit_file", path="SOUL.md", old="antiga", new="nova"),
                     J("respond", message="ok")]), Task(goal="muda a soul"), tmp_path).run()
     assert (tmp_path / "SOUL.md").read_text() == "essência antiga"     # bloqueado
 

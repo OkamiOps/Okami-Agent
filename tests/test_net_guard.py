@@ -37,6 +37,36 @@ def test_bad_string_blocked():
     assert _ip_blocked("not-an-ip") is True       # fail-closed
 
 
+@pytest.mark.parametrize("url", [
+    "http://0177.0.0.1/",        # octal: 0177 = 127 → loopback (getaddrinfo resolvia p/ 177.0.0.1!)
+    "http://2130706433/",        # inteiro único = 127.0.0.1
+    "http://0x7f.0.0.1/",        # hex = 127.0.0.1
+    "http://127.1/",             # abreviado = 127.0.0.1
+    "http://0x7f000001/",        # hex inteiro = 127.0.0.1
+    "http://017700000001/",      # octal inteiro = 127.0.0.1
+])
+def test_obfuscated_ipv4_blocked(url):
+    # #5: notação ambígua de IPv4 é parseada por inet_aton (= o que a CONEXÃO usa) ANTES do DNS → recusada.
+    with pytest.raises(BlockedURL):
+        validate_public_url(url)
+
+
+def test_obfuscated_public_ipv4_also_blocked():
+    # mesmo que normalize p/ IP PÚBLICO, a notação ofuscada é sinal de evasão → recusada
+    with pytest.raises(BlockedURL):
+        validate_public_url("http://010.010.010.010/")   # octal 8.8.8.8-ish, ainda assim recusado
+
+
+def test_canonical_public_ipv4_literal_allowed():
+    # IP literal CANÔNICO público continua passando (sem DNS), sem regressão
+    validate_public_url("http://93.184.216.34/")          # não levanta
+
+
+def test_canonical_loopback_literal_blocked():
+    with pytest.raises(BlockedURL):
+        validate_public_url("http://127.0.0.1/")
+
+
 def test_scheme_must_be_http(monkeypatch):
     monkeypatch.setattr(net_guard.socket, "getaddrinfo", _fake_dns({"example.com": ["93.184.216.34"]}))
     for bad in ("file:///etc/passwd", "gopher://x/", "ftp://host/f"):

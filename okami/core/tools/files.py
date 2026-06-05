@@ -81,6 +81,11 @@ class EditFile(Tool):
             return ToolResult(False, "edit_file exige 'old' (trecho a substituir) não-vazio.")
         if not p.exists():
             return ToolResult(False, f"'{rel}' não existe — use write_file para criar.")
+        # Grounding anti-alucinação (§3.7), igual ao write_file: não edita às cegas um arquivo não-lido
+        # (um 'old' adivinhado não basta). prelearned_files do harness já entram em ctx.read_files (exceção).
+        if rel not in ctx.read_files:
+            return ToolResult(False, f"'{rel}' existe mas você não o leu — use read_file antes de "
+                                     "editar (grounding; edição cega por trecho adivinhado é recusada).")
         from okami.core.file_safety import read_text_capped, write_text_atomic
         try:
             text = read_text_capped(p)

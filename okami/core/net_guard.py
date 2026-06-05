@@ -9,15 +9,18 @@ contrário. Antes de buscar QUALQUER uma delas, valida:
 - redirect: segue só p/ destino que TAMBÉM passa na validação (evita 302→rede interna);
 - IPv6-mapeado (::ffff:127.0.0.1) é desmascarado e validado como IPv4.
 
-getaddrinfo normaliza formas ofuscadas (decimal `2130706433`, hex `0x7f.1`, `[::1]`) p/ o IP real,
-então elas caem no mesmo filtro. DNS-rebinding TOCTOU puro (o resolver muda ENTRE validar e conectar)
-fica fora do escopo — exigiria fixar a conexão no IP validado e quebraria SNI/TLS; mitigado na prática
-por validar a origem E revalidar cada redirect. `allow_private=True` é o opt-in explícito (dev local).
+Literais IPv4 ofuscados (octal `0177.0.0.1`, hex `0x7f.1`, inteiro único `2130706433`, abreviado
+`127.1`) são parseados por `inet_aton` ANTES do DNS — o MESMO parser que a conexão usa — e recusados/
+validados como o IP real. Isso fecha a brecha em que `getaddrinfo('0177.0.0.1')` resolvia p/ 177.0.0.1
+(público) mas a conexão ia p/ 127.0.0.1 (loopback). DNS-rebinding TOCTOU puro (o resolver muda ENTRE
+validar e conectar) fica fora do escopo — exigiria fixar a conexão no IP validado e quebraria SNI/TLS;
+mitigado na prática por validar a origem E revalidar cada redirect. `allow_private=True` = opt-in (dev).
 """
 
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import urllib.request
 from urllib.parse import urlparse
@@ -25,6 +28,30 @@ from urllib.parse import urlparse
 
 class BlockedURL(ValueError):
     """URL recusada pela guarda anti-SSRF (esquema proibido, host não-roteável, ou DNS sem resposta)."""
+
+
+# IPv4 em notação CANÔNICA estrita: 4 octetos decimais 0-255, SEM zero à esquerda.
+_STRICT_DOTTED_V4 = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
+
+
+def _ipv4_literal(host: str) -> str | None:
+    """Se `host` é um literal IPv4 em QUALQUER notação (octal `0177.0.0.1`, hex `0x7f.1`, inteiro
+    único `2130706433`, abreviada `127.1`), devolve o IP CANÔNICO que a CONEXÃO usaria (inet_aton) —
+    e levanta BlockedURL se a notação for AMBÍGUA/ofuscada. None se for hostname de verdade.
+
+    Por que (brecha real #5): `getaddrinfo('0177.0.0.1')` resolve p/ 177.0.0.1 (público → passava),
+    mas a conexão via inet_aton vai p/ 127.0.0.1 (loopback). A validação divergia da conexão. Parser
+    próprio fecha isso: valida o MESMO IP que o socket usaria, e recusa notação ofuscada de cara."""
+    try:
+        canon = socket.inet_ntoa(socket.inet_aton(host))   # inet_aton = o que o OS realmente parseia
+    except OSError:
+        return None                                        # não é literal IPv4 → hostname
+    m = _STRICT_DOTTED_V4.match(host)
+    canonical = bool(m) and all(int(o) <= 255 and not (len(o) > 1 and o[0] == "0") for o in m.groups())
+    if not canonical:                                      # octal/hex/decimal-único/abreviada → evasão
+        raise BlockedURL(f"IP em notação ambígua/ofuscada ({host} → {canon}) — recusado (anti-SSRF). "
+                         "Use a forma canônica a.b.c.d.")
+    return canon
 
 
 def _ip_blocked(ip: str) -> bool:
@@ -57,6 +84,13 @@ def validate_public_url(url: str, *, allow_private: bool = False) -> None:
     if not host:
         raise BlockedURL("URL sem host")
     if allow_private:
+        return
+    # #5: literal IPv4 (qualquer notação) → valida o IP REAL da conexão, SEM DNS (fecha a divergência
+    # validação×conexão de 0177.0.0.1/2130706433/0x7f.1/127.1). _ipv4_literal levanta em notação ofuscada.
+    literal = _ipv4_literal(host)
+    if literal is not None:
+        if _ip_blocked(literal):
+            raise BlockedURL(f"host {host} → {literal} é rede interna/não-roteável (SSRF bloqueado)")
         return
     port = u.port or (443 if u.scheme == "https" else 80)
     ips = _resolve_ips(host, port)

@@ -51,7 +51,13 @@ _RULES: list[tuple[str, str, Severity, str]] = [
     (r"dd\s+if=\S+\s+of=/dev/", "dd_disk", Severity.CRITICAL, "sobrescreve dispositivo"),
     (r">\s*/dev/sd[a-z]", "overwrite_disk", Severity.CRITICAL, "escreve em disco bruto"),
     (r"(curl|wget)\s+[^\n|]*\|\s*(sudo\s+)?(ba)?sh", "pipe_to_shell", Severity.HIGH, "baixa e executa código remoto"),
+    (r"\b(?:ba)?sh\s+<\(\s*(?:curl|wget|fetch)", "proc_subst_exec", Severity.HIGH, "executa download via process substitution (sh <(curl…))"),
     (r"chmod\s+-R\s*0?777\s+/", "chmod_root", Severity.HIGH, "permissões perigosas na raiz"),
+    # "prepara e executa" payload local — gap que o chmod_root não pegava (#7)
+    (r"chmod\s+\+x\b[^\n]*?(?:&&|;|\|\||\n)\s*(?:\./|\bsh\s|\bbash\s|\bpython\d?\s|\bnode\s|\bperl\s|\bruby\s|\bsource\s)",
+     "chmod_exec", Severity.MEDIUM, "prepara e EXECUTA payload local (chmod +x → run)"),
+    (r"\b(?:bash|sh|python\d?|node|perl|ruby)\s+(?:/tmp/|/dev/shm/|/var/tmp/|~/\.[\w]|\$\{?TMPDIR)",
+     "run_from_temp", Severity.MEDIUM, "executa arquivo de diretório temporário/oculto (payload solto)"),
     # Exfiltração — hosts/webhooks comuns
     (r"discord(app)?\.com/api/webhooks", "exfil_webhook", Severity.HIGH, "webhook Discord (exfil)"),
     (r"hooks\.slack\.com/services", "exfil_webhook", Severity.HIGH, "webhook Slack (exfil)"),
