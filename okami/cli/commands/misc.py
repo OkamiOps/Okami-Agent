@@ -104,10 +104,12 @@ def status(
         console.print(f"[red]config não carrega:[/red] {e}")
         raise typer.Exit(1)
     if json_out:                                      # caminho máquina (#12): status resolvido p/ monitoramento
+        from okami.cli._shared import _collect_channels
         from okami.core.lint import lint_posture, summarize
         from okami.core.maintenance import disk_report
         from okami.integrations.mcp import servers_of
         pc = cfg.provider()
+        _, _channels = _collect_channels()
         payload = {
             "ok": True,
             "default_provider": cfg.default_provider,
@@ -118,7 +120,7 @@ def status(
             "sandbox": (cfg.sandbox or {}),
             "channels": sorted((cfg.gateway or {}).keys()),
             "mcp_servers": sorted(servers_of(cfg.mcp)),   # #P1: mcp.servers.<n>, não a chave 'servers'
-            "lint": summarize(lint_posture(cfg)),
+            "lint": summarize(lint_posture(cfg, channels=_channels)),
             "disk": disk_report(".", retention=cfg.retention),   # uso por área + quota (gateway long-running)
         }
         import json as _json
@@ -139,7 +141,8 @@ def status(
     voice_on = bool((cfg.voice or {}).get("stt") or (cfg.voice or {}).get("tts"))
     think = pc.reasoning_effort or "—"
     from okami.core.lint import lint_posture, summarize
-    cs = summarize(lint_posture(cfg))
+    raw, channels = _collect_channels()                  # canais (global + por-agente) p/ exposição consistente
+    cs = summarize(lint_posture(cfg, channels=channels))
     cc = cs["counts"]
 
     # masthead: estado-resumo à direita (conforme / N falhas) -------------------
@@ -180,8 +183,7 @@ def status(
     cards.append(_ui.panel(t, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
     # ◆ Canais & Gateway -------------------------------------------------------
-    raw, channels = _collect_channels()
-    ch_rows = []
+    ch_rows = []                                          # raw, channels já coletados acima (lint consistente)
     for (owner, ctype), conf in (channels or {}).items():
         if conf.get("allow_all"):
             st = _ui.badge("warn", "ingress ABERTO")

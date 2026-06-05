@@ -12,7 +12,7 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path
 
-from okami.core.lint import Finding, lint_posture
+from okami.core.lint import Finding, lint_posture, network_exposed
 
 # Baseline segura: o que vale quando não há okami.policy.yaml autorado.
 DEFAULT_POLICY: dict = {
@@ -87,7 +87,7 @@ def collect_channels(raw: dict | None, agents: dict | None = None) -> dict:
 def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | None = None,
              base_yaml: Path | None = None, env_path: Path | None = None) -> list[Finding]:
     """Avalia config+workspace contra a policy autorada. Inclui a postura embutida do lint."""
-    f: list[Finding] = list(lint_posture(cfg, base_yaml=base_yaml, env_path=env_path))
+    f: list[Finding] = list(lint_posture(cfg, base_yaml=base_yaml, env_path=env_path, channels=channels))
 
     # approvals.mode_allow ----------------------------------------------------
     allow_modes = (policy.get("approvals") or {}).get("mode_allow")
@@ -138,11 +138,8 @@ def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | Non
     # sandbox: forced local + isolamento exigido em instalação exposta --------
     sbpol = policy.get("sandbox") or {}
     sb = dict(getattr(cfg, "sandbox", None) or {})
-    # EXPOSTO = tem CANAL de verdade (ingress: telegram/slack…) OU o gateway faz bind de REDE (host/port).
-    # Um bloco `gateway:` só com tuning de display (reactions/auto_resume/max_sessions) NÃO expõe nada.
-    gw = getattr(cfg, "gateway", None) or {}
-    gw_binds = any(gw.get(k) for k in ("host", "bind", "port", "public", "webhook_url"))
-    exposed = gw_binds or bool(channels)
+    # EXPOSTO = canal de ingress real OU bind de rede do gateway (MESMA definição do lint, via helper único).
+    exposed = network_exposed(cfg, channels)
     if sbpol.get("forbid_forced_local_on_exposed", True) and exposed and sb.get("backend") == "local":
         f.append(Finding("policy.sandbox", "warn", "backend:local EXPLÍCITO numa instalação exposta "
                          "→ desliga o auto-harden por superfície.", "remova o backend fixo ou use profile: hardened."))

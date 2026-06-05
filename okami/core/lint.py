@@ -89,8 +89,20 @@ def _scan_secret_literals(node, path="") -> list[tuple[str, str]]:
     return out
 
 
-def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = None) -> list[Finding]:
-    """Roda os checks de postura sobre a config carregada. `base_yaml` = okami.yaml versionável."""
+def network_exposed(cfg, channels: dict | None = None) -> bool:
+    """Superfície EXPOSTA = canal de ingress REAL (telegram/slack/discord/mattermost) OU bind de REDE
+    do gateway (host/bind/port/public/webhook_url). Um bloco `gateway:` só com tuning de display
+    (reactions/auto_resume/max_sessions) NÃO expõe nada — é a MESMA definição usada pela policy strict,
+    para que o lint (warn) e a conformance (fail) nunca discordem sobre 'estou exposto?'."""
+    gw = getattr(cfg, "gateway", None) or {}
+    gw_binds = any(gw.get(k) for k in ("host", "bind", "port", "public", "webhook_url"))
+    return bool(gw_binds) or bool(channels)
+
+
+def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = None,
+                 channels: dict | None = None) -> list[Finding]:
+    """Roda os checks de postura sobre a config carregada. `base_yaml` = okami.yaml versionável.
+    `channels` = canais de ingress coletados (global + por-agente); usado p/ decidir exposição."""
     f: list[Finding] = []
 
     # 1) aprovação ------------------------------------------------------------
@@ -132,7 +144,7 @@ def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = 
     # 3) sandbox / isolamento -------------------------------------------------
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", None) or {})
-    exposed = bool(getattr(cfg, "gateway", None) or {})   # gateway (Telegram/API) = superfície de rede; voz é local
+    exposed = network_exposed(cfg, channels)   # canal de ingress OU bind de rede; reactions/voz NÃO expõem
     if sb.effective_backend() == "local" and exposed:
         f.append(Finding("sandbox.backend", "warn", "backend local numa instalação com gateway/superfície exposta "
                          "→ sem isolamento real do shell.", "sandbox.profile: hardened (docker se houver)."))
