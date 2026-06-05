@@ -31,6 +31,9 @@ class Session:
         self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
         self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
+        self.voice_off = False           # /voice off → não responde em áudio (TTS) nesta sessão
+        self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
+        self.queued: list = []           # mensagens em fila (runtime; não persiste)
 
     def interrupted(self) -> bool:
         """Tarefa interrompida = histórico termina numa fala do USER sem resposta do AGENTE."""
@@ -87,6 +90,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.resume_attempts = int(e.get("resume_attempts", 0))
             s.reasoning_effort = e.get("reasoning_effort", "")
             s.title = e.get("title", "")
+            s.voice_off = bool(e.get("voice_off", False))
+            s.busy_mode = e.get("busy_mode", "queue")
             self.sessions[cid] = s
         return self.sessions[cid]
 
@@ -100,7 +105,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
                                 resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
-                                title=s.title)
+                                title=s.title, voice_off=s.voice_off, busy_mode=s.busy_mode)
 
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
@@ -283,10 +288,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if low == "/status":
             bg = f" · ▶{len(self._bg)} background" if self._bg else ""
+            q = f" · 🕓{len(s.queued)} fila" if s.queued else ""
             ttl = f" · 📝 {s.title}" if s.title else ""
+            mute = " · 🔇" if s.voice_off else ""
             self.channel.send(chat_id, f"agente {self.agent_id}{ttl} · "
                               f"{'ocupado' if s.busy else 'livre'} · {len(s.history) // 2} trocas · "
-                              f"yolo={'on' if s.yolo else 'off'}{bg}")
+                              f"yolo={'on' if s.yolo else 'off'}{mute}{bg}{q}")
             return
         if low == "/yolo":
             s.yolo = True
@@ -297,6 +304,34 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.yolo = False
             self._save_meta(chat_id, s)
             self.channel.send(chat_id, "🔒 aprovação normal.")
+            return
+        if low.startswith("/voice"):
+            arg = text[len("/voice"):].strip().lower()
+            if arg in ("off", "mute", "0", "no"):
+                s.voice_off = True
+            elif arg in ("on", "1", "yes"):
+                s.voice_off = False
+            else:
+                s.voice_off = not s.voice_off          # sem arg → alterna
+            self._save_meta(chat_id, s)
+            self.channel.send(chat_id, "🔈 áudio DESLIGADO nesta sessão." if s.voice_off
+                              else "🔊 áudio LIGADO (respondo em voz quando o TTS está ativo).")
+            return
+        if low.startswith("/busy"):
+            arg = text[len("/busy"):].strip().lower()
+            if arg in ("queue", "fila"):
+                s.busy_mode = "queue"
+            elif arg in ("interrupt", "corta", "stop"):
+                s.busy_mode = "interrupt"
+            elif arg in ("", "status"):
+                q = f" · {len(s.queued)} na fila" if s.queued else ""
+                self.channel.send(chat_id, f"⏳ modo ocupado: {s.busy_mode}{q}. Opções: queue · interrupt.")
+                return
+            else:
+                self.channel.send(chat_id, "uso: /busy queue (fila) | interrupt (corta a atual) | status")
+                return
+            self._save_meta(chat_id, s)
+            self.channel.send(chat_id, f"⏳ ocupado → {s.busy_mode}.")
             return
         if low in ("/reload", "/reloadconfig"):        # #12: hot-reload de config (sem reiniciar)
             ok, msg = self.reload_config()
@@ -421,8 +456,13 @@ class AgentEndpoint(EndpointCommandsMixin):
             job = Scheduler(".").add(schedule, prompt, agent=self.agent_id, target=str(chat_id))
             self.channel.send(chat_id, f"⏰ agendei [{job['schedule']}]: {prompt}")
             return
-        if s.busy:
-            self.channel.send(chat_id, "⏳ ainda processando a anterior. Use /stop para cancelar.")
+        if s.busy:                                      # ocupado: enfileira (e corta a atual se modo interrupt)
+            s.queued.append((text, self._img.pop(cid, None)))
+            if s.busy_mode == "interrupt":
+                s.cancel = True
+                self.channel.send(chat_id, "⏹ interrompendo a atual — já começo a sua nova mensagem.")
+            else:
+                self.channel.send(chat_id, f"⏳ guardei na fila (#{len(s.queued)}) — começo quando a atual terminar.")
             return
         s.busy = True
         s.cancel = False
@@ -549,7 +589,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, prefix + reply)
             self._react(chat_id, {"COMPLETE": "👍", "BLOCKED": "👎",
                                   "NEEDS_INPUT": "🤔"}.get(task.state.name, "👎"))
-            self._maybe_voice(chat_id, reply)
+            if not s.voice_off:                          # /voice off muta o áudio nesta sessão
+                self._maybe_voice(chat_id, reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
@@ -559,6 +600,10 @@ class AgentEndpoint(EndpointCommandsMixin):
         finally:
             s.busy = False
             s.cancel = False
+            if s.queued:                                 # drena a fila: roda a próxima mensagem guardada
+                nxt_text, nxt_img = s.queued.pop(0)
+                s.busy = True
+                self._spawn(lambda t=nxt_text, im=nxt_img: self._run(chat_id, t, s, images=im))
 
     def _maybe_voice(self, chat_id, text: str) -> None:
         if not self.tts:

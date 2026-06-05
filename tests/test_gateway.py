@@ -75,6 +75,38 @@ def test_title_sets_shows_in_status_and_persists():
     assert ep.session("7").title == "meu projeto okami"
 
 
+def test_voice_toggle_persists():
+    ep = _ep()
+    ep.handle("7", "/voice off")
+    assert any("DESLIGADO" in t for _, t in ep.channel.sent) and ep.session("7").voice_off is True
+    ep.handle("7", "/voice on")
+    assert ep.session("7").voice_off is False
+    del ep.sessions["7"]                                  # persiste no store
+    assert ep.session("7").voice_off is False
+
+
+def test_busy_queue_enqueues_and_drains():
+    ep = _ep()
+    s = ep.session("7")
+    s.busy = True                                         # finge ocupado → próxima vai pra fila
+    ep.handle("7", "tarefa B")
+    assert len(s.queued) == 1 and any("fila (#1)" in t for _, t in ep.channel.sent)
+    s.busy = False
+    ep._run("7", "tarefa A", s)                           # roda A; no finally drena B (spawn síncrono)
+    sent = [t for _, t in ep.channel.sent]
+    assert any("feito: tarefa A" in t for t in sent) and any("feito: tarefa B" in t for t in sent)
+    assert s.queued == []                                 # fila drenada
+
+
+def test_busy_interrupt_cancels_current():
+    ep = _ep()
+    s = ep.session("7")
+    s.busy_mode, s.busy = "interrupt", True
+    ep.handle("7", "nova urgente")
+    assert s.cancel is True and len(s.queued) == 1
+    assert any("interrompendo" in t for _, t in ep.channel.sent)
+
+
 def test_message_runs_task_and_replies():
     ep = _ep()
     ep.handle("7", "crie x")
@@ -174,7 +206,8 @@ def test_concurrency_busy_guard():
     ep = _ep(spawn=lambda fn: None)   # não roda → fica busy
     ep.handle("7", "tarefa1")
     ep.handle("7", "tarefa2")
-    assert any("processando" in t for _, t in ep.channel.sent)
+    assert any("fila" in t for _, t in ep.channel.sent)    # ocupado → enfileira (não roda concorrente)
+    assert ep.session("7").queued                          # a 2ª ficou guardada
 
 
 def test_approval_yolo_session_auto():

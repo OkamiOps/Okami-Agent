@@ -57,6 +57,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # ---- sistema ----
     CommandDef("yolo", "auto-aprova ações sensíveis nesta sessão", "sistema"),
     CommandDef("normal", "volta a aprovação normal", "sistema"),
+    CommandDef("voice", "liga/desliga a resposta em áudio (TTS) nesta sessão", "sistema", args="[on|off]"),
+    CommandDef("busy", "o que fazer se você escrever ocupado: queue (fila) | interrupt (corta)", "sistema",
+               args="[modo]"),
     CommandDef("config", "mostra a config efetiva (segredos mascarados)", "sistema", tier="power"),
     CommandDef("reload", "recarrega a config em quente (sem reiniciar)", "sistema", ("reloadconfig",), tier="power"),
 ]
