@@ -67,3 +67,19 @@ def test_pt_catalog_covers_all_commands():
     from okami.locales.pt import MESSAGES as PT
     faltando = [cmd.name for cmd in c.COMMAND_REGISTRY if f"cmd.{cmd.name}" not in PT]
     assert not faltando, f"sem tradução PT: {faltando}"
+
+
+def test_migrated_cli_keys_have_pt_translation():
+    # INVARIANTE bilíngue: toda chave doctor./status./setup. usada no código TEM tradução PT
+    # (senão usuário pt veria inglês). Guarda contra migração futura esquecer o catálogo.
+    import pathlib
+    import re
+
+    from okami.locales.pt import MESSAGES
+    files = ["okami/cli/commands/basics.py", "okami/cli/commands/misc.py", "okami/cli/commands/setup.py"]
+    used: set[str] = set()
+    for f in files:
+        used |= set(re.findall(r'(?<![\w])t\(\s*"([a-z][a-z0-9_.]+)"', pathlib.Path(f).read_text(encoding="utf-8")))
+    body = {k for k in used if k.split(".")[0] in ("doctor", "status", "setup")}
+    missing = sorted(k for k in body if k not in MESSAGES)
+    assert not missing, f"chaves sem tradução PT: {missing}"
