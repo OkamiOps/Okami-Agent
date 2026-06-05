@@ -61,8 +61,9 @@ def test_setup_agent_section_creates_named_agent(tmp_path, monkeypatch):
 
 
 def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
-    """`okami provider add` grava o provider no okami.yaml e a chave no .env (não no yaml)."""
+    """`okami provider add` grava o provider no okami.yaml e a chave no .env GLOBAL (não no yaml)."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))          # ~ → tmp (segredo vai pro .env GLOBAL ~/.okami/.env)
     # evita rede no teste: discover_models devolve um catálogo fixo
     monkeypatch.setattr("okami.llm.models.discover_models",
                         lambda **kw: (["gpt-4o-mini", "gpt-4o"], "catalog"))
@@ -78,7 +79,7 @@ def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
     assert cfg["providers"]["openai"]["api_key_env"] == "OPENAI_API_KEY"
     assert cfg["providers"]["openai"]["model"] == "openai/gpt-4o-mini"   # prefixo + modelo escolhido
     assert "sk-test" not in (tmp_path / "okami.yaml").read_text(encoding="utf-8")   # chave NÃO no yaml
-    assert "OPENAI_API_KEY=sk-test" in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-test" in (tmp_path / ".okami" / ".env").read_text(encoding="utf-8")
 
 
 def test_discover_models_live_then_catalog(monkeypatch):

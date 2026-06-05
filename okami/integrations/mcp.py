@@ -83,9 +83,13 @@ class McpHttpClient:
 
 
 class McpStdioClient:
-    def __init__(self, command: str, args=None, env=None, cwd=None, timeout: float = 30.0):
+    def __init__(self, command: str, args=None, env=None, cwd=None, timeout: float = 30.0,
+                 env_passthrough=None):
         self.cmd = [command, *(args or [])]
         self.env = env
+        # allowlist de NOMES de env var a repassar do ambiente (ex.: ELEVENLABS_API_KEY do ~/.okami/.env)
+        # SEM versionar o token. O resto do ambiente continua sanitizado.
+        self.env_passthrough = list(env_passthrough or [])
         self.cwd = cwd
         self.timeout = timeout
         self.proc: subprocess.Popen | None = None
@@ -97,7 +101,11 @@ class McpStdioClient:
         # Servidor MCP é processo de TERCEIRO → NÃO vaza chaves/tokens do ambiente (mesma
         # sanitização do run_shell). Env extra explícito (self.env do config) é allowlist opt-in.
         from okami.core.tools import sanitized_env
-        full_env = {**sanitized_env(), **(self.env or {})}
+        base = sanitized_env()
+        for nm in self.env_passthrough:                 # repassa só os segredos explicitamente liberados
+            if nm in os.environ:
+                base[nm] = os.environ[nm]
+        full_env = {**base, **(self.env or {})}
         self.proc = subprocess.Popen(
             self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1, env=full_env, cwd=self.cwd,
@@ -204,6 +212,7 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
                 client = McpStdioClient(
                     conf["command"], conf.get("args"), conf.get("env"),
                     conf.get("cwd"), conf.get("timeout", 30),
+                    env_passthrough=conf.get("env_passthrough"),
                 )
             specs = client.start()
             clients.append(client)

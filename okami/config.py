@@ -16,8 +16,24 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-# Carrega .env (se existir) o quanto antes, para que api_key_env funcione.
-load_dotenv()
+# Segredos GLOBAIS do Okami: ~/.okami/.env (valem em QUALQUER workspace). É aqui que mora um
+# token tipo ELEVENLABS_API_KEY/MIMO_API_KEY — configure uma vez, usa em todo lugar.
+def global_env_path() -> Path:
+    """Caminho do .env global (~/.okami/.env). Onde `okami config set <SEGREDO>` grava por padrão."""
+    return Path.home() / ".okami" / ".env"
+
+
+def _load_env() -> None:
+    """Carrega segredos com precedência: ambiente real > .env do PROJETO (CWD) > .env GLOBAL.
+    (load_dotenv não sobrescreve quem já existe → carregar projeto antes do global dá essa ordem.)"""
+    load_dotenv()                                   # .env do projeto (CWD), se existir
+    g = global_env_path()
+    if g.exists():
+        load_dotenv(g)                              # global preenche o que faltou (não sobrescreve)
+
+
+# Carrega o quanto antes, para que api_key_env funcione já no import.
+_load_env()
 
 DEFAULT_CONFIG_NAMES = ("okami.yaml", "okami.yml")
 

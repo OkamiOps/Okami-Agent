@@ -577,11 +577,15 @@ def _to_int(s, default: int) -> int:
         return default
 
 
-def _set_env_var(key: str, value: str, path: str = ".env") -> None:
-    """Grava/atualiza KEY=value no .env — escrita ATÔMICA + permissão 0600 (segredo só p/ o dono)."""
+def _set_env_var(key: str, value: str, path: str | None = None) -> None:
+    """Grava/atualiza KEY=value no .env — escrita ATÔMICA + 0600 (segredo só p/ o dono).
+
+    path=None → .env GLOBAL (~/.okami/.env): configura uma vez, vale em qualquer workspace."""
     import os
     import tempfile
-    p = Path(path)
+    from okami.config import global_env_path
+    p = Path(path) if path else global_env_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
     lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
     out, done = [], False
     for ln in lines:
@@ -2369,12 +2373,18 @@ def config_get(key: str = typer.Argument(..., help="Chave pontilhada, ex.: memor
 def config_set(
     key: str = typer.Argument(..., help="Chave pontilhada (ex.: memory.backend) ou env (ex.: OPENAI_API_KEY)."),
     value: str = typer.Argument(..., help="Valor (true/false/número/lista a,b/json também)."),
+    project: bool = typer.Option(False, "--project", help="Segredo no .env do PROJETO (default = global ~/.okami/.env)."),
 ) -> None:
-    """Define um valor — auto-roteia: segredo (MAIÚSCULAS) → .env, resto → okami.local.yaml."""
+    """Define um valor — auto-roteia: segredo (MAIÚSCULAS) → .env, resto → okami.local.yaml.
+
+    Segredo vai pro .env GLOBAL (~/.okami/.env) por padrão → vale em QUALQUER workspace
+    (ex.: ELEVENLABS_API_KEY). Use --project p/ gravar só no projeto atual."""
     import yaml as _yaml
     if _is_secret_key(key):
-        _set_env_var(key, value)
-        console.print(f"[green]🔑 {key} → .env[/green] [dim](segredo, não versionado)[/dim]")
+        from okami.config import global_env_path
+        _set_env_var(key, value, path=".env" if project else None)
+        where = "projeto (.env)" if project else f"global ({global_env_path()})"
+        console.print(f"[green]🔑 {key} →[/green] {where} [dim](0600, não versionado)[/dim]")
         return
     p = Path("okami.local.yaml")
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
@@ -2399,12 +2409,13 @@ def config_unset(key: str = typer.Argument(..., help="Chave pontilhada a remover
 
 @config_app.command("path")
 def config_path() -> None:
-    """Mostra onde ficam os arquivos de config."""
-    for label, f in (("config base ", "okami.yaml"), ("overrides   ", "okami.local.yaml"),
-                     ("segredos    ", ".env")):
-        p = Path(f)
+    """Mostra onde ficam os arquivos de config (incl. o .env GLOBAL de segredos)."""
+    from okami.config import global_env_path
+    rows = [("config base    ", Path("okami.yaml")), ("overrides      ", Path("okami.local.yaml")),
+            ("segredos projeto", Path(".env")), ("segredos GLOBAL ", global_env_path())]
+    for label, p in rows:
         mark = "[green]✓[/green]" if p.exists() else "[dim]—[/dim]"
-        console.print(f"{mark} {label}: {p.resolve()}")
+        console.print(f"{mark} {label}: {p.resolve() if not p.is_absolute() else p}")
 
 
 @config_app.command("edit")

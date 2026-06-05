@@ -91,3 +91,17 @@ def test_mcp_uses_sanitized_env(monkeypatch):
         pass
     assert captured["env"].get("ALLOWED") == "1"               # env extra explícito (allowlist) passa
     assert "SECRET_TOKEN" not in captured["env"]               # segredo do ambiente NÃO vaza
+
+
+# ---------------------------------------------------------------- segredo GLOBAL (~/.okami/.env)
+def test_secret_config_set_writes_global(tmp_path, monkeypatch):
+    """`okami config set <SEGREDO>` grava no .env GLOBAL (~/.okami/.env), 0600 — vale em qualquer workspace."""
+    monkeypatch.setenv("HOME", str(tmp_path))                  # ~ → tmp
+    from okami.config import global_env_path
+    from okami.cli import _set_env_var
+    _set_env_var("ELEVENLABS_API_KEY", "sk-eleven")            # path=None → global
+    g = global_env_path()
+    assert g == tmp_path / ".okami" / ".env"
+    assert "ELEVENLABS_API_KEY=sk-eleven" in g.read_text()
+    if os.name != "nt":
+        assert (g.stat().st_mode & 0o777) == 0o600

@@ -22,6 +22,7 @@ def test_is_secret_key_and_coerce():
 
 def test_config_set_routes_secret_to_env_value_to_local(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))          # ~ → tmp (segredo vai pro .env GLOBAL ~/.okami/.env)
     (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
     runner.invoke(app, ["config", "set", "memory.backend", "holographic"])
     runner.invoke(app, ["config", "set", "approvals.mode", "yolo"])
@@ -33,7 +34,7 @@ def test_config_set_routes_secret_to_env_value_to_local(tmp_path, monkeypatch):
     assert local["approvals"]["mode"] == "yolo"
     assert local["persona"]["observe"] is False
     assert "sk-secret" not in (tmp_path / "okami.local.yaml").read_text(encoding="utf-8")
-    assert "OPENAI_API_KEY=sk-secret" in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-secret" in (tmp_path / ".okami" / ".env").read_text(encoding="utf-8")
 
 
 def test_config_get_reads_merged_and_unset(tmp_path, monkeypatch):
