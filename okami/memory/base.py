@@ -35,6 +35,12 @@ class MemoryItem:
     access_count: int = 0
     id: int | None = None
     score: float | None = None        # score de retrieval (preenchido no recall)
+    # ── governança (schema aditivo) ──
+    scope: str = "workspace"          # global | workspace | user:<id> | project:<n> | conversation:<id> | skill:<n>
+    confidence: str = "medium"        # low | medium | high
+    expires_at: float | None = None   # TTL (epoch s); None = nunca expira
+    supersedes_id: int | None = None  # id do item que ESTE substitui (consolidação)
+    status: str = "active"            # active | archived | forgotten | superseded
 
 
 class Memory:
@@ -68,6 +74,21 @@ class Memory:
 
     def reflect(self) -> None:  # curadoria/dreaming (opcional)
         return None
+
+    # ── CRUD/auditoria (opcional; backends que sabem por id sobrescrevem) ──
+    def forget_item(self, item_id: int) -> bool:   # esquecer (some do retrieval)
+        return False
+
+    def archive_item(self, item_id: int) -> bool:  # arquivar (some do retrieval, mas marcado)
+        return False
+
+    def explain(self, item_id: int) -> dict | None:
+        """Por que/quando esta memória apareceu: metadados + últimas recuperações (retrieval_logs)."""
+        return None
+
+    def export(self) -> list[dict]:
+        """Dump auditável de toda a memória (debug/backup/migração)."""
+        return []
 
     def health(self) -> dict:
         """Saúde da camada (P2): {backend, ok, failures, last_error}. Backend resiliente sobrescreve."""

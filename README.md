@@ -203,8 +203,13 @@ assinatura (OAuth/CLI), NUNCA pay-as-you-go.**
   efêmero/trivial** antes de persistir.
 - **Citação de origem** — toda memória injetada vem com `[categoria · origem · confiança]`.
 - **Auto-compaction** — quando o contexto enche, turnos antigos viram nós de *summary* sem perder o fio.
-- CLI: `okami memory add|search|list`. Arquivos de identidade/core (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`)
-  são sempre injetados (com limites de chars configuráveis).
+- **Escopo + memória global** — `scope` (global/workspace/…) por item; com `memory.global`, preferências
+  `scope=global` moram em `~/.okami` e valem em **qualquer** projeto, mas memória de um projeto **não**
+  contamina outro. Schema com `confidence`, `expires_at` (TTL) e `supersedes_id` (consolidação).
+- **Auditoria** — cada recall é logado (`retrieval_logs`); `okami memory explain <id>` mostra de onde a
+  memória veio e quando/por que apareceu. `forget` (some) e `archive` (some, marcado) são reversíveis no histórico.
+- CLI: `okami memory add|search|list|explain|forget|archive|export` (`--global` p/ a casa). Arquivos de
+  identidade/core (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`) são sempre injetados (limites configuráveis).
 
 ---
 
@@ -358,7 +363,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami auth list\|status` | Perfis de auth (metadata, sem segredo). |
 | `okami policy check\|init\|show` | Conformance autorada (`--strict` p/ GA). |
 | `okami config show\|get\|set\|unset\|path\|edit\|check` | Config efetiva (segredo → `.env`). |
-| `okami memory add\|search\|list` | Memória do workspace (híbrida). |
+| `okami memory add\|search\|list\|explain\|forget\|archive\|export` | Memória híbrida + auditoria/CRUD (`--global` = casa `~/.okami`). |
 | `okami taste like\|dislike\|different\|show\|steer` | Taste model de design. |
 | `okami persona-init\|persona-evolve\|persona-log\|persona-rollback` | Identidade evolutiva. |
 | `okami skills` / `okami learn <fonte>` / `okami scan <path>` | Skills + scan de segurança. |

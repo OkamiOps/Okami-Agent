@@ -1,6 +1,7 @@
 default_provider: lmstudio
 memory:
   backend: sqlite-fts5
+  global: true            # memória GLOBAL (~/.okami): scope=global vale em qualquer projeto; projeto não contamina projeto
   embedder:
     enabled: true
     api_base: http://localhost:4480/v1   # aponte p/ seu LMStudio em okami.local.yaml (não versionado)

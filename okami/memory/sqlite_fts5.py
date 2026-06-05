@@ -61,7 +61,15 @@ def _minmax(vals: list[float]) -> list[float]:
     return [(v - lo) / (hi - lo) for v in vals]
 
 
-_COLS = "id, text, kind, source, ts, importance, last_access, access_count, embedding"
+# ordem FIXA — _item()/recall/recent/forget indexam por posição; novas colunas SEMPRE no fim (0..8 estáveis).
+_COLS = ("id, text, kind, source, ts, importance, last_access, access_count, embedding, "
+         "scope, confidence, expires_at, supersedes_id, status")
+
+
+def _expired(row: tuple, now: float) -> bool:
+    """row[11] = expires_at. None = nunca expira."""
+    exp = row[11]
+    return exp is not None and exp <= now
 
 
 class SqliteFTS5Memory(Memory):
@@ -83,12 +91,23 @@ class SqliteFTS5Memory(Memory):
         self._mat_ids: list[int] = []
         self._mat_dirty = True
 
+    # colunas de governança adicionadas depois — ADD COLUMN aditivo p/ DBs antigos (idempotente).
+    _MIGRATIONS = {"scope": "TEXT DEFAULT 'workspace'", "confidence": "TEXT DEFAULT 'medium'",
+                   "expires_at": "REAL", "supersedes_id": "INTEGER", "status": "TEXT DEFAULT 'active'"}
+
     def _init_schema(self) -> bool:
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS items("
             "id INTEGER PRIMARY KEY, text TEXT, kind TEXT, source TEXT, tags TEXT, ts REAL, "
             "importance REAL DEFAULT 0.5, last_access REAL DEFAULT 0, access_count INTEGER DEFAULT 0, "
-            "embedding BLOB, superseded INTEGER DEFAULT 0)"
+            "embedding BLOB, superseded INTEGER DEFAULT 0, "
+            "scope TEXT DEFAULT 'workspace', confidence TEXT DEFAULT 'medium', "
+            "expires_at REAL, supersedes_id INTEGER, status TEXT DEFAULT 'active')"
+        )
+        self._migrate_columns()
+        self.conn.execute(                               # auditoria (#11): por que/quando a memória apareceu
+            "CREATE TABLE IF NOT EXISTS retrieval_logs("
+            "id INTEGER PRIMARY KEY, ts REAL, query TEXT, item_id INTEGER, score REAL, rank INTEGER)"
         )
         try:
             self.conn.executescript(
@@ -107,6 +126,14 @@ class SqliteFTS5Memory(Memory):
         except sqlite3.OperationalError:
             self.conn.commit()
             return False
+
+    def _migrate_columns(self) -> None:
+        """ADD COLUMN aditivo p/ DBs antigos — completa o schema sem destruir dados (idempotente)."""
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(items)")}
+        for col, ddl in self._MIGRATIONS.items():
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE items ADD COLUMN {col} {ddl}")  # col/ddl: constantes do módulo
+        self.conn.commit()
 
     # ------------------------------------------------------------------ write
     def write(self, item: MemoryItem) -> int:
@@ -133,19 +160,27 @@ class SqliteFTS5Memory(Memory):
             return dup_id
 
         cur = self.conn.execute(
-            "INSERT INTO items(text, kind, source, tags, ts, importance, last_access, access_count, embedding) "
-            "VALUES (?,?,?,?,?,?,?,0,?)",
+            "INSERT INTO items(text, kind, source, tags, ts, importance, last_access, access_count, "
+            "embedding, scope, confidence, expires_at, supersedes_id, status) "
+            "VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?)",
             (item.text, item.kind, item.source, item.tags, ts, importance, ts,
-             to_blob(emb) if emb is not None else None),
+             to_blob(emb) if emb is not None else None,
+             item.scope or "workspace", item.confidence or "medium",
+             item.expires_at, item.supersedes_id, item.status or "active"),
         )
         self.conn.commit()
+        if item.supersedes_id:                   # consolidação: o antigo sai do retrieval, marcado como tal
+            self.conn.execute("UPDATE items SET superseded = 1, status = 'superseded' WHERE id = ?",
+                              (int(item.supersedes_id),))
+            self.conn.commit()
         if emb is not None:
             self._mat_dirty = True
         return int(cur.lastrowid)
 
     def _find_duplicate(self, text: str, emb) -> int | None:
         if emb is not None:
-            for rid, _t, _k, _s, _ts, _imp, _la, _ac, blob in self._load():
+            for row in self._load():
+                rid, blob = row[0], row[8]
                 if blob is not None and cosine(emb, from_blob(blob)) >= self.dedup_threshold:
                     return rid
             return None
@@ -163,7 +198,9 @@ class SqliteFTS5Memory(Memory):
     def _item(self, row: tuple, score: float | None = None) -> MemoryItem:
         return MemoryItem(text=row[1], kind=row[2], source=row[3], ts=row[4],
                           importance=row[5], last_access=row[6], access_count=row[7],
-                          id=row[0], score=score)
+                          id=row[0], score=score,
+                          scope=row[9] or "workspace", confidence=row[10] or "medium",
+                          expires_at=row[11], supersedes_id=row[12], status=row[13] or "active")
 
     def _keyword_scores(self, query: str) -> dict[int, float]:
         """BM25 do FTS5 (ranking de verdade) normalizado [0,1] por rowid. {} se sem FTS."""
@@ -247,8 +284,10 @@ class SqliteFTS5Memory(Memory):
             "SELECT id FROM items WHERE superseded = 0 ORDER BY id DESC LIMIT 20"))
         if not cand:
             return []
-        # 2) rerank só os candidatos (não a base inteira).
-        rows = self._load_ids(cand)
+        # 2) rerank só os candidatos (não a base inteira); descarta EXPIRADOS (TTL vencido).
+        rows = [r for r in self._load_ids(cand) if not _expired(r, now)]
+        if not rows:
+            return []
         rel, rec, imp = [], [], []
         for row in rows:
             kws = kw.get(row[0], 0.0)
@@ -263,13 +302,28 @@ class SqliteFTS5Memory(Memory):
         scored.sort(key=lambda x: -x[0])
         top = scored[:limit]
         self._bump([r[0] for _s, r in top], now)
+        self._log_retrieval(query, top, now)               # auditoria (#11)
         return [self._item(r, score=s) for s, r in top]
 
     def recent(self, limit: int = 10) -> list[MemoryItem]:
+        now = self.clock()
         rows = self.conn.execute(
-            f"SELECT {_COLS} FROM items WHERE superseded = 0 ORDER BY id DESC LIMIT ?", (limit,)
+            f"SELECT {_COLS} FROM items WHERE superseded = 0 ORDER BY id DESC LIMIT ?", (limit * 3,)
         ).fetchall()
-        return [self._item(r) for r in rows]
+        return [self._item(r) for r in rows if not _expired(r, now)][:limit]
+
+    def _log_retrieval(self, query: str, top: list, now: float) -> None:
+        """Registra (best-effort) o que foi recuperado e com que score — base do `okami memory explain`.
+        Cap em ~5000 linhas (anti-incha, alinhado à retenção). Nunca derruba o recall."""
+        try:
+            self.conn.executemany(
+                "INSERT INTO retrieval_logs(ts, query, item_id, score, rank) VALUES (?,?,?,?,?)",
+                [(now, (query or "")[:200], int(r[0]), float(s), i) for i, (s, r) in enumerate(top)])
+            self.conn.execute(
+                "DELETE FROM retrieval_logs WHERE id <= (SELECT max(id) FROM retrieval_logs) - 5000")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     def _bump(self, ids: list[int], now: float) -> None:
         for rid in ids:
@@ -297,10 +351,50 @@ class SqliteFTS5Memory(Memory):
         scored.sort(key=lambda x: x[0])  # menor valor primeiro
         remove = scored[: len(rows) - max_items]
         for _v, rid in remove:
-            self.conn.execute("UPDATE items SET superseded = 1 WHERE id = ?", (rid,))
+            self.conn.execute("UPDATE items SET superseded = 1, status = 'forgotten' WHERE id = ?", (rid,))
         self.conn.commit()
         self._mat_dirty = True
         return len(remove)
+
+    # ------------------------------------------------------------------ CRUD/auditoria (#5/#11)
+    def _set_status(self, item_id: int, status: str) -> bool:
+        cur = self.conn.execute(
+            "UPDATE items SET status = ?, superseded = ? WHERE id = ?",
+            (status, 0 if status == "active" else 1, int(item_id)))
+        self.conn.commit()
+        self._mat_dirty = True
+        return cur.rowcount > 0
+
+    def forget_item(self, item_id: int) -> bool:
+        """Esquecer: some do retrieval (não pode voltar via recall) e fica marcado 'forgotten'."""
+        return self._set_status(item_id, "forgotten")
+
+    def archive_item(self, item_id: int) -> bool:
+        """Arquivar: some do retrieval mas marcado 'archived' (intencional, reversível)."""
+        return self._set_status(item_id, "archived")
+
+    def explain(self, item_id: int) -> dict | None:
+        row = self.conn.execute(f"SELECT {_COLS} FROM items WHERE id = ?", (int(item_id),)).fetchone()
+        if row is None:
+            return None
+        it = self._item(row)
+        logs = self.conn.execute(
+            "SELECT ts, query, score, rank FROM retrieval_logs WHERE item_id = ? ORDER BY id DESC LIMIT 10",
+            (int(item_id),)).fetchall()
+        return {"id": it.id, "text": it.text, "kind": it.kind, "source": it.source, "scope": it.scope,
+                "confidence": it.confidence, "status": it.status, "importance": it.importance,
+                "access_count": it.access_count, "supersedes_id": it.supersedes_id, "expires_at": it.expires_at,
+                "retrievals": [{"ts": t, "query": q, "score": sc, "rank": rk} for t, q, sc, rk in logs]}
+
+    def export(self) -> list[dict]:
+        rows = self.conn.execute(f"SELECT {_COLS}, superseded FROM items ORDER BY id").fetchall()
+        out = []
+        for row in rows:
+            it = self._item(row)
+            out.append({"id": it.id, "text": it.text, "kind": it.kind, "source": it.source,
+                        "scope": it.scope, "confidence": it.confidence, "status": it.status,
+                        "importance": it.importance, "ts": it.ts, "superseded": bool(row[14])})
+        return out
 
     def close(self) -> None:
         self.conn.close()

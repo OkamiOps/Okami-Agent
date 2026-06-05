@@ -11,7 +11,7 @@ from okami.memory.embeddings import Embedder, OpenAICompatEmbedder
 from okami.memory.sqlite_fts5 import SqliteFTS5Memory
 
 __all__ = ["Memory", "MemoryItem", "SqliteFTS5Memory", "Embedder", "OpenAICompatEmbedder",
-           "make_embedder", "open_memory", "save_turn", "compaction", "files"]
+           "make_embedder", "open_memory", "open_store", "save_turn", "compaction", "files"]
 
 
 def save_turn(mem, text: str, *, source: str, cfg_memory: dict | None) -> bool:
@@ -48,14 +48,11 @@ def make_embedder(cfg: dict | None) -> Embedder | None:
     return emb
 
 
-def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
-                embedder: Embedder | None = None, config: dict | None = None) -> Memory:
-    config = config or {}
-    base = Path(workspace) / ".okami"
-    base.mkdir(parents=True, exist_ok=True)
+def _open_store(base: Path, backend, clock, embedder: Embedder | None, config: dict) -> Memory:
+    """Abre o(s) backend(s) CONCRETO(s) num diretório-base (sem layering global).
 
-    # Camadas: backend pode ser uma lista (ex.: [holographic, honcho]) → LayeredMemory.
-    # Tolerante: um backend que falha (honcho-ai ausente / VPS offline) é PULADO; os outros seguem.
+    Camadas: backend pode ser uma lista (ex.: [holographic, honcho]) → LayeredMemory. Tolerante: um
+    backend que falha (honcho-ai ausente / VPS offline) é PULADO; os outros seguem."""
     if isinstance(backend, (list, tuple)):
         import warnings
 
@@ -63,7 +60,7 @@ def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
         built, skipped = [], []
         for b in backend:
             try:
-                built.append(open_memory(workspace, b, clock, embedder, config))
+                built.append(_open_store(base, b, clock, embedder, config))
             except Exception as e:  # noqa: BLE001
                 skipped.append(f"{b}: {e}")
         if skipped:
@@ -100,3 +97,31 @@ def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
         )
 
     raise ValueError(f"backend de memória desconhecido: {backend}")
+
+
+def open_store(base, backend="sqlite-fts5", clock=time.time, embedder: Embedder | None = None,
+               config: dict | None = None) -> Memory:
+    """Store CONCRETO num diretório-base (sem layering global) — usado pelo CRUD por id (projeto vs casa)."""
+    base = Path(base)
+    base.mkdir(parents=True, exist_ok=True)
+    return _open_store(base, backend, clock, embedder, config or {})
+
+
+def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
+                embedder: Embedder | None = None, config: dict | None = None) -> Memory:
+    config = config or {}
+    base = Path(workspace) / ".okami"
+    base.mkdir(parents=True, exist_ok=True)
+    mem = _open_store(base, backend, clock, embedder, config)
+
+    # Memória GLOBAL (#3): com memory.global, layer a casa (~/.okami) por baixo do store do projeto.
+    # ScopedMemory roteia escrita por escopo (global → casa, resto → projeto) e LÊ dos dois.
+    if config.get("global"):
+        from okami.home import okami_home
+        gbase = okami_home()
+        gbase.mkdir(parents=True, exist_ok=True)
+        if gbase.resolve() != base.resolve():        # evita layer o store consigo mesmo (projeto = casa)
+            gmem = _open_store(gbase, backend, clock, embedder, {**config, "global": False})
+            from okami.memory.scoped import ScopedMemory
+            return ScopedMemory(mem, gmem)
+    return mem
