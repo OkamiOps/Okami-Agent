@@ -102,6 +102,43 @@ def test_has_material_evidence_heuristic():
     assert has_material_evidence("Evidência: commit a1b2c3d na branch fix/login resolve o caso.")
 
 
+def test_parse_and_validate_handoff(tmp_path):
+    from okami.channels.paperclip import parse_handoff, validate_handoff
+    (tmp_path / "app.py").write_text("x = 1", encoding="utf-8")
+    res = ('Pronto.\n```json\n{"summary":"corrigi o bug de login","filesChanged":["app.py"],'
+           '"commandsRun":["pytest"],"artifacts":[],"risks":[],"nextGate":"deploy"}\n```')
+    h = parse_handoff(res)
+    assert h and h["summary"].startswith("corrigi")
+    ok, why = validate_handoff(h, tmp_path)
+    assert ok, why
+    # MENTE sobre arquivo (não existe no workspace) → inválido (validação externa)
+    h_lie = {"summary": "mexi em tudo", "filesChanged": ["nao_existe.py", "fantasma.ts"]}
+    ok2, why2 = validate_handoff(h_lie, tmp_path)
+    assert not ok2 and "NÃO existem" in why2
+    # sem prova (só summary) → inválido
+    assert validate_handoff({"summary": "fiz coisas"}, tmp_path)[0] is False
+    assert parse_handoff("texto solto sem json") is None
+
+
+def test_heartbeat_structured_handoff_done(tmp_path):
+    # handoff válido (arquivo existe) → done direto, sem cair na heurística
+    (tmp_path / "fix.py").write_text("ok", encoding="utf-8")
+    res = '```json\n{"summary":"corrigi o parser","filesChanged":["fix.py"],"commandsRun":["pytest"]}\n```'
+    cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}])
+    r = run_heartbeat(None, str(tmp_path), run_task=make_runner(TaskState.COMPLETE, result=res),
+                      client=cli, env={})
+    assert r.status == "done"
+
+
+def test_heartbeat_handoff_lying_about_files_in_review(tmp_path):
+    # handoff que cita arquivos INEXISTENTES → in_review (control plane não confia cego)
+    res = '```json\n{"summary":"corrigi tudo","filesChanged":["inventado.py"],"commandsRun":["pytest"]}\n```'
+    cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}])
+    r = run_heartbeat(None, str(tmp_path), run_task=make_runner(TaskState.COMPLETE, result=res),
+                      client=cli, env={})
+    assert r.status == "in_review" and cli.patches[0][1] == "in_review"
+
+
 def test_heartbeat_409_stops_without_patch():
     cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}], checkout_conflict=True)
     res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE), client=cli, env={})

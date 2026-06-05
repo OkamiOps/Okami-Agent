@@ -22,6 +22,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from dataclasses import dataclass
 
 # Status que o agente pode assumir numa issue (ordem de prioridade de trabalho no heartbeat).
@@ -159,6 +160,11 @@ def _ctx_block(issue: dict, ctx: dict) -> str:
     for c in comments[-6:]:
         who = c.get("authorName") or c.get("agentId") or c.get("author") or "?"
         bits.append(f"  comentário {who}: {(c.get('body') or '')[:300]}")
+    bits.append(
+        "AO CONCLUIR: termine com um HANDOFF estruturado (control plane valida e cruza com o disco) — "
+        "um bloco ```json {\"summary\":\"…\",\"filesChanged\":[…],\"commandsRun\":[…],\"artifacts\":[…],"
+        "\"risks\":[…],\"nextGate\":\"…\"}```. Sem prova material (arquivo/comando/teste real), a issue fica "
+        "em revisão, NÃO done — não invente arquivos/testes.")
     return "CONTEXTO PAPERCLIP (continue o trabalho, não repita):\n" + "\n".join(bits)
 
 
@@ -191,9 +197,68 @@ def has_material_evidence(result: str, *, min_len: int = 40) -> bool:
     return bool(_EVIDENCE_RE.search(text))
 
 
-_HANDOFF_HINT = ("Para fechar como **done**, o relatório precisa de EVIDÊNCIA material: arquivo(s) "
-                 "tocado(s), comando/teste rodado (ex.: `pytest`), commit/PR, ou fonte. Sem isso, "
-                 "fica em revisão (board bonito sem prova não conta).")
+# ── HANDOFF estruturado (P2/P3 — prova FORTE, validável externamente) ──────────
+# Acima da heurística: se o agente emite um handoff estruturado, validamos os campos E cruzamos os
+# filesChanged contra o disco (pega relatório que MENTE sobre arquivos). Schema:
+#   {summary, filesChanged[], commandsRun[], artifacts[], risks[], nextGate}
+_HANDOFF_KEYS = ("summary", "filesChanged", "commandsRun", "artifacts", "risks", "nextGate")
+
+
+def _balanced_objects(text: str) -> list[str]:
+    """Todo objeto {...} de 1º nível com chaves balanceadas (tolera aninhamento) — p/ extrair o handoff."""
+    out, depth, start = [], 0, -1
+    for i, ch in enumerate(text):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                out.append(text[start:i + 1])
+    return out
+
+
+def parse_handoff(result: str) -> dict | None:
+    """Extrai um HANDOFF estruturado do relatório (bloco ```json {…}``` ou objeto {…} com 'summary'/
+    'filesChanged'/…). None se não houver um parseável. Pega o objeto mais RICO (mais campos do schema)."""
+    text = result or ""
+    blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL) or _balanced_objects(text)
+    best, best_score = None, 0
+    for c in blocks:
+        try:
+            d = json.loads(c)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(d, dict):
+            score = sum(1 for k in _HANDOFF_KEYS if k in d)
+            if score > best_score and ("summary" in d or score >= 2):
+                best, best_score = d, score
+    return best
+
+
+def validate_handoff(handoff: dict, workspace) -> tuple[bool, str]:
+    """Valida o handoff: 'summary' + ≥1 prova (filesChanged/commandsRun/artifacts); e CRUZA os
+    filesChanged contra o workspace (se afirma ter mexido em arquivos, eles têm que existir)."""
+    def _strs(v):
+        return [str(x).strip() for x in (v or []) if str(x).strip()] if isinstance(v, list) else []
+    summary = str(handoff.get("summary") or "").strip()
+    files, cmds, arts = (_strs(handoff.get(k)) for k in ("filesChanged", "commandsRun", "artifacts"))
+    if len(summary) < 8:
+        return False, "handoff sem 'summary' substantivo"
+    if not (files or cmds or arts):
+        return False, "handoff sem prova (filesChanged/commandsRun/artifacts vazios)"
+    if files:                                            # validação EXTERNA: arquivo citado tem que existir
+        ws = Path(workspace)
+        if not any((ws / f).exists() for f in files):
+            return False, f"filesChanged citados NÃO existem no workspace ({', '.join(files[:3])})"
+    return True, "ok"
+
+
+_HANDOFF_HINT = ("Para fechar como **done**: prova material — arquivo(s) tocado(s), comando/teste rodado "
+                 "(ex.: `pytest`), commit/PR ou fonte. MELHOR: um HANDOFF estruturado em ```json "
+                 "{\"summary\":…,\"filesChanged\":[…],\"commandsRun\":[…],\"artifacts\":[…]}``` (validado + "
+                 "cruzado com o disco). Sem prova → revisão, não done (board bonito sem prova não conta).")
 
 
 def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = None, env=None,
@@ -258,10 +323,20 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
         client.patch_issue(issue_id, "in_review", comment)
         return HeartbeatResult(ok=True, issue_id=issue_id, status="in_review", detail="confirmação pendente")
     if task.state == TaskState.COMPLETE:
-        # #P1: control plane NÃO marca done só porque o agente disse 'complete' — exige evidência material.
-        # Sem prova verificável (arquivo/comando/teste/commit/fonte) → in_review, não done (board falso é veneno).
+        # #P1: control plane NÃO marca done só porque o agente disse 'complete' — exige PROVA.
         require_evidence = bool((getattr(cfg, "paperclip", None) or {}).get("require_evidence", True))
-        if require_evidence and not has_material_evidence(task.result or ""):
+        handoff = parse_handoff(task.result or "")
+        if handoff is not None:
+            # caminho FORTE (P2/P3): handoff estruturado → valida campos + CRUZA filesChanged com o disco.
+            ok, why = validate_handoff(handoff, workspace)
+            if not ok:
+                client.patch_issue(issue_id, "in_review",
+                                   (f"Handoff estruturado incompleto/inconsistente: {why}\n\n"
+                                    f"{(task.result or '')[:800]}")[:1100])
+                emit(f"⚠ handoff inválido → in_review ({why}).")
+                return HeartbeatResult(ok=True, issue_id=issue_id, status="in_review", detail=why)
+        elif require_evidence and not has_material_evidence(task.result or ""):
+            # sem handoff → heurística (piso dogfood). Sem prova material → in_review, não done.
             comment = (f"Marcado como concluído pelo agente, mas SEM evidência material.\n\n"
                        f"Resultado: {(task.result or '(vazio)')[:800]}\n\n{_HANDOFF_HINT}")
             client.patch_issue(issue_id, "in_review", comment)
