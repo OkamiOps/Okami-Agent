@@ -79,8 +79,27 @@ def list_providers() -> None:
 def doctor(
     fix: bool = typer.Option(False, "--fix", help="Conserta o que dá: lock órfão, perms do .env, temp."),
     json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
+    lint: bool = typer.Option(False, "--lint", help="Lint de POSTURA (segurança/exposição), estilo OpenClaw."),
 ) -> None:
-    """Diagnostica config, chaves e conectividade dos providers. `--fix` repara; `--json` p/ máquina."""
+    """Diagnostica config, chaves e conectividade. `--fix` repara; `--json` p/ máquina; `--lint` postura."""
+    if lint:                                        # conformance/postura (#12): pass/warn/fail
+        from okami.core.lint import lint_posture, summarize
+        findings = lint_posture(_load())
+        if json_out:
+            import json as _json
+            payload = {"summary": summarize(findings),
+                       "findings": [vars(x) for x in findings]}
+            console.print_json(_json.dumps(payload, ensure_ascii=False))
+            raise typer.Exit(0 if payload["summary"]["ok"] else 1)
+        icon = {"pass": "[green]✓[/green]", "warn": "[yellow]⚠[/yellow]", "fail": "[red]✗[/red]"}
+        console.print("[bold]Okami[/bold] — lint de postura\n")
+        for x in findings:
+            console.print(f"{icon.get(x.level, '?')} [bold]{x.check}[/bold]: {x.message}"
+                          + (f"\n   [dim]→ {x.fix}[/dim]" if x.fix and x.level != "pass" else ""))
+        s = summarize(findings)
+        console.print(f"\n[dim]{s['counts']['pass']} ok · {s['counts']['warn']} avisos · "
+                      f"{s['counts']['fail']} falhas[/dim]")
+        raise typer.Exit(0 if s["ok"] else 1)
     if json_out:                                    # caminho máquina: relatório estruturado + health
         import json as _json
 

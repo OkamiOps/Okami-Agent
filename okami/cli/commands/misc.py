@@ -11,6 +11,31 @@ from okami.cli._shared import (
 )
 
 
+policy_app = typer.Typer(help="Conformance de POLÍTICA/postura (#12): `okami policy check` (CI/pre-deploy).")
+app.add_typer(policy_app, name="policy")
+
+
+@policy_app.command("check")
+def policy_check(
+    json_out: bool = typer.Option(False, "--json", help="Saída JSON (CI)."),
+) -> None:
+    """Valida a POSTURA (aprovação, segredo, sandbox, MCP trust, exposição). Exit≠0 se houver falha."""
+    from okami.core.lint import lint_posture, summarize
+    findings = lint_posture(_load())
+    s = summarize(findings)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps({"summary": s, "findings": [vars(x) for x in findings]}, ensure_ascii=False))
+        raise typer.Exit(0 if s["ok"] else 1)
+    icon = {"pass": "[green]✓[/green]", "warn": "[yellow]⚠[/yellow]", "fail": "[red]✗[/red]"}
+    for x in findings:
+        if x.level != "pass":
+            console.print(f"{icon[x.level]} [bold]{x.check}[/bold]: {x.message} [dim]→ {x.fix}[/dim]")
+    verdict = "[green]✓ postura ok[/green]" if s["ok"] else f"[red]✗ {s['counts']['fail']} falha(s) de política[/red]"
+    console.print(verdict)
+    raise typer.Exit(0 if s["ok"] else 1)
+
+
 @app.command()
 def rollback(
     n: int = typer.Argument(1, help="Quantas escritas de arquivo reverter (da mais recente)."),
@@ -104,15 +129,38 @@ def tools() -> None:
 
 
 @app.command()
-def status() -> None:
+def status(
+    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
+) -> None:
     """Visão resolvida (estilo hermes/openclaw status): agente, modelo, providers, memória, toggles."""
     from rich.panel import Panel
     from rich.table import Table as _T
     try:
         cfg = _load()
     except Exception as e:  # noqa: BLE001
+        if json_out:
+            console.print_json(data={"ok": False, "error": str(e)})
+            raise typer.Exit(1)
         console.print(f"[red]config não carrega:[/red] {e}")
         raise typer.Exit(1)
+    if json_out:                                      # caminho máquina (#12): status resolvido p/ monitoramento
+        from okami.core.lint import lint_posture, summarize
+        pc = cfg.provider()
+        payload = {
+            "ok": True,
+            "default_provider": cfg.default_provider,
+            "model": pc.model,
+            "provider_ready": bool(pc.ready),
+            "approvals_mode": (cfg.approvals or {}).get("mode", "manual"),
+            "memory_backend": (cfg.memory or {}).get("backend", "sqlite-fts5"),
+            "sandbox": (cfg.sandbox or {}),
+            "channels": sorted((cfg.gateway or {}).keys()),
+            "mcp_servers": sorted((cfg.mcp or {}).keys()),
+            "lint": summarize(lint_posture(cfg)),
+        }
+        import json as _json
+        console.print_json(_json.dumps(payload, ensure_ascii=False))
+        raise typer.Exit(0)
     default_agent = (cfg.agents or {}).get("default", "—")
     pc = cfg.provider()
     appr = (cfg.approvals or {}).get("mode", "manual")
