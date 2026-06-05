@@ -57,14 +57,6 @@ Sem uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 ```bash
 docker compose build
 docker compose run --rm okami doctor
-docker compose run --rm okami task "crie hello.txt" -e file_exists:hello.txt
-```
-> Para um LMStudio na máquina host, aponte `api_base` para `http://host.docker.internal:PORT/v1`.
-
-### Docker (qualquer SO)
-```bash
-docker compose build
-docker compose run --rm okami doctor
 docker compose run --rm okami run "diga oi"
 docker compose run --rm okami task "crie hello.txt" -e file_exists:hello.txt
 # rodar os testes na imagem Linux:

@@ -229,10 +229,12 @@ class AgentEndpoint:
 
     def _approve(self, chat_id, s: Session) -> Callable[[dict], bool]:
         def approve(req: dict) -> bool:
-            if s.yolo or self.approval_mode in ("off", "yolo"):
+            if s.yolo or self.approval_mode == "yolo":     # YOLO explícito → autoaprova
                 return True
             if self.approval_mode == "smart" and req.get("risk") == "low":
                 return True
+            if self.approval_mode == "off":                # "off" = não pergunta → NEGA sensível (fail-closed)
+                return False
             q: queue.Queue = queue.Queue()
             self._pending[str(chat_id)] = q
             self.channel.send(chat_id, f"⚠ Aprovar: {req['reason']}? (/yes ou /no)")

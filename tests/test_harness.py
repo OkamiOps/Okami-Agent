@@ -209,10 +209,12 @@ def test_classify_categories():
     assert approval.classify("run_shell", {"cmd": "git push origin main"}).category == "git_push"
 
 
-def test_approver_yolo_and_off_allow_all():
+def test_approver_yolo_allows_off_is_fail_closed():
+    """yolo autoaprova; 'off' (sem prompt) NEGA sensível — não é mais o mesmo que yolo (self-review #5)."""
     from okami.core.approval import Approver
-    for m in ("yolo", "off"):
-        assert Approver(mode=m)({"category": "identity_file", "risk": "high"}) is True
+    sens = {"category": "identity_file", "risk": "high"}
+    assert Approver(mode="yolo")(sens) is True
+    assert Approver(mode="off")(sens) is False   # off = silencia interação, NÃO libera o perigoso
 
 
 def test_approver_manual_session_memory():

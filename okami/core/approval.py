@@ -76,14 +76,16 @@ class Approver:
     def __call__(self, request: dict) -> bool:
         cat = request.get("category", "")
         risk = request.get("risk", "high")
-        if self.mode in ("off", "yolo"):
+        if self.mode == "yolo":            # YOLO = explícito → autoaprova TUDO na sessão
             return True
         if cat and (cat in self.session_allow or cat in self.persistent_allow):
             return True
         if self.mode == "smart" and risk == "low":
             return True
-        if self.prompt is None:
-            return False  # fail-closed (não-interativo / sem aprovador)
+        # "off" = SEM prompt ≠ "permita tudo": sem prompt p/ ação sensível → NEGA (fail-closed).
+        # (Antes off≡yolo: alguém desligava interação achando que silenciava, mas liberava o perigoso.)
+        if self.mode == "off" or self.prompt is None:
+            return False
         decision = self.prompt(request)
         if decision == "session":
             self.session_allow.add(cat)
