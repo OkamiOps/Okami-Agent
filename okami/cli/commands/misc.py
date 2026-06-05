@@ -29,6 +29,29 @@ def rollback(
 
 
 @app.command()
+def events(
+    agent: str = typer.Option(None, "-a", "--agent"),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+    n: int = typer.Option(40, "-n", help="Quantos eventos finais mostrar."),
+) -> None:
+    """Timeline da última task (replay/debug) — .okami/events.jsonl."""
+    import datetime as _dt
+
+    from okami.observability.events import read_events
+    ws = _persona_ws(agent, workspace)
+    evs = read_events(ws)
+    if not evs:
+        console.print(f"[dim]sem eventos em {ws}/.okami/events.jsonl[/dim]")
+        return
+    for e in evs[-n:]:
+        ts = e.get("ts")
+        hhmm = _dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if isinstance(ts, (int, float)) else "--:--:--"
+        extra = {k: v for k, v in e.items() if k not in ("seq", "ts", "type")}
+        brief = "  ".join(f"[dim]{k}=[/dim]{str(v)[:60]}" for k, v in extra.items())
+        console.print(f"[dim]{e.get('seq', '?'):>3} {hhmm}[/dim] [bold #ff7527]{e.get('type', '?')}[/bold #ff7527] {brief}")
+
+
+@app.command()
 def status() -> None:
     """Visão resolvida (estilo hermes/openclaw status): agente, modelo, providers, memória, toggles."""
     from rich.panel import Panel

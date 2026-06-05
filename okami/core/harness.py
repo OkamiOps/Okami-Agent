@@ -349,6 +349,8 @@ class Harness:
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
         self.on_event = on_event or (lambda e: None)
+        from okami.observability.events import EventLog
+        self.events = EventLog(workspace)   # timeline JSONL p/ replay/debug (.okami/events.jsonl)
         self.messages: list[dict] = []
         self._action_schema = action_schema(self.registry)
         self._fingerprints: deque[str] = deque(maxlen=12)
@@ -364,6 +366,7 @@ class Harness:
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
+        self.events.emit(kind, **data)      # persiste o timeline (start/step/loop/compact/complete/…)
 
     # --- audit + budget de resultado de tool (Sprint 2) ---------------------
     def _audit(self, **fields) -> None:
@@ -650,6 +653,7 @@ class Harness:
         from okami.memory import files as _mfiles
         from okami.memory.base import MemoryItem
         self.memory.write(MemoryItem(text=f"{t.goal} → {t.result}", kind="summary", source="task"))
+        self.events.emit("memory_write", kind="summary", text=f"{t.goal} → {t.result}"[:200])
         _mfiles.append_fact(self.ctx.workspace, f"{t.goal} → {t.result}")
 
     def _fail(self, t: Task, reason: str) -> Task:
