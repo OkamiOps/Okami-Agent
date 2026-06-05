@@ -27,6 +27,7 @@ from typing import Callable
 from okami.memory import compaction as _compaction
 from okami.core import approval
 from okami.core.tools import Tool, ToolContext, ToolResult, default_registry, sanitized_env
+from okami.llm.usage import as_completion
 
 Generate = Callable[[list[dict], "dict | None"], str]  # (messages, action_schema) -> texto
 
@@ -121,6 +122,21 @@ _ACTION_RE = re.compile(
 class Action:
     tool: str
     args: dict
+
+
+def _action_from_tool_calls(tool_calls) -> Action | None:
+    """Primeira tool-call NATIVA (function-calling) → Action. None se vazio. Convive com o protocolo JSON."""
+    for tc in (tool_calls or []):
+        name = tc.get("name") if isinstance(tc, dict) else None
+        if not name:
+            continue
+        raw = tc.get("arguments") or "{}"
+        try:
+            args = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except json.JSONDecodeError:
+            args = {}
+        return Action(name, args if isinstance(args, dict) else {})
+    return None
 
 
 def parse_action(text: str) -> Action | None:
@@ -418,8 +434,9 @@ class Harness:
                 self.messages, promoted = _compaction.compact(self.messages, self.memory)
                 self._emit("compact", promoted=promoted)
             out = self.generate(self.messages, self._action_schema)
-            self.messages.append({"role": "assistant", "content": out})
-            action = parse_action(out)
+            comp = as_completion(out)              # tolera str (JSON-em-texto) E Completion (nativo)
+            self.messages.append({"role": "assistant", "content": comp.text})
+            action = _action_from_tool_calls(comp.tool_calls) or parse_action(comp.text)
 
             # --- Action-or-Terminate (§3.2) ---
             if action is None or action.tool not in self.registry:

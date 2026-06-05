@@ -85,6 +85,19 @@ class Tool:
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:  # pragma: no cover
         raise NotImplementedError
 
+    def to_openai_schema(self) -> dict:
+        """Schema function-calling (OpenAI) desta tool — p/ tool-calls NATIVO (§3.5). O protocolo
+        JSON-em-texto continua de pé; isto é a forma nativa equivalente, mesma `name`/args."""
+        props = {k: {"type": "string", "description": v} for k, v in (self.args_schema or {}).items()}
+        return {"type": "function", "function": {
+            "name": self.name, "description": self.description,
+            "parameters": {"type": "object", "properties": props, "required": list(self.required)}}}
+
+
+def openai_tools(registry: dict) -> list[dict]:
+    """Schemas OpenAI das tools (p/ enviar no payload quando o provider faz function-calling nativo)."""
+    return [t.to_openai_schema() for t in registry.values()]
+
 
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
     p = (ctx.workspace / rel).resolve()
