@@ -48,10 +48,18 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1 (pin por SHA)
         with:
           fetch-depth: 0
-      - name: Nenhum segredo versionado (script compartilhado com o pytest)
+      - name: Scanner rápido (padrões óbvios; compartilhado com o pytest)
         # Fonte única: scripts/secret-scan.sh (mesmo do tests/test_secret_scan.py). Vetor fake de teste
         # leva `# pragma: allowlist secret` (explícito/auditável); o resto é scan forte.
         run: bash scripts/secret-scan.sh
+      - name: gitleaks (scan PROFUNDO — alta-entropia + ~150 regras; GATE, working tree)
+        # Complementa o scanner rápido com o ruleset oficial. Binário PINADO por versão; --no-git
+        # = working tree (mesmo escopo do scanner rápido, sem falso-positivo de histórico antigo).
+        run: |
+          VER=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --no-git --config .gitleaks.toml --redact --no-banner --verbose --exit-code 1
 
   # Hardening de supply-chain (P1.5): agora é GATE (sem `|| true`). Falha a CI se houver problema.
   security:

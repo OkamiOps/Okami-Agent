@@ -98,6 +98,42 @@ def test_non_retryable_400_does_not_burn_pool(monkeypatch):
     assert len(calls) == 1                                    # 400 não-retriável → não rotaciona as 3
 
 
+def test_stream_falls_back_to_robust_path_on_pretoken_failure(monkeypatch):
+    # P2: stream que falha ANTES de qualquer token cai no caminho robusto (não deixa o turno em branco).
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
+
+    def boom_stream(**kw):
+        raise _exc("502 bad gateway", 502)
+    monkeypatch.setattr(prov.litellm, "completion", boom_stream)
+    monkeypatch.setattr(prov, "_complete_one", lambda pc, m, model, schema, ov: "resposta-robusta")
+    out = "".join(prov.stream_complete(cfg, "oi"))
+    assert out == "resposta-robusta"                          # entregou de uma vez, via fallback robusto
+
+
+def test_stream_empty_also_falls_back(monkeypatch):
+    # stream que termina sem produzir nada também é tratado como falha → caminho robusto
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
+    monkeypatch.setattr(prov.litellm, "completion", lambda **kw: iter([]))   # zero chunks
+    monkeypatch.setattr(prov, "_complete_one", lambda pc, m, model, schema, ov: "ok-robusto")
+    assert "".join(prov.stream_complete(cfg, "oi")) == "ok-robusto"
+
+
+def test_stream_happy_path_yields_tokens(monkeypatch):
+    # caminho feliz: streama token-a-token, sem cair no fallback
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
+
+    class _Delta:
+        def __init__(self, c):
+            self.delta = type("d", (), {"content": c})()
+
+    class _Chunk:
+        def __init__(self, c):
+            self.choices = [_Delta(c)]
+    monkeypatch.setattr(prov.litellm, "completion", lambda **kw: iter([_Chunk("oi"), _Chunk(" mundo")]))
+    monkeypatch.setattr(prov, "_complete_one", lambda *a: pytest.fail("não devia cair no fallback"))
+    assert "".join(prov.stream_complete(cfg, "x")) == "oi mundo"
+
+
 def test_complete_messages_scrubs_surrogates(monkeypatch):
     cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
     seen = {}

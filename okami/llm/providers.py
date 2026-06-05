@@ -268,12 +268,30 @@ def stream_complete(
     if via is not None:  # transports CLI/OAuth não streamam: devolve de uma vez
         yield via
         return
-    for chunk in litellm.completion(
-        **_kwargs(pc, messages, stream=True, model=model, **overrides)
-    ):
-        try:
-            delta = chunk.choices[0].delta.content
-        except (AttributeError, IndexError):
-            delta = None
-        if delta:
-            yield delta
+    # Robustez (dor nº1) também no caminho INTERATIVO: se o stream falha ANTES de qualquer token
+    # (429/5xx/timeout/instabilidade), NÃO deixa o turno em branco — cai no caminho robusto
+    # (complete_messages_ex: retry + rotação de chave + failover p/ pc.fallback) e entrega de uma vez.
+    # Se já streamou parte e quebrar no meio, propaga (não dá p/ refazer limpo sem duplicar).
+    produced = False
+    try:
+        for chunk in litellm.completion(
+            **_kwargs(pc, messages, stream=True, model=model, **overrides)
+        ):
+            try:
+                delta = chunk.choices[0].delta.content
+            except (AttributeError, IndexError):
+                delta = None
+            if delta:
+                produced = True
+                yield delta
+        if not produced:                              # stream terminou SEM nada → trata como falha
+            raise EmptyResponse("stream vazio")
+        return
+    except Exception as e:  # noqa: BLE001
+        if produced:
+            raise                                     # parte já entregue ao chamador → propaga
+        from okami import log
+        log.warn(f"stream instável ({_err.classify(e).reason}); caindo no caminho robusto (sem streaming).")
+        res = complete_messages_ex(cfg, messages, provider=provider, model=model, **overrides)
+        if res.text:
+            yield res.text

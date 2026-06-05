@@ -57,18 +57,29 @@ def test_inject_block(tmp_path):
     m.close()
 
 
-def test_compaction_promotes_then_shortens(tmp_path):
+def test_compaction_distills_durable_then_shortens(tmp_path):
     m = open_memory(tmp_path)
     messages = [{"role": "system", "content": "sys"}]
     for i in range(20):
-        messages.append({"role": "assistant", "content": f"mensagem antiga {i}"})
-    new_msgs, promoted = compaction.compact(messages, m, keep_tail=4)
+        messages.append({"role": "assistant", "content": f"o usuário prefere a opção {i} no fluxo"})
+    new_msgs, distilled = compaction.compact(messages, m, keep_tail=4)
     # encurtou: system + resumo + tail
     assert len(new_msgs) == 2 + 4
-    assert promoted > 0
-    # nada foi perdido: o conteúdo antigo é recuperável da memória
-    assert m.recall("mensagem antiga 1", limit=5)
-    assert "PROMOVIDAS" in new_msgs[1]["content"]
+    assert distilled > 0
+    # fato durável recuperável da memória; nota explica a separação de camadas
+    assert m.recall("opção 1", limit=5)
+    assert "DESTILADOS" in new_msgs[1]["content"]
+    m.close()
+
+
+def test_compaction_does_not_promote_raw_ephemeral_turns(tmp_path):
+    # P2: progresso efêmero/log NÃO vira "fato" na memória semântica (fica só na sessão/transcript).
+    m = open_memory(tmp_path)
+    messages = [{"role": "system", "content": "sys"}]
+    for i in range(20):
+        messages.append({"role": "assistant", "content": "ok"})       # trivial/efêmero (<8 chars)
+    new_msgs, distilled = compaction.compact(messages, m, keep_tail=4)
+    assert len(new_msgs) == 2 + 4 and distilled == 0                   # encurtou mas NÃO poluiu a memória
     m.close()
 
 

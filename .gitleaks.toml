@@ -1,0 +1,18 @@
+# Config do gitleaks — scan de segredo PROFUNDO (alta-entropia + ~150 regras), complementa o
+# scripts/secret-scan.sh (rápido, padrões óbvios). Roda no CI (job 'gitleaks'), working tree.
+title = "okami gitleaks"
+
+[extend]
+useDefault = true        # herda o ruleset oficial do gitleaks (AWS/GCP/Stripe/JWT/PEM/…)
+
+[allowlist]
+description = "vetores FAKE marcados + fixtures de teste (segredo de verdade NÃO mora no repo)"
+regexTarget = "line"
+regexes = [
+  '''pragma: allowlist secret''',   # mesma convenção do scanner rápido: linha marcada é fake auditável
+]
+paths = [
+  '''tests/.*''',                   # fixtures de teste contêm vetores fake (o scanner rápido já cobre tests/)
+  '''.*\.example\..*''',            # exemplos versionados (okami.local.example.yaml etc.)
+  '''okami/skills/.*scanner.*''',   # o detector de skills carrega padrões de exemplo
+]

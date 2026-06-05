@@ -1,13 +1,15 @@
 """Auto-compaction sem perder contexto (§6.4).
 
-Princípio: compaction = PROMOVER para long-term + deixar ponteiro recuperável, nunca esquecer.
-Antes de comprimir, as mensagens antigas são escritas no backend de memória (recuperáveis via
-recall_memory); só então são substituídas por um resumo com ponteiro.
+Princípio (P2 — separação de camadas): a SESSÃO guarda o histórico BRUTO (transcript recuperável);
+a MEMÓRIA guarda só FATOS DURÁVEIS. Compaction NÃO despeja turno bruto na memória (log/IDs/progresso
+efêmero virariam "fato" e contaminariam o recall) — cada mensagem antiga passa pelo FILTRO SEMÂNTICO
+(memory.policy: classifica fato/decisão/preferência/skill/erro, barra temp/trivial/segredo). Só o que
+é durável é destilado; o resto sai do contexto mas continua no transcript da sessão.
 """
 
 from __future__ import annotations
 
-from okami.memory.base import Memory, MemoryItem
+from okami.memory.base import Memory
 
 
 def estimate_chars(messages: list[dict]) -> int:
@@ -16,29 +18,34 @@ def estimate_chars(messages: list[dict]) -> int:
 
 def compact(messages: list[dict], memory: Memory | None, *,
             keep_tail: int = 6, source: str = "compaction") -> tuple[list[dict], int]:
-    """Retorna (mensagens_compactadas, n_promovidas). Mantém system + últimas keep_tail."""
+    """Retorna (mensagens_compactadas, n_destiladas). Mantém system + últimas keep_tail.
+
+    n_destiladas = fatos DURÁVEIS escritos na memória (não nº de mensagens) — o histórico bruto
+    completo segue recuperável na sessão (transcript), não na memória semântica."""
     if len(messages) <= keep_tail + 2:
         return messages, 0
     system = messages[0]
     head = messages[1:-keep_tail]
     tail = messages[-keep_tail:]
 
-    promoted = 0
+    distilled = 0
     if memory is not None:
-        from okami.memory.base import is_secret_item
+        from okami.memory.policy import prepare
         for m in head:
             content = (m.get("content") or "").strip()
             if not content:
                 continue
-            item = MemoryItem(text=f"[{m.get('role', '?')}] {content}", kind="turn", source=source)
-            if is_secret_item(item):      # segredo NÃO persiste → não infla a contagem de promovidas
+            # filtro semântico: turno BRUTO não vira memória. Só fato/decisão/preferência/skill/erro
+            # durável (classificado, não-segredo, não-efêmero) é destilado — com a categoria certa.
+            item = prepare(content, source=f"{source}:{m.get('role', '?')}")
+            if item is None:                          # log/ID/progresso efêmero/segredo → fica só na sessão
                 continue
             memory.write(item)
-            promoted += 1
-        note = (f"RESUMO (auto-compaction): {promoted} mensagens antigas foram PROMOVIDAS à "
-                "memória de longo prazo e são recuperáveis com a tool recall_memory. "
-                "Nada foi perdido — continue.")
+            distilled += 1
+        note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas saíram do contexto; "
+                f"{distilled} fato(s) durável(is) foram DESTILADOS à memória (recall_memory). "
+                "O histórico bruto continua na sessão — nada foi perdido. Continue.")
     else:
-        note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas foram resumidas "
-                "(sem backend de memória ativo). Continue.")
-    return [system, {"role": "user", "content": note}, *tail], promoted
+        note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas saíram do contexto "
+                "(sem backend de memória ativo; histórico segue na sessão). Continue.")
+    return [system, {"role": "user", "content": note}, *tail], distilled
