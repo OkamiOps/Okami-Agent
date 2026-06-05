@@ -77,8 +77,25 @@ def test_distill_skill_from_nontrivial_success():
     t = _done_task("criar componente de login com shadcn",
                    ["read_file", "write_file", "run_shell", "write_file", "task_complete"])
     sk = learning.distill_skill(t)
-    assert sk and sk["name"] == "criar-componente-de-login-com-shadcn"
+    # nome CURTO de conteúdo (≤4 palavras, sem 'de/com') — não a frase literal
+    assert sk and sk["name"] == "criar-componente-login-shadcn"
     assert "Quando usar" in sk["body"] and "read_file" in sk["body"]
+
+
+def test_skill_name_drops_conversational_fillers():
+    from okami.learning import _skill_name
+    # a dor real: a frase literal do usuário virava nome horrível
+    assert _skill_name("agora vou pedir pra voce analisar seu codigo") == "analisar-codigo"
+    assert _skill_name("faz deploy do container no docker") == "deploy-container-docker"
+    assert _skill_name("cria um endpoint REST de pagamento com Stripe") == "cria-endpoint-rest-pagamento"
+    n = _skill_name("analisa a pasta okami-agent que esta nos")
+    assert len(n) <= 32 and "que" not in n.split("-") and n.count("-") <= 3
+    # nunca vaza filler conversacional
+    for bad in ("agora", "voce", "pra", "eu", "vou", "pedir"):
+        assert bad not in _skill_name("agora vou pedir pra voce subir o servidor flask").split("-")
+    # fallback pela tool dominante quando só sobra filler
+    assert _skill_name("agora pode", tools=["run_shell", "run_shell"]).startswith("run-shell")
+    assert _skill_name("") == "skill"
 
 
 def test_distill_skips_trivial_or_failed():
