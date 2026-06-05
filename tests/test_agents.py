@@ -25,9 +25,14 @@ GLOBAL = {
 def test_load_agents_discovers_dirs(tmp_path, monkeypatch):
     _mk_agent(tmp_path, "suporte", {"default_provider": "claude"})
     _mk_agent(tmp_path, "dev", {})
+    # projeto: okami.yaml na pasta → base = tmp_path → agents em tmp_path/agents (casa central, não CWD cru)
+    (tmp_path / "okami.yaml").write_text("default_provider: lmstudio\nproviders: {lmstudio: {model: x}}\n",
+                                         encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     specs = load_agents()
     assert set(specs) == {"suporte", "dev"}
+    # explícito também funciona (compat)
+    assert set(load_agents(tmp_path / "agents")) == {"suporte", "dev"}
 
 
 def test_effective_config_merges_overrides(tmp_path):

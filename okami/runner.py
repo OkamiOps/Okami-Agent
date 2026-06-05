@@ -32,7 +32,7 @@ def run_task(
     on_event: Callable[[dict], None] | None = None,
     max_steps: int | None = None,            # None → harness.max_steps do okami.yaml (default 90)
     escalate_to: str | None = None,
-    skills_dir: str = "skills",
+    skills_dir: str | None = None,           # None → casa central (okami.home.skills_dir): não espalha
     extra_context: str = "",
     cancel: Callable[[], bool] | None = None,
     depth: int = 0,
@@ -44,6 +44,9 @@ def run_task(
 ) -> Task:
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
+    if skills_dir is None:                    # casa central (projeto/okami.yaml ou ~/.okami) — não o CWD cru
+        from okami.home import skills_dir as _skills_home
+        skills_dir = str(_skills_home())
 
     from okami.integrations.references import expand_references          # @file / @url / @gitdiff (#3)
     goal, ref_block = expand_references(goal, ws)

@@ -207,7 +207,8 @@ def chat(
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     tools = list(default_registry().keys())
     try:
-        sks = skillmod.load_skills(Path("skills"))
+        from okami.home import skills_dir
+        sks = skillmod.load_skills(skills_dir())
     except Exception:  # noqa: BLE001 — sem skills não impede o chat
         sks = []
     ctx_budget = max(1, int(context_window_tokens(pc) * pc.chars_per_token))

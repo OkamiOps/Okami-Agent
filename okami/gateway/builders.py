@@ -142,6 +142,24 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
     emit(f"⏰ scheduler no ar ({len(sched.load())} job(s)).")
 
 
+def _warn_unisolated_exposure(global_raw: dict, endpoints: list, emit: Callable[[str], None]) -> bool:
+    """#2: ao EXPOR canal (gateway público) SEM isolamento real, avisa GRITANTE. CLI/dev seguem sem
+    atrito — isto só dispara no gateway. Retorna True se avisou (exposto + sem Docker + sem strict)."""
+    from okami.core.sandbox import SandboxPolicy
+    sb = SandboxPolicy.from_config((global_raw or {}).get("sandbox") or {})
+    if bool(sb.require_isolation) or sb.effective_backend() == "docker":
+        return False                                  # isolamento real (Docker/strict) → ok, sem aviso
+    names = ", ".join(sorted({getattr(ep, "channel", None) and getattr(ep.channel, "name", "") or ""
+                              for ep in endpoints} - {""})) or "canais"
+    emit("⚠️  ATENÇÃO — SUPERFÍCIE EXPOSTA SEM ISOLAMENTO REAL")
+    emit(f"    Você está expondo {names} mas o sandbox não tem isolamento (Docker ausente / "
+         "require_isolation desligado).")
+    emit("    run_shell/process rodam NO HOST — risco real p/ uso público ('qualquer um manda mensagem').")
+    emit("    → Ligue isolamento:  okami harden        (sandbox.require_isolation: true)")
+    emit("    → Ou rode com Docker, ou aceite o risco em ambiente CONTROLADO. Ver docs/PRODUCTION.md.")
+    return True
+
+
 def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = print, make_channel=None):
     from okami.config import build_config
 
@@ -151,6 +169,7 @@ def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = pr
     if not everyone:
         emit("nada a rodar (nenhum agente com channels.telegram.token, nem grupo).")
         return everyone
+    _warn_unisolated_exposure(global_raw, everyone, emit)   # #2: aviso forte se expõe canal SEM isolamento real
     for ep in eps:                                     # boot: limpa sessões velhas + retoma interrompidas
         try:
             n = ep.prune_sessions(max_sessions=ep.max_sessions)

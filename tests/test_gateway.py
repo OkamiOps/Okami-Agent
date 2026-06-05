@@ -421,3 +421,42 @@ def test_build_group_endpoints_needs_member_token():
     eps = build_group_endpoints(graw, specs, [{"members": ["cto", "ui"]}],
                                 emit=msgs.append, make_channel=lambda tokens, **kw: FakeGroupChannel())
     assert len(eps) == 1                                     # grupo sobe com ≥1 token (cto)
+
+
+def test_gateway_warns_on_unisolated_exposure(monkeypatch):
+    from okami.core import sandbox as _sb
+    from okami.gateway.builders import _warn_unisolated_exposure
+
+    class _Ch:
+        name = "telegram"
+
+    class _Ep:
+        channel = _Ch()
+    msgs = []
+    monkeypatch.setattr(_sb.shutil, "which", lambda *_: None)   # sem Docker
+    # exposto + sem isolamento → avisa
+    assert _warn_unisolated_exposure({}, [_Ep()], msgs.append) is True
+    assert any("SEM ISOLAMENTO" in m for m in msgs) and any("okami harden" in m for m in msgs)
+    # require_isolation: true → não avisa
+    msgs2 = []
+    assert _warn_unisolated_exposure({"sandbox": {"require_isolation": True}}, [_Ep()], msgs2.append) is False
+    assert msgs2 == []
+
+
+def test_harden_command_sets_require_isolation(tmp_path, monkeypatch):
+    import yaml as _yaml
+    from typer.testing import CliRunner
+
+    from okami.cli import app
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n  lmstudio: {model: openai/x, api_key: lm, tier: local}\n",
+        encoding="utf-8")
+    res = CliRunner().invoke(app, ["harden"])
+    assert res.exit_code == 0
+    local = _yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
+    assert local["sandbox"]["require_isolation"] is True
+    # --off remove
+    CliRunner().invoke(app, ["harden", "--off"])
+    local2 = _yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
+    assert "require_isolation" not in (local2.get("sandbox") or {})

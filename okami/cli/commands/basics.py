@@ -255,6 +255,39 @@ def doctor(
 
 
 @app.command()
+def harden(
+    off: bool = typer.Option(False, "--off", help="Desliga o isolamento estrito (volta ao dev-friendly)."),
+) -> None:
+    """Liga o ISOLAMENTO ESTRITO p/ exposição pública (#2): superfície exposta SEM Docker → run_shell/
+    process DESABILITADOS, não degradam pro host. Grava sandbox.require_isolation no okami.local.yaml.
+
+    Use ANTES de expor o gateway publicamente ('qualquer um manda mensagem'). CLI/dev local não muda."""
+
+    from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
+    p = Path("okami.local.yaml")
+    data = read_yaml_resilient(p, default={}) or {}
+    sb = dict(data.get("sandbox") or {})
+    if off:
+        sb.pop("require_isolation", None)
+    else:
+        sb["require_isolation"] = True
+    data["sandbox"] = sb
+    secure_write_yaml(p, data)
+    if off:
+        console.print("[yellow]⚠ isolamento estrito DESLIGADO[/yellow] — superfície exposta volta a degradar "
+                      "p/ local sem Docker (dev-friendly). NÃO recomendado p/ uso público.")
+        return
+    console.print("[green]✓ isolamento estrito LIGADO[/green] [dim](sandbox.require_isolation: true em "
+                  "okami.local.yaml)[/dim]")
+    from okami.core.sandbox import SandboxPolicy
+    has_docker = SandboxPolicy.from_config({"backend": "auto"}).effective_backend() == "docker"
+    if not has_docker:
+        console.print("[yellow]   Docker NÃO detectado[/yellow] — em superfície exposta o run_shell/process "
+                      "ficará DESABILITADO (fail-closed) até ter Docker. É o comportamento seguro p/ GA.")
+    console.print("[dim]   Verifique: okami policy check --strict  ·  reverter: okami harden --off[/dim]")
+
+
+@app.command()
 def login(
     provider: str = typer.Argument(..., help="Provider para autenticar (ex.: codex, minimax)."),
 ) -> None:

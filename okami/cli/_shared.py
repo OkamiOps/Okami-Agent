@@ -469,7 +469,9 @@ def _ensure_agent(agent_id: str, *, name: str | None = None, provider: str | Non
     """Cria (ou atualiza) agents/<id>/: agent.yaml + identidade própria. Idempotente.
     Devolve True se acabou de criar. É o que materializa a estrutura multi-agente em disco."""
     import yaml as _yaml
-    d = Path("agents") / agent_id
+
+    from okami.home import agents_dir
+    d = agents_dir() / agent_id
     af = d / "agent.yaml"
     existed = af.exists()
     spec = (_yaml.safe_load(af.read_text(encoding="utf-8")) if existed else {}) or {}

@@ -31,13 +31,23 @@ No CI, o workflow `production-conformance.yml` roda o `--strict` em **dois modos
 
 ## 2. Ative o isolamento estrito no runtime
 
-No `okami.yaml` (ou `okami.local.yaml`) do ambiente de produção:
+Atalho (escreve no `okami.local.yaml`):
+
+```bash
+okami harden          # liga sandbox.require_isolation: true   (reverter: okami harden --off)
+```
+
+Ou na mão, no `okami.yaml` / `okami.local.yaml` do ambiente de produção:
 
 ```yaml
 sandbox:
   require_isolation: true     # ou: profile: hardened-strict
   # exposto + sem Docker → run_shell/process_start DESABILITADOS (exit 126), não caem no local
 ```
+
+> Sem isso, ao subir `okami gateway` expondo um canal SEM isolamento real, o gateway **avisa de forma
+> gritante** no boot (run_shell/process rodam no host). Para dev/testers controlados, ok; para
+> "qualquer um manda mensagem", ligue o `okami harden`.
 
 Com Docker presente, a superfície exposta roda isolada (rede off, não-root, `--cap-drop ALL`,
 rootfs read-only, só o workspace montado). Sem Docker, recusa — fail-closed.

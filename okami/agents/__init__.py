@@ -26,8 +26,9 @@ class AgentSpec:
     raw: dict  # conteúdo do agent.yaml (overrides)
 
 
-def load_agents(root: str | Path = "agents") -> dict[str, AgentSpec]:
-    root = Path(root)
+def load_agents(root: str | Path | None = None) -> dict[str, AgentSpec]:
+    from okami.home import agents_dir
+    root = Path(root) if root is not None else agents_dir()   # casa central (não espalha no CWD)
     out: dict[str, AgentSpec] = {}
     if not root.exists():
         return out

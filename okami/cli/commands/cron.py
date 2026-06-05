@@ -143,13 +143,14 @@ def agent_new(
     match: list[str] = typer.Option(None, "--match", help="Binding (origem) p/ rotear a este agente."),
     telegram_token: str = typer.Option(None, "--telegram-token", help="Token do bot Telegram do agente."),
 ) -> None:
-    """Cria um agente: agents/<id>/ com agent.yaml + identidade própria."""
-    if (Path("agents") / agent_id / "agent.yaml").exists():
+    """Cria um agente: <casa>/agents/<id>/ com agent.yaml + identidade própria."""
+    from okami.home import agents_dir
+    if (agents_dir() / agent_id / "agent.yaml").exists():
         console.print(f"[yellow]agente '{agent_id}' já existe.[/yellow]")
         raise typer.Exit(1)
     _ensure_agent(agent_id, name=name, provider=provider, memory=memory, match=match,
                   telegram_token=telegram_token)
-    d = (Path("agents") / agent_id).resolve()
+    d = (agents_dir() / agent_id).resolve()
     console.print(f"[green]✓ agente '{agent_id}' criado[/green]\n[dim]   {d}[/dim]\n"
                   "[dim]   (NÃO confundir com okami/agents/ que é o código)[/dim]")
 
@@ -167,7 +168,8 @@ def agent_list() -> None:
         return
     graw, _ = load_raw()
     default = (build_config(graw).agents or {}).get("default")
-    table = Table(title=f"Agentes  ·  pasta: {Path('agents').resolve()}")
+    from okami.home import agents_dir
+    table = Table(title=f"Agentes  ·  pasta: {agents_dir().resolve()}")
     table.add_column("id", style="bold")
     table.add_column("provider")
     table.add_column("memória")

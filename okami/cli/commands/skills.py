@@ -14,10 +14,11 @@ from okami.cli._shared import (
 def skills() -> None:
     """Lista as skills disponíveis (skills/*/SKILL.md)."""
     from okami import skills as skillmod
+    from okami.home import skills_dir
 
-    sks = skillmod.load_skills(Path("skills"))
+    sks = skillmod.load_skills(skills_dir())
     if not sks:
-        console.print("[dim]nenhuma skill em ./skills[/dim]")
+        console.print(f"[dim]nenhuma skill em {skills_dir()}[/dim]")
         return
     table = Table(title="Okami skills")
     table.add_column("nome", style="bold")
@@ -81,8 +82,9 @@ def learn(
     if report.blocked:
         console.print("[red]⚠ --force: instalando apesar do risco.[/red]")
 
-    dest_root = Path("skills")
-    dest_root.mkdir(exist_ok=True)
+    from okami.home import skills_dir
+    dest_root = skills_dir()
+    dest_root.mkdir(parents=True, exist_ok=True)
     from okami.skills.lockfile import record
     promoted = []
     for s in found:

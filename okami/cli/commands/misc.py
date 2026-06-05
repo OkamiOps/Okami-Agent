@@ -220,8 +220,9 @@ def status(
     # ◆ Uso (tokens/custo) -----------------------------------------------------
     try:
         from okami.gateway.sessions import TranscriptStore
+        from okami.home import agents_dir
         from okami.llm.usage import estimate_cost, format_tokens, summarize_store
-        ws = Path("agents") / default_agent if default_agent and default_agent != "—" else Path(".")
+        ws = agents_dir() / default_agent if default_agent and default_agent != "—" else Path(".")
         u = summarize_store(TranscriptStore(ws).load_store())
         if u.total_tokens:
             cr = estimate_cost(u, transport=pc.transport, provider=cfg.default_provider, model=pc.model)
@@ -317,6 +318,13 @@ def _root(
                                   callback=_version_cb, is_eager=True),
 ) -> None:
     """Okami Agent — CLI. Sem comando, mostra a visão geral."""
+    try:                                              # migra ~/skills e ~/agents soltos → ~/.okami (1×, idempotente)
+        import sys as _sys
+
+        from okami.home import migrate_stray
+        migrate_stray(emit=lambda m: print(m, file=_sys.stderr))   # stderr: não polui --json na 1ª vez
+    except Exception:  # noqa: BLE001 — migração nunca derruba um comando
+        pass
     if ctx.invoked_subcommand is None:
         help_cmd()
 

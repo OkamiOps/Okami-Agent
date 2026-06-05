@@ -50,13 +50,15 @@ def setup(
 
     # Painel de localização (estilo Hermes "Configuration Location")
     from rich.panel import Panel
+
+    from okami.home import agents_dir
     loc = Path.cwd()
     head = "[bold #ff7527]🐺 Okami — configuração[/]"
     if not fresh:
         head += "\n[green]✓ você já tem o Okami configurado[/] [dim](Enter mantém o valor atual)[/dim]"
     console.print(Panel(f"{head}\n\n[dim]okami.yaml:[/dim] {loc / 'okami.yaml'}\n"
                         f"[dim]overrides:[/dim] {loc / 'okami.local.yaml'}\n[dim]segredos (.env):[/dim] {loc / '.env'}\n"
-                        f"[dim]agentes:[/dim]   {loc / 'agents'}\n\n"
+                        f"[dim]agentes:[/dim]   {agents_dir()}\n\n"
                         "[dim]Pule pra uma seção: okami setup "
                         "provider|memory|agent|channel|voice|approvals|learning|persona[/dim]",
                         border_style="#ff7527", title="Configuration"))
@@ -155,7 +157,8 @@ def setup(
         local["agents"] = agents
         save_local()
         verb = "criado" if created else "já existia"
-        d = (Path("agents") / agent_id).resolve()
+        from okami.home import agents_dir
+        d = (agents_dir() / agent_id).resolve()
         console.print(f"[green]✓ agente '{agent_id}' {verb}[/green]\n[dim]   {d}[/dim]\n"
                       f"[dim]   SOUL/VOICE/PERSONA + sessões/memória próprias[/dim]")
 
@@ -257,7 +260,8 @@ def setup(
         _ensure_agent("okami", name="Okami")      # agente padrão (sem perguntar no rápido)
         local.setdefault("agents", {})["default"] = "okami"
         save_local()
-        console.print(f"[green]✓ agente padrão 'okami'[/green] [dim]({(Path('agents') / 'okami').resolve()})[/dim]")
+        from okami.home import agents_dir
+        console.print(f"[green]✓ agente padrão 'okami'[/green] [dim]({(agents_dir() / 'okami').resolve()})[/dim]")
 
     steps = {"provider": step_provider, "default": step_provider, "memory": step_memory,
              "agent": step_agent, "identity": step_agent, "channel": step_channel,
