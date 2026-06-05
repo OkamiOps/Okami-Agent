@@ -17,6 +17,25 @@ def _exc(msg, status=None):
     return e
 
 
+def test_message_text_falls_back_to_reasoning_content():
+    # modelo de reasoning (MiniMax-M3/DeepSeek-R1): põe a saída em reasoning_content, content vazio →
+    # sem o fallback a fala se perde ("só reasoning, não traz nada" → '(COMPLETE)' mudo).
+    class M:
+        content = ""
+        reasoning_content = '{"tool": "respond", "args": {"message": "Sou a Minerva"}}'
+    assert "Minerva" in prov._message_text(M())
+
+    class M2:                                              # content normal → NÃO usa reasoning
+        content = "resposta de verdade"
+        reasoning_content = "pensamento interno"
+    assert prov._message_text(M2()) == "resposta de verdade"
+
+    class M3:                                              # nada → vazio (não inventa)
+        content = ""
+        reasoning_content = None
+    assert prov._message_text(M3()) == ""
+
+
 # ----------------------------------------------------------------- classificador de erro
 def test_classify_rate_limit_rotates_and_fallbacks():
     c = errors.classify(_exc("Too Many Requests", 429))

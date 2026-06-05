@@ -150,7 +150,28 @@ def complete(
     if via is not None:
         return as_completion(via).text
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
-    return resp.choices[0].message.content or ""
+    return _message_text(resp.choices[0].message)
+
+
+def _message_text(message) -> str:
+    """Texto da resposta = `content`. Se vier VAZIO, cai no `reasoning_content`/`reasoning` — modelos de
+    REASONING (MiniMax-M3, DeepSeek-R1…) jogam a saída no campo de pensamento e deixam `content` vazio;
+    sem este fallback a fala se perde (output só-reasoning → resposta vazia / '(COMPLETE)' mudo)."""
+    txt = getattr(message, "content", None) or ""
+    if txt.strip():
+        return txt
+    for attr in ("reasoning_content", "reasoning"):
+        r = getattr(message, attr, None)
+        if isinstance(r, str) and r.strip():
+            return r
+    # alguns SDKs expõem em provider_specific_fields / model_extra
+    for bag in (getattr(message, "provider_specific_fields", None), getattr(message, "model_extra", None)):
+        if isinstance(bag, dict):
+            for attr in ("reasoning_content", "reasoning"):
+                r = bag.get(attr)
+                if isinstance(r, str) and r.strip():
+                    return r
+    return txt
 
 
 def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict | None:
@@ -186,7 +207,7 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
         overrides["tools"] = openai_tools(default_registry())
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     choice = resp.choices[0]
-    return Completion(text=choice.message.content or "",
+    return Completion(text=_message_text(choice.message),                   # content; vazio → reasoning_content
                       tool_calls=_extract_tool_calls(choice.message),       # antes JOGADO FORA (P0.4)
                       finish_reason=getattr(choice, "finish_reason", "") or "stop",
                       usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
@@ -288,7 +309,8 @@ def stream_complete(
             **_kwargs(pc, messages, stream=True, model=model, **overrides)
         ):
             try:
-                delta = chunk.choices[0].delta.content
+                d = chunk.choices[0].delta
+                delta = d.content or getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None)
             except (AttributeError, IndexError):
                 delta = None
             if delta:
