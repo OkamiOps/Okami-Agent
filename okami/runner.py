@@ -144,8 +144,8 @@ def run_task(
         for c in mcp_clients:
             c.close()
         return t
-    from okami.core.sandbox import SandboxPolicy
-    sandbox = SandboxPolicy.from_config(cfg.sandbox)   # §P0 #2: perfil de execução do run_shell
+    from okami.core.sandbox import effective_sandbox
+    sandbox = effective_sandbox(cfg.sandbox, surface)   # #P1.1: superfície exposta endurece por padrão
     harness = Harness(generate, t, ws, budget=budget,
                       on_event=on_event, escalate=escalate, system_extra=system_extra,
                       memory=mem, core_block=core_block, approve=approve,

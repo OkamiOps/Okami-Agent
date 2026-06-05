@@ -83,6 +83,25 @@ def default_policy() -> SandboxPolicy:
     return SandboxPolicy()
 
 
+# Superfícies EXPOSTAS (remoto/rede) → postura endurecida por padrão (#P1.1). CLI = máquina do dono = dev.
+EXPOSED_SURFACES = frozenset({"telegram", "group", "paperclip", "slack", "discord", "mattermost",
+                              "api", "gateway"})
+
+
+def effective_sandbox(cfg_sandbox, surface: str = "") -> "SandboxPolicy":
+    """Política do run_shell/process_start CIENTE DA SUPERFÍCIE (#P1.1).
+
+    Superfície exposta (Telegram/grupo/Paperclip/API…) SEM config explícita de backend/profile →
+    endurece p/ `auto` (Docker se houver; degrada p/ local se não houver — não quebra quem não tem
+    Docker). CLI local segue `dev`. Config EXPLÍCITA (backend ou profile no okami.yaml) sempre vence."""
+    raw = dict(cfg_sandbox or {})
+    p = SandboxPolicy.from_config(raw)
+    explicit = ("backend" in raw) or ("profile" in raw)
+    if not explicit and surface in EXPOSED_SURFACES:
+        p.backend = "auto"
+    return p
+
+
 @dataclass
 class SandboxResult:
     returncode: int
