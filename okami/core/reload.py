@@ -9,7 +9,7 @@ de canal/agent_id exige re-wiring → não é hot-reloadable (continua precisand
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 

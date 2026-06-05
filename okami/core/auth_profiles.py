@@ -19,10 +19,10 @@ _SUBSCRIPTION_TRANSPORTS = ("codex_oauth", "claude_cli", "minimax_oauth")
 
 def _kind(pc) -> str:
     t = getattr(pc, "transport", "")
+    if t == "claude_cli":
+        return "cli"                                     # CLI oficial 'claude' (antes do catch de oauth)
     if t in ("codex_oauth", "minimax_oauth") or getattr(pc, "auth", "") == "oauth_subscription":
         return "oauth"
-    if t == "claude_cli":
-        return "cli"
     if getattr(pc, "api_key_env", None) or getattr(pc, "api_key", None):
         return "api_key"
     return "none"

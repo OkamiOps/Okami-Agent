@@ -127,6 +127,53 @@ def events(
 
 
 @app.command()
+def replay(
+    trace: str = typer.Argument(None, help="trace_id do turno (sem arg = lista os turnos recentes)."),
+    agent: str = typer.Option(None, "-a", "--agent"),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+    json_out: bool = typer.Option(False, "--json", help="Saída JSON (CI/ferramenta)."),
+) -> None:
+    """Replay da TRAJETÓRIA de um turno (#12): `okami replay` lista turnos; `okami replay <trace>` detalha."""
+    import datetime as _dt
+
+    from okami.observability.trajectory import build_trajectory, list_traces, render_line
+    ws = _persona_ws(agent, workspace)
+    if not trace:                                     # sem trace → lista os turnos p/ escolher
+        traces = list_traces(ws)
+        if json_out:
+            import json as _json
+            console.print_json(_json.dumps({"traces": traces}, ensure_ascii=False))
+            return
+        if not traces:
+            console.print(f"[dim]sem turnos em {ws}/.okami/events.jsonl[/dim]")
+            return
+        t = Table(title="turnos (replay)", border_style="#3d3e50", header_style="bold #ff7527")
+        for col in ("trace", "quando", "passos", "llm", "tokens", "desfecho", "objetivo"):
+            t.add_column(col)
+        for s in traces:
+            when = (_dt.datetime.fromtimestamp(s["ended_at"]).strftime("%m-%d %H:%M")
+                    if s.get("ended_at") else "—")
+            t.add_row(s["trace"], when, str(s["steps"]), str(s["llm_calls"]),
+                      f"↑{s['tokens_in']} ↓{s['tokens_out']}", s["outcome"], str(s["goal"])[:48])
+        console.print(t)
+        console.print("[dim]→ okami replay <trace> p/ ver a trajetória completa do turno[/dim]")
+        return
+    traj = build_trajectory(ws, trace)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps(traj, ensure_ascii=False))
+        return
+    if not traj["events"]:
+        console.print(f"[yellow]trace '{trace}' não encontrado[/yellow] em {ws}/.okami/events.jsonl")
+        raise typer.Exit(1)
+    s = traj["summary"]
+    console.print(f"[bold #ff7527]trajetória {trace}[/] — {s['outcome']} · {s['steps']} passos · "
+                  f"{s['llm_calls']} LLM · ↑{s['tokens_in']} ↓{s['tokens_out']}")
+    for e in traj["events"]:
+        console.print(render_line(e))
+
+
+@app.command()
 def clean(
     workspace: str = typer.Option(".", "-w", "--workspace"),
     lock_stale: float = typer.Option(300.0, "--lock-stale", help="Idade (s) p/ considerar um .lock órfão."),
