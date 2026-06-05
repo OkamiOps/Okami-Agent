@@ -24,15 +24,21 @@ ou onde você quiser.
 > comandos/config ainda pode mudar entre alphas — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md).
 
-O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan) —
-com separação de turno, emoji por evento e **rodapé de custo por resposta** (ctx · tokens · tempo):
+O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
+
+![okami chat welcome](docs/images/chat-welcome.svg)
+
+Cada turno tem separação clara, emoji por evento (🧠 pensar · 🛠️ tool) e um **rodapé de custo por
+resposta** (ctx · tokens · tempo) — você sabe exatamente o que gastou:
 
 ![okami chat](docs/images/chat-demo.svg)
 
-![okami chat welcome](docs/chat-welcome.png)
+**Paridade multi-modelo** com assinatura-only (Codex/Claude por OAuth/CLI, LMStudio local, MiniMax/MiMo
+por Token Plan), com fallback automático:
 
-Toda a configuração é por **menu de seta** (`okami setup`, `okami provider add`); e a prontidão de
-release é um comando só (`okami readiness` — CI verde · strict verde · strict no HEAD):
+![okami providers](docs/images/providers.svg)
+
+E a prontidão de release é um comando só (`okami readiness` — CI verde · strict verde · strict no HEAD):
 
 ![okami readiness](docs/images/readiness.svg)
 
