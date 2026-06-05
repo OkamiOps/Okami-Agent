@@ -171,6 +171,13 @@ def doctor() -> None:
     else:
         console.print("  MCP: [dim]nenhum servidor configurado[/dim]")
 
+    from okami.core.sandbox import SandboxPolicy
+    sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", {}) or {})
+    real = ("[green]isolamento real[/green]" if sb.backend == "docker"
+            else "[yellow]cercas locais (sem confinar FS/rede)[/yellow]")
+    console.print(f"  sandbox: backend={sb.backend} · mode={sb.mode} · net={'on' if sb.network_on else 'off'} "
+                  f"· timeout={sb.timeout}s — {real}")
+
 
 @app.command()
 def login(

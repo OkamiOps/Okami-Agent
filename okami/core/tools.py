@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,6 +65,7 @@ class ToolContext:
     skills: dict = field(default_factory=dict)  # nome -> corpo da SKILL.md (progressive disclosure)
     checkpoints: object | None = None  # snapshot antes de escrever → rollback (duck-typed: snapshot)
     spawn: object | None = None  # delega um subtask a um subagente isolado (Callable(goal, agent, model)->str)
+    sandbox: object | None = None  # SandboxPolicy do run_shell (None → default_policy()); §P0 #2
 
 
 @dataclass
@@ -249,25 +249,22 @@ class FindFiles(Tool):
 
 class RunShell(Tool):
     name = "run_shell"
-    description = "Executa um comando de shell no workspace (timeout 60s). Sandbox real virá na Fase 12."
+    description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "
+                   "sanitizado; isolamento real com backend docker). Em perfil read-only, comando que "
+                   "altera estado é bloqueado.")
     args_schema = {"cmd": "comando a executar"}
     required = ("cmd",)
 
     def run(self, args, ctx):
+        from okami.core.sandbox import default_policy, run_sandboxed
         cmd = args["cmd"]
         eff = shell_has_effect(cmd)   # read-only (ls/grep/cat…) → effect=False (não engana o watchdog)
-        try:
-            r = subprocess.run(
-                cmd, shell=True, cwd=str(ctx.workspace),
-                capture_output=True, text=True, timeout=60,
-                env=sanitized_env(),  # sem credenciais no ambiente (anti-exfiltração)
-            )
-        except subprocess.TimeoutExpired:
-            return ToolResult(False, f"timeout (60s): {cmd}", effect=eff)
-        out = (r.stdout or "") + (r.stderr or "")
-        out = out.strip() or "(sem saída)"
-        ok = r.returncode == 0
-        return ToolResult(ok, f"exit={r.returncode}\n{out}", effect=eff)
+        policy = ctx.sandbox or default_policy()
+        if getattr(policy, "mode", "") == "read-only" and eff:   # defesa em profundidade (perfil)
+            return ToolResult(False, f"sandbox read-only: comando que altera estado bloqueado ({cmd[:80]})",
+                              effect=False)
+        res = run_sandboxed(cmd, ctx.workspace, policy)
+        return ToolResult(res.returncode == 0, f"exit={res.returncode}\n{res.output}", effect=eff)
 
 
 class RememberFact(Tool):

@@ -137,6 +137,7 @@ class OkamiConfig(BaseModel):
     gateway: dict[str, Any] = Field(default_factory=dict)    # {"auto_resume": false, "max_sessions": 500} (§13)
     learning: dict[str, Any] = Field(default_factory=dict)   # {"auto_skill": false} (§7 auto-aprimoramento)
     hooks: dict[str, Any] = Field(default_factory=dict)      # {evento: ["cmd"]} event hooks (§11)
+    sandbox: dict[str, Any] = Field(default_factory=dict)    # {"backend": "local|docker", "mode": ...} (§P0 #2)
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -211,6 +212,7 @@ def build_config(raw: dict) -> OkamiConfig:
         gateway=raw.get("gateway") or {},
         learning=raw.get("learning") or {},
         hooks=raw.get("hooks") or {},
+        sandbox=raw.get("sandbox") or {},
     )
 
 

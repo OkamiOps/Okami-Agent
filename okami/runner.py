@@ -141,12 +141,15 @@ def run_task(
         for c in mcp_clients:
             c.close()
         return t
+    from okami.core.sandbox import SandboxPolicy
+    sandbox = SandboxPolicy.from_config(cfg.sandbox)   # §P0 #2: perfil de execução do run_shell
     harness = Harness(generate, t, ws, budget=budget,
                       on_event=on_event, escalate=escalate, system_extra=system_extra,
                       memory=mem, core_block=core_block, approve=approve,
                       skills=skills_map, registry=registry, cancel=cancel,
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
-                      images=images, prelearned_files=prelearned_files)   # vision §6 + arquivos pré-conhecidos
+                      images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
+                      sandbox=sandbox)
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
