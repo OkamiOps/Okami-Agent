@@ -1,15 +1,27 @@
-"""Gerência de PROCESSOS em background (#10 — process manager estilo Hermes).
+"""Gerência de PROCESSOS em background (#1/#8/#10 — process manager estilo Hermes).
 
-Roda comando LONGO sem bloquear o turno: `start` devolve um id; `poll`/`wait`/`log`/`kill` operam
-depois — até em OUTRO turno/run, porque o estado vive no disco (`.okami/processes/<id>.{json,log,exit}`).
-O comando roda com env SANITIZADO, em sessão própria (sobrevive ao turno) e com o MESMO bloqueio de
-caminho sensível do run_shell. A saída é redigida (segredo mascarado) antes de voltar pro modelo.
+Roda comando LONGO sem bloquear o turno: `start` devolve um id; `poll`/`wait`/`log`/`kill`/`list`
+operam depois — até em OUTRO turno/run, porque o estado vive no disco
+(`.okami/processes/<id>.{json,log,exit}`). O comando roda com env SANITIZADO, em sessão própria
+(sobrevive ao turno), sob a MESMA política do run_shell (#5: docker/local/perfil), e com bloqueio de
+caminho sensível. A saída é redigida (segredo mascarado) antes de voltar pro modelo.
+
+Recursos "confiável pra coisa longa" (#1/#8):
+- **reconciliação anti-PID-reuse**: poll compara o start-time do PID (não confia só no kill -0);
+- **notify_on_complete**: `drain_completed()` entrega quem terminou (o gateway avisa no chat);
+- **watch_patterns**: `watch_hits()` diz quais regex apareceram no log (ex.: "Listening on", "ERROR");
+- **paginação de log**: `log_page(offset, limit)` p/ navegar log grande sem despejar tudo;
+- **cap de log** (pós-saída) + **TTL/prune** → disco não cresce sem limite.
+
+Ainda NÃO Hermes-grade (limites conhecidos, documentados): stdin/write/submit interativo e PTY —
+processo detached + pipe entre turnos é um buraco à parte; fica p/ um próximo passo.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -17,8 +29,12 @@ import subprocess
 import time
 from pathlib import Path
 
+from okami.core.filelock import _proc_start
+
 
 class ProcessManager:
+    _MAX_LOG = 5_000_000           # cap do log armazenado (compactado pós-saída) — disco bounded
+
     def __init__(self, workspace):
         self.ws = Path(workspace)
         self.dir = self.ws / ".okami" / "processes"
@@ -32,12 +48,13 @@ class ProcessManager:
     def _exitf(self, pid_id):
         return self.dir / f"{pid_id}.exit"
 
-    def start(self, cmd: str, policy=None) -> dict:
-        """Sobe `cmd` em background sob a MESMA política do run_shell (#5). ValueError se bloqueado.
+    # ----------------------------------------------------------------- start
+    def start(self, cmd: str, policy=None, *, notify: bool = False, watch=None) -> dict:
+        """Sobe `cmd` em background sob a política do run_shell (#5). ValueError se bloqueado.
 
-        Backend docker (efetivo) → o processo longo roda ISOLADO (rede off, não-root, só workspace).
-        Backend docker EXIGIDO sem Docker → recusa (não cai no local inseguro). Log/exit são RELATIVOS
-        ao workspace → o wrapper funciona igual dentro do container (que monta ws em /workspace)."""
+        `notify` → entra em drain_completed() ao terminar. `watch` → lista de regex monitoradas no log.
+        Backend docker (efetivo) → processo ISOLADO; docker EXIGIDO sem Docker → recusa (não cai no local).
+        Log/exit são RELATIVOS ao workspace → o wrapper funciona igual dentro do container."""
         import secrets
 
         from okami.core.tools import _SENSITIVE_PATH, sanitized_env
@@ -66,9 +83,13 @@ class ProcessManager:
             proc = subprocess.Popen(["sh", "-c", wrapped], cwd=str(self.ws), env=sanitized_env(),
                                     start_new_session=True, preexec_fn=pre)   # sessão própria → sobrevive ao turno
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
-                "backend": eff, "container": container}
-        self._meta(pid_id).write_text(json.dumps(meta), encoding="utf-8")
+                "start_time": _proc_start(proc.pid), "backend": eff, "container": container,
+                "notify": bool(notify), "watch": list(watch or []), "notified": False}
+        self._write_meta(pid_id, meta)
         return meta
+
+    def _write_meta(self, pid_id, meta) -> None:
+        self._meta(pid_id).write_text(json.dumps(meta), encoding="utf-8")
 
     def _read_meta(self, pid_id):
         p = self._meta(pid_id)
@@ -77,14 +98,18 @@ class ProcessManager:
         except ValueError:
             return None
 
-    @staticmethod
-    def _alive(pid: int) -> bool:
+    # ----------------------------------------------------------------- liveness (anti-reuse)
+    def _alive(self, meta: dict) -> bool:
+        """Vivo? kill -0 + reconciliação por start-time (PID reciclado por OUTRO processo → morto)."""
+        pid = meta.get("pid", 0)
         try:
             os.kill(pid, 0)
-            return True
         except OSError:
             return False
+        stored, cur = meta.get("start_time", ""), _proc_start(pid)
+        return not (stored and cur and stored != cur)
 
+    # ----------------------------------------------------------------- poll / log / wait
     def poll(self, pid_id: str) -> dict:
         meta = self._read_meta(pid_id)
         if not meta:
@@ -95,9 +120,27 @@ class ProcessManager:
             pass
         exitf = self._exitf(pid_id)
         if exitf.exists():
+            self._compact_log(pid_id)                  # terminou → compacta se o log ficou gigante
             code = exitf.read_text(encoding="utf-8").strip()
             return {**meta, "status": "exited", "exit_code": int(code) if code.lstrip("-").isdigit() else None}
-        return {**meta, "status": "running" if self._alive(meta["pid"]) else "exited"}
+        if not self._alive(meta):                      # morto sem exitfile (crash/órfão) → reconcilia
+            self._compact_log(pid_id)
+            return {**meta, "status": "exited", "exit_code": None}
+        return {**meta, "status": "running"}
+
+    def _compact_log(self, pid_id: str) -> None:
+        """Pós-saída: se o log passou do cap, mantém head+tail (disco bounded). Não toca log vivo."""
+        p = self._logf(pid_id)
+        try:
+            if not p.exists() or p.stat().st_size <= self._MAX_LOG:
+                return
+        except OSError:
+            return
+        data = p.read_text(encoding="utf-8", errors="ignore")
+        half = self._MAX_LOG // 2
+        omitted = len(data) - 2 * half
+        p.write_text(f"{data[:half]}\n…[log compactado: {omitted} chars removidos no meio]…\n{data[-half:]}",
+                     encoding="utf-8", newline="\n")
 
     def log(self, pid_id: str, *, tail: int = 4000) -> str:
         p = self._logf(pid_id)
@@ -105,6 +148,36 @@ class ProcessManager:
             return ""
         from okami.core.redact import clean_output
         return clean_output(p.read_text(encoding="utf-8", errors="ignore"), head=tail, tail=tail)
+
+    def log_page(self, pid_id: str, *, offset: int = 0, limit: int = 200) -> dict:
+        """Paginação por LINHAS (redigidas): {lines, total, offset, shown}. offset<0 conta do fim."""
+        p = self._logf(pid_id)
+        if not p.exists():
+            return {"lines": [], "total": 0, "offset": 0, "shown": 0}
+        from okami.core.redact import redact, strip_ansi
+        lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        total = len(lines)
+        if offset < 0:
+            offset = max(0, total + offset)
+        chunk = [redact(strip_ansi(ln)) for ln in lines[offset:offset + max(1, limit)]]
+        return {"lines": chunk, "total": total, "offset": offset, "shown": len(chunk)}
+
+    def watch_hits(self, pid_id: str) -> list[str]:
+        """Quais `watch` patterns (regex) já apareceram no log do processo."""
+        meta = self._read_meta(pid_id)
+        pats = (meta or {}).get("watch") or []
+        if not pats:
+            return []
+        p = self._logf(pid_id)
+        text = p.read_text(encoding="utf-8", errors="ignore") if p.exists() else ""
+        out = []
+        for pat in pats:
+            try:
+                if re.search(pat, text):
+                    out.append(pat)
+            except re.error:
+                pass
+        return out
 
     def wait(self, pid_id: str, timeout: float = 30.0) -> dict:
         deadline = time.time() + timeout
@@ -115,6 +188,7 @@ class ProcessManager:
             time.sleep(0.1)
         return self.poll(pid_id)
 
+    # ----------------------------------------------------------------- kill
     def kill(self, pid_id: str) -> bool:
         meta = self._read_meta(pid_id)
         if not meta:
@@ -140,7 +214,42 @@ class ProcessManager:
             self._exitf(pid_id).write_text("-15", encoding="utf-8")   # marca terminado por SIGTERM (poll determinístico)
         return ok
 
+    # ----------------------------------------------------------------- list / notify / prune
     def list(self) -> list[dict]:
         if not self.dir.exists():
             return []
         return [self.poll(f.stem) for f in sorted(self.dir.glob("*.json"))]
+
+    def drain_completed(self) -> list[dict]:
+        """Processos com notify=True que TERMINARAM e ainda não foram avisados — marca como avisados."""
+        out = []
+        if not self.dir.exists():
+            return out
+        for f in sorted(self.dir.glob("*.json")):
+            meta = self._read_meta(f.stem)
+            if not meta or not meta.get("notify") or meta.get("notified"):
+                continue
+            st = self.poll(f.stem)
+            if st.get("status") == "exited":
+                meta["notified"] = True
+                self._write_meta(f.stem, meta)
+                out.append(st)
+        return out
+
+    def prune(self, ttl_seconds: float = 86400.0) -> list[str]:
+        """Remove (meta+log+exit) processos JÁ TERMINADOS há mais de `ttl_seconds` — cleanup TTL."""
+        removed, now = [], time.time()
+        if not self.dir.exists():
+            return removed
+        for f in sorted(self.dir.glob("*.json")):
+            pid_id = f.stem
+            if self.poll(pid_id).get("status") != "exited":
+                continue
+            exitf = self._exitf(pid_id)
+            ts = (exitf.stat().st_mtime if exitf.exists() else f.stat().st_mtime)
+            if now - ts > ttl_seconds:
+                for path in (self._meta(pid_id), self._logf(pid_id), self._exitf(pid_id)):
+                    if path.exists():
+                        path.unlink()
+                removed.append(pid_id)
+        return removed

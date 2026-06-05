@@ -117,14 +117,25 @@ def prune_checkpoints(root, *, days: float = 14.0, keep: int = 50) -> tuple[list
                                   days=days, keep=keep, exclude={"journal.jsonl"})
 
 
-def clean_workspace(root, *, lock_stale: float = 300.0) -> dict:
+def prune_processes(root, *, ttl_hours: float = 24.0) -> list[str]:
+    """Remove processos em background JÁ TERMINADOS há mais de `ttl_hours` (cleanup TTL #1/#8)."""
+    from okami.core.processes import ProcessManager
+    try:
+        return ProcessManager(root).prune(ttl_seconds=ttl_hours * 3600.0)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def clean_workspace(root, *, lock_stale: float = 300.0, proc_ttl_hours: float = 24.0) -> dict:
     """Faxina padrão (conservadora) — devolve um relatório com contagens e bytes liberados."""
     locks = clean_stale_locks(root, stale=lock_stale)
     rm_t, freed_t = prune_temp(root)
     rm_a, freed_a = prune_audio(root)
+    rm_p = prune_processes(root, ttl_hours=proc_ttl_hours)
     return {
         "locks_removed": len(locks),
         "temp_removed": len(rm_t),
         "audio_removed": len(rm_a),
+        "processes_removed": len(rm_p),
         "bytes_freed": freed_t + freed_a,
     }

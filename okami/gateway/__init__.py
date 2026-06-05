@@ -398,6 +398,7 @@ class AgentEndpoint:
         if not self.channel.allowed(chat_id):
             self.channel.send(chat_id, "🚫 chat não autorizado.")
             return
+        self._last_chat = str(chat_id)                 # alvo do notify_on_complete (#1/#8) best-effort
         text = (text or "").strip()
         cid = str(chat_id)
         if cid in self._pending:                       # resposta a uma aprovação pendente
@@ -696,6 +697,21 @@ class AgentEndpoint:
                 continue
             if text:
                 self.handle(msg.chat_id, text)
+        self._notify_completed_processes()
+
+    def _notify_completed_processes(self) -> None:
+        """notify_on_complete (#1/#8): avisa no chat os processos com notify=True que terminaram."""
+        chat = getattr(self, "_last_chat", None)
+        if not chat:
+            return
+        try:
+            from okami.core.processes import ProcessManager
+            done = ProcessManager(self.ws).drain_completed()
+        except Exception:  # noqa: BLE001
+            return
+        for st in done:
+            self.channel.send(chat, f"✅ processo {st['id']} terminou (exit={st.get('exit_code')}): "
+                              f"{str(st.get('cmd', ''))[:60]}")
 
     def loop(self) -> None:
         while self.running:
