@@ -132,7 +132,7 @@ okami gateway              # sobe os bots de Telegram (1 por agente)
 ```
 
 - **Configuração** é sempre por **menu de seta** (↑↓ Enter); sem terminal interativo, cai num menu numerado.
-- **Segredos** vão pro `.env` (projeto) ou `~/.okami/.env` (global) — **nunca** pro `okami.yaml`, que é versionado.
+- **Segredos** vão pro `.env` (projeto) ou `$OKAMI_HOME/.env` (global, default `~/.okami/.env`) — **nunca** pro `okami.yaml`, que é versionado.
 - Sem instalar o entry point, dá para rodar com `python -m okami.cli ...`.
 
 ---
@@ -284,7 +284,7 @@ Segurança *fail-closed* é o diferencial do Okami para uso real/exposto. (Detal
 [docs/PRODUCTION.md](docs/PRODUCTION.md).)
 
 - **Assinatura-only & segredos** — Claude/Codex sempre por OAuth/CLI; chaves só no `.env`
-  (projeto ou global `~/.okami/.env`, `chmod 600`), **nunca** no YAML versionado. O `config set` recusa
+  (projeto ou global `$OKAMI_HOME/.env`, default `~/.okami/.env`, `chmod 600`), **nunca** no YAML versionado. O `config set` recusa
   segredo literal em chave pontilhada e manda usar `${ENV}`.
 - **Aprovação go/no-go** — modos `manual` · `smart` (auto-aprova risco baixo) · `off`
   (**fail-closed**: sem prompt = nega o sensível) · `yolo` (bypass explícito por sessão). A aprovação é
@@ -396,7 +396,7 @@ restrito ainda); ações sensíveis sempre passam por go/no-go.
 |---|---|---|
 | `okami.yaml` | Config base (providers, memória, contracts, voz, learning). | ✅ sim |
 | `okami.local.yaml` | Overrides locais (ex.: IP do LMStudio). | ❌ gitignored |
-| `.env` / `~/.okami/.env` | **Segredos** (chaves de API, tokens). | ❌ gitignored |
+| `.env` / `$OKAMI_HOME/.env` (default `~/.okami/.env`) | **Segredos** (chaves de API, tokens). | ❌ gitignored |
 | `okami.policy.yaml` | Postura de conformance autorada. | ✅ sim |
 
 Cada provider tem `model` (string LiteLLM), `api_base` opcional, `api_key_env`/`api_key`, `transport`,

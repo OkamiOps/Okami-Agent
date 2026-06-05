@@ -51,13 +51,32 @@ def test_migrate_stray_moves_into_okami_home(tmp_path, monkeypatch):
     (tmp_path / "skills" / "minha-skill").mkdir(parents=True)
     (tmp_path / "skills" / "minha-skill" / "SKILL.md").write_text("x", encoding="utf-8")
     (tmp_path / "agents" / "okami").mkdir(parents=True)
+    (tmp_path / "agents" / "okami" / "agent.yaml").write_text("id: okami\n", encoding="utf-8")  # marcador
     moved = home.migrate_stray()
     assert set(moved) == {"skills", "agents"}
     assert (tmp_path / ".okami" / "skills" / "minha-skill" / "SKILL.md").exists()
-    assert (tmp_path / ".okami" / "agents" / "okami").exists()
+    assert (tmp_path / ".okami" / "agents" / "okami" / "agent.yaml").exists()
     assert not (tmp_path / "skills").exists() and not (tmp_path / "agents").exists()
     # idempotente: segunda vez não move nada
     assert home.migrate_stray() == []
+    # manifesto auditável do que foi movido
+    import json
+    manifest = json.loads((tmp_path / ".okami" / "migrations.json").read_text(encoding="utf-8"))
+    assert manifest[-1]["moved"] == ["skills", "agents"] or set(manifest[-1]["moved"]) == {"skills", "agents"}
+    assert manifest[-1]["from"] == str(tmp_path)
+
+
+def test_migrate_skips_folders_without_okami_markers(tmp_path, monkeypatch):
+    # P1-leve: NÃO sequestra pasta genérica da home — sem SKILL.md / agent.yaml, deixa quieto.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("OKAMI_HOME", raising=False)
+    (tmp_path / "skills" / "fotos-do-ze").mkdir(parents=True)        # pasta "skills" do usuário, não do Okami
+    (tmp_path / "skills" / "fotos-do-ze" / "foto.png").write_text("x", encoding="utf-8")
+    (tmp_path / "agents" / "imobiliaria").mkdir(parents=True)         # idem: sem agent.yaml
+    assert home.migrate_stray() == []
+    assert (tmp_path / "skills" / "fotos-do-ze" / "foto.png").exists()  # intacta
+    assert (tmp_path / "agents" / "imobiliaria").exists()
+    assert not (tmp_path / ".okami" / "migrations.json").exists()       # nada movido → sem manifesto
 
 
 def test_migrate_skips_when_home_is_a_project(tmp_path, monkeypatch):

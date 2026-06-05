@@ -314,11 +314,11 @@ def config_get(
 def config_set(
     key: str = typer.Argument(..., help="Chave pontilhada (ex.: memory.backend) ou env (ex.: OPENAI_API_KEY)."),
     value: str = typer.Argument(..., help="Valor (true/false/número/lista a,b/json também)."),
-    project: bool = typer.Option(False, "--project", help="Segredo no .env do PROJETO (default = global ~/.okami/.env)."),
+    project: bool = typer.Option(False, "--project", help="Segredo no .env do PROJETO (default = global $OKAMI_HOME/.env, ~/.okami)."),
 ) -> None:
     """Define um valor — auto-roteia: segredo (MAIÚSCULAS) → .env, resto → okami.local.yaml.
 
-    Segredo vai pro .env GLOBAL (~/.okami/.env) por padrão → vale em QUALQUER workspace
+    Segredo vai pro .env GLOBAL ($OKAMI_HOME/.env, default ~/.okami/.env) por padrão → vale em QUALQUER workspace
     (ex.: ELEVENLABS_API_KEY). Use --project p/ gravar só no projeto atual."""
     import yaml as _yaml
     if _is_secret_key(key):

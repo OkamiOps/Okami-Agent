@@ -15,7 +15,7 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-# Segredos GLOBAIS do Okami: ~/.okami/.env (valem em QUALQUER workspace). É aqui que mora um
+# Segredos GLOBAIS do Okami: $OKAMI_HOME/.env (default ~/.okami/.env) — valem em QUALQUER workspace. É aqui que mora um
 # token tipo ELEVENLABS_API_KEY/MIMO_API_KEY — configure uma vez, usa em todo lugar.
 def global_env_path() -> Path:
     """Caminho do .env global ($OKAMI_HOME/.env, default ~/.okami/.env). Fonte única via okami.home."""

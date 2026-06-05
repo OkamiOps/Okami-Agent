@@ -229,7 +229,7 @@ def _to_int(s, default: int) -> int:
 def _set_env_var(key: str, value: str, path: str | None = None) -> None:
     """Grava/atualiza KEY=value no .env — escrita ATÔMICA + 0600 (segredo só p/ o dono).
 
-    path=None → .env GLOBAL (~/.okami/.env): configura uma vez, vale em qualquer workspace."""
+    path=None → .env GLOBAL ($OKAMI_HOME/.env, default ~/.okami/.env): configura uma vez, vale em qualquer workspace."""
     import os
     import tempfile
     from okami.config import global_env_path

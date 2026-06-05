@@ -248,10 +248,11 @@ def doctor(
         from okami.core.maintenance import clean_stale_locks, fix_env_perms, prune_temp
         console.print("\n[bold]--fix[/bold]")
         locks = clean_stale_locks(".")
-        env_fixed = fix_env_perms(global_env_path())
+        env_p = global_env_path()
+        env_fixed = fix_env_perms(env_p)
         rm_t, freed = prune_temp(".")
         console.print(f"  locks órfãos removidos: [bold]{len(locks)}[/bold]")
-        console.print(f"  ~/.okami/.env perms: {'[yellow]corrigido → 0600[/yellow]' if env_fixed else '[green]ok[/green]'}")
+        console.print(f"  {env_p} perms: {'[yellow]corrigido → 0600[/yellow]' if env_fixed else '[green]ok[/green]'}")
         console.print(f"  temporários removidos: [bold]{len(rm_t)}[/bold] [dim]({freed / 1024:.1f} KB)[/dim]")
 
 
