@@ -62,13 +62,23 @@ def events(
 def clean(
     workspace: str = typer.Option(".", "-w", "--workspace"),
     lock_stale: float = typer.Option(300.0, "--lock-stale", help="Idade (s) p/ considerar um .lock órfão."),
+    deep: bool = typer.Option(False, "--deep", help="Também poda sessões arquivadas e checkpoints antigos (quota)."),
+    days: float = typer.Option(30.0, "--days", help="Idade (dias) p/ podar no --deep."),
+    keep: int = typer.Option(10, "--keep", help="Quantas sessões arquivadas manter (as mais recentes)."),
 ) -> None:
-    """Faxina de disco (P2): lock órfão + temporários (.tmp) + áudio temporário (voz/TTS)."""
+    """Faxina de disco (P2): lock órfão + temporários + áudio. `--deep` aplica quota a sessões/checkpoints."""
     from okami.core.maintenance import clean_workspace
     rep = clean_workspace(workspace, lock_stale=lock_stale)
+    extra = ""
+    if deep:
+        from okami.core.maintenance import prune_checkpoints, prune_sessions
+        rs, fs = prune_sessions(workspace, days=days, keep=keep)
+        rc, fc = prune_checkpoints(workspace, days=days, keep=keep * 5)
+        rep["bytes_freed"] += fs + fc
+        extra = f", {len(rs)} sessão(ões) arquivada(s), {len(rc)} checkpoint(s)"
     kb = rep["bytes_freed"] / 1024
     console.print(f"[green]✓ faxina[/green] [dim]({workspace})[/dim]: "
-                  f"{rep['locks_removed']} lock(s), {rep['temp_removed']} temp, {rep['audio_removed']} áudio "
+                  f"{rep['locks_removed']} lock(s), {rep['temp_removed']} temp, {rep['audio_removed']} áudio{extra} "
                   f"[dim]· {kb:.1f} KB liberados[/dim]")
 
 

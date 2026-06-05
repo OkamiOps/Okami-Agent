@@ -77,6 +77,46 @@ def prune_audio(root) -> tuple[list[str], int]:
     return removed, freed
 
 
+def prune_by_age_and_count(directory, *, pattern: str = "*", days: float = 30.0,
+                           keep: int = 20, exclude=()) -> tuple[list[str], int]:
+    """Poda arquivos: MANTÉM os `keep` mais recentes; remove o resto que for mais velho que `days`.
+    Devolve (removidos, bytes). `exclude` protege nomes (ex.: journal.jsonl)."""
+    d = Path(directory)
+    if not d.exists():
+        return [], 0
+    files = sorted((f for f in d.glob(pattern) if f.is_file() and f.name not in set(exclude)),
+                   key=lambda f: f.stat().st_mtime, reverse=True)
+    cutoff = time.time() - days * 86400
+    removed, freed = [], 0
+    for f in files[keep:]:                          # além dos `keep` mais novos
+        try:
+            if f.stat().st_mtime < cutoff:
+                sz = f.stat().st_size
+                f.unlink()
+                removed.append(str(f))
+                freed += sz
+        except OSError:
+            pass
+    return removed, freed
+
+
+def prune_sessions(root, *, days: float = 30.0, keep: int = 10) -> tuple[list[str], int]:
+    """Poda transcripts ARQUIVADOS (`*.reset.jsonl`) de sessions/groups — quota por idade+contagem."""
+    removed, freed = [], 0
+    for sub in ("sessions", "groups"):
+        r, fr = prune_by_age_and_count(Path(root) / ".okami" / sub,
+                                       pattern="*.reset.jsonl", days=days, keep=keep)
+        removed += r
+        freed += fr
+    return removed, freed
+
+
+def prune_checkpoints(root, *, days: float = 14.0, keep: int = 50) -> tuple[list[str], int]:
+    """Poda snapshots antigos de checkpoints — MANTÉM o journal.jsonl (rollback) sempre."""
+    return prune_by_age_and_count(Path(root) / ".okami" / "checkpoints",
+                                  days=days, keep=keep, exclude={"journal.jsonl"})
+
+
 def clean_workspace(root, *, lock_stale: float = 300.0) -> dict:
     """Faxina padrão (conservadora) — devolve um relatório com contagens e bytes liberados."""
     locks = clean_stale_locks(root, stale=lock_stale)
