@@ -42,7 +42,6 @@ def gateway(
     use -f p/ rodar em primeiro plano, --stop p/ parar, --status p/ checar."""
     import os
     import subprocess
-    import sys
 
     pidfile, logfile = _gateway_files()
     running_pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text().strip().isdigit() else None

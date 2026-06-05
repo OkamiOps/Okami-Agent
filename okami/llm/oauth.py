@@ -20,7 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 STORE_DIR = Path.home() / ".okami" / "credentials"
 

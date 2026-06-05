@@ -85,7 +85,8 @@ def test_distill_skips_trivial_or_failed():
     assert learning.distill_skill(_done_task("oi", ["write_file", "task_complete"])) is None   # poucos passos
     one = _done_task("x", ["write_file", "write_file", "write_file", "write_file"])
     assert learning.distill_skill(one) is None                      # 1 tool só (sem variedade)
-    failed = _done_task("y", ["a", "b", "c", "d"]); failed.state = TaskState.FAILED
+    failed = _done_task("y", ["a", "b", "c", "d"])
+    failed.state = TaskState.FAILED
     assert learning.distill_skill(failed) is None
 
 

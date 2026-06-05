@@ -13,7 +13,7 @@ import json
 import re
 from pathlib import Path
 
-from okami.core import Step, Task, TaskState
+from okami.core import Task, TaskState
 from okami.memory.base import MemoryItem
 
 _TUNING = ".okami/tuning.json"

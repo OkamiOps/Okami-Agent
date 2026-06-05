@@ -1,0 +1,31 @@
+name: CodeQL
+
+# Análise estática de segurança (P1.5 — "depois CodeQL/Semgrep"). Roda em push/PR na main e semanal.
+# Requer code scanning habilitado no repo (grátis em repo público; privado precisa de GHAS).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "37 4 * * 1"   # toda segunda 04:37 UTC
+
+permissions:
+  contents: read
+  security-events: write   # publica os alertas no painel de Security
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1 (pin por SHA)
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2 (pin por SHA)
+        with:
+          languages: python
+          queries: security-and-quality
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2 (pin por SHA)
+        with:
+          category: "/language:python"

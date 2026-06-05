@@ -281,7 +281,8 @@ def check_exit(criteria: list[dict], ctx: ToolContext) -> tuple[bool, list[str]]
                 missing.append(f"arquivo '{c['path']}' não existe")
         elif t == "shell_ok":
             try:
-                r = subprocess.run(
+                # hook é comando do OPERADOR (config confiável), não input do modelo → shell=True ok.
+                r = subprocess.run(  # nosec B602
                     c["cmd"], shell=True, cwd=str(ctx.workspace),
                     capture_output=True, text=True, timeout=120, env=sanitized_env(),
                 )

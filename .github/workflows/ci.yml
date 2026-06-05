@@ -49,8 +49,7 @@ jobs:
           fi
           echo "sem segredos versionados ✓"
 
-  # Hardening de supply-chain (P2). Informativo por enquanto (|| true) — vira gate quando triado.
-  # TODO: pinar as actions por SHA (não por @v4/@v5) e gerar SBOM/assinatura no release.
+  # Hardening de supply-chain (P1.5): agora é GATE (sem `|| true`). Falha a CI se houver problema.
   security:
     runs-on: ubuntu-latest
     steps:
@@ -59,12 +58,14 @@ jobs:
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5 (pin por SHA)
         with:
           enable-cache: true
-      - name: Ruff — estilo + regras de segurança (informativo)
-        run: uvx ruff check okami tests || true
-      - name: Bandit — segurança Python (informativo)
-        run: uvx bandit -r okami -ll || true
-      - name: pip-audit — CVEs de dependência / OSV (informativo)
+      - name: Ruff — estilo + regras de segurança (GATE)
+        run: uvx ruff check okami tests
+      - name: Bandit — HIGH severity é GATE (use `# nosec <ID>` justificado p/ exceções)
+        run: uvx bandit -r okami --severity-level high --confidence-level medium -q
+      - name: Bandit — relatório MEDIUM+ (informativo, não bloqueia)
+        run: uvx bandit -r okami --severity-level medium -q || true
+      - name: pip-audit — CVE high/critical é GATE
         run: |
-          uv export --frozen --no-dev -o /tmp/reqs.txt 2>/dev/null \
-            || uv export --frozen -o /tmp/reqs.txt 2>/dev/null || : > /tmp/reqs.txt
-          uvx pip-audit -r /tmp/reqs.txt || true
+          # --no-hashes: o pacote editável (-e .) não pode exigir hash; pip-audit pula o self-package.
+          uv export --frozen --no-dev --no-hashes -o /tmp/reqs.txt
+          uvx pip-audit -r /tmp/reqs.txt

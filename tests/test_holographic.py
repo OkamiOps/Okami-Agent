@@ -13,7 +13,8 @@ def test_encode_similarity_lexical():
     a = enc.encode("deploy do frontend com Vercel")
     b = enc.encode("o frontend usa Vercel no deploy")   # tokens compartilhados → similar
     c = enc.encode("banco de dados Postgres e migrations")
-    cos = lambda x, y: float(np.dot(x, y))  # já normalizados
+    def cos(x, y):  # já normalizados
+        return float(np.dot(x, y))
     assert cos(a, b) > cos(a, c)
 
 

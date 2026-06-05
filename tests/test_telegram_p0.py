@@ -14,7 +14,8 @@ def test_split_no_data_loss():
     t = "\n".join(f"linha {i} " + "x" * 60 for i in range(200))   # bem > 4096
     chunks = _split_message(t, 4000)
     assert len(chunks) > 1 and all(len(c) <= 4000 for c in chunks)
-    squash = lambda s: s.replace(" ", "").replace("\n", "")
+    def squash(s):
+        return s.replace(" ", "").replace("\n", "")
     assert "".join(squash(c) for c in chunks) == squash(t)        # nada perdido
 
 

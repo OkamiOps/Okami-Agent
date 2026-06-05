@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from okami.gateway.checkpoints import Checkpoints
-from okami.core import Budget, Harness, Task, TaskState
+from okami.core import Budget, Harness, Task
 from okami.core.tools import ToolContext, WriteFile
 
 import json

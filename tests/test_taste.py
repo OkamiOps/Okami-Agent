@@ -59,7 +59,7 @@ def test_cap_prevents_unbounded_growth():
 
 
 def test_persistence_roundtrip(tmp_path):
-    prof = record_feedback(tmp_path, "like", "shadcn minimal", ["shadcn", "minimal"])
+    record_feedback(tmp_path, "like", "shadcn minimal", ["shadcn", "minimal"])
     prof2 = TasteProfile.load(tmp_path)
     assert len(prof2.attractors) == 1 and "shadcn" in prof2.attractors[0].tags
     assert prof2.score(["shadcn", "minimal"], "") > 0          # sobrevive ao reload
@@ -78,6 +78,5 @@ def test_promote_strong_taste_to_voice(tmp_path):
     voice = (tmp_path / "VOICE.md").read_text(encoding="utf-8")
     assert "shadcn" in voice and "design" in voice.lower()
     # não re-promove o mesmo termo
-    n_before = voice.count("shadcn")
     record_feedback(tmp_path, "like", "shadcn extra")
     assert (tmp_path / "VOICE.md").read_text(encoding="utf-8").count("Em design, prefira 'shadcn'") == 1

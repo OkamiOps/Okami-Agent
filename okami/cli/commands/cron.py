@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import typer
 from rich.table import Table
-from okami.llm import providers as prov
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (

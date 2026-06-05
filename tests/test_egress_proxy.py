@@ -7,7 +7,6 @@ import socketserver
 import threading
 import time
 
-import pytest
 
 from okami.core import egress_proxy
 from okami.core.egress_proxy import EgressProxy, _match

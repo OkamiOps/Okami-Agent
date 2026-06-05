@@ -213,7 +213,8 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                 proxy = EgressProxy(policy.egress_allow)
                 proxy.start()
                 env = {**env, **proxy.proxy_env()}  # curl/pip/npm/requests passam pelo filtro
-            r = subprocess.run(
+            # shell=True é o PROPÓSITO do sandbox local (rodar o comando); a defesa é o backend docker, não evitar shell.
+            r = subprocess.run(  # nosec B602
                 cmd, shell=True, cwd=str(workspace), capture_output=True, text=True,
                 timeout=policy.timeout, env=env, preexec_fn=_rlimit_preexec(policy),
             )

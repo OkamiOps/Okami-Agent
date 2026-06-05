@@ -44,7 +44,8 @@ def test_vision_capability_default_false():
 def test_distill_skill_llm_falls_back_when_no_cfg():
     from okami.core import Step, Task, TaskState
     from okami import learning
-    t = Task(goal="x"); t.state = TaskState.COMPLETE
+    t = Task(goal="x")
+    t.state = TaskState.COMPLETE
     t.steps = [Step(i, tl, {}, "", True) for i, tl in enumerate(["a", "b", "c", "d"])]
     assert learning.distill_skill_llm(None, t) is None         # sem cfg → None (cai no determinístico)
 
@@ -73,7 +74,8 @@ def test_acp_initialize_and_prompt_roundtrip():
     out = io.BytesIO()
 
     def fake_run_task(cfg, ws, goal):
-        t = Task(goal=goal); t.state, t.result = TaskState.COMPLETE, f"feito: {goal}"
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, f"feito: {goal}"
         return t
 
     run_acp(None, ".", fake_run_task, stdin=inp, stdout=out)
@@ -105,11 +107,12 @@ def test_imagegen_two_flows(monkeypatch, tmp_path):
     monkeypatch.setattr(ig.urllib.request, "urlopen", fake_urlopen)
 
     # fluxo SEM referência → generations (JSON)
-    out1 = ig.generate_image("um gato", str(tmp_path / "a.png"))
+    ig.generate_image("um gato", str(tmp_path / "a.png"))
     assert calls["url"].endswith("/images/generations") and "json" in calls["ctype"]
     assert (tmp_path / "a.png").exists()
 
     # fluxo COM referência → edits (multipart)
-    ref = tmp_path / "foto.png"; ref.write_bytes(b"\x89PNG")
+    ref = tmp_path / "foto.png"
+    ref.write_bytes(b"\x89PNG")
     ig.generate_image("vire um infográfico", str(tmp_path / "b.png"), references=[str(ref)])
     assert calls["url"].endswith("/images/edits") and "multipart/form-data" in calls["ctype"]

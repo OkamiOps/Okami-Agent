@@ -6,7 +6,7 @@ Adicionar comando = uma linha aqui + um handler no gateway. Aliases, categoria e
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

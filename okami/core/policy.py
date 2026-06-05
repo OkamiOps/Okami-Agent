@@ -12,7 +12,7 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path
 
-from okami.core.lint import Finding, _looks_real_secret, _scan_secret_literals, lint_posture
+from okami.core.lint import Finding, lint_posture
 
 # Baseline segura: o que vale quando não há okami.policy.yaml autorado.
 DEFAULT_POLICY: dict = {

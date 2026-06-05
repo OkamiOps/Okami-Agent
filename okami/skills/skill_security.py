@@ -81,7 +81,7 @@ _NET_CALL = re.compile(r"(curl|wget|fetch\s*\(|requests\.(get|post|put)|urllib|a
 _SECRET_REF = re.compile(r"(\.ssh/|id_rsa|\.aws/cred|\.codex/auth|\.claude/\.cred|\.okami/cred|\benv\b|secret|token|password|api[_\s-]?key)", re.IGNORECASE)
 # Unicode oculto: zero-width, BOM e overrides bidirecionais (Trojan Source) usados para
 # esconder prompt injection da revisão humana.
-_HIDDEN_UNICODE = re.compile("[​-‏‪-‮⁠⁦-⁩﻿]")
+_HIDDEN_UNICODE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
 # Binários/executáveis empacotados (não dá para escanear o conteúdo).
 _EXEC_EXT = {".exe", ".dll", ".so", ".dylib", ".bin", ".msi", ".scr", ".com", ".bat",
              ".cmd", ".app", ".o", ".a", ".node", ".wasm"}

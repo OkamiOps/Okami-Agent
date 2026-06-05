@@ -29,7 +29,6 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     Ctrl-C cancela o turno (NÃO sai), Ctrl-D sai. Sem prompt_toolkit → cai no REPL simples (bloqueante),
     pra nunca quebrar o básico. O ponto-chave é o `patch_stdout`: o progresso ao vivo do agente não
     corrompe a linha que você está digitando (o que faz o terminal sentir 'perfeito')."""
-    import sys
     if not sys.stdin.isatty():            # pipe/CI/sem terminal → REPL simples (prompt_toolkit travaria no /dev/tty)
         _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
         return
@@ -196,10 +195,9 @@ def chat(
         return
 
     # --- parâmetros de exibição (TUI e REPL compartilham) ---------------------
-    import sys
     from datetime import datetime
 
-    from okami import __version__, tui
+    from okami import tui
     from okami import skills as skillmod
     from okami.core.tools import default_registry
     from okami.llm.providers import context_window_tokens

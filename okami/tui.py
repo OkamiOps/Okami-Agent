@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rich.align import Align
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -301,7 +300,7 @@ def event_line(e: dict) -> Text | None:
     k = e.get("kind")
     if k == "step":
         prev = _args_preview(e.get("args") or {})
-        mark = f"[{CYAN}]✓[/]" if e.get("ok") else f"[red]✗[/]"
+        mark = f"[{CYAN}]✓[/]" if e.get("ok") else "[red]✗[/]"
         t = Text.from_markup(f"  {mark} [{SOFT}]{e['tool']}[/]" + (f" [{MUTE}]{prev}[/]" if prev else ""))
         return t
     if k == "approval_request":
