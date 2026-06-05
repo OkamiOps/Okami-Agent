@@ -14,24 +14,46 @@ from okami.core.tool_registry import spec
 # (process_start/run_shell já caem pelo teto 'dangerous', mas listamos explícito p/ clareza + cobrir
 #  process_write/signal/kill, que são 'sensitive' e passariam pelo teto.)
 _REMOTE_DENY = {"run_shell", "process_start", "process_write", "process_signal", "process_kill", "spawn"}
+# Worker (Paperclip): EXECUTA (run_shell/process_start sob sandbox+defer), mas não GERENCIA processo
+# de terceiro nem recursiona (process_write/signal/kill, spawn fora). #P1.
+_WORKER_DENY = {"process_write", "process_signal", "process_kill", "spawn"}
 
 # Negações default por superfície. cli = máquina do dono → surface completa.
 _DENY_BY_SURFACE: dict[str, set[str]] = {
     "cli": set(),
     "telegram": set(_REMOTE_DENY),                   # remoto: nada de shell/processo/spawn por padrão
     "group": _REMOTE_DENY | {"generate_image"},      # grupo: mais restrito ainda
-    "paperclip": set(),                              # governado pelo approval (defer)
     "subagent": {"spawn"},                           # subagente não spawna (anti-recursão explosiva)
     "api": set(_REMOTE_DENY),
     "cron": set(),
     "slack": set(_REMOTE_DENY),                      # #P1: canal REST remoto ≠ CLI local
     "discord": set(_REMOTE_DENY),
     "mattermost": set(_REMOTE_DENY),
+    # Paperclip POR PAPEL (#P1): antes 'paperclip' era surface COMPLETA (porta larga). Agora o default
+    # já é o worker (executa, mas não gerencia processo/recursiona), e cada papel tem repertório próprio.
+    "paperclip": set(_WORKER_DENY),                  # default = worker
+    "paperclip-worker": set(_WORKER_DENY),           # executa sob sandbox + governança defer
+    "paperclip-manager": set(_REMOTE_DENY),          # control plane: orquestra, NÃO executa shell/processo
+    "paperclip-reviewer": _REMOTE_DENY | {"write_file", "edit_file"},  # revisa/lê, não executa nem escreve
+    "paperclip-external": set(_REMOTE_DENY),         # externo não-confiável: nada perigoso (+ cap safe abaixo)
 }
 # Teto de sensibilidade por superfície (defesa extra): remoto não roda 'dangerous' sem opt-in.
 _MAX_DANGER: dict[str, str] = {"telegram": "sensitive", "group": "safe", "api": "sensitive",
-                               "slack": "sensitive", "discord": "sensitive", "mattermost": "sensitive"}
+                               "slack": "sensitive", "discord": "sensitive", "mattermost": "sensitive",
+                               "paperclip-manager": "sensitive", "paperclip-reviewer": "safe",
+                               "paperclip-external": "safe"}
 _DANGER_RANK = {"safe": 0, "sensitive": 1, "dangerous": 2}
+
+# Papel do Paperclip (me['role'] do control plane) → superfície. Default = worker (papel desconhecido).
+_PAPERCLIP_ROLE_SURFACE = {"worker": "paperclip-worker", "manager": "paperclip-manager",
+                           "reviewer": "paperclip-reviewer", "external": "paperclip-external",
+                           "admin": "paperclip-manager", "orchestrator": "paperclip-manager"}
+
+
+def paperclip_surface(role) -> str:
+    """Papel do Paperclip → superfície de tool policy (#P1). Papel desconhecido → 'paperclip' (worker)."""
+    return _PAPERCLIP_ROLE_SURFACE.get(str(role or "").lower().strip(), "paperclip")
+
 
 # nome do canal (channel.name) → superfície. Mais confiável que o nome da CLASSE.
 _NAME_TO_SURFACE = {"telegram": "telegram", "telegram-group": "group", "slack": "slack",

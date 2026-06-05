@@ -76,3 +76,45 @@ def test_remote_rest_channels_deny_shell_and_process():
         for t in ("run_shell", "process_start", "process_write", "process_signal", "process_kill", "spawn"):
             assert t not in reg, f"{cname} NÃO pode ter {t} (canal remoto)"
         assert "read_file" in reg and "respond" in reg and "task_complete" in reg   # mantém o seguro
+
+
+# ---------------- Paperclip por papel (#P1) ----------------
+
+def test_paperclip_role_maps_to_surface():
+    from okami.core.tool_policy import paperclip_surface
+    assert paperclip_surface("worker") == "paperclip-worker"
+    assert paperclip_surface("manager") == "paperclip-manager"
+    assert paperclip_surface("reviewer") == "paperclip-reviewer"
+    assert paperclip_surface("external") == "paperclip-external"
+    assert paperclip_surface("admin") == "paperclip-manager"
+    assert paperclip_surface("dev") == "paperclip"            # desconhecido → worker (default)
+    assert paperclip_surface(None) == "paperclip"
+
+
+def test_paperclip_default_is_worker_not_full_surface():
+    # #P1: antes 'paperclip' era surface COMPLETA; agora default = worker (sem gestão de processo/spawn)
+    reg = filter_registry(default_registry(), "paperclip")
+    assert "run_shell" in reg and "process_start" in reg     # worker EXECUTA (sob sandbox + defer)
+    for t in ("process_write", "process_signal", "process_kill", "spawn"):
+        assert t not in reg, t                               # mas não gerencia processo nem recursiona
+
+
+def test_paperclip_manager_no_execution():
+    reg = filter_registry(default_registry(), "paperclip-manager")
+    for t in ("run_shell", "process_start", "process_write", "process_kill", "spawn"):
+        assert t not in reg, t                               # control plane: orquestra, não executa
+    assert "read_file" in reg and "respond" in reg
+
+
+def test_paperclip_reviewer_reads_does_not_write_or_execute():
+    reg = filter_registry(default_registry(), "paperclip-reviewer")
+    for t in ("run_shell", "process_start", "write_file", "edit_file", "spawn"):
+        assert t not in reg, t
+    assert "read_file" in reg and "recall_memory" in reg and "respond" in reg
+
+
+def test_paperclip_external_denies_everything_dangerous():
+    reg = filter_registry(default_registry(), "paperclip-external")
+    for t in ("run_shell", "process_start", "spawn", "write_file", "edit_file", "browse"):
+        assert t not in reg, t                               # cap 'safe' + remote deny → só leitura/resposta
+    assert "read_file" in reg and "respond" in reg

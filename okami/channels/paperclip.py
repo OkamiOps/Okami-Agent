@@ -183,7 +183,9 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
     agent_id = me.get("id") or env.get("PAPERCLIP_AGENT_ID")
     company_id = (me.get("companyId") or (me.get("company") or {}).get("id")
                   or env.get("PAPERCLIP_COMPANY_ID"))
-    emit(f"sou {agent_id} @ {company_id} · papel={me.get('role')} · budget={me.get('budget')}")
+    from okami.core.tool_policy import paperclip_surface
+    surface = paperclip_surface(me.get("role"))      # #P1: papel → repertório de tools (worker/manager/…)
+    emit(f"sou {agent_id} @ {company_id} · papel={me.get('role')} (surface={surface}) · budget={me.get('budget')}")
 
     issues = client.list_issues(company_id, agent_id)
     issue = _pick_issue(issues, env.get("PAPERCLIP_TASK_ID"))
@@ -218,7 +220,7 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
         return False
 
     task = run_task(cfg, workspace, goal, approve=approve, extra_context=_ctx_block(issue, ctx),
-                    surface="paperclip", emit=emit)
+                    surface=surface, emit=emit)               # #P1: surface por papel (não mais 'paperclip' fixo)
 
     if pending and task.state != TaskState.COMPLETE:
         comment = ("Aguardando confirmação humana p/ ações sensíveis:\n- "

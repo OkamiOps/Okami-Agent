@@ -83,6 +83,30 @@ def test_heartbeat_no_actionable_issue():
     assert res.status == "none" and cli.patches == []
 
 
+def _runner_capturing(captured):
+    def runner(cfg, ws, goal, *, approve=None, extra_context="", emit=lambda m: None, surface="cli", **kw):
+        captured["surface"] = surface
+        t = Task(goal=goal)
+        t.state = TaskState.COMPLETE
+        return t
+    return runner
+
+
+def test_heartbeat_passes_role_based_surface():
+    """#P1: o papel do Paperclip (me['role']) vira a superfície de tool policy do run_task."""
+    cap = {}
+    cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}],
+                        me={"id": "a1", "companyId": "c1", "role": "manager"})
+    run_heartbeat(None, ".", run_task=_runner_capturing(cap), client=cli, env={})
+    assert cap["surface"] == "paperclip-manager"             # manager → surface sem execução
+
+    cap2 = {}
+    cli2 = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}],
+                         me={"id": "a1", "companyId": "c1", "role": "dev"})   # papel desconhecido
+    run_heartbeat(None, ".", run_task=_runner_capturing(cap2), client=cli2, env={})
+    assert cap2["surface"] == "paperclip"                    # default = worker
+
+
 def test_heartbeat_blocked_marks_blocked_with_reason():
     cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "in_progress"}])
     res = run_heartbeat(None, ".", run_task=make_runner(TaskState.BLOCKED, reason="faltou credencial"),
