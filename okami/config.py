@@ -179,12 +179,13 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def load_raw(path: Path | None = None) -> tuple[dict, Path]:
     """Lê o okami.yaml + merge do okami.local.yaml. Retorna (raw, caminho)."""
+    from okami.core.safe_io import read_yaml_resilient
     cfg_path = path or find_config()
-    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    raw = read_yaml_resilient(cfg_path, default={})          # recovery se a config base corromper (P1.2)
     for local_name in ("okami.local.yaml", "okami.local.yml"):
         local = cfg_path.parent / local_name
         if local.exists():
-            raw = _deep_merge(raw, yaml.safe_load(local.read_text(encoding="utf-8")) or {})
+            raw = _deep_merge(raw, read_yaml_resilient(local, default={}))
             break
     return raw, cfg_path
 

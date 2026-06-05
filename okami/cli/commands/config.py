@@ -205,7 +205,8 @@ def config_set(
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
     coerced = _coerce(value)
     _dotted_set(data, key, coerced)
-    p.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    from okami.core.safe_io import secure_write_yaml
+    secure_write_yaml(p, data)              # atômico + backup + .last-good (P1.2)
     console.print(f"[green]✓ {key}[/green] = {coerced!r} [dim]→ okami.local.yaml[/dim]")
 
 
@@ -216,7 +217,8 @@ def config_unset(key: str = typer.Argument(..., help="Chave pontilhada a remover
     p = Path("okami.local.yaml")
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
     if _dotted_del(data, key):
-        p.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        from okami.core.safe_io import secure_write_yaml
+        secure_write_yaml(p, data)         # atômico + backup + .last-good (P1.2)
         console.print(f"[green]✓ removido:[/green] {key}")
     else:
         console.print(f"[yellow]não estava nos overrides:[/yellow] {key}")

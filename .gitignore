@@ -22,3 +22,8 @@ okami.local.yaml
 
 # macOS
 .DS_Store
+
+# backups do secure_write (P1.2)
+*.bak[0-9]
+*.bak[0-9][0-9]
+*.last-good

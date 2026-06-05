@@ -58,7 +58,8 @@ def _persist_always_allow(category: str) -> None:
     allow = appr.setdefault("always_allow", [])
     if category not in allow:
         allow.append(category)
-    p.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    from okami.core.safe_io import secure_write_yaml
+    secure_write_yaml(p, data)              # atômico + backup + .last-good (P1.2)
 
 
 def _build_approver(cfg, yolo: bool = False, mode: str | None = None):
@@ -448,12 +449,11 @@ def _resolve_agent(agent: str | None, workspace: str):
 
 
 def _write_local(update: dict) -> None:
-    """Mescla chaves no okami.local.yaml (override não-destrutivo do okami.yaml)."""
-    import yaml as _yaml
+    """Mescla chaves no okami.local.yaml (override não-destrutivo do okami.yaml) — escrita durável."""
+    from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
     p = Path("okami.local.yaml")
-    data = _yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
-    data = data or {}
+    data = read_yaml_resilient(p, default={})       # recupera de backup se o atual estiver corrompido
     data.update(update)
-    p.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    secure_write_yaml(p, data)                       # atômico + backup rotacionado + .last-good (P1.2)
 
 
