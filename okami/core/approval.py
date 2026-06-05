@@ -40,7 +40,7 @@ class Sensitive:
 
 def classify(tool: str, args: dict) -> Sensitive | None:
     """None se não-sensível; senão (razão, categoria, risco)."""
-    if tool == "write_file":
+    if tool in ("write_file", "edit_file"):              # edit_file também escreve → mesma trava
         path = str(args.get("path", "")).replace("\\", "/")
         for rx, cat, risk in _FILE_RULES:
             if rx.search(path):

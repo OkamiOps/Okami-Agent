@@ -148,7 +148,7 @@ def hero(cols: int = 50):
 
 # Buckets p/ agrupar as tools por domínio (como o "Available Tools" do Hermes).
 _TOOL_BUCKETS = [
-    ("arquivos", ["read_file", "write_file", "list_dir"]),
+    ("arquivos", ["read_file", "write_file", "edit_file", "list_dir"]),
     ("shell", ["run_shell"]),
     ("memória", ["remember", "recall_memory", "remember_user"]),
     ("skills", ["use_skill"]),

@@ -113,6 +113,49 @@ class WriteFile(Tool):
         return ToolResult(True, f"escrito {rel} ({len(content)} chars)", effect=True)
 
 
+class EditFile(Tool):
+    name = "edit_file"
+    description = ("Edita um arquivo por substituição EXATA de trecho (old→new) — sem reescrever tudo. "
+                   "'old' precisa casar literalmente (espaços/indentação) e ser ÚNICO, ou use replace_all.")
+    args_schema = {"path": "caminho relativo", "old": "trecho exato a trocar (literal)",
+                   "new": "novo trecho", "replace_all": "(opcional) trocar todas as ocorrências"}
+    required = ("path", "old")
+
+    def run(self, args, ctx):
+        rel = args["path"]
+        old = args.get("old", "")
+        new = args.get("new", "")
+        replace_all = bool(args.get("replace_all", False))
+        try:
+            p = _safe_path(ctx, rel)
+        except ValueError as e:
+            return ToolResult(False, str(e))
+        if not old:
+            return ToolResult(False, "edit_file exige 'old' (trecho a substituir) não-vazio.")
+        if not p.exists():
+            return ToolResult(False, f"'{rel}' não existe — use write_file para criar.")
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(False, f"erro ao ler {rel}: {e}")
+        count = text.count(old)
+        if count == 0:
+            return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços).")
+        if count > 1 and not replace_all:
+            return ToolResult(False, f"'old' aparece {count}× em {rel} — torne-o único (mais contexto) "
+                                     "ou passe replace_all=true.")
+        if ctx.checkpoints is not None:                # snapshot antes (rede de segurança / rollback)
+            try:
+                ctx.checkpoints.snapshot(rel)
+            except Exception:  # noqa: BLE001
+                pass
+        new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        p.write_text(new_text, encoding="utf-8", newline="\n")
+        ctx.read_files.add(rel)
+        n = count if replace_all else 1
+        return ToolResult(True, f"editado {rel} ({n} substituiç{'ões' if n > 1 else 'ão'})", effect=True)
+
+
 class ListDir(Tool):
     name = "list_dir"
     description = "Lista arquivos/pastas de um diretório do workspace."
@@ -315,7 +358,7 @@ class NeedInput(Tool):
 
 
 def default_registry() -> dict[str, Tool]:
-    tools = [Respond(), ReadFile(), WriteFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
+    tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
              RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(), FinishSetup(),
              TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

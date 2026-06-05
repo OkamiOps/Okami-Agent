@@ -178,6 +178,11 @@ descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo execu
 Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."""
 
 
+# Teto do resultado de tool QUE VAI PRO CONTEXTO do modelo (chars). Output maior é truncado no
+# contexto e persistido inteiro em .okami/tool_outputs/ (o registro/transcrição guardam o completo).
+_TOOL_RESULT_BUDGET = 12_000
+
+
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
     status = "ok" if res.ok else "ERRO"
     return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{res.output}"
@@ -305,6 +310,40 @@ class Harness:
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
 
+    # --- audit + budget de resultado de tool (Sprint 2) ---------------------
+    def _audit(self, **fields) -> None:
+        """Trilha append-only de TODA tool + decisão de aprovação (.okami/audit.jsonl). Best-effort."""
+        try:
+            import time as _t
+            d = self.ctx.workspace / ".okami"
+            d.mkdir(parents=True, exist_ok=True)
+            with (d / "audit.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": _t.time(), **fields}, ensure_ascii=False, default=str) + "\n")
+        except Exception:  # noqa: BLE001 — auditoria nunca derruba o turno
+            pass
+
+    @staticmethod
+    def _args_brief(args: dict) -> str:
+        """Resumo curto e NÃO-sensível dos args p/ o audit (path/cmd/query — nunca o content inteiro)."""
+        if not isinstance(args, dict):
+            return ""
+        for k in ("path", "cmd", "query", "url", "name", "goal"):
+            v = args.get(k)
+            if isinstance(v, str) and v:
+                return f"{k}={v[:120]}"
+        return ""
+
+    def _persist_large_output(self, step_n: int, text: str) -> str:
+        """Output grande → .okami/tool_outputs/step_<n>.txt; devolve o caminho relativo p/ referência."""
+        try:
+            d = self.ctx.workspace / ".okami" / "tool_outputs"
+            d.mkdir(parents=True, exist_ok=True)
+            p = d / f"step_{step_n}.txt"
+            p.write_text(text, encoding="utf-8")
+            return str(p.relative_to(self.ctx.workspace))
+        except Exception:  # noqa: BLE001
+            return "(falha ao persistir)"
+
     @staticmethod
     def _fingerprint(action: Action) -> str:
         return f"{action.tool}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
@@ -418,7 +457,11 @@ class Harness:
                 self._emit("approval_request", tool=action.tool, reason=sens.reason, category=sens.category)
                 req = {"tool": action.tool, "args": action.args, "reason": sens.reason,
                        "category": sens.category, "risk": sens.risk}
-                if not self.approve(req):
+                approved = self.approve(req)
+                self._audit(event="approval", tool=action.tool, category=sens.category,
+                            risk=sens.risk, args=self._args_brief(action.args),
+                            decision="allow" if approved else "deny")
+                if not approved:
                     self._stats["denials"] += 1
                     self._fingerprints.append(fp)
                     step_n += 1
@@ -449,6 +492,8 @@ class Harness:
             step_n += 1
             t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
             self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect)
+            self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
+                        ok=res.ok, effect=res.effect, out_chars=len(res.output))
             if self.hooks is not None:
                 self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
 
@@ -470,7 +515,13 @@ class Harness:
                     "concreta (escreva/rode algo) ou declare task_blocked."})
                 self._steps_without_effect = 0
 
-            self.messages.append({"role": "user", "content": format_observation(step_n, action.tool, res)})
+            obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
+            if len(res.output) > _TOOL_RESULT_BUDGET:
+                saved = self._persist_large_output(step_n, res.output)
+                obs_res = ToolResult(res.ok, res.output[:_TOOL_RESULT_BUDGET]
+                                     + f"\n\n[… truncado: {len(res.output)} chars no total; "
+                                       f"completo em {saved} (use read_file p/ ver mais) …]", res.effect)
+            self.messages.append({"role": "user", "content": format_observation(step_n, action.tool, obs_res)})
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
 
