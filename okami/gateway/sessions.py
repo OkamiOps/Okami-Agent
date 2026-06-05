@@ -18,36 +18,67 @@ import time
 from pathlib import Path
 
 class _FileLock:
-    """Lock cross-platform por arquivo (.lock atômico O_EXCL) — concorrência multi-processo.
-    Best-effort: se não conseguir em `timeout`s segue mesmo assim (não trava o agente); limpa lock velho."""
+    """Lock cross-platform por arquivo (.lock atômico O_EXCL) — concorrência multi-processo (P0.5).
+
+    O lock guarda o DONO (pid + criação). Rouba o lock só se o dono MORREU (os.kill(pid,0)) ou se está
+    velho demais. Ao soltar, só remove o lock que EU criei (não atropela o de outro). Se não conseguir
+    em `timeout`s, segue mesmo assim — mas AVISA no log (não é mais silencioso)."""
 
     def __init__(self, target: Path, timeout: float = 10.0, stale: float = 60.0):
         self.lock = Path(str(target) + ".lock")
         self.timeout, self.stale = timeout, stale
+        self.acquired = False
+
+    def _owner_alive(self) -> bool:
+        try:
+            info = json.loads(self.lock.read_text(encoding="utf-8"))
+            pid = int(info.get("pid", 0))
+        except Exception:  # noqa: BLE001 — lock recém-criado/meio-escrito (janela entre create e write):
+            return True     # assume VIVO p/ NÃO roubar (evita corrida); `age > stale` ainda reclama o real-órfão
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)                               # processo vivo? (POSIX; ProcessLookupError se morto)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True                                  # sem permissão p/ sinalizar → existe (conservador)
+
+    def _age(self) -> float:
+        try:
+            return time.time() - self.lock.stat().st_mtime
+        except OSError:
+            return 0.0
 
     def __enter__(self):
         start = time.time()
         while True:
             try:
                 fd = os.open(str(self.lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, json.dumps({"pid": os.getpid(), "created": time.time()}).encode("utf-8"))
                 os.close(fd)
+                self.acquired = True
                 return self
             except FileExistsError:
-                try:
-                    if time.time() - self.lock.stat().st_mtime > self.stale:
-                        self.lock.unlink()                # lock órfão de processo morto → remove
-                        continue
-                except OSError:
-                    pass
+                if not self._owner_alive() or self._age() > self.stale:   # dono morto OU velho → rouba
+                    try:
+                        self.lock.unlink()
+                    except OSError:
+                        pass
+                    continue
                 if time.time() - start > self.timeout:
-                    return self                           # desiste e segue (best-effort)
+                    from okami.log import warn
+                    warn(f"session lock ocupado >{self.timeout:.0f}s ({self.lock.name}) — seguindo sem lock")
+                    return self                          # best-effort, mas agora REGISTRA
                 time.sleep(0.03)
 
     def __exit__(self, *exc):
-        try:
-            self.lock.unlink()
-        except OSError:
-            pass
+        if self.acquired:                                # só removo o lock que EU criei
+            try:
+                self.lock.unlink()
+            except OSError:
+                pass
 
 
 class TranscriptStore:
@@ -113,17 +144,21 @@ class TranscriptStore:
 
     # ----------------------------------------------------------------- transcript (append-only)
     def append(self, chat_id, role: str, text: str) -> str:
-        """Acrescenta UM nó ao transcript (append-only) e atualiza os metadados. Devolve o id do nó."""
+        """Acrescenta UM nó ao transcript e atualiza os metadados — TUDO sob UM lock por chat (P0.5).
+
+        Antes: lia node_count, escrevia e atualizava em passos separados → duas escritas concorrentes
+        pegavam o mesmo node_count (id duplicado / metadado perdido). Agora o lock por chat serializa
+        a transação inteira (count fresco → append → update_entry)."""
         self.dir.mkdir(parents=True, exist_ok=True)
-        e = self.entry(chat_id)
-        n = int(e.get("node_count", 0))
         ts = self._clock()
-        node = {"id": f"{chat_id}-{n}", "parentId": (f"{chat_id}-{n - 1}" if n else None),
-                "role": role, "text": text, "ts": ts}
-        with self._tx_path(chat_id).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(node, ensure_ascii=False) + "\n")
-        self.update_entry(chat_id, node_count=n + 1, last_node_id=node["id"], last_role=role,
-                          last_interaction_at=ts)
+        with _FileLock(self._tx_path(chat_id)):          # serializa a transação do MESMO chat
+            n = int(self.entry(chat_id).get("node_count", 0))   # node_count FRESCO sob o lock
+            node = {"id": f"{chat_id}-{n}", "parentId": (f"{chat_id}-{n - 1}" if n else None),
+                    "role": role, "text": text, "ts": ts}
+            with self._tx_path(chat_id).open("a", encoding="utf-8") as f:
+                f.write(json.dumps(node, ensure_ascii=False) + "\n")
+            self.update_entry(chat_id, node_count=n + 1, last_node_id=node["id"], last_role=role,
+                              last_interaction_at=ts)     # store lock (alvo diferente → sem deadlock)
         return node["id"]
 
     def read(self, chat_id, limit: int | None = None) -> list[dict]:
