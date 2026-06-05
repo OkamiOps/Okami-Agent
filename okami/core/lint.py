@@ -21,22 +21,38 @@ class Finding:
     fix: str = ""
 
 
-_SENSITIVE_SEG = re.compile(
-    r"api[_-]?keys?|tokens?|authorization|passwo?rds?|secrets?|credentials?|private[_-]?keys?|apikey",
-    re.IGNORECASE,
-)
+_SECRET_LEAF = re.compile(r"api[_-]?key|apikey|token|secret|passwo?rd|credential|private[_-]?key|authorization",
+                          re.IGNORECASE)
+# sufixos que parecem segredo mas NÃO são o valor: nome de env var, URL, id, caminho…
+_NOT_SECRET_SUFFIX = ("_env", "_url", "_uri", "_endpoint", "_id", "_name", "_path", "_file", "_header")
 
 
-def _scan_secret_literals(node, path="") -> list[str]:
-    """Caminhos de chaves sensíveis com valor LITERAL (não ${ENV}) — segredo em texto."""
-    out: list[str] = []
+def _is_secret_leaf(leaf: str) -> bool:
+    low = leaf.lower()
+    if low.endswith(_NOT_SECRET_SUFFIX):
+        return False                                  # *_env (nome), *_url (endpoint), … → não é o segredo
+    return bool(_SECRET_LEAF.search(low))
+
+
+def _looks_real_secret(value: str) -> bool:
+    """Distingue um SEGREDO real (sk-…, JWT, token longo) de um dummy/local ('lm-studio', 'not-needed')."""
+    from okami.core.redact import redact
+    v = value.strip()
+    if redact(v) != v:                                # bate um padrão conhecido (sk-/JWT/AKIA/ghp_/xox/Bearer)
+        return True
+    return len(v) >= 16 and bool(re.search(r"[A-Za-z]", v) and re.search(r"[0-9]", v))   # longo + alfanumérico
+
+
+def _scan_secret_literals(node, path="") -> list[tuple[str, str]]:
+    """(caminho, valor) de chaves sensíveis com valor LITERAL (não ${ENV}) — segredo em texto."""
+    out: list[tuple[str, str]] = []
     if isinstance(node, dict):
         for k, v in node.items():
             kp = f"{path}.{k}" if path else str(k)
             if isinstance(v, (dict, list)):
                 out += _scan_secret_literals(v, kp)
-            elif _SENSITIVE_SEG.search(str(k)) and isinstance(v, str) and v.strip() and not v.strip().startswith("${"):
-                out.append(kp)
+            elif _is_secret_leaf(str(k)) and isinstance(v, str) and v.strip() and not v.strip().startswith("${"):
+                out.append((kp, v))
     elif isinstance(node, list):
         for i, v in enumerate(node):
             out += _scan_secret_literals(v, f"{path}[{i}]")
@@ -67,17 +83,24 @@ def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = 
         except Exception:  # noqa: BLE001
             raw_base = {}
         leaks = _scan_secret_literals(raw_base)
-        if leaks:
+        real = [p for p, v in leaks if _looks_real_secret(v)]
+        dummy = [p for p, v in leaks if not _looks_real_secret(v)]
+        if real:
             f.append(Finding("secrets.in_yaml", "fail",
-                             f"segredo em texto no {base.name} (versionável): {', '.join(leaks[:5])}.",
+                             f"segredo REAL em texto no {base.name} (versionável): {', '.join(real[:5])}.",
                              "mova p/ .env e referencie com ${ENV_VAR}."))
+        elif dummy:
+            f.append(Finding("secrets.in_yaml", "warn",
+                             f"valor literal em chave sensível no {base.name}: {', '.join(dummy[:5])} "
+                             "(parece dummy/local — confirme que não é segredo real).",
+                             "se for segredo, use ${ENV_VAR}; se for dummy local, ok."))
         else:
             f.append(Finding("secrets.in_yaml", "pass", f"sem segredo literal no {base.name}."))
 
     # 3) sandbox / isolamento -------------------------------------------------
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", None) or {})
-    exposed = bool(getattr(cfg, "gateway", None) or {}) or bool((getattr(cfg, "voice", None) or {}))
+    exposed = bool(getattr(cfg, "gateway", None) or {})   # gateway (Telegram/API) = superfície de rede; voz é local
     if sb.effective_backend() == "local" and exposed:
         f.append(Finding("sandbox.backend", "warn", "backend local numa instalação com gateway/superfície exposta "
                          "→ sem isolamento real do shell.", "sandbox.profile: hardened (docker se houver)."))

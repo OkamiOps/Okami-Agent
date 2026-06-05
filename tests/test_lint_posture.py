@@ -49,8 +49,22 @@ def test_secret_env_ref_in_base_yaml_passes(tmp_path):
 
 def test_scan_secret_literals_helper():
     node = {"providers": {"x": {"api_key": "literal"}}, "channels": {"t": {"token": "${T}"}}, "ok": "plain"}
-    leaks = _scan_secret_literals(node)
-    assert "providers.x.api_key" in leaks and "channels.t.token" not in leaks
+    paths = [p for p, _ in _scan_secret_literals(node)]
+    assert "providers.x.api_key" in paths and "channels.t.token" not in paths
+
+
+def test_scan_ignores_url_envname_false_positives():
+    """device_authorization_url (URL), api_key_env (nome de var), token_url → NÃO são segredo."""
+    node = {"oauth": {"device_authorization_url": "https://x/auth", "token_url": "https://x/tok"},
+            "mimo": {"api_key_env": "MIMO_API_KEY"}}
+    assert _scan_secret_literals(node) == []
+
+
+def test_dummy_local_secret_warns_not_fails(tmp_path):
+    base = tmp_path / "okami.yaml"
+    base.write_text("providers:\n  lmstudio:\n    api_key: lm-studio\n", encoding="utf-8")   # dummy local
+    f = lint_posture(_cfg(), base_yaml=base)
+    assert _levels(f)["secrets.in_yaml"] == "warn"
 
 
 def test_sandbox_local_with_gateway_warns(tmp_path):
