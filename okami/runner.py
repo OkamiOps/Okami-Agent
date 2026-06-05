@@ -119,8 +119,13 @@ def run_task(
     mcp_clients = []
     servers = (cfg.mcp or {}).get("servers")
     if servers:
+        from okami.core.tool_policy import filter_mcp_registry
         from okami.integrations.mcp import load_mcp_tools
         mcp_tools, mcp_clients = load_mcp_tools(servers, emit=emit)
+        # #P1: MCP entra DEPOIS do filtro por surface → reaplica a policy (capability × superfície).
+        # Sem isto, uma tool MCP write/shell/network escapava da postura remota e furava o sandbox.
+        mcp_tools = filter_mcp_registry(mcp_tools, surface, config=getattr(cfg, "tools", None),
+                                        sandbox=getattr(cfg, "sandbox", None), emit=emit)
         registry.update(mcp_tools)
 
     # Auto-compaction adaptativa à janela do modelo (§6.4): Qwen 32K comprime cedo, Claude 200K tarde.

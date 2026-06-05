@@ -144,6 +144,7 @@ class OkamiConfig(BaseModel):
     tools: dict[str, Any] = Field(default_factory=dict)      # {"surfaces": {telegram: {deny:[...], allow:[...]}}} (P1.4)
     harness: dict[str, Any] = Field(default_factory=dict)    # {"max_steps": 90} — orçamento de passos por tarefa
     retention: dict[str, Any] = Field(default_factory=dict)  # poda/quota de disco p/ gateway long-running (ver maintenance.py)
+    paperclip: dict[str, Any] = Field(default_factory=dict)  # {"require_evidence": true} — control plane exige prova p/ done
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -223,6 +224,7 @@ def build_config(raw: dict) -> OkamiConfig:
         tools=raw.get("tools") or {},
         harness=raw.get("harness") or {},
         retention=raw.get("retention") or raw.get("cleanup") or {},
+        paperclip=raw.get("paperclip") or {},
     )
 
 

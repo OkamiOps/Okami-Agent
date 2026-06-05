@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -166,6 +167,35 @@ def _auto_approve(mode: str) -> bool:
     return mode == "yolo"
 
 
+# Marcadores de EVIDÊNCIA MATERIAL num relatório de conclusão (#P1 — board bonito e falso é veneno).
+# Paperclip é control plane: 'complete' do agente NÃO basta p/ marcar done — precisa de prova verificável
+# (arquivo tocado, comando/teste rodado, commit, fonte, URL, ou uma seção de handoff explícita).
+_EVIDENCE_PATTERNS = (
+    r"```",                                              # bloco de código (diff/saída/comando)
+    r"\b[\w./-]+\.(py|ts|tsx|js|jsx|md|yaml|yml|json|toml|rs|go|sql|sh|css|html)\b",  # caminho de arquivo
+    r"\b[0-9a-f]{7,40}\b",                               # hash de commit
+    r"https?://",                                        # fonte/URL
+    r"\$\s|\bpytest\b|\bnpm\b|\bcargo\b|\bgit\b|\buv run\b",   # comando rodado
+    r"\b\d+\s+(test|teste|passed|passaram|ok)\b",        # resultado de teste
+    r"\b(evid[êe]ncia|artefato|arquivo|commit|teste|resultado|sa[íi]da|pull request)\s*[:=]",  # handoff
+)
+_EVIDENCE_RE = re.compile("|".join(_EVIDENCE_PATTERNS), re.IGNORECASE)
+
+
+def has_material_evidence(result: str, *, min_len: int = 40) -> bool:
+    """True se o relatório tem prova material (não só "Concluído"/"Feito"). Heurística conservadora:
+    exige um marcador de evidência E corpo mínimo — senão o trabalho vira in_review, não done."""
+    text = (result or "").strip()
+    if len(text) < min_len:
+        return False                                     # "Concluído." / "Feito" → sem prova
+    return bool(_EVIDENCE_RE.search(text))
+
+
+_HANDOFF_HINT = ("Para fechar como **done**, o relatório precisa de EVIDÊNCIA material: arquivo(s) "
+                 "tocado(s), comando/teste rodado (ex.: `pytest`), commit/PR, ou fonte. Sem isso, "
+                 "fica em revisão (board bonito sem prova não conta).")
+
+
 def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = None, env=None,
                   approve_mode: str = "defer", emit=lambda m: None) -> HeartbeatResult:
     """UMA batida de heartbeat: identifica → pega a issue → checkout → harness → reporta status.
@@ -228,6 +258,16 @@ def run_heartbeat(cfg, workspace, *, run_task, client: PaperclipClient | None = 
         client.patch_issue(issue_id, "in_review", comment)
         return HeartbeatResult(ok=True, issue_id=issue_id, status="in_review", detail="confirmação pendente")
     if task.state == TaskState.COMPLETE:
+        # #P1: control plane NÃO marca done só porque o agente disse 'complete' — exige evidência material.
+        # Sem prova verificável (arquivo/comando/teste/commit/fonte) → in_review, não done (board falso é veneno).
+        require_evidence = bool((getattr(cfg, "paperclip", None) or {}).get("require_evidence", True))
+        if require_evidence and not has_material_evidence(task.result or ""):
+            comment = (f"Marcado como concluído pelo agente, mas SEM evidência material.\n\n"
+                       f"Resultado: {(task.result or '(vazio)')[:800]}\n\n{_HANDOFF_HINT}")
+            client.patch_issue(issue_id, "in_review", comment)
+            emit("⚠ complete SEM evidência material → in_review (não done).")
+            return HeartbeatResult(ok=True, issue_id=issue_id, status="in_review",
+                                   detail="sem evidência material")
         client.patch_issue(issue_id, "done", task.result or "Concluído.")
         return HeartbeatResult(ok=True, issue_id=issue_id, status="done", detail=task.result or "")
     if task.state == TaskState.NEEDS_INPUT:

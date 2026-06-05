@@ -62,13 +62,44 @@ def make_runner(state, result="feito", reason="", sensitive=None):
     return runner
 
 
+_EVID = "Corrigi o off-by-one em okami/core/harness.py e rodei `pytest`: 690 testes passaram."
+
+
 def test_heartbeat_happy_path_checks_out_and_marks_done():
     cli = FakePaperclip(issues=[{"id": "i1", "title": "fix bug", "status": "todo", "priority": 2}])
-    res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE, result="bug corrigido"),
+    res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE, result=_EVID),
                         client=cli, env={})
     assert res.status == "done" and res.issue_id == "i1"
     assert ("checkout", "i1") in cli.calls           # checkout ANTES de trabalhar
-    assert cli.patches == [("i1", "done", "bug corrigido")]
+    assert cli.patches == [("i1", "done", _EVID)]
+
+
+def test_heartbeat_complete_without_evidence_falls_to_in_review():
+    # #P1: control plane não marca done só porque o agente disse 'complete' — exige prova material.
+    cli = FakePaperclip(issues=[{"id": "i1", "title": "fix bug", "status": "todo"}])
+    res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE, result="Concluído."),
+                        client=cli, env={})
+    assert res.status == "in_review"                 # board bonito sem prova → revisão, não done
+    assert cli.patches[0][1] == "in_review" and "evidência" in cli.patches[0][2].lower()
+
+
+def test_require_evidence_opt_out_via_config():
+    # operador pode desligar (cfg.paperclip.require_evidence: false) — volta a aceitar 'complete' cru
+    from okami.config import build_config
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "m"}},
+                        "paperclip": {"require_evidence": False}})
+    cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}])
+    res = run_heartbeat(cfg, ".", run_task=make_runner(TaskState.COMPLETE, result="ok"),
+                        client=cli, env={})
+    assert res.status == "done"
+
+
+def test_has_material_evidence_heuristic():
+    from okami.channels.paperclip import has_material_evidence
+    assert not has_material_evidence("Concluído.") and not has_material_evidence("Feito ✓")
+    assert has_material_evidence("Editei src/app.py e validei o fluxo de login com o time todo.")
+    assert has_material_evidence("Rodei `pytest`, 12 testes passaram sem erro nenhum aqui agora.")
+    assert has_material_evidence("Evidência: commit a1b2c3d na branch fix/login resolve o caso.")
 
 
 def test_heartbeat_409_stops_without_patch():
@@ -128,7 +159,7 @@ def test_heartbeat_defer_sensitive_creates_interaction_and_in_review():
 def test_heartbeat_yolo_auto_approves_no_interaction():
     cli = FakePaperclip(issues=[{"id": "i1", "title": "x", "status": "todo"}])
     sens = {"reason": "rm -rf", "category": "destructive_shell", "risk": "critical"}
-    res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE, result="ok", sensitive=sens),
+    res = run_heartbeat(None, ".", run_task=make_runner(TaskState.COMPLETE, result=_EVID, sensitive=sens),
                         client=cli, env={}, approve_mode="yolo")
     assert res.status == "done" and cli.interactions == []   # yolo aprovou tudo
 

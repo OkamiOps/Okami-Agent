@@ -105,13 +105,67 @@ def test_paperclip_worker_shell_gated_without_isolation():
     reg = filter_registry(default_registry(), "paperclip")           # sandbox=None → não isolado
     assert "run_shell" not in reg and "process_start" not in reg     # fail-closed
     assert "read_file" in reg and "respond" in reg                   # leitura/resposta seguem
-    # mas o DEPLOY pode ABRIR explícito via tools.surfaces.paperclip.allow:
-    cfg = {"surfaces": {"paperclip": {"allow": ["run_shell"]}}}
-    reg2 = filter_registry(default_registry(), "paperclip", config=cfg)
-    assert "run_shell" in reg2                                       # allow explícito vence o gate
-    # require_isolation também libera (isolamento real):
+    # require_isolation libera (isolamento real):
     reg3 = filter_registry(default_registry(), "paperclip-worker", sandbox={"profile": "hardened-strict"})
     assert "run_shell" in reg3 and "process_start" in reg3
+
+
+def test_allow_does_not_bypass_isolation_gate():
+    # #P1: `allow` comum NÃO fura mais o gate de isolamento (era o buraco). Só a flag unsafe_* grotesca.
+    allow_cfg = {"surfaces": {"paperclip": {"allow": ["run_shell"]}}}
+    reg = filter_registry(default_registry(), "paperclip", config=allow_cfg)   # sem isolamento
+    assert "run_shell" not in reg                                    # allow sozinho NÃO libera shell sem isolamento
+    # a flag grotesca por superfície libera:
+    unsafe_surface = {"surfaces": {"paperclip": {"unsafe_allow_without_isolation": True}}}
+    assert "run_shell" in filter_registry(default_registry(), "paperclip", config=unsafe_surface)
+    # a flag grotesca do sandbox (deploy inteiro) também:
+    reg2 = filter_registry(default_registry(), "paperclip",
+                           sandbox={"unsafe_allow_host_shell_without_isolation": True})
+    assert "run_shell" in reg2
+    # com isolamento real, allow funciona normalmente (não há gate a furar):
+    iso = {"surfaces": {"paperclip-manager": {"allow": ["run_shell"]}}}
+    assert "run_shell" in filter_registry(default_registry(), "paperclip-manager",
+                                          config=iso, sandbox={"require_isolation": True})
+
+
+class _FakeMcp:
+    """Stub de tool MCP: tem .name e .capabilities (como McpTool)."""
+    def __init__(self, name, caps):
+        self.name = name
+        self.capabilities = set(caps)
+
+
+def test_mcp_filtered_by_surface_capability():
+    from okami.core.tool_policy import filter_mcp_registry
+    tools = {
+        "srv__read_doc": _FakeMcp("srv__read_doc", {"read"}),
+        "srv__write_file": _FakeMcp("srv__write_file", {"write"}),
+        "srv__run_cmd": _FakeMcp("srv__run_cmd", {"shell"}),
+        "srv__fetch": _FakeMcp("srv__fetch", {"network"}),
+    }
+    # CLI (máquina do dono): MCP livre
+    assert set(filter_mcp_registry(dict(tools), "cli")) == set(tools)
+    # Telegram (remoto): só a tool de LEITURA passa; write/shell/network somem
+    tg = filter_mcp_registry(dict(tools), "telegram")
+    assert set(tg) == {"srv__read_doc"}
+    # Slack idem
+    assert set(filter_mcp_registry(dict(tools), "slack")) == {"srv__read_doc"}
+    # deploy pode abrir uma MCP de efeito por nome:
+    cfg = {"surfaces": {"telegram": {"allow": ["srv__write_file"]}}}
+    tg2 = filter_mcp_registry(dict(tools), "telegram", config=cfg)
+    assert "srv__write_file" in tg2 and "srv__run_cmd" not in tg2
+
+
+def test_mcp_worker_dangerous_requires_isolation():
+    from okami.core.tool_policy import filter_mcp_registry
+    tools = {"srv__run_cmd": _FakeMcp("srv__run_cmd", {"shell"}),
+             "srv__read": _FakeMcp("srv__read", {"read"})}
+    # worker SEM isolamento: MCP shell fura o sandbox → removida; leitura fica
+    no_iso = filter_mcp_registry(dict(tools), "paperclip-worker")
+    assert set(no_iso) == {"srv__read"}
+    # worker COM isolamento real: MCP de efeito permitida
+    iso = filter_mcp_registry(dict(tools), "paperclip-worker", sandbox={"require_isolation": True})
+    assert set(iso) == {"srv__run_cmd", "srv__read"}
 
 
 def test_paperclip_manager_no_execution():
