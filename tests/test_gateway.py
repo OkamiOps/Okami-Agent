@@ -47,6 +47,34 @@ def _ep(mode="manual", allow=None, runner=_runner_ok, spawn=None):
                          approval_mode=mode, spawn=spawn or (lambda fn: fn()))   # ws isolado: persistência
 
 
+def test_background_runs_isolated_and_reports():
+    ep = _ep()
+    ep.handle("7", "/background analise o repo")
+    texts = [t for _, t in ep.channel.sent]
+    assert any("background #1 rodando" in t for t in texts)
+    assert any("background #1 pronto" in t and "feito: analise o repo" in t for t in texts)
+    assert ep._bg == {}                                  # terminou → removido do tracking
+    assert not any("analise o repo" in h for _, h in ep.session("7").history)   # não poluiu a sessão
+
+
+def test_background_alias_and_requires_prompt():
+    ep = _ep()
+    ep.handle("7", "/background")
+    assert any("uso: /background" in t for _, t in ep.channel.sent)
+    ep.handle("7", "/bg some os numeros")                # alias /bg canonicaliza p/ background
+    assert any("background #1 pronto" in t and "feito: some os numeros" in t for _, t in ep.channel.sent)
+
+
+def test_title_sets_shows_in_status_and_persists():
+    ep = _ep()
+    ep.handle("7", "/title meu projeto okami")
+    assert any("renomeada: meu projeto okami" in t for _, t in ep.channel.sent)
+    ep.handle("7", "/status")
+    assert any("📝 meu projeto okami" in t for _, t in ep.channel.sent)
+    del ep.sessions["7"]                                 # força rebuild do store (persistência)
+    assert ep.session("7").title == "meu projeto okami"
+
+
 def test_message_runs_task_and_replies():
     ep = _ep()
     ep.handle("7", "crie x")

@@ -30,6 +30,7 @@ class Session:
         self.resume_attempts = 0         # guarda anti-loop de auto-resume (Hermes #7536)
         self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
+        self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
 
     def interrupted(self) -> bool:
         """Tarefa interrompida = histórico termina numa fala do USER sem resposta do AGENTE."""
@@ -67,6 +68,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         from collections import OrderedDict
         self._seen_msgs: OrderedDict = OrderedDict()   # idempotência por turno (#3): msg_id já processado
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
+        self._bg: dict[int, str] = {}        # tarefas /background em andamento (id → resumo) — não bloqueia a sessão
+        self._bg_seq = 0
         self.running = True
 
     def session(self, chat_id) -> Session:
@@ -80,6 +83,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.persona_overlay = e.get("persona_overlay", "")
             s.resume_attempts = int(e.get("resume_attempts", 0))
             s.reasoning_effort = e.get("reasoning_effort", "")
+            s.title = e.get("title", "")
             self.sessions[cid] = s
         return self.sessions[cid]
 
@@ -92,7 +96,8 @@ class AgentEndpoint(EndpointCommandsMixin):
     def _save_meta(self, chat_id, s: Session) -> None:
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
-                                resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort)
+                                resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
+                                title=s.title)
 
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
@@ -274,9 +279,11 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, "🧹 conversa reiniciada.")
             return
         if low == "/status":
-            self.channel.send(chat_id, f"agente {self.agent_id} · "
+            bg = f" · ▶{len(self._bg)} background" if self._bg else ""
+            ttl = f" · 📝 {s.title}" if s.title else ""
+            self.channel.send(chat_id, f"agente {self.agent_id}{ttl} · "
                               f"{'ocupado' if s.busy else 'livre'} · {len(s.history) // 2} trocas · "
-                              f"yolo={'on' if s.yolo else 'off'}")
+                              f"yolo={'on' if s.yolo else 'off'}{bg}")
             return
         if low == "/yolo":
             s.yolo = True
@@ -387,6 +394,23 @@ class AgentEndpoint(EndpointCommandsMixin):
         if low.startswith("/export"):
             self.channel.send(chat_id, self._export_cmd(chat_id, text[len("/export"):].strip()))
             return
+        if low.startswith("/title"):                   # nome amigável da conversa (aparece no /status e /sessions)
+            arg = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            if not arg:
+                self.channel.send(chat_id, f"📝 título: {s.title}" if s.title else "sem título. Uso: /title <nome>")
+                return
+            s.title = arg[:80]
+            self._save_meta(chat_id, s)
+            self.channel.send(chat_id, f"📝 conversa renomeada: {s.title}")
+            return
+        cmd_bg = low.split(maxsplit=1)[0]
+        if cmd_bg in ("/background", "/bg"):            # roda EM PARALELO (sessão isolada) e avisa no fim
+            prompt = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            if not prompt:
+                self.channel.send(chat_id, "uso: /background <tarefa> — rodo em paralelo e te aviso quando terminar.")
+                return
+            self._spawn_background(chat_id, prompt, yolo=s.yolo)
+            return
         from okami.automation.scheduler import Scheduler, infer_commitment   # §11: "me lembra de X amanhã" → agenda
         ic = infer_commitment(text, time.time())
         if ic:
@@ -400,6 +424,28 @@ class AgentEndpoint(EndpointCommandsMixin):
         s.busy = True
         s.cancel = False
         self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
+
+    def _spawn_background(self, chat_id, prompt: str, *, yolo: bool = False) -> None:
+        """/background: roda `prompt` numa tarefa ISOLADA (não toca no histórico da sessão), em paralelo,
+        e devolve o resultado quando terminar. Aprovação fail-closed (só ações seguras) a menos que a
+        sessão esteja em yolo — em background não dá pra pedir /yes interativo."""
+        self._bg_seq += 1
+        bid = self._bg_seq
+        self._bg[bid] = prompt[:60]
+        self.channel.send(chat_id, f"▶ background #{bid} rodando — sigo livre pra conversar; te aviso no fim.")
+
+        def _bgrun(_bid=bid, _p=prompt, _yolo=yolo):
+            try:
+                approve = (lambda req: True) if _yolo else (lambda req: False)   # fail-closed sem interação
+                task = self.run_task(self.cfg, self.ws, _p, approve=approve, surface=self.surface)
+                out = (getattr(task, "result", "") or "").strip() or "(sem saída textual)"
+                self.channel.send(chat_id, f"✅ background #{_bid} pronto:\n{out}")
+            except Exception as e:  # noqa: BLE001 — background nunca derruba o endpoint
+                self.channel.send(chat_id, f"❌ background #{_bid} falhou: {e}")
+            finally:
+                self._bg.pop(_bid, None)
+
+        self._spawn(_bgrun)
 
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None) -> None:
         if resume:                                        # retomada: o USER já está no transcript

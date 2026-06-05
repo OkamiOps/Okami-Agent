@@ -30,6 +30,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("sessions", "lista as conversas arquivadas (por /new)", "sessão", ("ls",)),
     CommandDef("resume", "retoma uma conversa arquivada (/resume <n>)", "sessão", args="<n>"),
     CommandDef("export", "exporta a conversa atual em Markdown (/export [arquivo])", "sessão", args="[arquivo]"),
+    CommandDef("background", "roda uma tarefa em paralelo e avisa quando terminar", "sessão",
+               ("bg",), args="<tarefa>"),
+    CommandDef("title", "dá um nome à conversa atual (/title <nome>)", "sessão", args="[nome]"),
     CommandDef("exit", "sai do chat", "sessão", ("quit", "sair"), scope="chat", tier="essential"),
     # ---- modelo / raciocínio ----
     CommandDef("model", "mostra ou troca o modelo desta sessão", "modelo", ("m",), args="[id]", tier="essential"),

@@ -170,8 +170,9 @@ def chat(
     """Conversa com o agente NO TERMINAL — sem Telegram. Sessão persiste (retoma ao reabrir).
 
     Por padrão abre a TUI de tela cheia (regiões fixas, mouse, scroll, status pinado, aprovação por
-    botão). Use --no-tui pro REPL de linha. Slash commands: /new /status /stop /yolo /feedback /persona
-    /undo /help. Saia com /exit, Ctrl-D (TUI) ou Ctrl-D (REPL)."""
+    botão). Use --no-tui pro REPL de linha. Slash commands (iguais ao Telegram — `/commands` lista tudo):
+    /new /status /stop /background /title /model /think /usage /tools /sessions /resume /compact /persona
+    /feedback /yolo /help. Saia com /exit ou Ctrl-D."""
     from okami.gateway import AgentEndpoint
     from okami.runner import run_task as _rt
 
