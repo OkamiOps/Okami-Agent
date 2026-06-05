@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -22,6 +23,36 @@ from okami.core.tools import Tool, ToolResult
 
 class McpError(Exception):
     pass
+
+
+# Manifesto de CAPABILITY de tool MCP (#8) — classifica o que cada tool de terceiro pode fazer.
+_MCP_CAPS = [
+    ("write", re.compile(r"writ|creat|delet|updat|edit|\bput\b|\bpost\b|mov|renam|insert|upload|commit|push|set[_-]", re.I)),
+    ("shell", re.compile(r"shell|exec|\brun\b|command|bash|terminal|spawn", re.I)),
+    ("network", re.compile(r"fetch|http|\burl\b|\bweb\b|search|brows|request|download|crawl|\bsend\b", re.I)),
+    ("secret-access", re.compile(r"secret|token|credential|api[_-]?key|password|\bauth", re.I)),
+    ("read", re.compile(r"read|\bget\b|list|search|find|fetch|show|describ|query", re.I)),
+]
+DANGEROUS_CAPS = frozenset({"write", "shell", "network", "secret-access", "external-side-effect"})
+
+
+def infer_capabilities(spec: dict) -> set[str]:
+    """Capabilities de uma tool MCP por nome+descrição (read/write/network/shell/secret-access/…)."""
+    text = (str(spec.get("name", "")) + " " + str(spec.get("description") or "")).lower()
+    caps = {cap for cap, rx in _MCP_CAPS if rx.search(text)}
+    if caps & {"network", "write"}:
+        caps.add("external-side-effect")
+    return caps or {"read"}
+
+
+def _mcp_url_ok(url: str) -> bool:
+    """HTTPS, ou host LOCAL (loopback/.local) — senão é plaintext / servidor arbitrário (recusa por padrão)."""
+    from urllib.parse import urlparse
+    u = urlparse(url)
+    if u.scheme == "https":
+        return True
+    host = (u.hostname or "").lower()
+    return u.scheme == "http" and (host in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or host.endswith(".local"))
 
 
 def _parse_jsonrpc(raw: str) -> dict:
@@ -180,7 +211,8 @@ class McpStdioClient:
 class McpTool(Tool):
     """Embrulha uma tool de um servidor MCP como Tool nativa do harness."""
 
-    def __init__(self, client: McpStdioClient, spec: dict, prefix: str = ""):
+    def __init__(self, client: McpStdioClient, spec: dict, prefix: str = "", *,
+                 capabilities=None, trusted: bool = False):
         self._client = client
         self._remote = spec.get("name", "")
         self.name = f"{prefix}{self._remote}"
@@ -189,6 +221,8 @@ class McpTool(Tool):
         props = schema.get("properties") or {}
         self.args_schema = {k: (v.get("description") or v.get("type") or "") for k, v in props.items()}
         self.required = tuple(schema.get("required") or ())
+        self.capabilities = set(capabilities) if capabilities is not None else infer_capabilities(spec)
+        self.trusted = trusted              # servidor de confiança → não força go/no-go por capability (#8)
 
     def run(self, args, ctx):
         try:
@@ -205,9 +239,18 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
     for name, conf in (servers or {}).items():
         if conf.get("disabled"):
             continue
+        url = conf.get("url")
+        if url and not _mcp_url_ok(url) and not conf.get("insecure"):   # #8: HTTPS/local-only por padrão
+            emit(f"⚠ MCP '{name}' RECUSADO: {url} não é HTTPS nem local — use https:// (ou insecure: true, perigoso).")
+            continue
+        for hk, hv in (conf.get("headers") or {}).items():            # #8/#6: header com segredo literal
+            if isinstance(hv, str) and len(hv) > 8 and not hv.strip().startswith("${"):
+                emit(f"⚠ MCP '{name}' header {hk}: parece SEGREDO em texto — use ${{ENV_VAR}} (não versione token).")
+        trusted = bool(conf.get("trusted"))
+        cap_override = conf.get("capabilities")
         try:
-            if conf.get("url"):                      # transporte HTTP/SSE (§12)
-                client = McpHttpClient(conf["url"], conf.get("headers"), conf.get("timeout", 30))
+            if url:                                  # transporte HTTP/SSE (§12)
+                client = McpHttpClient(url, conf.get("headers"), conf.get("timeout", 30))
             else:
                 client = McpStdioClient(
                     conf["command"], conf.get("args"), conf.get("env"),
@@ -217,9 +260,12 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
             specs = client.start()
             clients.append(client)
             for spec in specs:
-                t = McpTool(client, spec, prefix=f"{name}__")
+                caps = set(cap_override) if cap_override else None
+                t = McpTool(client, spec, prefix=f"{name}__", capabilities=caps, trusted=trusted)
                 tools[t.name] = t
-            emit(f"MCP '{name}': {len(specs)} tool(s)")
+            danger = sorted({c for t in tools.values() if t.name.startswith(f"{name}__")
+                             for c in getattr(t, "capabilities", set()) if c in DANGEROUS_CAPS})
+            emit(f"MCP '{name}': {len(specs)} tool(s)" + (f" · capabilities perigosas: {', '.join(danger)}" if danger else ""))
         except Exception as e:  # noqa: BLE001 — um servidor ruim não derruba os outros
             emit(f"MCP '{name}' falhou: {e}")
     return tools, clients

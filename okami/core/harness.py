@@ -545,6 +545,12 @@ class Harness:
 
             # --- Go/No-Go para ação sensível (§12): identidade, .env, segredos, shell destrutivo ---
             sens = approval.classify(action.tool, action.args)
+            if sens is None:                                  # #8: tool MCP de terceiro com capability PERIGOSA
+                _t = self.registry.get(action.tool)
+                _caps = getattr(_t, "capabilities", None) or set()
+                if not getattr(_t, "trusted", False) and (_caps & {"write", "shell", "network", "secret-access"}):
+                    _risk = "high" if (_caps & {"shell", "secret-access"}) else "medium"
+                    sens = approval.Sensitive(f"MCP {action.tool} ({', '.join(sorted(_caps))})", "mcp_capability", _risk)
             if sens is not None:
                 self._emit("approval_request", tool=action.tool, reason=sens.reason, category=sens.category)
                 import hashlib
