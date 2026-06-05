@@ -89,6 +89,17 @@ class LayeredMemory(Memory):
                 pass
         return n
 
+    def consolidate(self, now: float | None = None) -> dict:
+        out = {"expired": 0, "merged": 0}
+        for b in self.backends:
+            try:
+                r = b.consolidate(now)
+                out["expired"] += int(r.get("expired", 0))
+                out["merged"] += int(r.get("merged", 0))
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
     def close(self) -> None:
         for b in self.backends:
             try:

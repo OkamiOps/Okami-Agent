@@ -34,6 +34,19 @@ def _fold(s: str) -> str:
 _IMPORTANT_HINTS = ("prefere", "sempre", "nunca", "decid", "importante", "regra",
                     "credenc", "senha", "objetivo", "não use", "deve ", "obrigat")
 
+# consolidação (#7): tokens "de conteúdo" p/ medir quase-duplicata, e ranking de confiança.
+_STOP_MIN = {"de", "a", "o", "e", "que", "do", "da", "em", "para", "pra", "com", "no", "na", "os", "as",
+             "um", "uma", "por", "se", "ao", "dos", "das", "the", "of", "to", "and", "is", "in", "for", "with"}
+_CONF_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _content_tokens(text: str) -> set[str]:
+    return {w for w in (_fold(x) for x in _WORD.findall(text or "")) if len(w) >= 3 and w not in _STOP_MIN}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
 
 def _heuristic_importance(item: MemoryItem) -> float:
     base = {"decision": 0.8, "summary": 0.7, "fact": 0.55, "procedural": 0.75,
@@ -395,6 +408,51 @@ class SqliteFTS5Memory(Memory):
                         "scope": it.scope, "confidence": it.confidence, "status": it.status,
                         "importance": it.importance, "ts": it.ts, "superseded": bool(row[14])})
         return out
+
+    # ------------------------------------------------------------------ consolidação (#7)
+    def consolidate(self, now: float | None = None, *, scan: int = 400, dup_jaccard: float = 0.8) -> dict:
+        """Consolidação HEURÍSTICA (sem LLM): expira TTL vencido e funde quase-duplicatas — mantém a mais
+        nova/confiável e marca a outra 'superseded' (NÃO apaga). Conservadora de propósito: só funde
+        textos quase idênticos (jaccard ≥ 0.8, mesmo kind) e NUNCA rebaixa um item mais confiável por um
+        mais fraco (respeita preferência explícita)."""
+        now = now if now is not None else self.clock()
+        expired = self.conn.execute(
+            "UPDATE items SET superseded = 1, status = 'forgotten' "
+            "WHERE superseded = 0 AND expires_at IS NOT NULL AND expires_at <= ?", (now,)).rowcount
+        self.conn.commit()
+        merged = self._merge_near_dups(scan, dup_jaccard)
+        if expired or merged:
+            self._mat_dirty = True
+        return {"expired": int(expired), "merged": int(merged)}
+
+    def _merge_near_dups(self, scan: int, thr: float) -> int:
+        rows = self.conn.execute(
+            "SELECT id, text, kind, confidence FROM items WHERE superseded = 0 ORDER BY id DESC LIMIT ?",
+            (scan,)).fetchall()
+        kept: list[tuple] = []                       # (id, kind, tokens, confidence) — do mais NOVO p/ o antigo
+        merged = 0
+        for rid, text, kind, conf in rows:
+            toks = _content_tokens(text)
+            dup = None
+            if toks:
+                for kid, kkind, ktoks, kconf in kept:
+                    if kkind == kind and _jaccard(toks, ktoks) >= thr:
+                        dup = (kid, kconf)
+                        break
+            if dup is None:
+                kept.append((rid, kind, toks, conf or "medium"))
+                continue
+            kid, kconf = dup
+            if _CONF_RANK.get(conf or "medium", 1) > _CONF_RANK.get(kconf or "medium", 1):
+                kept.append((rid, kind, toks, conf or "medium"))   # antigo MAIS confiável → mantém os dois
+                continue
+            self.conn.execute("UPDATE items SET superseded = 1, status = 'superseded' WHERE id = ?", (rid,))
+            self.conn.execute("UPDATE items SET supersedes_id = ?, importance = min(1.0, importance + 0.05), "
+                              "access_count = access_count + 1 WHERE id = ?", (rid, kid))
+            merged += 1
+        if merged:
+            self.conn.commit()
+        return merged
 
     def close(self) -> None:
         self.conn.close()

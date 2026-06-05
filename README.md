@@ -208,8 +208,14 @@ assinatura (OAuth/CLI), NUNCA pay-as-you-go.**
   contamina outro. Schema com `confidence`, `expires_at` (TTL) e `supersedes_id` (consolidação).
 - **Auditoria** — cada recall é logado (`retrieval_logs`); `okami memory explain <id>` mostra de onde a
   memória veio e quando/por que apareceu. `forget` (some) e `archive` (some, marcado) são reversíveis no histórico.
-- CLI: `okami memory add|search|list|explain|forget|archive|export` (`--global` p/ a casa). Arquivos de
-  identidade/core (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`) são sempre injetados (limites configuráveis).
+- **Consolidação** (heurística, sem LLM) — pós-tarefa e via `okami memory consolidate`: expira TTL vencido e
+  funde quase-duplicatas (marca `superseded`, **não apaga**), respeitando confiança (não rebaixa preferência
+  explícita por inferência fraca).
+- **Persona Compiler** (`okami/learning/compiler.py`) — bloco CURTO de direção por turno (read-only): puxa p/
+  precisão quando um papo casual tem assunto técnico, e adapta a abertura ao estado emocional da pessoa (sem
+  distorcer a solução). A identidade inteira (SOUL/VOICE/PERSONA) segue sempre injetada; isto é só o delta do turno.
+- CLI: `okami memory add|search|list|explain|forget|archive|consolidate|export` (`--global` p/ a casa). Arquivos
+  de identidade/core (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`) são sempre injetados (limites configuráveis).
 
 ---
 
@@ -363,7 +369,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami auth list\|status` | Perfis de auth (metadata, sem segredo). |
 | `okami policy check\|init\|show` | Conformance autorada (`--strict` p/ GA). |
 | `okami config show\|get\|set\|unset\|path\|edit\|check` | Config efetiva (segredo → `.env`). |
-| `okami memory add\|search\|list\|explain\|forget\|archive\|export` | Memória híbrida + auditoria/CRUD (`--global` = casa `~/.okami`). |
+| `okami memory add\|search\|list\|explain\|forget\|archive\|consolidate\|export` | Memória híbrida + auditoria/CRUD/consolidação (`--global` = casa `~/.okami`). |
 | `okami taste like\|dislike\|different\|show\|steer` | Taste model de design. |
 | `okami persona-init\|persona-evolve\|persona-log\|persona-rollback` | Identidade evolutiva. |
 | `okami skills` / `okami learn <fonte>` / `okami scan <path>` | Skills + scan de segurança. |

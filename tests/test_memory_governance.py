@@ -84,6 +84,40 @@ def test_export_dumps_all(tmp_path):
     assert forgot["superseded"] is True and forgot["status"] == "forgotten"
 
 
+# ---------------------------------------------------------------- consolidação (#7)
+def test_consolidate_expires_ttl(tmp_path):
+    now = [1000.0]
+    m = SqliteFTS5Memory(tmp_path / "m.db", clock=lambda: now[0])
+    m.write(MemoryItem(text="contexto temporario qqq", kind="fact", expires_at=1500.0))
+    m.write(MemoryItem(text="fato duravel www", kind="fact"))
+    now[0] = 2000.0
+    r = m.consolidate()
+    assert r["expired"] == 1
+    assert m.count() == 1 and any("www" in i.text for i in m.recent(10))
+
+
+def test_consolidate_merges_near_dups(tmp_path):
+    m = SqliteFTS5Memory(tmp_path / "m.db", clock=lambda: 1000.0)
+    a = m.write(MemoryItem(text="usuario prefere tema escuro no editor vscode", kind="preference"))
+    b = m.write(MemoryItem(text="usuario prefere tema escuro no editor vscode sempre", kind="preference"))
+    assert m.count() == 2
+    r = m.consolidate()
+    assert r["merged"] == 1 and m.count() == 1           # antigo fundido no novo
+    assert m.explain(a)["status"] == "superseded"
+    assert m.explain(b)["supersedes_id"] == a            # o novo passou a substituir o antigo
+
+
+def test_consolidate_keeps_more_confident(tmp_path):
+    m = SqliteFTS5Memory(tmp_path / "m.db", clock=lambda: 1000.0)
+    m.write(MemoryItem(text="usuario prefere tema escuro no editor vscode",
+                       kind="preference", confidence="high"))
+    m.write(MemoryItem(text="usuario prefere tema escuro no editor vscode talvez",
+                       kind="preference", confidence="low"))
+    r = m.consolidate()
+    # o mais novo é fraco (low) e o antigo é forte (high) → NÃO rebaixa o explícito; mantém os dois
+    assert r["merged"] == 0 and m.count() == 2
+
+
 # ---------------------------------------------------------------- escopo/global (#3)
 def test_scoped_routes_and_isolates(tmp_path):
     proj = SqliteFTS5Memory(tmp_path / "proj.db", clock=lambda: 1000.0)

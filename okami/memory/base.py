@@ -90,6 +90,10 @@ class Memory:
         """Dump auditável de toda a memória (debug/backup/migração)."""
         return []
 
+    def consolidate(self, now: float | None = None) -> dict:
+        """Consolidação heurística (expira TTL, funde quase-duplicatas). Backends sobrescrevem."""
+        return {"expired": 0, "merged": 0}
+
     def health(self) -> dict:
         """Saúde da camada (P2): {backend, ok, failures, last_error}. Backend resiliente sobrescreve."""
         return {"backend": type(self).__name__, "ok": True, "failures": 0, "last_error": ""}

@@ -110,9 +110,13 @@ def run_task(
     ui_task = bool((cfg.contracts or {}).get("ui")) or any(
         k in s.name.lower() for s in routed for k in ("frontend", "design", "shadcn", "heroui", "ui"))
     taste_block = tastemod.TasteProfile.load(ws).steer() if ui_task else ""
-    # extra_context (ex.: histórico da conversa do gateway §13) vem primeiro.
-    system_extra = "\n\n".join(x for x in (extra_context, taste_block, skillmod.render_block(routed),
-                                           catalog) if x)
+    # Persona Compiler (#8): direção CURTA do turno (registro técnico em papo + estado emocional),
+    # read-only — a identidade inteira segue indo via core_block. Vazio quando não há sinal.
+    from okami.learning.compiler import compile_turn
+    turn_steer = compile_turn(goal, exit_criteria, contracts=cfg.contracts)
+    # turn_steer primeiro (direção base); extra_context (com overlay de sessão) pode sobrepor depois.
+    system_extra = "\n\n".join(x for x in (turn_steer, extra_context, taste_block,
+                                           skillmod.render_block(routed), catalog) if x)
     skills_map = {s.name: s.body for s in safe}
 
     mem = open_memory(ws, backend=cfg.memory.get("backend", "sqlite-fts5"),
@@ -177,6 +181,8 @@ def run_task(
         save_turn(mem, t.result or "", source="agent", cfg_memory=cfg.memory)
         try:
             learning.apply(mem, t, model_name=model or "default")
+            if (cfg.memory or {}).get("auto_consolidate", True):   # §7: consolidação heurística pós-tarefa
+                mem.consolidate()                          # expira TTL + funde quase-duplicatas (sem LLM)
             learning.record_run(ws, tune_key, t.stats)    # §7: acumula stats p/ auto-tune do modelo
             if (cfg.learning or {}).get("auto_skill"):    # §7: destila skill da experiência (escaneada)
                 name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default",

@@ -168,6 +168,19 @@ def memory_explain(
             console.print(f"    · {when}  score={r['score']:.2f} rank={r['rank']}  “{(r['query'] or '')[:60]}”")
 
 
+@mem_app.command("consolidate")
+def memory_consolidate(
+    workspace: str = _WS,
+    global_: bool = _GLOBAL,
+) -> None:
+    """Consolida (heurístico, sem LLM): expira TTL vencido + funde quase-duplicatas (marca 'superseded')."""
+    store = _crud_store(workspace, global_)
+    r = store.consolidate()
+    store.close()
+    console.print(f"[green]✓ consolidado[/green] [dim]({r.get('expired', 0)} expirados · "
+                  f"{r.get('merged', 0)} fundidos)[/dim]")
+
+
 @mem_app.command("export")
 def memory_export(
     workspace: str = _WS,
