@@ -29,6 +29,47 @@ def test_activity_panel_content():
     assert "background: nenhum" in empty and "livre" in empty
 
 
+def test_route_skin_and_mouse():
+    def r(line):
+        return _route_repl_line(line, busy=False, pending_approval=False)
+    assert r("/skin nord") == "skin" and r("/skin") == "skin"
+    assert r("/mouse off") == "mouse" and r("/mouse") == "mouse"
+
+
+def test_skins_list_and_theme_defined():
+    from okami.tui import SKINS
+    assert "okami" in SKINS and "nord" in SKINS
+    import okami.tui_app as ta
+    if getattr(ta, "_HAS_TEXTUAL", False):
+        assert ta.OKAMI_THEME.name == "okami" and ta.OKAMI_THEME.primary == "#ff7527"
+
+
+def test_skin_changes_theme_via_pilot(tmp_path):
+    import okami.tui_app as ta
+    if not getattr(ta, "_HAS_TEXTUAL", False):
+        return
+    import asyncio
+
+    from okami.core import Task, TaskState
+
+    def _runner(cfg, ws, goal, **kw):
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "ok"
+        return t
+
+    async def _run():
+        app = ta.OkamiChatApp(cfg=None, ws=str(tmp_path), name="dev", cid="t", run_task=_runner)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.theme == "okami"                    # default = marca
+            app._cmd_skin("/skin nord")
+            assert app.theme == "nord"                     # /skin troca de verdade
+            app._cmd_skin("/skin inexistente")
+            assert app.theme == "nord"                     # nome inválido não muda
+
+    asyncio.run(_run())
+
+
 def test_route_repl_line_client_commands():
     def r(line, **kw):
         return _route_repl_line(line, busy=kw.get("busy", False),

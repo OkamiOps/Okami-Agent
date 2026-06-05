@@ -87,22 +87,31 @@ def _render_message(text: str):
 
 if _HAS_TEXTUAL:
 
+    from textual.theme import Theme
+
+    OKAMI_THEME = Theme(                                  # tema da marca (default do /skin)
+        name="okami", primary="#ff7527", secondary="#ff39d1", accent="#00dfe8",
+        foreground="#f4f4f8", background="#0d0d12", surface="#16161f", panel="#221a12",
+        success="#1f7a3d", warning="#ffb86c", error="#7a2a2a", dark=True,
+    )
+
     class OkamiChatApp(App):
         """App Textual do chat: header · log · aprovação · input · status."""
 
+        # CSS em VARIÁVEIS de tema ($surface/$primary/…) → /skin troca o tema e a chrome re-tematiza.
         CSS = """
-        Screen { layout: vertical; background: #0d0d12; }
-        #header { height: 1; padding: 0 1; background: #16161f; }
-        #log { height: 1fr; padding: 1 2; background: #0d0d12; scrollbar-color: #ff7527; scrollbar-size: 1 1; }
+        Screen { layout: vertical; background: $background; }
+        #header { height: 1; padding: 0 1; background: $surface; }
+        #log { height: 1fr; padding: 1 2; background: $background; scrollbar-color: $primary; scrollbar-size: 1 1; }
         #activity { height: auto; display: none; padding: 0 2; }
-        #approval { height: auto; display: none; padding: 1 2; background: #221a12; border-top: solid #ff7527; }
-        #approval-label { width: 1fr; content-align: left middle; color: #ffb86c; }
-        #input { border: round #3d3e50; background: #16161f; }
-        #input:focus { border: round #ff7527; }
-        #status { height: 1; padding: 0 1; color: #6c6d80; background: #16161f; }
+        #approval { height: auto; display: none; padding: 1 2; background: $panel; border-top: solid $primary; }
+        #approval-label { width: 1fr; content-align: left middle; color: $warning; }
+        #input { border: round $panel; background: $surface; }
+        #input:focus { border: round $accent; }
+        #status { height: 1; padding: 0 1; color: $text-muted; background: $surface; }
         Button { min-width: 12; margin: 0 1; }
-        Button#approve { background: #1f7a3d; }
-        Button#deny { background: #7a2a2a; }
+        Button#approve { background: $success; }
+        Button#deny { background: $error; }
         """
 
         BINDINGS = [
@@ -139,6 +148,7 @@ if _HAS_TEXTUAL:
             self._exit_armed = 0.0
             self._busy_since: float | None = None
             self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
+            self._mouse_on = True                         # /mouse off → solta o mouse p/ seleção nativa
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
 
         # ---- layout ----------------------------------------------------------
@@ -154,6 +164,11 @@ if _HAS_TEXTUAL:
             yield Static("", id="status")
 
         def on_mount(self) -> None:
+            try:                                           # tema da marca como default (/skin troca)
+                self.register_theme(OKAMI_THEME)
+                self.theme = "okami"
+            except Exception:  # noqa: BLE001 — se a API de tema mudar, segue no tema padrão
+                pass
             self.query_one("#approval").display = False
             if self._new:
                 self.ep.session(self._cid).history.clear()
@@ -255,6 +270,10 @@ if _HAS_TEXTUAL:
                         self.call_from_thread(self._cmd_details, line)
                     elif d == "agents":
                         self.call_from_thread(self._cmd_agents)
+                    elif d == "skin":
+                        self.call_from_thread(self._cmd_skin, line)
+                    elif d == "mouse":
+                        self.call_from_thread(self._cmd_mouse, line)
                     elif d in ("approval", "stop"):
                         self._safe_handle(line)
                     else:                                  # handle | queue → fila (1 só produtor)
@@ -285,6 +304,37 @@ if _HAS_TEXTUAL:
             s = self.ep.sessions.get(self._cid)
             self.query_one("#log", RichLog).write(
                 _tui.activity_panel(bg=self.ep._bg, busy=self._busy(), queued=len(s.queued) if s else 0))
+
+        def _cmd_skin(self, line: str) -> None:
+            from rich.text import Text
+            log = self.query_one("#log", RichLog)
+            arg = line.split(maxsplit=1)[1].strip().lower() if " " in line else ""
+            avail = ", ".join(_tui.SKINS)
+            if not arg:
+                log.write(Text(f"  🎨 tema atual: {self.theme}. Disponíveis: {avail}", style="dim"))
+                return
+            if arg in self.available_themes:
+                self.theme = arg                           # reativo → re-tematiza a chrome na hora
+                log.write(Text(f"  🎨 tema → {arg}", style="dim"))
+            else:
+                log.write(Text(f"  🎨 tema '{arg}' não existe. Tente: {avail}", style="dim"))
+
+        def _cmd_mouse(self, line: str) -> None:
+            from rich.text import Text
+            log = self.query_one("#log", RichLog)
+            arg = line.split(maxsplit=1)[1].strip().lower() if " " in line else ""
+            want = True if arg in ("on", "1", "yes") else False if arg in ("off", "0", "no") else not self._mouse_on
+            drv = getattr(self, "_driver", None)
+            fn = getattr(drv, "_enable_mouse_support" if want else "_disable_mouse_support", None)
+            if fn is None:
+                log.write(Text("  🖱 toggle de mouse não suportado nesta versão do Textual.", style="dim"))
+                return
+            try:
+                fn()
+                self._mouse_on = want
+                log.write(Text(f"  🖱 mouse {'ON' if want else 'OFF (seleção nativa do terminal)'}", style="dim"))
+            except Exception as e:  # noqa: BLE001 — driver pode recusar; não derruba a TUI
+                log.write(Text(f"  🖱 não consegui mudar o mouse: {e}", style="dim"))
 
         # ---- timer: atividade + status + barra de aprovação ------------------
         def _tick(self) -> None:

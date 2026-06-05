@@ -121,6 +121,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             sx = ep.sessions.get(cid)
             console.print(tui.activity_panel(bg=ep._bg, busy=_busy(), queued=len(sx.queued) if sx else 0))
             continue
+        if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
+            console.print(f"[dim]🎨 {decision} só vale na TUI de tela cheia (rode `okami chat` sem --no-tui).[/dim]")
+            continue
         if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
             inflight.append(line)
             if decision == "queue":

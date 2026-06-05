@@ -59,6 +59,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args="[nível]", scope="chat", tier="power"),
     CommandDef("agents", "painel de atividade: turno, /background e fila", "info", ("tasks",),
                scope="chat", tier="power"),
+    CommandDef("skin", "troca o tema da TUI (okami | nord | dracula | …)", "info", args="[tema]",
+               scope="chat", tier="power"),
+    CommandDef("mouse", "liga/desliga o mouse da TUI (off = seleção nativa do terminal)", "info",
+               args="[on|off]", scope="chat", tier="power"),
     CommandDef("whoami", "mostra seu chat id (p/ allowlist)", "info", ("id",), tier="power"),
     # ---- sistema ----
     CommandDef("yolo", "auto-aprova ações sensíveis nesta sessão", "sistema"),

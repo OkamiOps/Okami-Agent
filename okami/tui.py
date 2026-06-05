@@ -183,7 +183,7 @@ def _skill_category(s) -> str:
 def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
     """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
 
-    Retorna: exit · help · details · agents · approval · stop · queue · handle.
+    Retorna: exit · help · details · agents · skin · mouse · approval · stop · queue · handle.
     - comandos de DISPLAY (help/details/agents) são CLIENTE — não vão pro endpoint;
     - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
     - /stop sempre passa direto (cancela mesmo ocupado);
@@ -198,6 +198,10 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
         return "details"
     if head in ("/agents", "/tasks"):                   # painel de atividade (cliente)
         return "agents"
+    if head == "/skin":                                 # tema da TUI (cliente)
+        return "skin"
+    if head == "/mouse":                                # mouse on/off (cliente)
+        return "mouse"
     if pending_approval:
         return "approval"
     if low in ("/stop", "/cancel", "/parar"):
@@ -310,6 +314,9 @@ def _args_full(args: dict) -> str:
 
 
 _DETAIL_LEVELS = ("hidden", "collapsed", "expanded")
+
+# Temas da TUO (/skin): 'okami' é a marca (registrado no app); o resto são temas embutidos do Textual.
+SKINS = ("okami", "nord", "gruvbox", "dracula", "tokyo-night", "monokai", "textual-light")
 
 
 def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 0) -> Text:
