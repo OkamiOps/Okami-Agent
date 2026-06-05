@@ -48,6 +48,32 @@ def agents_dir() -> Path:
     return base_dir() / "agents"
 
 
+# ── caminhos GLOBAIS (segredos/credenciais) — sempre dentro da casa, nunca Path.home()/".okami" cru ──
+def home_path(*parts: str) -> Path:
+    """Caminho dentro da casa do Okami (okami_home()/...). Use SEMPRE isto — é a fonte única."""
+    return okami_home().joinpath(*parts)
+
+
+def read_path(*parts: str) -> Path:
+    """Caminho p/ LER: a casa ATUAL se existir; senão a LEGADA (~/.okami) se existir; senão a atual.
+    Migração suave: se você muda OKAMI_HOME, credenciais/segredos antigos seguem encontráveis."""
+    cur = home_path(*parts)
+    if cur.exists():
+        return cur
+    legacy = (Path.home() / ".okami").joinpath(*parts)
+    return legacy if legacy.exists() else cur
+
+
+def env_path() -> Path:
+    """O `.env` GLOBAL de segredos (canônico p/ ESCRITA): okami_home()/.env."""
+    return home_path(".env")
+
+
+def credentials_dir() -> Path:
+    """Pasta de credenciais OAuth (canônica p/ ESCRITA): okami_home()/credentials."""
+    return home_path("credentials")
+
+
 def migrate_stray(*, emit=lambda m: None) -> list[str]:
     """Move `~/skills` e `~/agents` SOLTOS na home pra dentro de `~/.okami/` (uma vez, idempotente).
 

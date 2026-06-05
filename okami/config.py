@@ -18,17 +18,21 @@ from pydantic import BaseModel, Field
 # Segredos GLOBAIS do Okami: ~/.okami/.env (valem em QUALQUER workspace). É aqui que mora um
 # token tipo ELEVENLABS_API_KEY/MIMO_API_KEY — configure uma vez, usa em todo lugar.
 def global_env_path() -> Path:
-    """Caminho do .env global (~/.okami/.env). Onde `okami config set <SEGREDO>` grava por padrão."""
-    return Path.home() / ".okami" / ".env"
+    """Caminho do .env global ($OKAMI_HOME/.env, default ~/.okami/.env). Fonte única via okami.home."""
+    from okami.home import env_path
+    return env_path()
 
 
 def _load_env() -> None:
-    """Carrega segredos com precedência: ambiente real > .env do PROJETO (CWD) > .env GLOBAL.
-    (load_dotenv não sobrescreve quem já existe → carregar projeto antes do global dá essa ordem.)"""
+    """Carrega segredos com precedência: ambiente real > .env do PROJETO (CWD) > .env GLOBAL ($OKAMI_HOME)
+    > .env LEGADO (~/.okami, se OKAMI_HOME for custom). (load_dotenv não sobrescreve quem já existe.)"""
     load_dotenv()                                   # .env do projeto (CWD), se existir
     g = global_env_path()
     if g.exists():
         load_dotenv(g)                              # global preenche o que faltou (não sobrescreve)
+    legacy = Path.home() / ".okami" / ".env"        # install antigo / OKAMI_HOME mudou → ainda honra
+    if legacy != g and legacy.exists():
+        load_dotenv(legacy)
 
 
 # Carrega o quanto antes, para que api_key_env funcione já no import.
@@ -114,13 +118,14 @@ class ProviderConfig(BaseModel):
         - codex_oauth: ~/.codex/auth.json existe.
         - litellm: chave resolvida (local usa dummy).
         """
+        from okami.home import read_path
         if self.transport == "claude_cli":
             return shutil.which("claude") is not None
         if self.transport == "codex_oauth":
-            return ((Path.home() / ".okami" / "credentials" / "codex.json").exists()
+            return (read_path("credentials", "codex.json").exists()
                     or (Path.home() / ".codex" / "auth.json").exists())
         if self.transport == "minimax_oauth":
-            return (Path.home() / ".okami" / "credentials" / f"{self.name}.json").exists()
+            return read_path("credentials", f"{self.name}.json").exists()
         if self.auth == "oauth_subscription":
             return False
         return self.resolved_key() is not None

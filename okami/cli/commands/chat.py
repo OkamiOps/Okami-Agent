@@ -46,7 +46,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     import threading
     import time as _t
 
-    hist_dir = Path(".okami")
+    from okami.home import okami_home               # history do REPL é UI global → casa, NÃO o CWD
+    hist_dir = okami_home()
     hist_dir.mkdir(parents=True, exist_ok=True)
     from okami import commands as _cmds              # autocomplete vem do REGISTRO declarativo
     cmds = _cmds.all_slash_names(scope="chat")

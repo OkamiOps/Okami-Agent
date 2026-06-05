@@ -204,8 +204,9 @@ def doctor(
         fts_ok = True
     except sqlite3.Error:
         fts_ok = False
+    from okami.home import read_path
     codex_auth = ((Path.home() / ".codex" / "auth.json").exists()
-                  or (Path.home() / ".okami" / "credentials" / "codex.json").exists())
+                  or read_path("credentials", "codex.json").exists())
     from okami.config import global_env_path
     genv = global_env_path()
     if genv.exists():

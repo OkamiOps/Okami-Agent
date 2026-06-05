@@ -50,8 +50,9 @@ def build_report(cfg, *, ping=None) -> dict:
     except sqlite3.Error:
         rep["checks"]["sqlite_fts5"] = False
 
+    from okami.home import read_path
     rep["checks"]["codex_auth"] = ((Path.home() / ".codex" / "auth.json").exists()
-                                   or (Path.home() / ".okami" / "credentials" / "codex.json").exists())
+                                   or read_path("credentials", "codex.json").exists())
 
     from okami.config import global_env_path
     genv = global_env_path()

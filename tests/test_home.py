@@ -75,3 +75,31 @@ def test_migrate_does_not_clobber_existing_target(tmp_path, monkeypatch):
     (tmp_path / "skills" / "a").mkdir(parents=True)
     (tmp_path / ".okami" / "skills").mkdir(parents=True)   # destino já existe → não move (não clobbera)
     assert home.migrate_stray() == [] and (tmp_path / "skills").exists()
+
+
+def test_okami_home_is_single_source_for_env_and_credentials(tmp_path, monkeypatch):
+    # P1: OKAMI_HOME custom dirige .env global E credenciais (não mais hardcoded ~/.okami)
+    custom = tmp_path / "opt-okami"
+    monkeypatch.setenv("OKAMI_HOME", str(custom))
+    assert home.env_path() == custom / ".env"
+    assert home.credentials_dir() == custom / "credentials"
+    assert home.home_path("credentials", "codex.json") == custom / "credentials" / "codex.json"
+    # global_env_path() do config delega ao home (fonte única)
+    from okami.config import global_env_path
+    assert global_env_path() == custom / ".env"
+
+
+def test_read_path_legacy_fallback(tmp_path, monkeypatch):
+    # migração suave: credencial num install LEGADO (~/.okami) ainda é encontrada quando OKAMI_HOME muda
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path / "novo"))
+    legacy = tmp_path / ".okami" / "credentials"
+    legacy.mkdir(parents=True)
+    (legacy / "codex.json").write_text("{}", encoding="utf-8")
+    # atual não existe → cai no legado
+    assert home.read_path("credentials", "codex.json") == legacy / "codex.json"
+    # quando o atual existe, prefere o atual
+    novo = tmp_path / "novo" / "credentials"
+    novo.mkdir(parents=True)
+    (novo / "codex.json").write_text("{}", encoding="utf-8")
+    assert home.read_path("credentials", "codex.json") == novo / "codex.json"

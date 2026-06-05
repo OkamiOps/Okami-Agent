@@ -35,17 +35,18 @@ def _is_subscription(pc) -> bool:
 
 def _location(pc) -> str:
     """ONDE mora a credencial — caminho ou NOME da env var, jamais o valor."""
+    from okami.home import credentials_dir, read_path
     t = getattr(pc, "transport", "")
     if t == "codex_oauth":
-        for p in (Path.home() / ".codex" / "auth.json", Path.home() / ".okami" / "credentials" / "codex.json"):
+        for p in (Path.home() / ".codex" / "auth.json", read_path("credentials", "codex.json")):
             if p.exists():
                 return str(p)
         return "~/.codex/auth.json"
     if t == "claude_cli":
         return "CLI oficial 'claude' (~/.claude)"
     if t == "minimax_oauth":
-        p = Path.home() / ".okami" / "credentials" / "minimax.json"
-        return str(p) if p.exists() else "~/.okami/credentials/minimax.json"
+        p = read_path("credentials", "minimax.json")
+        return str(p) if p.exists() else str(credentials_dir() / "minimax.json")
     if getattr(pc, "api_key_env", None):
         return f"env:{pc.api_key_env}"                    # NOME da var, não o valor
     if getattr(pc, "api_key", None):
@@ -57,7 +58,8 @@ def _oauth_expiry(pc):
     """Timestamp de expiração do token OAuth (best-effort, SÓ o número — nunca o token). None se n/d."""
     if getattr(pc, "transport", "") != "codex_oauth":
         return None
-    for p in (Path.home() / ".codex" / "auth.json", Path.home() / ".okami" / "credentials" / "codex.json"):
+    from okami.home import read_path
+    for p in (Path.home() / ".codex" / "auth.json", read_path("credentials", "codex.json")):
         if not p.exists():
             continue
         try:

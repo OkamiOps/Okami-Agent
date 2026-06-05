@@ -37,7 +37,15 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ($scriptDir -and (Test-Path (Join-Path $scriptDir '..\pyproject.toml'))) {
   $Src = (Resolve-Path (Join-Path $scriptDir '..')).Path; Say "usando o repo local: $Src"
 } elseif (Test-Path (Join-Path $Src '.git')) {
-  Say "atualizando $Src"; git -C $Src pull --ff-only 2>$null
+  Say "atualizando $Src"
+  git -C $Src pull --ff-only
+  if ($LASTEXITCODE -ne 0) {
+    if ($env:OKAMI_INSTALL_ALLOW_DIRTY -eq '1') {
+      Say "git pull falhou - OKAMI_INSTALL_ALLOW_DIRTY=1 -> instalando a versao LOCAL existente (pode estar velha)."
+    } else {
+      Die "git pull falhou (sem rede? working copy suja?). Resolva, ou force com OKAMI_INSTALL_ALLOW_DIRTY=1."
+    }
+  }
 } else {
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die "git e necessario para clonar." }
   Say "clonando em $Src"; git clone --depth 1 $RepoUrl $Src

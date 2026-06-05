@@ -370,8 +370,9 @@ def _detect_environment(existing: dict | None = None) -> list["_Detected"]:
         if key in live:
             add(key, f"{key} — {base} ([green]{live[key]} modelos, no ar[/green])", pd)
     # assinaturas/OAuth logadas (sem rede)
+    from okami.home import read_path
     if (Path.home() / ".codex" / "auth.json").exists() or \
-            (Path.home() / ".okami" / "credentials" / "codex.json").exists():
+            read_path("credentials", "codex.json").exists():
         add("codex", "OpenAI Codex / ChatGPT ([green]assinatura logada[/green])", dict(preset("codex").base))
     if shutil.which("claude"):
         add("claude", "Anthropic Claude ([green]CLI `claude` instalado[/green])", dict(preset("claude").base))
@@ -506,7 +507,12 @@ def _resolve_agent(agent: str | None, workspace: str):
             raise typer.Exit(1)
         graw, _ = load_raw()
         return effective_config(graw, spec), spec.dir, agent
-    return _load(), Path(workspace), "okami"
+    # sem agente: o workspace DEFAULT ('workspaces/default') NÃO vai pro CWD cru — ancora na casa/projeto
+    ws = Path(workspace)
+    if workspace == "workspaces/default" and not ws.is_absolute():
+        from okami.home import base_dir
+        ws = base_dir() / "workspaces" / "default"
+    return _load(), ws, "okami"
 
 
 def _write_local(update: dict) -> None:

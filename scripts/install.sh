@@ -56,7 +56,14 @@ SDIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -n "$SDIR" ] && [ -f "$SDIR/../pyproject.toml" ]; then
   SRC="$(cd "$SDIR/.." && pwd)"; say "usando o repo local: $SRC"
 elif [ -d "$SRC/.git" ]; then
-  say "atualizando $SRC"; git -C "$SRC" pull --ff-only || true
+  say "atualizando $SRC"
+  if ! git -C "$SRC" pull --ff-only; then
+    if [ "${OKAMI_INSTALL_ALLOW_DIRTY:-}" = "1" ]; then
+      say "⚠ git pull falhou — OKAMI_INSTALL_ALLOW_DIRTY=1 → instalando a versão LOCAL existente (pode estar velha)."
+    else
+      die "git pull falhou (sem rede? working copy suja?). Resolva, ou force com OKAMI_INSTALL_ALLOW_DIRTY=1."
+    fi
+  fi
 else
   command -v git >/dev/null 2>&1 || die "git é necessário para clonar."
   say "clonando em $SRC"; git clone --depth 1 "$REPO_URL" "$SRC"

@@ -22,7 +22,9 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-STORE_DIR = Path.home() / ".okami" / "credentials"
+from okami.home import credentials_dir
+
+STORE_DIR = credentials_dir()   # $OKAMI_HOME/credentials (default ~/.okami/credentials) — fonte única
 
 
 def _store_path(provider: str) -> Path:
