@@ -7,27 +7,38 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
+![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-passing-3fb950)
-![status](https://img.shields.io/badge/status-alpha-orange)
+![tests](https://img.shields.io/badge/tests-880%20passing-3fb950)
+![status](https://img.shields.io/badge/status-public%20alpha-orange)
+
+**[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
 
 </div>
 
 ---
 
-O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
+> 🐺 **Alpha público (`v0.1.0-alpha`).** O Okami está aberto pra você experimentar. A superfície de
+> comandos/config ainda pode mudar entre alphas — para expor publicamente, rode `okami policy check
+> --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md).
 
-![okami chat](docs/chat-welcome.png)
+O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan) —
+com separação de turno, emoji por evento e **rodapé de custo por resposta** (ctx · tokens · tempo):
 
-Toda a configuração é por **menu de seta** (`okami setup`, `okami provider add`):
+![okami chat](docs/images/chat-demo.svg)
 
-![menus](docs/menu-demo.gif)
+![okami chat welcome](docs/chat-welcome.png)
 
-> Documentação profunda: [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) ·
-> [Estrutura](docs/STRUCTURE.md) · [Produção/GA](docs/PRODUCTION.md) ·
-> [Pesquisa competitiva](docs/COMPETITIVE_RESEARCH.md).
+Toda a configuração é por **menu de seta** (`okami setup`, `okami provider add`); e a prontidão de
+release é um comando só (`okami readiness` — CI verde · strict verde · strict no HEAD):
+
+![okami readiness](docs/images/readiness.svg)
+
+> Documentação completa em **[okamiagent.com/docs](https://okamiagent.com/docs)**. No repo:
+> [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Estrutura](docs/STRUCTURE.md) ·
+> [Produção/GA](docs/PRODUCTION.md) · [Pesquisa competitiva](docs/COMPETITIVE_RESEARCH.md).
 
 ---
 
@@ -462,6 +473,12 @@ tests/         suíte completa (pytest)
 
 ## Documentação
 
+- 🌐 **Site**: [okamiagent.com](https://okamiagent.com) — visão geral do produto.
+- 📚 **Docs**: [okamiagent.com/docs](https://okamiagent.com/docs) — guia completo de uso.
+- 🎨 **Landing (fonte)**: [github.com/OkamiOps/Okami-Agent-LP](https://github.com/OkamiOps/Okami-Agent-LP).
+- 📦 **Releases**: [github.com/OkamiOps/Okami-Agent/releases](https://github.com/OkamiOps/Okami-Agent/releases) · [CHANGELOG](CHANGELOG.md).
+
+No repositório:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura completa (harness, skills, providers,
   memória, auto-melhoria, multi-agente, segurança).
 - [docs/PRODUCTION.md](docs/PRODUCTION.md) — checklist de GA + como ligar a postura hostil.
@@ -472,8 +489,9 @@ tests/         suíte completa (pytest)
 
 <div align="center">
 
-**Okami Agent** — © OkamiOps. Construído com [uv](https://docs.astral.sh/uv/) ·
-[LiteLLM](https://github.com/BerriAI/litellm) · [Textual](https://textual.textualize.io/).
+**Okami Agent** — © OkamiOps · [okamiagent.com](https://okamiagent.com). Construído com
+[uv](https://docs.astral.sh/uv/) · [LiteLLM](https://github.com/BerriAI/litellm) ·
+[Textual](https://textual.textualize.io/).
 
 *Custom Solutions · AI Innovation*
 

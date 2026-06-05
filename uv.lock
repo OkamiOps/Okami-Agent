@@ -1401,7 +1401,7 @@ wheels = [
 
 [[package]]
 name = "okami-agent"
-version = "0.0.1"
+version = "0.1.0a0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },

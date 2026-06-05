@@ -34,4 +34,16 @@ jobs:
       - name: GitHub Release (com wheel + sdist + SBOM)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Notas CURADAS (RELEASE_NOTES.md) se existir; senão auto-gera a partir dos commits.
+          NOTES="--generate-notes"
+          [ -f RELEASE_NOTES.md ] && NOTES="--notes-file RELEASE_NOTES.md"
+          # alpha/beta/rc → marca como pré-release (não vira "latest").
+          PRE=""
+          case "$TAG" in *alpha*|*beta*|*rc*) PRE="--prerelease";; esac
+          ASSETS="dist/*.whl dist/*.tar.gz"
+          [ -f dist/sbom.cdx.json ] && ASSETS="$ASSETS dist/sbom.cdx.json"
+          # Idempotente: cria, ou (se já existe) só re-sobe os assets.
+          gh release create "$TAG" $ASSETS --title "$TAG" $NOTES $PRE \
+            || gh release upload "$TAG" $ASSETS --clobber
