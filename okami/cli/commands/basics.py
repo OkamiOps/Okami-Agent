@@ -131,6 +131,46 @@ def doctor() -> None:
                   f"persona={fl.get('persona', 6000)} agents={fl.get('agents', 4000)} "
                   f"user={fl.get('user', 4000)} memory={fl.get('memory', 4000)}")
 
+    # --- toolchain & sistema (#13 self-review: doctor mais agressivo, estilo Hermes) ---
+    import shutil
+    import sqlite3
+    import stat as _stat
+
+    console.print("\n[bold]toolchain[/bold]")
+    for tool, why in (("git", "skills/learn, checkpoints"), ("uv", "instalação/deps"),
+                      ("node", "ACP/IDE e alguns MCP"), ("docker", "sandbox/serviços (opcional)"),
+                      ("claude", "transporte claude_cli"), ("rg", "busca rápida (opcional)")):
+        path = shutil.which(tool)
+        console.print(f"  {tool}: {f'[green]{path}[/green]' if path else '[yellow]não encontrado[/yellow]'} "
+                      f"[dim]({why})[/dim]")
+    try:                                              # SQLite FTS5 → memória híbrida (senão degrada p/ LIKE)
+        _c = sqlite3.connect(":memory:")
+        _c.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
+        _c.close()
+        fts_ok = True
+    except sqlite3.Error:
+        fts_ok = False
+    console.print(f"  SQLite FTS5: {'[green]ok[/green]' if fts_ok else '[yellow]ausente → memória usa LIKE[/yellow]'}")
+
+    codex_auth = (Path.home() / ".codex" / "auth.json").exists() or \
+        (Path.home() / ".okami" / "credentials" / "codex.json").exists()
+    console.print(f"  codex auth: {'[green]logado[/green]' if codex_auth else '[yellow]rode: okami login codex[/yellow]'}")
+
+    from okami.config import global_env_path
+    genv = global_env_path()
+    if genv.exists():
+        mode = _stat.S_IMODE(genv.stat().st_mode)
+        s = "[green](0600 ✓)[/green]" if mode == 0o600 else "[yellow](recomendado 0600)[/yellow]"
+        console.print(f"  ~/.okami/.env: existe · perm {oct(mode)} {s}")
+    else:
+        console.print("  ~/.okami/.env: [dim]nenhum (configure com `okami config set`)[/dim]")
+
+    mcp = getattr(cfg, "mcp", None) or {}
+    if mcp:
+        console.print(f"  MCP: {len(mcp)} servidor(es): {', '.join(list(mcp)[:6])}")
+    else:
+        console.print("  MCP: [dim]nenhum servidor configurado[/dim]")
+
 
 @app.command()
 def login(
