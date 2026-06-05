@@ -225,6 +225,43 @@ class AgentEndpoint:
         s.model_override = arg
         return f"🧠 modelo desta sessão → {arg} (vale nos próximos turnos; /model sem arg mostra)"
 
+    def _sessions_text(self, chat_id) -> str:
+        import datetime as _dt
+        arr = self.store.archives(chat_id)
+        if not arr:
+            return "🗂 nenhuma conversa arquivada (o /new arquiva a atual)."
+        out = ["🗂 conversas arquivadas — /resume <n>:"]
+        for i, a in enumerate(arr[:15], 1):
+            when = _dt.datetime.fromtimestamp(a["ts"]).strftime("%d/%m %H:%M") if a["ts"] else "?"
+            out.append(f"  {i}. {when} · {a['turns']} trocas")
+        return "\n".join(out)
+
+    def _resume_cmd(self, chat_id, s: "Session", arg: str) -> str:
+        arr = self.store.archives(chat_id)
+        if not arr:
+            return "nada pra retomar (veja /sessions)."
+        try:
+            name = arr[int(arg) - 1]["name"]
+        except (ValueError, IndexError):
+            return "uso: /resume <n> (o número vem do /sessions)."
+        try:
+            hist = self.store.resume(chat_id, name)
+        except Exception as e:  # noqa: BLE001
+            return f"❌ não retomei: {e}"
+        s.history[:] = list(hist)
+        return f"↻ retomei a conversa ({len(hist) // 2} trocas). Pode continuar de onde parou."
+
+    def _export_cmd(self, chat_id, arg: str) -> str:
+        import time as _t
+        from pathlib import Path as _P
+        name = arg or f"conversa_{chat_id}_{int(_t.time())}.md"
+        dest = _P(name) if _P(name).is_absolute() else _P(self.ws) / name
+        try:
+            out = self.store.export(chat_id, dest)
+            return f"📄 exportado em Markdown: {out}"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ export falhou: {e}"
+
     def _compact_now(self, chat_id, s: "Session") -> str:
         if len(s.history) < 4:
             return "🗜 nada relevante pra compactar ainda."
@@ -456,6 +493,15 @@ class AgentEndpoint:
             return
         if low == "/compact":
             self.channel.send(chat_id, self._compact_now(chat_id, s))
+            return
+        if low == "/sessions":
+            self.channel.send(chat_id, self._sessions_text(chat_id))
+            return
+        if low.startswith("/resume"):
+            self.channel.send(chat_id, self._resume_cmd(chat_id, s, text[len("/resume"):].strip()))
+            return
+        if low.startswith("/export"):
+            self.channel.send(chat_id, self._export_cmd(chat_id, text[len("/export"):].strip()))
             return
         from okami.automation.scheduler import Scheduler, infer_commitment   # §11: "me lembra de X amanhã" → agenda
         ic = infer_commitment(text, time.time())

@@ -165,6 +165,45 @@ class TranscriptStore:
                 pass
         self.update_entry(chat_id, node_count=0, last_node_id=None, last_role=None)
 
+    # ----------------------------------------------------------------- session service (/sessions /resume /export)
+    def archives(self, chat_id) -> list[dict]:
+        """Sessões ARQUIVADAS (por /new) deste chat: [{ts, name, turns}], mais nova primeiro."""
+        out = []
+        for p in self.dir.glob(f"{chat_id}.*.reset.jsonl"):
+            try:
+                ts = int(p.name.split(".")[-3])
+            except (ValueError, IndexError):
+                ts = 0
+            turns = len(p.read_text(encoding="utf-8", errors="ignore").splitlines()) // 2
+            out.append({"ts": ts, "name": p.name, "turns": turns})
+        return sorted(out, key=lambda a: a["ts"], reverse=True)
+
+    def resume(self, chat_id, name: str) -> list[tuple[str, str]]:
+        """Retoma uma sessão arquivada: arquiva a atual e torna `name` o transcript ativo. Devolve o histórico."""
+        arch = self.dir / name
+        if not name.startswith(f"{chat_id}.") or not arch.exists():
+            raise FileNotFoundError(name)
+        self.reset(chat_id)                          # arquiva a sessão atual antes de trocar
+        arch.rename(self._tx_path(chat_id))          # a arquivada vira a ativa
+        nodes = self.read(chat_id)
+        self.update_entry(chat_id, node_count=len(nodes),
+                          last_node_id=(nodes[-1].get("id") if nodes else None),
+                          last_role=(nodes[-1].get("role") if nodes else None))
+        return [(n.get("role", ""), n.get("text", "")) for n in nodes if n.get("role")]
+
+    def export(self, chat_id, path) -> Path:
+        """Exporta o transcript como Markdown legível. Devolve o caminho escrito."""
+        nodes = self.read(chat_id)
+        lines = [f"# Conversa {chat_id}\n"]
+        for n in nodes:
+            who = {"USER": "você", "AGENTE": "okami", "SUMMARY": "— resumo —"}.get(n.get("role", ""),
+                                                                                   n.get("role", ""))
+            lines.append(f"**{who}:** {n.get('text', '')}\n")
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+        return out
+
     # ----------------------------------------------------------------- maintenance (poda)
     def prune(self, max_sessions: int = 500, max_age_days: float = 30.0) -> int:
         """Estilo OpenClaw session.maintenance: remove sessões velhas/excedentes (store + transcript)."""
