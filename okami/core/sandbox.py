@@ -30,7 +30,7 @@ from pathlib import Path
 
 @dataclass
 class SandboxPolicy:
-    backend: str = "local"           # "local" | "docker"
+    backend: str = "local"           # "local" | "docker" | "auto" (docker se houver, senão local)
     mode: str = "workspace-write"    # "read-only" | "workspace-write" | "yolo"
     network: bool = False            # rede liberada? (real só no docker; yolo liga)
     timeout: int = 60                # segundos (relógio) — sempre vale
@@ -58,6 +58,12 @@ class SandboxPolicy:
     def network_on(self) -> bool:
         """Rede liberada? (yolo sempre libera, mesmo se a policy foi construída na mão)."""
         return self.network or self.mode == "yolo"
+
+    def effective_backend(self) -> str:
+        """Resolve o backend real (#4): 'auto' vira docker se houver Docker, senão local."""
+        if self.backend == "auto":
+            return "docker" if shutil.which("docker") else "local"
+        return self.backend
 
 
 def default_policy() -> SandboxPolicy:
@@ -128,7 +134,14 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                   *, env: dict | None = None) -> SandboxResult:
     """Executa `cmd` sob a política. docker se backend=docker E docker presente; senão local."""
     policy = policy or default_policy()
-    use_docker = policy.backend == "docker" and bool(shutil.which("docker"))
+    eff = policy.effective_backend()
+    if eff == "docker" and not shutil.which("docker"):
+        # backend docker EXPLÍCITO sem Docker → NÃO cai no local inseguro em silêncio (review #4):
+        # run_shell fica desabilitado até ter o isolamento real.
+        return SandboxResult(126, "sandbox: backend=docker exigido, mas Docker não está disponível — "
+                             "run_shell DESABILITADO (não caio no local inseguro). Instale o Docker, "
+                             "ou use backend=auto (cai no local) / backend=local explícito.")
+    use_docker = (eff == "docker")
     try:
         if use_docker:
             r = subprocess.run(docker_argv(cmd, workspace, policy),
