@@ -181,9 +181,19 @@ def config_show(diff: bool = typer.Option(False, "--diff", help="Só os override
     console.print(_yaml.safe_dump(_redact(raw), allow_unicode=True, sort_keys=False))
 
 
+def _looks_secret_value(val) -> bool:
+    """True se o VALOR escalar parece um segredo (sk-…, token JWT, etc.) mesmo com chave inócua."""
+    from okami.core.redact import redact
+    s = str(val)
+    return bool(s) and redact(s) != s          # o redator central mexeu → tem padrão de segredo
+
+
 @config_app.command("get")
-def config_get(key: str = typer.Argument(..., help="Chave pontilhada, ex.: memory.backend")) -> None:
-    """Lê um valor da config efetiva (chave pontilhada)."""
+def config_get(
+    key: str = typer.Argument(..., help="Chave pontilhada, ex.: memory.backend"),
+    raw_out: bool = typer.Option(False, "--raw", help="Mostra o valor CRU mesmo se for segredo (cuidado: vaza)."),
+) -> None:
+    """Lê um valor da config efetiva (chave pontilhada). Segredo é mascarado por padrão (#9; use --raw p/ ver)."""
     import yaml as _yaml
     from okami.config import load_raw
     raw, _ = load_raw()
@@ -191,7 +201,10 @@ def config_get(key: str = typer.Argument(..., help="Chave pontilhada, ex.: memor
     if val is None:
         console.print("[dim](não definido)[/dim]")
     elif isinstance(val, (dict, list)):
-        console.print(_yaml.safe_dump(_redact(val), allow_unicode=True, sort_keys=False))
+        console.print(_yaml.safe_dump(_redact(val) if not raw_out else val, allow_unicode=True, sort_keys=False))
+    elif not raw_out and (_is_sensitive_dotted(key) or _looks_secret_value(val)):
+        # #2/#9: scalar sensível NÃO sai cru — antes `config get channels.telegram.token` cuspia o token.
+        console.print("[yellow]***[/] [dim](segredo — use --raw p/ ver o valor cru)[/dim]")
     else:
         console.print(str(val))
 

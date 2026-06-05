@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-import urllib.request
 from pathlib import Path
 
 _REF_RE = re.compile(r"@([\w./:\-~]+)")
@@ -25,9 +24,12 @@ def _git_diff(ws: Path) -> str:
 
 
 def _fetch_url(url: str) -> str:
+    from okami.core.net_guard import BlockedURL, guarded_urlopen
     try:
-        with urllib.request.urlopen(url, timeout=15) as r:  # noqa: S310
+        with guarded_urlopen(url, timeout=15) as r:     # #6: valida anti-SSRF antes de buscar
             return r.read(_MAX).decode("utf-8", "ignore")
+    except BlockedURL as e:
+        return f"(URL recusada: {e})"                    # o modelo vê o motivo, não um silêncio
     except Exception:  # noqa: BLE001
         return ""
 
