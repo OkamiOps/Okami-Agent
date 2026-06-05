@@ -273,3 +273,12 @@ def test_grounding_allows_overwrite_after_read(tmp_path):
     r = Harness(Script(outputs), t, tmp_path).run()
     assert r.state == TaskState.COMPLETE
     assert (tmp_path / "exists.txt").read_text(encoding="utf-8") == "novo"
+
+
+def test_inspection_verb_expects_action(tmp_path):
+    """#10 self-review: 'analisa a pasta' → promessa NÃO é resposta; o harness exige EXECUTAR."""
+    s = Script(["vou analisar a pasta já já",                 # promete (FUTURE_INTENT) → nudge
+                J("list_dir", path="."),                       # aí age
+                J("respond", message="é uma pasta vazia")])
+    r = Harness(s, Task(goal="analisa a pasta atual"), tmp_path).run()
+    assert any(st.tool == "list_dir" for st in r.steps)        # executou, não só prometeu
