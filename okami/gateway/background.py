@@ -13,9 +13,55 @@ import time
 from pathlib import Path
 
 
+def event_line_plain(e: dict) -> str:
+    """Um evento do harness → 1 linha de texto puro (sem Rich) p/ o log do /background."""
+    k = e.get("kind")
+    if k == "step":
+        args = e.get("args") or {}
+        prev = ""
+        for key in ("path", "cmd", "query", "url", "name", "text", "goal"):
+            v = args.get(key)
+            if isinstance(v, str) and v:
+                prev = " " + v.replace("\n", " ")[:60]
+                break
+        return f"{'✓' if e.get('ok') else '✗'} {e.get('tool', '')}{prev}".rstrip()
+    if k == "approval_request":
+        return f"⚠ aprovação: {e.get('reason', '')}"
+    if k == "loop":
+        return f"⟲ loop (x{e.get('repeats', '?')})"
+    if k == "escalate":
+        return f"⬆ escalando: {e.get('why', '')}"
+    if k == "compact":
+        return f"⊟ compactando ({e.get('promoted', 0)} → memória)"
+    if k == "complete_rejected":
+        return "✗ ainda falta: " + ", ".join(e.get("missing", []))
+    return ""
+
+
 class BackgroundRegistry:
     def __init__(self, ws):
         self.path = Path(ws) / ".okami" / "background.json"
+
+    # ── log AO VIVO por job (stream de stdout/progresso, persistido + paginável) ──
+    def log_path(self, jid: int) -> Path:
+        return self.path.parent / "background" / f"{jid}.log"
+
+    def append_log(self, jid: int, line: str) -> None:
+        if not line:
+            return
+        p = self.log_path(jid)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as f:
+                f.write(line.rstrip() + "\n")
+        except OSError:
+            pass
+
+    def tail(self, jid: int, n: int = 30) -> list[str]:
+        try:
+            return self.log_path(jid).read_text(encoding="utf-8", errors="ignore").splitlines()[-max(1, n):]
+        except OSError:
+            return []
 
     def _read(self) -> dict:
         try:
@@ -83,5 +129,12 @@ class BackgroundRegistry:
         d["jobs"] = alive[-keep:] if len(alive) > keep else alive
         removed = len(jobs) - len(d["jobs"])
         if removed:
+            kept = {j.get("id") for j in d["jobs"]}
+            for j in jobs:                               # apaga o log dos jobs podados (não deixa lixo)
+                if j.get("id") not in kept:
+                    try:
+                        self.log_path(j["id"]).unlink(missing_ok=True)
+                    except OSError:
+                        pass
             self._write(d)
         return removed

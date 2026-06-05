@@ -480,9 +480,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             if sub in ("cancel", "kill", "stop"):      # /background cancel <id> → para a tarefa
                 self.channel.send(chat_id, self._background_cancel(parts[1].strip() if len(parts) > 1 else ""))
                 return
+            if sub in ("log", "logs", "tail"):         # /background log <id> [linhas] → progresso ao vivo
+                self.channel.send(chat_id, self._background_log(parts[1].strip() if len(parts) > 1 else ""))
+                return
             if not prompt:
                 self.channel.send(chat_id, "uso: /background <tarefa> · /background status · "
-                                  "/background cancel <id>. Rodo em paralelo e te aviso quando terminar.")
+                                  "/background log <id> · /background cancel <id>. Rodo em paralelo e aviso no fim.")
                 return
             self._spawn_background(chat_id, prompt, yolo=s.yolo)
             return
@@ -530,6 +533,17 @@ class AgentEndpoint(EndpointCommandsMixin):
             out.append(f"  {icon.get(j.get('state'), '·')} #{j['id']} [{when}] {(j.get('prompt') or '')[:60]}")
         return "\n".join(out)
 
+    def _background_log(self, arg: str) -> str:
+        toks = arg.split()
+        if not toks or not toks[0].lstrip("#").isdigit():
+            return "uso: /background log <id> [linhas] (ids em /background status)."
+        bid = int(toks[0].lstrip("#"))
+        n = int(toks[1]) if len(toks) > 1 and toks[1].isdigit() else 30
+        lines = self._bgreg.tail(bid, n)
+        if not lines:
+            return f"📄 background #{bid}: sem log ainda (ou id inexistente)."
+        return f"📄 background #{bid} (últimas {len(lines)} linhas):\n" + "\n".join("  " + ln for ln in lines)
+
     def _background_cancel(self, arg: str) -> str:
         a = arg.lstrip("#").strip()
         if not a.isdigit():
@@ -553,19 +567,28 @@ class AgentEndpoint(EndpointCommandsMixin):
         self.channel.send(chat_id, f"▶ background #{bid} rodando — sigo livre pra conversar; te aviso no fim. "
                           f"(/background cancel {bid} pra parar)")
 
+        from okami.gateway.background import event_line_plain
+
+        def _on_ev(e, _bid=bid):                         # stream AO VIVO: cada passo do harness → log do job
+            self._bgreg.append_log(_bid, event_line_plain(e))
+
         def _bgrun(_bid=bid, _p=prompt, _yolo=yolo, _ev=ev):
             try:
                 approve = (lambda req: True) if _yolo else (lambda req: False)   # fail-closed sem interação
                 task = self.run_task(self.cfg, self.ws, _p, approve=approve, surface=self.surface,
-                                     cancel=_ev.is_set)   # harness checa entre passos → para no /background cancel
+                                     cancel=_ev.is_set,   # harness checa entre passos → para no /background cancel
+                                     on_event=_on_ev)     # progresso ao vivo → /background log <id>
                 if _ev.is_set():
+                    self._bgreg.append_log(_bid, "⏹ cancelado")
                     self._bgreg.finish(_bid, state="cancelled", result="cancelado pelo usuário")
                     self.channel.send(chat_id, f"⏹ background #{_bid} cancelado.")
                 else:
                     out = (getattr(task, "result", "") or "").strip() or "(sem saída textual)"
+                    self._bgreg.append_log(_bid, "✅ concluído")
                     self._bgreg.finish(_bid, state="done", result=out)
                     self.channel.send(chat_id, f"✅ background #{_bid} pronto:\n{out}")
             except Exception as e:  # noqa: BLE001 — background nunca derruba o endpoint
+                self._bgreg.append_log(_bid, f"❌ erro: {e}")
                 self._bgreg.finish(_bid, state="failed", result=str(e))
                 self.channel.send(chat_id, f"❌ background #{_bid} falhou: {e}")
             finally:

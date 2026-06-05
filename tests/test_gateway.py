@@ -89,6 +89,26 @@ def test_background_cancel_stops_running_job():
     assert any("background #1 cancelado" in t for _, t in ep.channel.sent)
 
 
+def test_background_log_captures_live_events():
+    ep = _ep()
+
+    def _runner(cfg, ws, goal, *, on_event=None, **kw):
+        if on_event:                                     # emite progresso (como o harness real)
+            on_event({"kind": "step", "tool": "run_shell", "ok": True, "args": {"cmd": "ls -la"}})
+            on_event({"kind": "step", "tool": "write_file", "ok": True, "args": {"path": "x.py"}})
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "feito"
+        return t
+
+    ep.run_task = _runner
+    ep.handle("7", "/background cria um script")
+    lines = ep._bgreg.tail(1, 50)
+    assert any("run_shell ls -la" in ln for ln in lines)
+    assert any("write_file x.py" in ln for ln in lines) and any("concluído" in ln for ln in lines)
+    ep.handle("7", "/background log 1")                   # /background log <id> mostra o stream
+    assert any("background #1" in t and "run_shell" in t for _, t in ep.channel.sent)
+
+
 def test_background_cancel_unknown_id():
     ep = _ep()
     ep.handle("7", "/background cancel 99")
