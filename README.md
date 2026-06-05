@@ -376,6 +376,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami agent new\|list` | Multi-agente (`agents/<id>`). |
 | `okami gateway` / `okami serve` / `okami room` | Telegram bots / API HTTP / sala multi-agente. |
 | `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway como serviço do SO (launchd/systemd, sobe no boot) + log ao vivo. |
+| Telegram: menu `/` (setMyCommands) · reações 👀/👍/👎 (`gateway.reactions`) · botões inline de aprovação ✅/❌ | UX nativa do Telegram. |
 | `okami cron add\|list\|remove\|run\|tick` | Agendamento. |
 | `okami hooks` / `okami mcp` | Event hooks / servidores MCP. |
 | `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voz, STT, TTS, imagem. |

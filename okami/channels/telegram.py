@@ -99,6 +99,22 @@ class TelegramClient:
                                    {"text": "❌ Negar", "callback_data": f"okapprove:{sfx}no"}]]}
         return self._call("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": kb})
 
+    def set_my_commands(self, commands: list[dict]) -> None:
+        """Registra o menu do botão '/' (setMyCommands). Best-effort — menu é cosmético."""
+        try:
+            self._call("setMyCommands", {"commands": commands})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def set_reaction(self, chat_id, message_id, emoji: str) -> None:
+        """Reage à mensagem (setMessageReaction). Best-effort — o set de emojis do Telegram é limitado;
+        emoji inválido só não aparece (não quebra o turno)."""
+        try:
+            self._call("setMessageReaction", {"chat_id": chat_id, "message_id": int(message_id),
+                                              "reaction": [{"type": "emoji", "emoji": emoji}]})
+        except Exception:  # noqa: BLE001
+            pass
+
     def answer_callback(self, callback_id: str, text: str = "") -> None:
         try:
             self._call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text})
@@ -190,8 +206,16 @@ class TelegramChannel(Channel):
                 out.append(Inbound("telegram", str(chat), text=txt, msg_id=mid))
         return out
 
+    def start(self) -> None:
+        """No boot do gateway: registra o menu '/' do Telegram a partir do registro de comandos."""
+        from okami import commands as _cmds
+        self.client.set_my_commands(_cmds.telegram_menu())
+
     def send(self, chat_id, text: str) -> None:
         self.client.send_message(chat_id, text)
+
+    def set_reaction(self, chat_id, message_id, emoji: str) -> None:
+        self.client.set_reaction(chat_id, message_id, emoji)
 
     def send_typing(self, chat_id) -> None:
         self.client.send_chat_action(chat_id, "typing")

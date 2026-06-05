@@ -32,6 +32,11 @@ retention:                    # poda/quota de disco (gateway long-running não m
   processes:    {ttl_hours: 24}          # processos em background já terminados
   audio:        {enabled: true}          # voz/TTS temporário
   quota_mb:     {tool_outputs: 500, checkpoints: 200, sessions: 200}   # 0/ausente = sem teto; >0 = aviso no status
+gateway:                      # bots de Telegram (1 por agente)
+  reactions: true             # reage à mensagem: 👀 processando · 👍 feito · 👎 erro (Telegram). Desligue com false.
+  # auto_resume: false        # retoma tarefa interrompida no boot (com guarda anti-loop)
+  # max_sessions: 500         # poda sessões antigas
+
 voice:                        # Telegram (áudio). Requer deps: uv sync --extra voice
   stt:
     backend: whisper          # áudio recebido → texto (faster-whisper local)

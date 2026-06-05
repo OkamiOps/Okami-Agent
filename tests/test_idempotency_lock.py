@@ -30,6 +30,7 @@ def _bare_ep(batch):
     from collections import OrderedDict
     ep._seen_msgs = OrderedDict()
     ep._img = {}
+    ep._last_msg_id = {}
     ep.stt = ep.tts = None
     handled = []
     ep.handle = lambda cid, text: handled.append((cid, text))

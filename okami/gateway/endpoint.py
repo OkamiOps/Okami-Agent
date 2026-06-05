@@ -43,7 +43,8 @@ class AgentEndpoint(EndpointCommandsMixin):
     def __init__(self, agent_id: str, cfg, ws, channel, run_task: Callable,
                  approval_mode: str = "manual", approval_timeout: float = 120.0,
                  max_history_chars: int = 6000, stt=None, tts=None, spawn: Callable | None = None,
-                 auto_resume: bool = False, max_sessions: int = 500, on_event: Callable | None = None):
+                 auto_resume: bool = False, max_sessions: int = 500, on_event: Callable | None = None,
+                 reactions: bool = False):
         self.on_event = on_event             # progresso ao vivo (tool-calls/loop/compact) — chat liga, Telegram não
         self.agent_id = agent_id
         self.cfg = cfg
@@ -70,6 +71,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
         self._bg: dict[int, str] = {}        # tarefas /background em andamento (id → resumo) — não bloqueia a sessão
         self._bg_seq = 0
+        self.reactions = reactions           # reações 👀/👍/👎 na mensagem (Telegram) — opt-in
+        self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
         self.running = True
 
     def session(self, chat_id) -> Session:
@@ -425,6 +428,18 @@ class AgentEndpoint(EndpointCommandsMixin):
         s.cancel = False
         self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
 
+    def _react(self, chat_id, emoji: str) -> None:
+        """Reage à última mensagem do usuário (Telegram). Best-effort, opt-in (self.reactions)."""
+        if not self.reactions:
+            return
+        fn = getattr(self.channel, "set_reaction", None)
+        mid = self._last_msg_id.get(str(chat_id))
+        if fn and mid:
+            try:
+                fn(chat_id, mid, emoji)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _spawn_background(self, chat_id, prompt: str, *, yolo: bool = False) -> None:
         """/background: roda `prompt` numa tarefa ISOLADA (não toca no histórico da sessão), em paralelo,
         e devolve o resultado quando terminar. Aprovação fail-closed (só ações seguras) a menos que a
@@ -485,6 +500,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001 — typing nunca quebra o turno
                 pass
         self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
+        self._react(chat_id, "👀")                       # 👀 = processando (Telegram)
         try:
             approve = self._approve(chat_id, s)
             on_ev = self.on_event
@@ -531,12 +547,15 @@ class AgentEndpoint(EndpointCommandsMixin):
             prefix = "" if chatty else {"COMPLETE": "✅ ", "BLOCKED": "⚠ ",
                                         "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
             self.channel.send(chat_id, prefix + reply)
+            self._react(chat_id, {"COMPLETE": "👍", "BLOCKED": "👎",
+                                  "NEEDS_INPUT": "🤔"}.get(task.state.name, "👎"))
             self._maybe_voice(chat_id, reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
         except Exception as e:  # noqa: BLE001 — USER já está no transcript → detectável como interrompido
             self.channel.send(chat_id, f"❌ erro: {e}")
+            self._react(chat_id, "👎")
         finally:
             s.busy = False
             s.cancel = False
@@ -563,6 +582,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self._seen_msgs[mid] = True
                 if len(self._seen_msgs) > 1000:            # LRU simples (descarta o mais antigo)
                     self._seen_msgs.popitem(last=False)
+                self._last_msg_id[str(msg.chat_id)] = mid  # alvo das reações 👀/👍/👎
             text = msg.text
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
                 try:
@@ -622,6 +642,10 @@ class AgentEndpoint(EndpointCommandsMixin):
                                   f"{str(n.get('cmd', ''))[:60]}")
 
     def loop(self) -> None:
+        try:                                            # boot: registra o menu '/' (Telegram setMyCommands)
+            getattr(self.channel, "start", lambda: None)()
+        except Exception:  # noqa: BLE001
+            pass
         try:                                            # SIGHUP → hot-reload (convenção de daemon)
             import signal as _sig
             _sig.signal(_sig.SIGHUP, lambda *_: setattr(self, "_reload_req", True))

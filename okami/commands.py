@@ -105,6 +105,17 @@ def all_slash_names(scope: str | None = None) -> list[str]:
     return names
 
 
+def telegram_menu() -> list[dict]:
+    """[{command, description}] p/ o setMyCommands do Telegram (o menu do botão '/'). Sem aliases;
+    pula comandos só-do-chat (ex.: /exit). Nome ≤32 e descrição ≤256 (limites da API)."""
+    out = []
+    for c in COMMAND_REGISTRY:
+        if c.scope == "chat":                         # /exit /quit não fazem sentido no Telegram
+            continue
+        out.append({"command": c.name[:32], "description": (c.desc or c.name)[:256]})
+    return out[:100]                                  # limite do Telegram
+
+
 def help_lines(essential_only: bool = False) -> list[str]:
     """Linhas 'categoria: /a /b …' p/ help em texto (Telegram/console)."""
     cats = by_category(tier="essential" if essential_only else None)

@@ -78,7 +78,8 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
                              max_history_chars=hist_chars,
                              stt=make_stt(voice.get("stt")), tts=make_tts(voice.get("tts")),
                              auto_resume=bool(gw.get("auto_resume", False)),
-                             max_sessions=int(gw.get("max_sessions", 500)))
+                             max_sessions=int(gw.get("max_sessions", 500)),
+                             reactions=bool(gw.get("reactions", False)))
 
     eps: list[AgentEndpoint] = []
     seen_tokens: dict[str, str] = {}                   # token → 1º agente que o usou (anti-conflito multi-profile)
