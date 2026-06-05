@@ -20,9 +20,11 @@ Okami-Agent/
 └── deploy/       Dockerfile · docker-compose.yml  ← tudo de container junto
 ```
 
-**Onboarding** (estilo Hermes): `scripts/install.sh` (ou `.ps1` no Windows) detecta Python 3.11+, cria o
-venv e o comando `okami` global. Depois `okami setup` (wizard: provider → login → memória → identidade →
-canal) e `okami chat` (REPL no terminal, sem precisar de Telegram). Nada de editar YAML/JSON na mão.
+**Onboarding** (estilo Hermes): `scripts/install.sh` (ou `.ps1` no Windows) instala o `uv`, baixa o
+Python e cria o comando `okami` — **centralizando TUDO em `~/.okami/`** (ou `$OKAMI_HOME`), sem espalhar
+pelo SO: `~/.okami/src` (código), `~/.okami/tools` (venv isolado, via `UV_TOOL_DIR`), `~/.okami/bin`
+(launcher, via `UV_TOOL_BIN_DIR`), e os dados/segredos em `~/.okami/` em runtime. Depois `okami setup`
+(wizard: provider → login → memória → identidade → canal) e `okami chat`. Nada de editar YAML/JSON na mão.
 
 Build em container: `docker build -f deploy/Dockerfile -t okami-agent .` (ou
 `docker compose -f deploy/docker-compose.yml run --rm okami doctor`). O `.dockerignore` fica na raiz

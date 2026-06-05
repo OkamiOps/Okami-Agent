@@ -84,6 +84,11 @@ okami setup     # configura em 2-3 cliques (detecta seus providers)
 okami chat      # conversa no terminal
 ```
 
+**Tudo numa pasta só — `~/.okami/`** (ou `$OKAMI_HOME`), como o `~/.openclaw`/`~/.hermes`: o instalador
+não espalha pelo SO. O código fica em `~/.okami/src`, o venv isolado em `~/.okami/tools`, o launcher em
+`~/.okami/bin`, e os dados (skills, agents, sessões, `.env`, credenciais) em `~/.okami/` em runtime.
+Atualizar/desinstalar = rodar o instalador de novo / `uv tool uninstall okami-agent`.
+
 <details><summary><b>Dev (rodar do código, sem instalar global)</b></summary>
 
 ```bash

@@ -119,7 +119,9 @@ def _config_effective_yaml() -> str:
 
 def _config_file_rows():
     from okami.config import global_env_path
-    return [("base", Path("okami.yaml")), ("overrides", Path("okami.local.yaml")),
+    from okami.home import base_dir, okami_home
+    return [("casa", okami_home()), ("dados (base)", base_dir()),
+            ("base", Path("okami.yaml")), ("overrides", Path("okami.local.yaml")),
             (".env projeto", Path(".env")), (".env global", global_env_path()),
             ("policy", Path("okami.policy.yaml"))]
 
