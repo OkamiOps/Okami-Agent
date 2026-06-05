@@ -419,6 +419,82 @@ class GenerateImage(Tool):
         return ToolResult(True, f"imagem gerada{how}: {args['path']}", effect=True)
 
 
+class ProcessStart(Tool):
+    name = "process_start"
+    description = ("Roda um comando LONGO em BACKGROUND (não bloqueia o turno) → devolve um id. Use p/ "
+                   "servidor que fica de pé, build/teste demorado, watch. Depois: process_poll/log/wait/kill.")
+    args_schema = {"cmd": "comando a rodar em background"}
+    required = ("cmd",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        try:
+            meta = ProcessManager(ctx.workspace).start(args["cmd"])
+        except ValueError as e:
+            return ToolResult(False, str(e))
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(False, f"falha ao iniciar processo: {e}")
+        return ToolResult(True, f"processo {meta['id']} no ar (pid {meta['pid']}): {args['cmd'][:80]}", effect=True)
+
+
+class ProcessPoll(Tool):
+    name = "process_poll"
+    description = "Status de um processo em background (running/exited + exit code) + saída recente."
+    args_schema = {"id": "id do processo (de process_start)"}
+    required = ("id",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        pm = ProcessManager(ctx.workspace)
+        st = pm.poll(args["id"])
+        body = f"status={st.get('status')}"
+        if st.get("status") == "exited":
+            body += f" exit={st.get('exit_code')}"
+        tail = pm.log(args["id"], tail=1500)
+        return ToolResult(st.get("status") != "unknown", body + (f"\n{tail}" if tail else ""))
+
+
+class ProcessWait(Tool):
+    name = "process_wait"
+    description = "Espera um processo em background terminar (até `timeout`s) e devolve o status final + saída."
+    args_schema = {"id": "id do processo", "timeout": "(opc) segundos (default 30)"}
+    required = ("id",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        pm = ProcessManager(ctx.workspace)
+        try:
+            to = float(args.get("timeout", 30))
+        except (TypeError, ValueError):
+            to = 30.0
+        st = pm.wait(args["id"], timeout=to)
+        return ToolResult(st.get("status") != "unknown",
+                          f"status={st.get('status')} exit={st.get('exit_code')}\n{pm.log(args['id'], tail=2000)}")
+
+
+class ProcessLog(Tool):
+    name = "process_log"
+    description = "Saída (log) de um processo em background — redigida (segredo mascarado) e truncada (head/tail)."
+    args_schema = {"id": "id do processo"}
+    required = ("id",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        return ToolResult(True, ProcessManager(ctx.workspace).log(args["id"]) or "(sem saída ainda)")
+
+
+class ProcessKill(Tool):
+    name = "process_kill"
+    description = "Mata um processo em background (SIGTERM no grupo)."
+    args_schema = {"id": "id do processo"}
+    required = ("id",)
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        ok = ProcessManager(ctx.workspace).kill(args["id"])
+        return ToolResult(ok, f"processo {args['id']} {'morto' if ok else 'não encontrado'}", effect=ok)
+
+
 # Tools terminais: o loop trata especialmente, mas elas existem para schema/parse.
 class Respond(Tool):
     name = "respond"
@@ -453,7 +529,8 @@ class NeedInput(Tool):
 
 
 def default_registry() -> dict[str, Tool]:
-    tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(), RememberFact(), RecallMemory(),
-             RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(), FinishSetup(),
-             TaskComplete(), TaskBlocked(), NeedInput()]
+    tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(),
+             ProcessStart(), ProcessPoll(), ProcessWait(), ProcessLog(), ProcessKill(),
+             RememberFact(), RecallMemory(), RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
+             FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

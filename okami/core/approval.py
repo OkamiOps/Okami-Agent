@@ -45,7 +45,7 @@ def classify(tool: str, args: dict) -> Sensitive | None:
         for rx, cat, risk in _FILE_RULES:
             if rx.search(path):
                 return Sensitive(f"escrever em {cat}: {path}", cat, risk)
-    if tool == "run_shell":
+    if tool in ("run_shell", "process_start"):           # process_start = shell em background → mesma trava
         cmd = str(args.get("cmd", ""))
         for rx, cat, risk in _SHELL_RULES:
             if rx.search(cmd):

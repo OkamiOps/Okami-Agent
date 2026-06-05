@@ -30,6 +30,11 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("list_dir", "arquivo", tier="essential"),
     ToolSpec("find_files", "arquivo"),
     ToolSpec("run_shell", "shell", tier="essential", danger="dangerous"),
+    ToolSpec("process_start", "processo", tier="power", danger="dangerous"),
+    ToolSpec("process_poll", "processo"),
+    ToolSpec("process_wait", "processo"),
+    ToolSpec("process_log", "processo"),
+    ToolSpec("process_kill", "processo", danger="sensitive"),
     ToolSpec("remember", "memória"),
     ToolSpec("recall_memory", "memória"),
     ToolSpec("remember_user", "memória"),
@@ -44,7 +49,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
 )
 
 _BY_NAME: dict[str, ToolSpec] = {s.name: s for s in TOOL_REGISTRY}
-_CAT_ORDER = ("conversa", "arquivo", "shell", "memória", "skill", "web", "mídia", "subagente", "controle")
+_CAT_ORDER = ("conversa", "arquivo", "shell", "processo", "memória", "skill", "web", "mídia", "subagente", "controle")
 
 
 def spec(name: str) -> ToolSpec | None:
