@@ -63,12 +63,12 @@ class Task:
 
 @dataclass
 class Budget:
-    max_steps: int = 24
+    max_steps: int = 90          # passos (ações) por tarefa — antes 24, baixo demais p/ tarefa real
     max_consecutive_violations: int = 3
     max_repeat: int = 3          # mesma ação N vezes → loop
     stall_limit: int = 4         # passos sem efeito observável → quebra
     max_loop_breaks: int = 3     # quebras de loop antes de FAILED
-    max_total_turns: int = 100   # backstop: o harness SEMPRE termina
+    max_total_turns: int = 300   # backstop bem acima de max_steps → o limite que vale é o de passos
     max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
 
 

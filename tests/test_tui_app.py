@@ -83,3 +83,29 @@ def test_tui_approval_bar_shows_and_button_answers(tmp_path):
     asyncio.run(scenario())
     assert out.get("bar_shown") is True
     assert out.get("answer") == "/yes"                          # clicar Aprovar respondeu a aprovação
+
+
+def test_tui_send_approval_opens_panel_with_action(tmp_path):
+    """send_approval → o PAINEL abre na hora com a AÇÃO (não fica só texto '/yes ou /no' no log)."""
+    out = {}
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one("#approval").display is False    # fechado de início
+            app.ep._pending["terminal"] = _queue.Queue()          # fluxo real: _approve seta pending…
+            app.show_approval("⚠ Aprovar [run_shell] · cmd=rm -rf / (risco=critical)")   # …e chama send_approval
+            await pilot.pause(0.2)
+            out["shown"] = bool(app.query_one("#approval").display)
+            out["label"] = app._approval_text
+
+    asyncio.run(scenario())
+    assert out.get("shown") is True
+    assert "run_shell" in out["label"] and "rm -rf" in out["label"]   # mostra a ação real
+
+
+def test_tui_channel_has_send_approval():
+    from okami.tui_app import TuiChannel
+    assert hasattr(TuiChannel, "send_approval")     # o canal expõe o caminho de painel (não cai no texto)

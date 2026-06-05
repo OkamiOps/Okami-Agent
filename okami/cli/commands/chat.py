@@ -233,7 +233,8 @@ def chat(
             console.print(line)
 
     ch = TerminalChannel(name, console=console)
-    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event)
+    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
+                       approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
     if new:
         ep.session(cid).history.clear()
         ep.store.reset(cid)

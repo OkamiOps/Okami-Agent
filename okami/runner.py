@@ -30,7 +30,7 @@ def run_task(
     model: str | None = None,
     approve: Callable[[dict], bool] | None = None,
     on_event: Callable[[dict], None] | None = None,
-    max_steps: int = 24,
+    max_steps: int | None = None,            # None → harness.max_steps do okami.yaml (default 90)
     escalate_to: str | None = None,
     skills_dir: str = "skills",
     extra_context: str = "",
@@ -130,6 +130,8 @@ def run_task(
         if ov.get("tool_mode") and pc.capability.tool_mode != ov["tool_mode"]:
             pc.capability.tool_mode = ov["tool_mode"]
             emit(f"🔧 auto-tune: {tune_key} → tool_mode={ov['tool_mode']}")
+    if max_steps is None:                    # tunável no okami.yaml: harness.max_steps (default 90)
+        max_steps = int((getattr(cfg, "harness", None) or {}).get("max_steps", 90))
     budget = Budget(max_steps=max_steps, max_context_chars=prov.compaction_threshold_chars(pc))
     emit(f"janela≈{prov.context_window_tokens(pc)//1000}K tokens · compacta em ~{budget.max_context_chars//1000}k chars")
 

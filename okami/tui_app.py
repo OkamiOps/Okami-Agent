@@ -59,6 +59,10 @@ class TuiChannel(Channel):
         self.sent.append((str(chat_id), text))
         self.app.call_from_thread(self.app.sink_message, str(chat_id), text)
 
+    def send_approval(self, chat_id, text: str, nonce: str = "") -> None:
+        # go/no-go → abre o PAINEL na hora (com a ação), em vez do texto "(/yes ou /no)" no log.
+        self.app.call_from_thread(self.app.show_approval, text)
+
     def send_audio(self, chat_id, audio_path) -> None:
         self.app.call_from_thread(self.app.sink_note, f"🔊 áudio: {audio_path}")
 
@@ -127,7 +131,7 @@ if _HAS_TEXTUAL:
             self.channel = TuiChannel(self)
             self.ep = AgentEndpoint(name, cfg, ws, self.channel, run_task=run_task,
                                     approval_mode=approval_mode, on_event=self._event_from_thread,
-                                    spawn=spawn)
+                                    spawn=spawn, approval_timeout=600.0)   # humano no terminal pode demorar
             self.inflight: deque[str] = deque()
             self._input_q: queue.Queue[str] = queue.Queue()
             self._stop = threading.Event()
@@ -217,6 +221,16 @@ if _HAS_TEXTUAL:
             elif event.button.id == "deny":
                 self._input_q.put("/no")
 
+        def show_approval(self, ask: str) -> None:
+            """Abre o painel de aprovação com a AÇÃO (tool + arg) — chamado pelo send_approval do canal."""
+            self._approval_text = ask or "⚠ aprovar a ação pendente?"
+            try:
+                self.query_one("#approval-label", Static).update(self._approval_text)
+                self.query_one("#approval").display = True
+                self.query_one("#approve", Button).focus()
+            except Exception:  # noqa: BLE001
+                pass
+
         # ---- worker (único produtor de turnos → sem corrida) -----------------
         def _busy(self) -> bool:
             s = self.ep.sessions.get(self._cid)
@@ -272,13 +286,18 @@ if _HAS_TEXTUAL:
                     act.display = False
                 self.query_one("#status", Static).update(self._status_text())
             except Exception:  # noqa: BLE001
-                return
-            pending = self._cid in self.ep._pending
-            bar = self.query_one("#approval")
-            if pending != bool(bar.display):
-                bar.display = pending
-                if pending:
+                pass                                   # erro no status NÃO pode esconder a aprovação ↓
+            try:                                       # aprovação em try PRÓPRIO (desacoplado do status)
+                pending = self._cid in self.ep._pending
+                bar = self.query_one("#approval")
+                if pending and not bar.display:        # abriu: garante visível + foco no Aprovar
+                    bar.display = True
                     self.query_one("#approve", Button).focus()
+                elif not pending and bar.display:      # resolveu: fecha + reseta o rótulo
+                    bar.display = False
+                    self.query_one("#approval-label", Static).update("⚠ aprovar a ação pendente?")
+            except Exception:  # noqa: BLE001
+                pass
 
         # ---- render helpers --------------------------------------------------
         def _header_text(self):
