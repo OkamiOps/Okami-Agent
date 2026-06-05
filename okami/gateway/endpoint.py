@@ -110,6 +110,21 @@ class AgentEndpoint(EndpointCommandsMixin):
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
 
+    def _home_file(self) -> Path:
+        return Path(self.ws) / ".okami" / "home_chat.txt"
+
+    def home_chat(self) -> str:
+        """Chat 'casa' p/ entregar lembretes/agendamentos sem alvo explícito (/sethome). '' se não definido."""
+        try:
+            return self._home_file().read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def set_home(self, chat_id) -> None:
+        p = self._home_file()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(chat_id), encoding="utf-8")
+
     def prune_sessions(self, max_sessions: int = 500, max_age_days: float = 30.0) -> int:
         return self.store.prune(max_sessions=max_sessions, max_age_days=max_age_days)
 
@@ -397,6 +412,17 @@ class AgentEndpoint(EndpointCommandsMixin):
                 s.persona_overlay = persona.overlay(arg)
                 self.channel.send(chat_id, f"🎭 nesta sessão: {arg} (/persona off p/ voltar)")
             self._save_meta(chat_id, s)
+            return
+        if low == "/sethome":                           # destino dos lembretes/cron sem alvo explícito
+            self.set_home(chat_id)
+            self.channel.send(chat_id, "🏠 este chat virou a CASA dos lembretes/agendamentos sem destino.")
+            return
+        if low.startswith("/topic"):                    # tópicos do Telegram já viram sessões separadas (auto)
+            cur = ":" in cid and cid.rsplit(":", 1)[1]
+            here = f"\nVocê está no tópico {cur} (conversa separada)." if cur else ""
+            self.channel.send(chat_id, "🧵 cada TÓPICO do Telegram neste chat é uma conversa separada "
+                              "(histórico/sessão próprios) — automático. Crie um tópico no app pra abrir "
+                              "outra linha de conversa em paralelo." + here)
             return
         if low == "/commands":                          # registry: lista completa por categoria
             self.channel.send(chat_id, self._commands_text())

@@ -133,8 +133,9 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
             return "(sem endpoint p/ entregar)"
         task = ep.run_task(ep.cfg, ep.ws, job["prompt"])
         result = task.result or task.reason or task.state.value
-        if job.get("target"):                          # entrega no chat (estilo OpenClaw cron→canal)
-            ep.channel.send(job["target"], f"⏰ {job['id']}: {result}")
+        target = job.get("target") or ep.home_chat()   # alvo explícito, senão a CASA (/sethome)
+        if target:                                     # entrega no chat (estilo OpenClaw cron→canal)
+            ep.channel.send(target, f"⏰ {job['id']}: {result}")
         return result
 
     def loop():

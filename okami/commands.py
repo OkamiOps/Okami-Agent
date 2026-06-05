@@ -30,6 +30,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("sessions", "lista as conversas arquivadas (por /new)", "sessão", ("ls",)),
     CommandDef("resume", "retoma uma conversa arquivada (/resume <n>)", "sessão", args="<n>"),
     CommandDef("export", "exporta a conversa atual em Markdown (/export [arquivo])", "sessão", args="[arquivo]"),
+    CommandDef("topic", "conversas paralelas no mesmo chat (tópicos do Telegram = sessões separadas)", "sessão",
+               tier="power"),
     CommandDef("background", "roda uma tarefa em paralelo e avisa quando terminar", "sessão",
                ("bg",), args="<tarefa>"),
     CommandDef("title", "dá um nome à conversa atual (/title <nome>)", "sessão", args="[nome]"),
@@ -60,6 +62,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("voice", "liga/desliga a resposta em áudio (TTS) nesta sessão", "sistema", args="[on|off]"),
     CommandDef("busy", "o que fazer se você escrever ocupado: queue (fila) | interrupt (corta)", "sistema",
                args="[modo]"),
+    CommandDef("sethome", "define este chat como destino dos lembretes/agendamentos (cron)", "sistema",
+               tier="power"),
     CommandDef("config", "mostra a config efetiva (segredos mascarados)", "sistema", tier="power"),
     CommandDef("reload", "recarrega a config em quente (sem reiniciar)", "sistema", ("reloadconfig",), tier="power"),
 ]

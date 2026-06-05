@@ -72,3 +72,35 @@ def test_reactions_off_by_default():
                        spawn=lambda fn: fn())                    # reactions default False
     ep.poll_once()
     assert ch.reacts == []                                       # opt-in: nada reage
+
+
+# ---------------------------------------------------------------- tópicos do Telegram (multi-sessão num chat)
+def test_telegram_decode_composite():
+    from okami.channels.telegram import TelegramChannel
+    assert TelegramChannel._decode("123:5") == ("123", 5)
+    assert TelegramChannel._decode("-100999") == ("-100999", None)
+    assert TelegramChannel._decode("-100999:7") == ("-100999", 7)
+
+
+def test_telegram_poll_makes_topic_a_separate_session(monkeypatch):
+    from okami.channels.telegram import TelegramChannel
+    ch = TelegramChannel("TOK", allow_chats=[123])
+    updates = [
+        {"update_id": 1, "message": {"chat": {"id": 123}, "text": "root", "message_id": 10}},
+        {"update_id": 2, "message": {"chat": {"id": 123}, "text": "no topico", "message_id": 11,
+                                     "is_topic_message": True, "message_thread_id": 5}},
+    ]
+    monkeypatch.setattr(ch.client, "get_updates", lambda offset=0, timeout=30: updates)
+    cids = [i.chat_id for i in ch.poll()]
+    assert "123" in cids and "123:5" in cids                    # tópico = sessão separada (auto)
+
+
+def test_telegram_send_and_allowed_route_thread(monkeypatch):
+    from okami.channels.telegram import TelegramChannel
+    ch = TelegramChannel("TOK", allow_chats=[123])
+    sent = []
+    monkeypatch.setattr(ch.client, "send_message", lambda chat, text, thread=None: sent.append((chat, thread)))
+    ch.send("123:5", "oi")
+    ch.send("123", "oi root")
+    assert ("123", 5) in sent and ("123", None) in sent         # entrega no tópico certo
+    assert ch.allowed("123:5") and ch.allowed("123") and not ch.allowed("999:1")   # allowlist usa o chat real

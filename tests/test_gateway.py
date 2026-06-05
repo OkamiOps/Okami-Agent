@@ -75,6 +75,19 @@ def test_title_sets_shows_in_status_and_persists():
     assert ep.session("7").title == "meu projeto okami"
 
 
+def test_sethome_sets_cron_target():
+    ep = _ep()
+    assert ep.home_chat() == ""
+    ep.handle("7", "/sethome")
+    assert any("CASA" in t for _, t in ep.channel.sent) and ep.home_chat() == "7"
+
+
+def test_topic_info_command():
+    ep = _ep()
+    ep.handle("7", "/topic")
+    assert any("TÓPICO" in t.upper() for _, t in ep.channel.sent)
+
+
 def test_voice_toggle_persists():
     ep = _ep()
     ep.handle("7", "/voice off")

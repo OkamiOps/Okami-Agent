@@ -79,25 +79,34 @@ class TelegramClient:
         res = self._call("getUpdates", {"offset": offset, "timeout": timeout}, timeout=timeout + 5)
         return res.get("result", [])
 
-    def send_message(self, chat_id, text: str) -> dict:
+    def send_message(self, chat_id, text: str, thread: int | None = None) -> dict:
         res: dict = {}
         for chunk in _split_message(text, 4000):          # >4096 → várias partes (não trunca mais)
-            res = self._call("sendMessage", {"chat_id": chat_id, "text": chunk})
+            p = {"chat_id": chat_id, "text": chunk}
+            if thread is not None:
+                p["message_thread_id"] = thread           # tópico de fórum (conversa paralela)
+            res = self._call("sendMessage", p)
         return res
 
-    def send_chat_action(self, chat_id, action: str = "typing") -> None:
+    def send_chat_action(self, chat_id, action: str = "typing", thread: int | None = None) -> None:
         try:
-            self._call("sendChatAction", {"chat_id": chat_id, "action": action})
+            p = {"chat_id": chat_id, "action": action}
+            if thread is not None:
+                p["message_thread_id"] = thread
+            self._call("sendChatAction", p)
         except Exception:  # noqa: BLE001 — typing é best-effort
             pass
 
-    def send_approval(self, chat_id, text: str, nonce: str = "") -> dict:
+    def send_approval(self, chat_id, text: str, nonce: str = "", thread: int | None = None) -> dict:
         """Aprovação com BOTÕES inline (✅/❌). `nonce` (P1.3) amarra o clique a ESTE pedido — clique
         velho/deslocado de outra ação não aprova (anti-stale). Sem nonce mantém o formato antigo."""
         sfx = f"{nonce}:" if nonce else ""
         kb = {"inline_keyboard": [[{"text": "✅ Aprovar", "callback_data": f"okapprove:{sfx}yes"},
                                    {"text": "❌ Negar", "callback_data": f"okapprove:{sfx}no"}]]}
-        return self._call("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": kb})
+        p = {"chat_id": chat_id, "text": text, "reply_markup": kb}
+        if thread is not None:
+            p["message_thread_id"] = thread
+        return self._call("sendMessage", p)
 
     def set_my_commands(self, commands: list[dict]) -> None:
         """Registra o menu do botão '/' (setMyCommands). Best-effort — menu é cosmético."""
@@ -161,6 +170,16 @@ class TelegramChannel(Channel):
         self.allow = {str(c) for c in (allow_chats or [])}
         self.allow_all = bool(allow_all)   # SÓ explícito abre p/ todos (deny-by-default)
 
+    @staticmethod
+    def _decode(chat_id) -> tuple[str, int | None]:
+        """'chat:thread' → (chat, thread). Tópicos do Telegram viram sessões separadas no endpoint."""
+        s = str(chat_id)
+        if ":" in s:
+            real, _, t = s.rpartition(":")
+            if t.lstrip("-").isdigit():
+                return real, int(t)
+        return s, None
+
     def poll(self) -> list[Inbound]:
         out = []
         for u in self.client.get_updates(offset=self._offset, timeout=30):
@@ -169,7 +188,8 @@ class TelegramChannel(Channel):
             if cq:
                 self.client.answer_callback(cq.get("id", ""))   # tira o "spinner" do botão
                 data = cq.get("data") or ""
-                chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
+                cmsg = cq.get("message") or {}
+                chat = (cmsg.get("chat") or {}).get("id")
                 frm = str((cq.get("from") or {}).get("id"))
                 if chat is None or not data.startswith("okapprove:"):
                     continue
@@ -178,7 +198,9 @@ class TelegramChannel(Channel):
                 rest = data[len("okapprove:"):]                  # "yes" (antigo) | "<nonce>:yes" (P1.3)
                 nonce, verdict = rest.rsplit(":", 1) if ":" in rest else ("", rest)
                 cmd = "/yes" if verdict == "yes" else "/no"
-                out.append(Inbound("telegram", str(chat), text=(f"{cmd}:{nonce}" if nonce else cmd)))
+                thr = cmsg.get("message_thread_id")              # tópico → casa com a sessão chat:thread
+                cid_cb = f"{chat}:{thr}" if (cmsg.get("is_topic_message") and thr) else str(chat)
+                out.append(Inbound("telegram", cid_cb, text=(f"{cmd}:{nonce}" if nonce else cmd)))
                 continue
             msg = u.get("message") or {}
             chat = (msg.get("chat") or {}).get("id")
@@ -203,7 +225,10 @@ class TelegramChannel(Channel):
             txt = msg.get("text")
             if txt:
                 mid = str(msg.get("message_id") or u.get("update_id") or "")
-                out.append(Inbound("telegram", str(chat), text=txt, msg_id=mid))
+                # tópico de fórum → vira "chat:thread": o endpoint trata como conversa SEPARADA (auto).
+                thr = msg.get("message_thread_id")
+                cid = f"{chat}:{thr}" if (msg.get("is_topic_message") and thr) else str(chat)
+                out.append(Inbound("telegram", cid, text=txt, msg_id=mid))
         return out
 
     def start(self) -> None:
@@ -212,25 +237,31 @@ class TelegramChannel(Channel):
         self.client.set_my_commands(_cmds.telegram_menu())
 
     def send(self, chat_id, text: str) -> None:
-        self.client.send_message(chat_id, text)
+        chat, thread = self._decode(chat_id)
+        self.client.send_message(chat, text, thread=thread)
 
     def set_reaction(self, chat_id, message_id, emoji: str) -> None:
-        self.client.set_reaction(chat_id, message_id, emoji)
+        chat, _ = self._decode(chat_id)                  # reação é no chat real (thread não se aplica)
+        self.client.set_reaction(chat, message_id, emoji)
 
     def send_typing(self, chat_id) -> None:
-        self.client.send_chat_action(chat_id, "typing")
+        chat, thread = self._decode(chat_id)
+        self.client.send_chat_action(chat, "typing", thread=thread)
 
     def send_approval(self, chat_id, text: str, nonce: str = "") -> None:
-        self.client.send_approval(chat_id, text, nonce)
+        chat, thread = self._decode(chat_id)
+        self.client.send_approval(chat, text, nonce, thread=thread)
 
     def send_audio(self, chat_id, audio_path) -> None:
-        self.client.send_audio(chat_id, audio_path)
+        chat, _ = self._decode(chat_id)
+        self.client.send_audio(chat, audio_path)
 
     def allowed(self, chat_id) -> bool:
         # DENY-BY-DEFAULT: sem allowlist, NINGUÉM passa (a não ser allow_all explícito). Agente com
-        # shell/tools/memória atrás de um bot público é perigoso → fail-closed.
+        # shell/tools/memória atrás de um bot público é perigoso → fail-closed. Tópico usa o chat real.
+        chat, _ = self._decode(chat_id)
         if self.allow:
-            return str(chat_id) in self.allow
+            return chat in self.allow
         return self.allow_all
 
 
