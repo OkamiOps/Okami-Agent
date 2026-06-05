@@ -42,12 +42,19 @@ def scan(path: str = typer.Argument(..., help="Diretório/arquivo de skill a ver
 def learn(
     source: str = typer.Argument(..., help="owner/repo, URL, caminho local, ou clawhub:<slug>."),
     force: bool = typer.Option(False, "--force", help="Instalar mesmo se o scan BLOQUEAR (perigoso)."),
+    allow_exec: bool = typer.Option(False, "--allow-exec",
+                                    help="Permite fontes que EXECUTAM código no fetch (clawhub/npx) ANTES do scan."),
 ) -> None:
     """Baixa uma skill, VALIDA (quarentena + scan) e só então instala em ./skills (skill.sh/ClawHub)."""
     import shutil
 
     from okami import skills as skillmod
     from okami.skills.skill_security import scan_path
+
+    if source.startswith("clawhub:") and not allow_exec:    # P1.5: clawhub roda npx ANTES do scan validar
+        console.print("[red]✗ clawhub roda `npx` (código do ecossistema npm) ANTES do scan validar.[/red]")
+        console.print("[dim]use --allow-exec se confiar na origem; prefira git/caminho local (estáticos).[/dim]")
+        raise typer.Exit(2)
 
     quarantine = Path(".okami") / "quarantine"
     shutil.rmtree(quarantine, ignore_errors=True)
@@ -76,11 +83,14 @@ def learn(
 
     dest_root = Path("skills")
     dest_root.mkdir(exist_ok=True)
+    from okami.skills.lockfile import record
     promoted = []
     for s in found:
-        shutil.copytree(s.path.parent, dest_root / s.path.parent.name, dirs_exist_ok=True)
+        target = dest_root / s.path.parent.name
+        shutil.copytree(s.path.parent, target, dirs_exist_ok=True)
+        record(Path("."), s.name, source=source, skill_dir=target)   # proveniência + sha256 (P1.5)
         promoted.append(s.name)
     shutil.rmtree(quarantine, ignore_errors=True)
-    console.print(f"[green]✓ instaladas:[/green] {', '.join(promoted)}")
+    console.print(f"[green]✓ instaladas:[/green] {', '.join(promoted)} [dim](🔒 skills-lock.json)[/dim]")
 
 

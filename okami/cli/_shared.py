@@ -124,16 +124,18 @@ def _fetch_skill_source(source: str, dest: Path) -> None:
     import shutil
     import subprocess
 
+    from okami.core.tools import sanitized_env
+    env = sanitized_env()                 # fetch (npx/git) SEM segredos — clawhub roda código (P1.5)
     dest.mkdir(parents=True, exist_ok=True)
     local = Path(source)
     if local.exists():  # caminho local
         shutil.copytree(local, dest / local.name, dirs_exist_ok=True)
         return
-    if source.startswith("clawhub:"):  # ClawHub
-        subprocess.call(["npx", "clawhub", "install", source.split(":", 1)[1]], cwd=str(dest))
+    if source.startswith("clawhub:"):  # ClawHub (executa npx — gated por --allow-exec no learn)
+        subprocess.call(["npx", "clawhub", "install", source.split(":", 1)[1]], cwd=str(dest), env=env)
         return
     url = f"https://github.com/{source}.git" if re.match(r"^[\w.-]+/[\w.-]+$", source) else source
-    subprocess.call(["git", "clone", "--depth", "1", url], cwd=str(dest))
+    subprocess.call(["git", "clone", "--depth", "1", url], cwd=str(dest), env=env)
 
 
 def _build_memory_block(memory: str, honcho_url=None, honcho_key=None,
