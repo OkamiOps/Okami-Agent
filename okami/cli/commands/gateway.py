@@ -306,6 +306,155 @@ def logs(
             return
 
 
+# ─────────────────────────────── supervisão de PROCESSOS (fora do gateway/agente) ───────────────────
+process_app = typer.Typer(invoke_without_command=True,
+                          help="Supervisão dos processos em background do agente: ps · log · kill · signal · wait.")
+app.add_typer(process_app, name="process")
+
+_PWS = typer.Option("workspaces/default", "--workspace", "-w", help="Workspace do agente (onde vivem os processos).")
+_PA = typer.Option(None, "--agent", "-a", help="Agente (agents/<id>) — atalho pro workspace dele.")
+
+
+def _pm(workspace: str, agent: str | None):
+    from okami.core.processes import ProcessManager
+    from okami.home import agents_dir
+    ws = (agents_dir() / agent) if agent else Path(workspace)
+    return ProcessManager(ws)
+
+
+def _process_table(pm) -> None:
+    import time as _t
+    procs = pm.list()
+    if not procs:
+        console.print("[dim]nenhum processo em background. (o agente sobe com process_start: servidor, build longo…)[/dim]")
+        return
+    t = Table(title="Processos em background", border_style="#ff7527", title_style="bold #ff7527")
+    t.add_column("id", style="bold #f4f4f8", no_wrap=True)
+    t.add_column("status", no_wrap=True)
+    t.add_column("pid", style="#6c6d80", no_wrap=True)
+    t.add_column("há", style="#6c6d80", no_wrap=True)
+    t.add_column("comando", style="#b9bac8", overflow="ellipsis", max_width=54)
+    now = _t.time()
+    for p in procs:
+        st = p.get("status", "?")
+        color = {"running": "green", "exited": "#6c6d80", "unknown": "yellow"}.get(st, "white")
+        code = p.get("exit_code")
+        label = st + (f" ({code})" if st == "exited" and code is not None else "")
+        if p.get("interactive"):
+            label += " ·PTY"
+        ago = f"{int(now - p['started'])}s" if p.get("started") else "?"
+        t.add_row(p.get("id", ""), f"[{color}]{label}[/{color}]", str(p.get("pid", "")), ago, p.get("cmd", ""))
+    console.print(t)
+
+
+@process_app.callback(invoke_without_command=True)
+def _process_main(ctx: typer.Context, workspace: str = _PWS, agent: str = _PA) -> None:
+    """`okami process` sem subcomando → lista (= okami ps)."""
+    if ctx.invoked_subcommand is None:
+        _process_table(_pm(workspace, agent))
+
+
+@process_app.command("list")
+def process_list(workspace: str = _PWS, agent: str = _PA) -> None:
+    """Lista os processos em background do agente (id · status · pid · comando)."""
+    _process_table(_pm(workspace, agent))
+
+
+@app.command()
+def ps(workspace: str = _PWS, agent: str = _PA) -> None:
+    """Atalho: lista os processos em background do agente (= okami process list)."""
+    _process_table(_pm(workspace, agent))
+
+
+@process_app.command("log")
+def process_log(
+    pid_id: str = typer.Argument(..., help="id do processo (de okami ps)."),
+    workspace: str = _PWS,
+    agent: str = _PA,
+    lines: int = typer.Option(200, "-n", "--lines", help="Quantas linhas finais."),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Segue o log ao vivo (tail -f)."),
+) -> None:
+    """Mostra (ou segue) o log de um processo — redigido (segredo mascarado)."""
+    import time as _t
+    pm = _pm(workspace, agent)
+    page = pm.log_page(pid_id, offset=-lines, limit=lines)
+    if not page["total"]:
+        console.print(f"[dim]sem log p/ #{pid_id} (id inexistente ou ainda sem saída).[/dim]")
+        return
+    for ln in page["lines"]:
+        console.print(ln, markup=False)
+    if not follow:
+        return
+    seen = page["total"]
+    try:
+        while True:
+            nxt = pm.log_page(pid_id, offset=seen, limit=500)
+            for ln in nxt["lines"]:
+                console.print(ln, markup=False)
+            seen += nxt["shown"]
+            if pm.poll(pid_id).get("status") != "running" and nxt["shown"] == 0:
+                break
+            _t.sleep(0.4)
+    except KeyboardInterrupt:
+        return
+
+
+@process_app.command("kill")
+def process_kill(
+    pid_id: str = typer.Argument(..., help="id do processo."),
+    workspace: str = _PWS,
+    agent: str = _PA,
+) -> None:
+    """Mata o processo (SIGTERM no grupo · docker kill se isolado)."""
+    ok = _pm(workspace, agent).kill(pid_id)
+    console.print(f"[yellow]⏹ #{pid_id} morto[/yellow]" if ok else f"[red]✗ #{pid_id} não encontrado[/red]")
+    if not ok:
+        raise typer.Exit(1)
+
+
+@process_app.command("signal")
+def process_signal(
+    pid_id: str = typer.Argument(..., help="id do processo."),
+    sig: str = typer.Argument("TERM", help="Sinal: TERM·INT·HUP·KILL·USR1·USR2·STOP·CONT·QUIT."),
+    workspace: str = _PWS,
+    agent: str = _PA,
+) -> None:
+    """Manda um sinal arbitrário pro grupo do processo."""
+    ok = _pm(workspace, agent).signal(pid_id, sig)
+    console.print(f"[green]✓ {sig.upper()} → #{pid_id}[/green]" if ok else f"[red]✗ falhou (#{pid_id}/{sig})[/red]")
+    if not ok:
+        raise typer.Exit(1)
+
+
+@process_app.command("wait")
+def process_wait(
+    pid_id: str = typer.Argument(..., help="id do processo."),
+    workspace: str = _PWS,
+    agent: str = _PA,
+    timeout: float = typer.Option(60.0, "-t", "--timeout"),
+) -> None:
+    """Espera o processo terminar (até timeout) e mostra o exit code."""
+    st = _pm(workspace, agent).wait(pid_id, timeout=timeout)
+    code = st.get("exit_code")
+    if st.get("status") == "exited":
+        console.print(f"[green]✓ #{pid_id} terminou[/green] [dim](exit {code})[/dim]")
+    else:
+        console.print(f"[yellow]⏳ #{pid_id} ainda {st.get('status')}[/yellow] (timeout {timeout}s)")
+
+
+@process_app.command("clean")
+def process_clean(
+    workspace: str = _PWS,
+    agent: str = _PA,
+    ttl_hours: float = typer.Option(24.0, "--ttl-hours", help="Remove terminados há mais de N horas."),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Poda processos JÁ TERMINADOS (meta+log+exit) além do TTL."""
+    removed = _pm(workspace, agent).prune(ttl_seconds=ttl_hours * 3600.0, dry_run=dry_run)
+    verb = "seriam removidos" if dry_run else "removidos"
+    console.print(f"[dim]{len(removed)} processo(s) {verb}.[/dim]")
+
+
 @app.command("mcp")
 def mcp_cmd() -> None:
     """Lista os servidores MCP configurados e as tools que eles expõem."""
