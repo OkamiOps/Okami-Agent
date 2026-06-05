@@ -279,12 +279,15 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
                 emit(f"⚠ MCP '{name}' header {hk}: parece SEGREDO em texto — use ${{ENV_VAR}} (não versione token).")
         trust = _trust_of(conf)                      # #11: untrusted (default) | reviewed | trusted
         trusted = trust == "trusted"
+        from okami.core.envref import resolve_env, resolve_env_map
         try:
             if url:                                  # transporte HTTP/SSE (§12)
-                client = McpHttpClient(url, conf.get("headers"), conf.get("timeout", 30))
+                # resolve ${ENV} nos headers — antes o literal `${TOKEN}` ia cru pro servidor.
+                client = McpHttpClient(resolve_env(url), resolve_env_map(conf.get("headers")),
+                                       conf.get("timeout", 30))
             else:
                 client = McpStdioClient(
-                    conf["command"], conf.get("args"), conf.get("env"),
+                    conf["command"], conf.get("args"), resolve_env_map(conf.get("env")),
                     conf.get("cwd"), conf.get("timeout", 30),
                     env_passthrough=conf.get("env_passthrough"),
                 )

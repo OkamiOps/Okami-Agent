@@ -68,11 +68,17 @@ def open_memory(workspace: Path, backend="sqlite-fts5", clock=time.time,
         return SqliteFTS5Memory(base / "memory-holo.db", clock=clock, embedder=HRREncoder(dim))
 
     if name == "honcho":
+        import os as _os
+
+        from okami.core.envref import resolve_env
         from okami.memory.honcho_backend import HonchoMemory
         hc = config.get("honcho") or {}
+        # api_key: literal (com ${ENV} resolvido) OU o valor da env nomeada em api_key_env.
+        api_key = resolve_env(hc.get("api_key")) or _os.getenv(hc.get("api_key_env") or "") or None
         return HonchoMemory(
-            base_url=hc.get("base_url"), api_key=hc.get("api_key"),
-            workspace=hc.get("workspace", "okami"), session_id=hc.get("session", "default"),
+            base_url=resolve_env(hc.get("base_url")), api_key=api_key,
+            workspace=hc.get("workspace_id") or hc.get("workspace") or "okami",   # workspace_id é o nome do SDK
+            session_id=hc.get("session", "default"),
             user_peer=hc.get("user_peer", "user"), assistant_peer=hc.get("assistant_peer", "okami"),
         )
 

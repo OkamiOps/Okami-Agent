@@ -65,14 +65,51 @@ class HonchoMemory(Memory):
             pass
         return 0
 
+    def _ask(self, peer, query: str, *, target=None) -> str:
+        """peer.chat com os kwargs ideais, DEGRADANDO se a versão do SDK não suportar algum.
+
+        `target` é o peer SOBRE QUEM perguntar. `assistant.chat(query, target=user)` = 'o que a Okami
+        sabe sobre o usuário'; `user.chat(query)` = representação global do próprio usuário. NUNCA
+        `assistant.chat(query)` sem target — isso perguntaria sobre a PRÓPRIA Okami (bug antigo)."""
+        chat = getattr(peer, "chat", None)
+        if not callable(chat):
+            return ""
+        for kw in (dict(target=target, session=self.session, reasoning_level="low"),
+                   dict(target=target, session=self.session),
+                   dict(target=target), {}):
+            kw = {k: v for k, v in kw.items() if v is not None}   # target=None some → chat global do peer
+            try:
+                return _text_of(chat(query, **kw))
+            except TypeError:
+                continue                                          # kwarg não suportado nessa versão → tenta menos
+            except Exception:  # noqa: BLE001 — erro de runtime do SDK → desiste deste peer
+                return ""
+        return ""
+
     def _dialectic(self, query: str) -> str:
-        for target in (self.assistant, self.user, self._client):
-            chat = getattr(target, "chat", None)
-            if callable(chat):
-                try:
-                    return _text_of(chat(query))
-                except Exception:  # noqa: BLE001
-                    continue
+        """O que a Okami sabe sobre o USUÁRIO (assistant.chat target=user); fallback: rep. global do user."""
+        return self._ask(self.assistant, query, target=self.user) or self._ask(self.user, query)
+
+    def _context(self, query: str = "") -> str:
+        """Card/representação do USUÁRIO na perspectiva da Okami — session.context com peer_target.
+
+        Sem peer_target a gente perdia o caminho mais forte (representação do user); degrada se o SDK
+        não suportar os kwargs."""
+        ctx_fn = getattr(self.session, "context", None)
+        if not callable(ctx_fn):
+            return ""
+        ut, ap = getattr(self.user, "id", None), getattr(self.assistant, "id", None)
+        for kw in (dict(peer_target=ut, peer_perspective=ap, search_query=query or None),
+                   dict(peer_target=ut, peer_perspective=ap),
+                   dict(peer_target=ut), {}):
+            kw = {k: v for k, v in kw.items() if v is not None}
+            try:
+                ctx = ctx_fn(**kw)
+                return ctx.to_prompt() if hasattr(ctx, "to_prompt") else _text_of(ctx)
+            except TypeError:
+                continue
+            except Exception:  # noqa: BLE001
+                return ""
         return ""
 
     def recall(self, query: str, limit: int = 5) -> list[MemoryItem]:
@@ -84,12 +121,7 @@ class HonchoMemory(Memory):
         # (2) dialética SEMPRE-ON no nível da PESSOA (não só da tarefa). É o que faz a resposta soar
         # ancorada em QUEM é a pessoa, não genérica. Cold start vs sessão em andamento usam queries
         # diferentes (strings do Hermes). Por cima, a dialética específica da tarefa (query).
-        block = ""
-        try:
-            ctx = self.session.context()
-            block = _text_of(ctx) if not hasattr(ctx, "to_prompt") else ctx.to_prompt()
-        except Exception:  # noqa: BLE001
-            block = ""
+        block = self._context(query)
         cold = self.count() == 0
         person_q = ("Quem é essa pessoa? Quais as preferências, objetivos e jeito de trabalhar dela?"
                     if cold else

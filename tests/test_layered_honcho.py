@@ -55,17 +55,20 @@ def test_open_memory_list_builds_layered(tmp_path):
 class FakePeer:
     def __init__(self, pid):
         self.id = pid
+        self.calls = []                         # registra (query, target, reasoning_level)
 
     def message(self, text):
         return {"peer": self.id, "text": text}
 
-    def chat(self, query):  # API dialética (oráculo)
+    def chat(self, query, *, target=None, session=None, reasoning_level=None):
+        self.calls.append({"q": query, "target": getattr(target, "id", target), "rl": reasoning_level})
         return f"insight sobre '{query}': o usuário prefere modo escuro"
 
 
 class FakeSession:
     def __init__(self):
         self.msgs = []
+        self.ctx_calls = []                     # registra peer_target/peer_perspective/search_query
 
     def add_peers(self, peers):
         pass
@@ -73,7 +76,9 @@ class FakeSession:
     def add_messages(self, msgs):
         self.msgs.extend(msgs)
 
-    def context(self):
+    def context(self, *, peer_target=None, peer_perspective=None, search_query=None):
+        self.ctx_calls.append({"peer_target": peer_target, "peer_perspective": peer_perspective,
+                               "search_query": search_query})
         return "user-model: gosta de respostas diretas"
 
     def messages(self):
@@ -83,9 +88,10 @@ class FakeSession:
 class FakeHonchoClient:
     def __init__(self):
         self._session = FakeSession()
+        self._peers = {}
 
     def peer(self, pid):
-        return FakePeer(pid)
+        return self._peers.setdefault(pid, FakePeer(pid))
 
     def session(self, sid):
         return self._session
@@ -101,3 +107,74 @@ def test_honcho_write_recall_inject_mocked():
     assert "user-model" in block                # session.context() (camada base)
     assert "modo escuro" in block               # dialética disparou no nível da pessoa, não só da tarefa
     assert "recite" in block.lower()            # header de USO ("não recite"), não rótulo passivo
+
+
+def test_honcho_dialectic_targets_user_not_self():
+    """P0: a dialética pergunta SOBRE O USUÁRIO (assistant.chat target=user), não sobre a própria Okami."""
+    m = HonchoMemory(client=FakeHonchoClient())
+    m.recall("preferências")
+    assert m.assistant.calls, "assistant.chat não foi chamado"
+    assert m.assistant.calls[0]["target"] == m.user.id   # target = user (não vazio → não é self-model)
+    assert m.assistant.calls[0]["rl"] == "low"           # reasoning_level passado
+    # bug antigo: assistant.chat(query) SEM target → perguntava sobre a Okami. Agora nunca.
+    assert all(c["target"] == m.user.id for c in m.assistant.calls)
+
+
+def test_honcho_inject_passes_peer_target():
+    """P1: session.context recebe peer_target=user (perspectiva da Okami) — caminho do card do usuário."""
+    m = HonchoMemory(client=FakeHonchoClient())
+    m.inject("preferências")
+    assert m.session.ctx_calls, "session.context não foi chamado"
+    c0 = m.session.ctx_calls[0]
+    assert c0["peer_target"] == m.user.id and c0["peer_perspective"] == m.assistant.id
+
+
+def test_honcho_user_fallback_when_assistant_silent():
+    """Se a Okami ainda não sabe nada (assistant retorna vazio), cai na rep. global do próprio user."""
+    client = FakeHonchoClient()
+    m = HonchoMemory(client=client)
+    m.assistant.chat = lambda *a, **k: ""        # assistant sem insight
+    hits = m.recall("preferências")
+    assert hits and "modo escuro" in hits[0].text   # veio de user.chat (fallback)
+    assert m.user.calls and m.user.calls[0]["target"] is None   # user.chat global (sem target)
+
+
+# ----------------------------------------------------------------- config do Honcho (P1)
+def _capture_honcho(monkeypatch):
+    captured = {}
+
+    class FakeHM:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("okami.memory.honcho_backend.HonchoMemory", FakeHM)
+    return captured
+
+
+def test_honcho_config_workspace_id_and_api_key_env(tmp_path, monkeypatch):
+    cap = _capture_honcho(monkeypatch)
+    monkeypatch.setenv("HONCHO_API_KEY", "secret-xyz")
+    monkeypatch.setenv("HONCHO_BASE_URL", "https://honcho.example/v1")
+    cfg = {"honcho": {"base_url": "${HONCHO_BASE_URL}", "api_key_env": "HONCHO_API_KEY",
+                      "workspace_id": "ws-id", "session": "s1"}}
+    open_memory(tmp_path, backend="honcho", config=cfg)
+    assert cap["workspace"] == "ws-id"                       # workspace_id (nome do SDK), não 'okami'
+    assert cap["api_key"] == "secret-xyz"                    # resolvido de api_key_env
+    assert cap["base_url"] == "https://honcho.example/v1"    # ${ENV} expandido no base_url
+
+
+def test_honcho_config_literal_env_ref_resolved(tmp_path, monkeypatch):
+    cap = _capture_honcho(monkeypatch)
+    monkeypatch.setenv("HONCHO_API_KEY", "live-key")
+    open_memory(tmp_path, backend="honcho", config={"honcho": {"api_key": "${HONCHO_API_KEY}", "workspace": "ws"}})
+    assert cap["api_key"] == "live-key"                      # NÃO o literal "${HONCHO_API_KEY}"
+
+
+def test_honcho_config_undefined_env_is_none(tmp_path, monkeypatch):
+    cap = _capture_honcho(monkeypatch)
+    monkeypatch.delenv("HONCHO_API_KEY", raising=False)
+    open_memory(tmp_path, backend="honcho", config={"honcho": {"api_key": "${HONCHO_API_KEY}"}})
+    assert cap["api_key"] is None                            # indefinido → None (nunca o literal)
