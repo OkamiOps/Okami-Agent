@@ -46,6 +46,19 @@ def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _collect_channels():
+    """Canais p/ a policy/status: bloco global `channels` + por-agente (agent.yaml), best-effort."""
+    from okami.config import load_raw
+    from okami.core.policy import collect_channels
+    raw, _ = load_raw()
+    try:
+        from okami.agents import load_agents
+        agents = load_agents()
+    except Exception:  # noqa: BLE001
+        agents = {}
+    return raw, collect_channels(raw, agents)
+
+
 def _disk_renderable(cfg, *, root: str = ".", top: int = 6, as_meters: bool = False):
     """Renderable da seção `◆ Disco`: uso por área (bytes/arquivos), total e aviso de quota.
 

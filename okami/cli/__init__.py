@@ -7,6 +7,7 @@ from okami.cli._app import app, console  # noqa: F401
 from okami.cli.commands import (  # noqa: F401,E402
     basics, task, skills, memory, setup, persona, cron,
     chat, media, gateway, provider, config, misc,
+    auth, policy, observability,
 )
 
 # Re-exports p/ compatibilidade (testes e o gateway importam de okami.cli):
