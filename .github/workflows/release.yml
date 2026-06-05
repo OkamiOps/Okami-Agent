@@ -1,0 +1,37 @@
+name: Release
+
+# Em tag v* (P2 supply-chain): build + SBOM (CycloneDX) + PROVENANCE (attestation sigstore) + release.
+# Actions pinadas por SHA. A provenance prova que estes artefatos saíram DESTE repo/commit neste runner.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write        # criar o GitHub Release
+  id-token: write        # OIDC p/ sigstore (provenance)
+  attestations: write    # gravar a attestation de build provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1 (pin por SHA)
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5 (pin por SHA)
+        with:
+          enable-cache: true
+      - name: Build wheel + sdist
+        run: uv build
+      - name: SBOM (CycloneDX)
+        run: |
+          uv export --frozen --no-dev --format requirements-txt -o reqs.txt 2>/dev/null \
+            || uv export --frozen -o reqs.txt 2>/dev/null || : > reqs.txt
+          uvx --from cyclonedx-bom cyclonedx-py requirements reqs.txt -o dist/sbom.cdx.json || true
+      - name: Provenance (build attestation) das wheels
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2 (pin por SHA)
+        with:
+          subject-path: 'dist/*.whl'
+      - name: GitHub Release (com wheel + sdist + SBOM)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
