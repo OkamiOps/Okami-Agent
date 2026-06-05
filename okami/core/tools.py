@@ -428,13 +428,24 @@ class ProcessStart(Tool):
 
     def run(self, args, ctx):
         from okami.core.processes import ProcessManager
+        from okami.core.sandbox import default_policy
+        cmd = args["cmd"]
+        policy = ctx.sandbox or default_policy()                 # #5: MESMA política do run_shell
+        mode = getattr(policy, "mode", "")
+        if mode == "read-only":                                  # processo longo é sempre efetivo → bloqueia
+            return ToolResult(False, "sandbox read-only: process_start (comando longo) bloqueado.", effect=False)
+        if mode != "yolo" and _SENSITIVE_PATH.search(cmd):       # P0.1: não exfiltra segredo nem em background
+            return ToolResult(False, "sandbox: comando toca caminho sensível (.env/.ssh/.aws/credenciais/"
+                              f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
+                              effect=False)
         try:
-            meta = ProcessManager(ctx.workspace).start(args["cmd"])
+            meta = ProcessManager(ctx.workspace).start(cmd, policy)
         except ValueError as e:
             return ToolResult(False, str(e))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"falha ao iniciar processo: {e}")
-        return ToolResult(True, f"processo {meta['id']} no ar (pid {meta['pid']}): {args['cmd'][:80]}", effect=True)
+        return ToolResult(True, f"processo {meta['id']} no ar (pid {meta['pid']}, backend {meta.get('backend')}): "
+                          f"{cmd[:80]}", effect=True)
 
 
 class ProcessPoll(Tool):

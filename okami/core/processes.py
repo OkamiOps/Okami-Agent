@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import time
@@ -31,20 +32,41 @@ class ProcessManager:
     def _exitf(self, pid_id):
         return self.dir / f"{pid_id}.exit"
 
-    def start(self, cmd: str) -> dict:
-        """Sobe `cmd` em background. Levanta ValueError se tocar caminho sensível."""
+    def start(self, cmd: str, policy=None) -> dict:
+        """Sobe `cmd` em background sob a MESMA política do run_shell (#5). ValueError se bloqueado.
+
+        Backend docker (efetivo) → o processo longo roda ISOLADO (rede off, não-root, só workspace).
+        Backend docker EXIGIDO sem Docker → recusa (não cai no local inseguro). Log/exit são RELATIVOS
+        ao workspace → o wrapper funciona igual dentro do container (que monta ws em /workspace)."""
         import secrets
 
         from okami.core.tools import _SENSITIVE_PATH, sanitized_env
         if _SENSITIVE_PATH.search(cmd):
             raise ValueError("comando toca caminho sensível (.env/.ssh/credenciais…) — bloqueado")
+        eff = policy.effective_backend() if policy is not None else "local"
+        if eff == "docker" and not shutil.which("docker"):
+            raise ValueError("sandbox: backend=docker exigido, mas Docker ausente — process_start DESABILITADO "
+                             "(não caio no local inseguro). Use backend=auto/local, ou instale o Docker.")
         self.dir.mkdir(parents=True, exist_ok=True)
         pid_id = secrets.token_hex(4)
-        log, exitf = shlex.quote(str(self._logf(pid_id))), shlex.quote(str(self._exitf(pid_id)))
-        wrapped = f"({cmd}) > {log} 2>&1; echo $? > {exitf}"     # captura saída + exit code no disco
-        proc = subprocess.Popen(["sh", "-c", wrapped], cwd=str(self.ws), env=sanitized_env(),
-                                start_new_session=True)          # sessão própria → sobrevive ao turno
-        meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3)}
+        logrel = shlex.quote(f".okami/processes/{pid_id}.log")    # RELATIVO ao cwd=workspace (vale local E docker)
+        exitrel = shlex.quote(f".okami/processes/{pid_id}.exit")
+        wrapped = f"({cmd}) > {logrel} 2>&1; echo $? > {exitrel}"  # captura saída + exit code no disco
+        container = ""
+        if eff == "docker":
+            from okami.core.sandbox import docker_argv
+            container = f"okami-{pid_id}"
+            argv = docker_argv(wrapped, self.ws, policy, name=container)
+            proc = subprocess.Popen(argv, cwd=str(self.ws), start_new_session=True)
+        else:
+            pre = None
+            if policy is not None:
+                from okami.core.sandbox import _rlimit_preexec
+                pre = _rlimit_preexec(policy)                     # rlimits do perfil (CPU/mem/nproc/fsize)
+            proc = subprocess.Popen(["sh", "-c", wrapped], cwd=str(self.ws), env=sanitized_env(),
+                                    start_new_session=True, preexec_fn=pre)   # sessão própria → sobrevive ao turno
+        meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
+                "backend": eff, "container": container}
         self._meta(pid_id).write_text(json.dumps(meta), encoding="utf-8")
         return meta
 
@@ -98,6 +120,13 @@ class ProcessManager:
         if not meta:
             return False
         ok = False
+        if meta.get("backend") == "docker" and meta.get("container"):
+            try:
+                subprocess.run(["docker", "kill", meta["container"]],   # derruba o container (não só o cliente)
+                               capture_output=True, timeout=15)
+                ok = True
+            except (OSError, subprocess.SubprocessError):
+                ok = False
         try:
             os.killpg(os.getpgid(meta["pid"]), signal.SIGTERM)   # mata o grupo (start_new_session)
             ok = True
@@ -106,7 +135,7 @@ class ProcessManager:
                 os.kill(meta["pid"], signal.SIGTERM)
                 ok = True
             except OSError:
-                ok = False
+                ok = ok or False
         if ok and not self._exitf(pid_id).exists():
             self._exitf(pid_id).write_text("-15", encoding="utf-8")   # marca terminado por SIGTERM (poll determinístico)
         return ok

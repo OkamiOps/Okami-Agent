@@ -43,9 +43,18 @@ class SandboxPolicy:
 
     @classmethod
     def from_config(cls, d: dict | None) -> "SandboxPolicy":
-        """Constrói a política do bloco `sandbox:` do okami.yaml (campos ausentes = default)."""
+        """Constrói a política do bloco `sandbox:` do okami.yaml (campos ausentes = default).
+
+        `profile:` é um atalho de POSTURA (#5):
+          • dev (default)  — backend local: cercas contra acidente/exfiltração, sem isolamento real.
+                             Pra você desenvolver na sua máquina sem precisar de Docker.
+          • hardened       — backend auto (Docker se houver; SEM Docker o run_shell/process fica
+                             DESABILITADO em vez de cair no local). Rede off, não-root, só workspace.
+        Campos explícitos sempre vencem o atalho do profile."""
         d = d or {}
         p = cls()
+        if str(d.get("profile", "")).lower() == "hardened" and d.get("backend") is None:
+            p.backend = "auto"          # postura endurecida → exige isolamento real (docker) quando houver
         for k in ("backend", "mode", "network", "timeout", "max_output",
                   "mem_mb", "cpu_seconds", "nproc", "fsize_mb", "image"):
             if d.get(k) is not None:
@@ -113,21 +122,46 @@ def _rlimit_preexec(policy: SandboxPolicy):
     return _apply
 
 
-def docker_argv(cmd: str, workspace: Path, policy: SandboxPolicy) -> list[str]:
-    """argv do `docker run` — PURA, p/ testar a política sem subir container."""
+def _host_user() -> str:
+    """uid:gid do processo host → roda NÃO-ROOT no container E mantém a posse certa do workspace montado."""
+    if os.name != "posix":
+        return ""
+    try:
+        return f"{os.getuid()}:{os.getgid()}"
+    except AttributeError:
+        return ""
+
+
+def docker_argv(cmd: str, workspace: Path, policy: SandboxPolicy, *, name: str = "") -> list[str]:
+    """argv do `docker run` — PURA, p/ testar a política sem subir container.
+
+    Postura (#5): só o workspace montado (`-v ws:/workspace`, `:ro` em read-only), `--network none`
+    por padrão (rede off), cgroups (--memory/--pids-limit/--cpus), NÃO-ROOT (--user uid:gid),
+    no-new-privileges, e rootfs read-only no perfil read-only."""
     ws = str(Path(workspace).resolve())
     ro = policy.mode == "read-only"
-    return [
-        "docker", "run", "--rm", "--init",
-        "--network", ("bridge" if policy.network_on else "none"),
+    argv = ["docker", "run", "--rm", "--init"]
+    if name:
+        argv += ["--name", name]                                  # nomeia p/ kill determinístico (process_start)
+    argv += [
+        "--network", ("bridge" if policy.network_on else "none"),  # rede OFF por padrão
         "--memory", f"{policy.mem_mb or 1024}m",
         "--pids-limit", str(policy.nproc or 256),
         "--cpus", "1",
+        "--cap-drop", "ALL",                                      # nenhuma capability extra
+        "--security-opt", "no-new-privileges",
+    ]
+    user = _host_user()
+    if user:
+        argv += ["--user", user]                                  # não-root (uid:gid do host)
+    if ro:
+        argv += ["--read-only"]                                   # rootfs read-only
+    argv += [
         "-v", f"{ws}:/workspace" + (":ro" if ro else ""),
         "-w", "/workspace",
-        ("--read-only" if ro else "--security-opt=no-new-privileges"),
         policy.image, "sh", "-lc", cmd,
     ]
+    return argv
 
 
 def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None,
