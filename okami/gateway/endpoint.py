@@ -73,7 +73,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._seen_msgs: OrderedDict = OrderedDict()   # idempotência por turno (#3): msg_id já processado
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
         self._bg: dict[int, str] = {}        # tarefas /background em andamento (id → resumo) — não bloqueia a sessão
-        self._bg_seq = 0
+        from okami.gateway.background import BackgroundRegistry
+        self._bgreg = BackgroundRegistry(ws)   # registro PERSISTIDO (sobrevive a restart) das tarefas /background
         self.reactions = reactions           # reações 👀/👍/👎 na mensagem (Telegram) — opt-in
         self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
         self.running = True
@@ -470,8 +471,12 @@ class AgentEndpoint(EndpointCommandsMixin):
         cmd_bg = low.split(maxsplit=1)[0]
         if cmd_bg in ("/background", "/bg"):            # roda EM PARALELO (sessão isolada) e avisa no fim
             prompt = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            if prompt.lower() == "status":             # /background status → lista persistida (durável)
+                self.channel.send(chat_id, self._background_status())
+                return
             if not prompt:
-                self.channel.send(chat_id, "uso: /background <tarefa> — rodo em paralelo e te aviso quando terminar.")
+                self.channel.send(chat_id, "uso: /background <tarefa> · /background status. "
+                                  "Rodo em paralelo e te aviso quando terminar.")
                 return
             self._spawn_background(chat_id, prompt, yolo=s.yolo)
             return
@@ -506,12 +511,24 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _background_status(self) -> str:
+        import datetime as _dt
+        jobs = self._bgreg.list(15)
+        if not jobs:
+            return "▶ nenhuma tarefa /background ainda."
+        icon = {"running": "▶", "done": "✅", "failed": "❌", "interrupted": "⏸"}
+        out = ["📋 tarefas /background (durável — sobrevive a restart):"]
+        for j in jobs:
+            when = (_dt.datetime.fromtimestamp(j["started_at"]).strftime("%d/%m %H:%M")
+                    if j.get("started_at") else "?")
+            out.append(f"  {icon.get(j.get('state'), '·')} #{j['id']} [{when}] {(j.get('prompt') or '')[:60]}")
+        return "\n".join(out)
+
     def _spawn_background(self, chat_id, prompt: str, *, yolo: bool = False) -> None:
         """/background: roda `prompt` numa tarefa ISOLADA (não toca no histórico da sessão), em paralelo,
         e devolve o resultado quando terminar. Aprovação fail-closed (só ações seguras) a menos que a
         sessão esteja em yolo — em background não dá pra pedir /yes interativo."""
-        self._bg_seq += 1
-        bid = self._bg_seq
+        bid = self._bgreg.add(prompt)                    # PERSISTE (durável): id/prompt/estado/tempos
         self._bg[bid] = prompt[:60]
         self.channel.send(chat_id, f"▶ background #{bid} rodando — sigo livre pra conversar; te aviso no fim.")
 
@@ -520,8 +537,10 @@ class AgentEndpoint(EndpointCommandsMixin):
                 approve = (lambda req: True) if _yolo else (lambda req: False)   # fail-closed sem interação
                 task = self.run_task(self.cfg, self.ws, _p, approve=approve, surface=self.surface)
                 out = (getattr(task, "result", "") or "").strip() or "(sem saída textual)"
+                self._bgreg.finish(_bid, state="done", result=out)
                 self.channel.send(chat_id, f"✅ background #{_bid} pronto:\n{out}")
             except Exception as e:  # noqa: BLE001 — background nunca derruba o endpoint
+                self._bgreg.finish(_bid, state="failed", result=str(e))
                 self.channel.send(chat_id, f"❌ background #{_bid} falhou: {e}")
             finally:
                 self._bg.pop(_bid, None)
@@ -725,6 +744,11 @@ class AgentEndpoint(EndpointCommandsMixin):
         try:                                            # #P1.4: recovery de órfão no boot (processo morto sem exit)
             from okami.core.processes import ProcessManager
             ProcessManager(self.ws).reconcile()
+        except Exception:  # noqa: BLE001
+            pass
+        try:                                            # /background durável: job 'running' que o restart matou → interrupted
+            self._bgreg.reconcile()
+            self._bgreg.prune()
         except Exception:  # noqa: BLE001
             pass
         while self.running:

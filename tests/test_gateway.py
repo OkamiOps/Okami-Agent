@@ -57,6 +57,23 @@ def test_background_runs_isolated_and_reports():
     assert not any("analise o repo" in h for _, h in ep.session("7").history)   # não poluiu a sessão
 
 
+def test_background_persisted_and_status():
+    ep = _ep()
+    ep.handle("7", "/background analise o repo")
+    assert any("background #1 pronto" in t for _, t in ep.channel.sent)
+    # durável: registry tem o job concluído + /background status lista
+    assert ep._bgreg.list()[0]["state"] == "done"
+    ep.handle("7", "/background status")
+    assert any("✅ #1" in t and "analise o repo" in t for _, t in ep.channel.sent)
+
+
+def test_background_reconcile_marks_orphan_interrupted():
+    # job que ficou 'running' (gateway caiu) → vira 'interrupted' no reconcile (boot)
+    ep = _ep()
+    ep._bgreg.add("tarefa que o crash matou", now=1.0)
+    assert ep._bgreg.reconcile() == 1 and ep._bgreg.list()[0]["state"] == "interrupted"
+
+
 def test_background_alias_and_requires_prompt():
     ep = _ep()
     ep.handle("7", "/background")
