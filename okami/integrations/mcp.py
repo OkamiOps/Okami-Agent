@@ -45,6 +45,32 @@ def infer_capabilities(spec: dict) -> set[str]:
     return caps or {"read"}
 
 
+_TRUST_LEVELS = ("untrusted", "reviewed", "trusted")
+
+
+def _trust_of(conf: dict) -> str:
+    """Nível de confiança do servidor (#11): untrusted (default) | reviewed | trusted.
+
+    `trusted: true` (legado) → 'trusted'. Desconhecido → 'untrusted' (fail-safe)."""
+    lvl = str(conf.get("trust", "")).lower().strip()
+    if lvl in _TRUST_LEVELS:
+        return lvl
+    return "trusted" if conf.get("trusted") else "untrusted"
+
+
+def _tool_manifest(conf: dict, tname: str):
+    """(capabilities|None, approval_policy, tem_manifesto?) p/ a tool `tname` do servidor.
+
+    Precedência: entrada por-tool em `tools.<nome>` > override por-servidor `capabilities` > inferência."""
+    entry = (conf.get("tools") or {}).get(tname) or {}
+    server_caps = conf.get("capabilities")                  # override legado, vale p/ o servidor todo
+    declared = entry.get("capabilities", server_caps)
+    caps = set(declared) if declared is not None else None  # None → McpTool infere
+    policy = str(entry.get("approval", "auto")).lower()
+    has_manifest = bool(entry) or server_caps is not None
+    return caps, policy, has_manifest
+
+
 def _mcp_url_ok(url: str) -> bool:
     """HTTPS, ou host LOCAL (loopback/.local) — senão é plaintext / servidor arbitrário (recusa por padrão)."""
     from urllib.parse import urlparse
@@ -212,7 +238,8 @@ class McpTool(Tool):
     """Embrulha uma tool de um servidor MCP como Tool nativa do harness."""
 
     def __init__(self, client: McpStdioClient, spec: dict, prefix: str = "", *,
-                 capabilities=None, trusted: bool = False):
+                 capabilities=None, trusted: bool = False, approval_policy: str = "auto",
+                 unverified: bool = False):
         self._client = client
         self._remote = spec.get("name", "")
         self.name = f"{prefix}{self._remote}"
@@ -223,6 +250,10 @@ class McpTool(Tool):
         self.required = tuple(schema.get("required") or ())
         self.capabilities = set(capabilities) if capabilities is not None else infer_capabilities(spec)
         self.trusted = trusted              # servidor de confiança → não força go/no-go por capability (#8)
+        # política de aprovação do MANIFESTO (#11): auto (gate por capability) | never (liberada) | always.
+        self.approval_policy = approval_policy
+        # #11: servidor UNTRUSTED + tool SEM manifesto → não confio na inferência por nome ("read" bonitinho).
+        self.unverified = unverified
 
     def run(self, args, ctx):
         try:
@@ -246,8 +277,8 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
         for hk, hv in (conf.get("headers") or {}).items():            # #8/#6: header com segredo literal
             if isinstance(hv, str) and len(hv) > 8 and not hv.strip().startswith("${"):
                 emit(f"⚠ MCP '{name}' header {hk}: parece SEGREDO em texto — use ${{ENV_VAR}} (não versione token).")
-        trusted = bool(conf.get("trusted"))
-        cap_override = conf.get("capabilities")
+        trust = _trust_of(conf)                      # #11: untrusted (default) | reviewed | trusted
+        trusted = trust == "trusted"
         try:
             if url:                                  # transporte HTTP/SSE (§12)
                 client = McpHttpClient(url, conf.get("headers"), conf.get("timeout", 30))
@@ -259,13 +290,24 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
                 )
             specs = client.start()
             clients.append(client)
+            unverified_names = []
             for spec in specs:
-                caps = set(cap_override) if cap_override else None
-                t = McpTool(client, spec, prefix=f"{name}__", capabilities=caps, trusted=trusted)
+                caps, policy, has_manifest = _tool_manifest(conf, spec.get("name", ""))
+                # #11: untrusted + sem manifesto → não confia na inferência por nome → exige go/no-go.
+                unverified = (trust == "untrusted") and not has_manifest
+                if unverified:
+                    unverified_names.append(spec.get("name", ""))
+                t = McpTool(client, spec, prefix=f"{name}__", capabilities=caps, trusted=trusted,
+                            approval_policy=policy, unverified=unverified)
                 tools[t.name] = t
             danger = sorted({c for t in tools.values() if t.name.startswith(f"{name}__")
                              for c in getattr(t, "capabilities", set()) if c in DANGEROUS_CAPS})
-            emit(f"MCP '{name}': {len(specs)} tool(s)" + (f" · capabilities perigosas: {', '.join(danger)}" if danger else ""))
+            extra = f" · trust={trust}"
+            if danger:
+                extra += f" · capabilities perigosas: {', '.join(danger)}"
+            if unverified_names:
+                extra += f" · {len(unverified_names)} não-revisada(s) → go/no-go"
+            emit(f"MCP '{name}': {len(specs)} tool(s)" + extra)
         except Exception as e:  # noqa: BLE001 — um servidor ruim não derruba os outros
             emit(f"MCP '{name}' falhou: {e}")
     return tools, clients

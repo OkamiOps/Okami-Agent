@@ -545,10 +545,19 @@ class Harness:
 
             # --- Go/No-Go para ação sensível (§12): identidade, .env, segredos, shell destrutivo ---
             sens = approval.classify(action.tool, action.args)
-            if sens is None:                                  # #8: tool MCP de terceiro com capability PERIGOSA
+            if sens is None:                                  # #8/#11: tool MCP de terceiro — manifesto/trust store
                 _t = self.registry.get(action.tool)
                 _caps = getattr(_t, "capabilities", None) or set()
-                if not getattr(_t, "trusted", False) and (_caps & {"write", "shell", "network", "secret-access"}):
+                _pol = getattr(_t, "approval_policy", "auto")
+                _dang = _caps & {"write", "shell", "network", "secret-access", "external-side-effect"}
+                if _pol == "always":                          # manifesto exige aprovação explícita
+                    sens = approval.Sensitive(f"MCP {action.tool}: aprovação exigida no manifesto", "mcp_manifest", "high")
+                elif _pol == "never" or getattr(_t, "trusted", False):
+                    pass                                      # liberada no manifesto / servidor confiável
+                elif getattr(_t, "unverified", False):        # #11: untrusted sem manifesto → não confia no nome
+                    sens = approval.Sensitive(
+                        f"MCP {action.tool}: tool não revisada (capabilities não declaradas)", "mcp_unverified", "medium")
+                elif _dang:
                     _risk = "high" if (_caps & {"shell", "secret-access"}) else "medium"
                     sens = approval.Sensitive(f"MCP {action.tool} ({', '.join(sorted(_caps))})", "mcp_capability", _risk)
             if sens is not None:
