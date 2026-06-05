@@ -51,13 +51,15 @@ def test_policy_conformance_is_a_gate():
     assert gate and all("|| true" not in ln for ln in gate), "policy check precisa ser gate"
 
 
-def test_codeql_workflow_pinned_by_sha():
-    cq = _ROOT / ".github" / "workflows" / "codeql.yml"
-    if not cq.exists():
-        pytest.skip("codeql.yml ausente")
-    text = cq.read_text(encoding="utf-8")
-    assert "codeql-action/init@" in text and "codeql-action/analyze@" in text
-    # actions pinadas por SHA de 40 hex (não por @v3)
-    import re
-    for m in re.findall(r"uses:\s*github/codeql-action/\w+@(\S+)", text):
-        assert re.fullmatch(r"[0-9a-f]{40}", m), f"codeql action não pinada por SHA: {m}"
+@pytest.mark.skipif(not _CI.exists(), reason="ci.yml ausente")
+def test_semgrep_is_a_gate():
+    lines = _security_steps()
+    sg = [ln for ln in lines if "semgrep scan" in ln]
+    assert sg, "faltou o gate de Semgrep"
+    assert all("|| true" not in ln for ln in sg), "Semgrep não pode ser informativo (|| true)"
+    assert any("--error" in ln for ln in sg), "Semgrep precisa de --error p/ falar como gate"
+
+
+def test_codeql_removed_needs_ghas():
+    # CodeQL exige GHAS (repo privado não tem) → removido em favor do Semgrep in-runner
+    assert not (_ROOT / ".github" / "workflows" / "codeql.yml").exists()

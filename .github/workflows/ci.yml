@@ -73,3 +73,12 @@ jobs:
           # --no-hashes: o pacote editável (-e .) não pode exigir hash; pip-audit pula o self-package.
           uv export --frozen --no-dev --no-hashes -o /tmp/reqs.txt
           uvx pip-audit -r /tmp/reqs.txt
+      - name: Semgrep — análise estática de segurança (GATE; substitui o CodeQL)
+        # CodeQL exige GitHub Advanced Security (repo privado não tem) → SARIF upload sempre falhava.
+        # Semgrep roda 100% no runner e mostra os achados no log. Excluímos só a regra dynamic-urllib
+        # (redundante: URLs do usuário/modelo passam por okami/core/net_guard anti-SSRF, e o resto são
+        # endpoints de config; já coberto por ruff S310). shell=True legítimo leva `# nosemgrep`.
+        run: >
+          uvx --from semgrep semgrep scan --config p/security-audit --error --metrics off
+          --exclude-rule python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          okami

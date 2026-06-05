@@ -283,7 +283,7 @@ def check_exit(criteria: list[dict], ctx: ToolContext) -> tuple[bool, list[str]]
             try:
                 # hook é comando do OPERADOR (config confiável), não input do modelo → shell=True ok.
                 r = subprocess.run(  # nosec B602
-                    c["cmd"], shell=True, cwd=str(ctx.workspace),
+                    c["cmd"], shell=True, cwd=str(ctx.workspace),  # nosemgrep — hook do operador (ver # nosec acima)
                     capture_output=True, text=True, timeout=120, env=sanitized_env(),
                 )
                 if r.returncode != 0:
