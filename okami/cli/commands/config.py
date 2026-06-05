@@ -17,6 +17,18 @@ def _is_secret_key(key: str) -> bool:
     return bool(re.fullmatch(r"[A-Z][A-Z0-9_]+", key))
 
 
+_SENSITIVE_SEG = re.compile(
+    r"api[_-]?keys?|tokens?|authorization|passwo?rds?|secrets?|credentials?|private[_-]?keys?|apikey",
+    re.IGNORECASE,
+)
+
+
+def _is_sensitive_dotted(key: str) -> bool:
+    """Chave PONTILHADA que aponta p/ segredo (#6): providers.openai.api_key, channels.telegram.token,
+    mcp.servers.x.headers.Authorization, memory.honcho.api_key… — NÃO pode ir em texto no YAML versionável."""
+    return any(_SENSITIVE_SEG.search(seg) for seg in key.split("."))
+
+
 def _coerce(value: str):
     """'true'→True, '42'→42, '[a,b]'/json→estrutura, 'a,b'→lista, senão string."""
     s = value.strip()
@@ -201,6 +213,12 @@ def config_set(
         where = "projeto (.env)" if project else f"global ({global_env_path()})"
         console.print(f"[green]🔑 {key} →[/green] {where} [dim](0600, não versionado)[/dim]")
         return
+    if _is_sensitive_dotted(key) and not str(value).strip().startswith("${"):   # #6: segredo NÃO vai em texto
+        env_name = key.replace(".", "_").upper()
+        console.print(f"[red]✗ '{key}' parece SEGREDO[/red] — não gravo em texto no okami.local.yaml (versionável).")
+        console.print(f"[dim]→ guarde como env var:[/dim] [bold]okami config set {env_name} <valor>[/bold]")
+        console.print(f"[dim]  e referencie no yaml com:[/dim] [bold]okami config set {key} '${{{env_name}}}'[/bold]")
+        raise typer.Exit(2)
     p = Path("okami.local.yaml")
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
     coerced = _coerce(value)
