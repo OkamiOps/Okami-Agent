@@ -1,0 +1,37 @@
+"""Redator central — estilo Hermes `redact.py`.
+
+UM lugar só p/ mascarar segredos antes de QUALQUER coisa sair pra log, saída de tool,
+auditoria (.okami/audit.jsonl) ou mensagem de erro. Conservador de propósito: prefere
+mascarar a vazar, mas não mutila texto comum (padrões específicos, não "qualquer coisa longa").
+"""
+
+from __future__ import annotations
+
+import re
+
+_MASK = "«redacted»"
+
+_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # NOME_SENSÍVEL = valor  /  "nome": "valor"  (KEY/SECRET/TOKEN/PASSWORD/AUTH/SESSION/COOKIE…)
+    # O sep tolera aspas (estilo JSON: "password": "x") entre o nome e o = / :.
+    (re.compile(
+        r'(?i)(\b[A-Z0-9_]*(?:API[_-]?KEY|ACCESS[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|'
+        r'CREDENTIAL|PRIVATE[_-]?KEY|SESSION|COOKIE|AUTH)[A-Z0-9_]*\b)(["\']?\s*[=:]\s*["\']?)([^\s"\',;]+)'),
+     lambda m: f"{m.group(1)}{m.group(2)}{_MASK}"),
+    (re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._\-]{8,}'), f"Bearer {_MASK}"),
+    (re.compile(r'\bsk-[A-Za-z0-9_\-]{16,}\b'), f"sk-{_MASK}"),          # OpenAI-style
+    (re.compile(r'\bxox[baprs]-[A-Za-z0-9-]{8,}\b'), f"xox-{_MASK}"),    # Slack
+    (re.compile(r'\b(gh[pousr]_)[A-Za-z0-9]{20,}\b'), lambda m: f"{m.group(1)}{_MASK}"),  # GitHub
+    (re.compile(r'\bAKIA[0-9A-Z]{12,}\b'), f"AKIA{_MASK}"),             # AWS access key id
+    (re.compile(r'\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}\b'),
+     f"{_MASK}-jwt"),                                                    # JWT
+]
+
+
+def redact(text: str) -> str:
+    """Mascara segredos conhecidos em `text` (no-op p/ vazio/não-str)."""
+    if not text or not isinstance(text, str):
+        return text
+    for rx, repl in _PATTERNS:
+        text = rx.sub(repl, text)
+    return text

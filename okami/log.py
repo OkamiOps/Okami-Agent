@@ -33,11 +33,20 @@ if not logger.handlers:
     logger.propagate = False
 
 
+def _safe(msg: str) -> str:
+    """Mascara segredos ANTES de ir pro log (redator central)."""
+    try:
+        from okami.core.redact import redact
+        return redact(msg)
+    except Exception:  # noqa: BLE001 — log nunca derruba nada
+        return msg
+
+
 def dbg(msg: str, *, exc_info: bool = False) -> None:
     """Best-effort silencioso (só aparece com OKAMI_LOG=DEBUG)."""
-    logger.debug(msg, exc_info=exc_info)
+    logger.debug(_safe(msg), exc_info=exc_info)
 
 
 def warn(msg: str, *, exc_info: bool = True) -> None:
     """Falha que afeta comportamento — registra com traceback (não vai pro chat)."""
-    logger.warning(msg, exc_info=exc_info)
+    logger.warning(_safe(msg), exc_info=exc_info)

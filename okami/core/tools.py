@@ -100,11 +100,9 @@ def openai_tools(registry: dict) -> list[dict]:
 
 
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
-    p = (ctx.workspace / rel).resolve()
-    # impede escapar do workspace
-    if ctx.workspace.resolve() not in p.parents and p != ctx.workspace.resolve():
-        raise ValueError(f"caminho fora do workspace: {rel}")
-    return p
+    """Jail de workspace + bloqueio de symlink-escape (centralizado em core.file_safety)."""
+    from okami.core.file_safety import safe_path
+    return safe_path(ctx.workspace, rel)  # PathEscape é ValueError → callers `except ValueError` seguem
 
 
 class ReadFile(Tool):
@@ -115,12 +113,13 @@ class ReadFile(Tool):
 
     def run(self, args, ctx):
         rel = args["path"]
+        from okami.core.file_safety import read_text_capped
         try:
             p = _safe_path(ctx, rel)
-            text = p.read_text(encoding="utf-8")
+            text = read_text_capped(p)        # teto de tamanho → não estoura memória
         except FileNotFoundError:
             return ToolResult(False, f"arquivo não existe: {rel}")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — inclui FileTooLarge/PathEscape (msg clara)
             return ToolResult(False, f"erro ao ler {rel}: {e}")
         ctx.read_files.add(rel)
         return ToolResult(True, text, effect=False)
@@ -150,11 +149,13 @@ class WriteFile(Tool):
                 ctx.checkpoints.snapshot(rel)
             except Exception:  # noqa: BLE001 — checkpoint é best-effort, nunca bloqueia a escrita
                 pass
-        p.parent.mkdir(parents=True, exist_ok=True)
-        # newline="\n": evita CRLF dependente de SO em arquivos gerados (portabilidade).
-        p.write_text(content, encoding="utf-8", newline="\n")
+        from okami.core.file_safety import FileTooLarge, write_text_atomic
+        try:
+            n = write_text_atomic(p, content)   # atômico (sem arquivo meia-escrito) + teto de tamanho
+        except FileTooLarge as e:
+            return ToolResult(False, str(e))
         ctx.read_files.add(rel)  # acabou de escrever → conhece o conteúdo
-        return ToolResult(True, f"escrito {rel} ({len(content)} chars)", effect=True)
+        return ToolResult(True, f"escrito {rel} ({n} chars)", effect=True)
 
 
 class EditFile(Tool):
@@ -178,8 +179,9 @@ class EditFile(Tool):
             return ToolResult(False, "edit_file exige 'old' (trecho a substituir) não-vazio.")
         if not p.exists():
             return ToolResult(False, f"'{rel}' não existe — use write_file para criar.")
+        from okami.core.file_safety import read_text_capped, write_text_atomic
         try:
-            text = p.read_text(encoding="utf-8")
+            text = read_text_capped(p)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao ler {rel}: {e}")
         count = text.count(old)
@@ -194,7 +196,7 @@ class EditFile(Tool):
             except Exception:  # noqa: BLE001
                 pass
         new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
-        p.write_text(new_text, encoding="utf-8", newline="\n")
+        write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
         ctx.read_files.add(rel)
         n = count if replace_all else 1
         return ToolResult(True, f"editado {rel} ({n} substituiç{'ões' if n > 1 else 'ão'})", effect=True)

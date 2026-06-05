@@ -370,10 +370,12 @@ class Harness:
         """Trilha append-only de TODA tool + decisão de aprovação (.okami/audit.jsonl). Best-effort."""
         try:
             import time as _t
+            from okami.core.redact import redact
             d = self.ctx.workspace / ".okami"
             d.mkdir(parents=True, exist_ok=True)
+            line = json.dumps({"ts": _t.time(), **fields}, ensure_ascii=False, default=str)
             with (d / "audit.jsonl").open("a", encoding="utf-8") as f:
-                f.write(json.dumps({"ts": _t.time(), **fields}, ensure_ascii=False, default=str) + "\n")
+                f.write(redact(line) + "\n")        # mascara segredos na trilha de auditoria
         except Exception:  # noqa: BLE001 — auditoria nunca derruba o turno
             pass
 
@@ -391,10 +393,11 @@ class Harness:
     def _persist_large_output(self, step_n: int, text: str) -> str:
         """Output grande → .okami/tool_outputs/step_<n>.txt; devolve o caminho relativo p/ referência."""
         try:
+            from okami.core.redact import redact
             d = self.ctx.workspace / ".okami" / "tool_outputs"
             d.mkdir(parents=True, exist_ok=True)
             p = d / f"step_{step_n}.txt"
-            p.write_text(text, encoding="utf-8")
+            p.write_text(redact(text), encoding="utf-8")   # output grande pode ter segredo → mascara
             return str(p.relative_to(self.ctx.workspace))
         except Exception:  # noqa: BLE001
             return "(falha ao persistir)"
