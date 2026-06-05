@@ -107,105 +107,110 @@ def doctor(
         rep["healthy"] = health_ok(rep)
         console.print_json(_json.dumps(rep, ensure_ascii=False))
         raise typer.Exit(0 if rep["healthy"] else 1)
-    console.print(f"[bold]Okami[/bold] v{__version__} — doctor")
-    console.print(
-        f"[dim]{platform.system()} {platform.release()} · Python {platform.python_version()}[/dim]"
-    )
-    cfg = _load()
-    console.print(f"default_provider: [bold]{cfg.default_provider}[/bold]\n")
-
-    for name, pc in cfg.providers.items():
-        console.print(f"[bold]{name}[/bold] ({pc.tier})")
-        console.print(f"  model: {pc.model}")
-        if pc.transport == "claude_cli":
-            s = "[green]CLI 'claude' OK[/green]" if pc.ready else "[yellow]instale/logue o CLI 'claude'[/yellow]"
-            console.print(f"  transport: claude_cli — {s}")
-        elif pc.transport == "codex_oauth":
-            s = "[green]~/.codex/auth.json OK[/green]" if pc.ready else f"[yellow]rode: okami login {name}[/yellow]"
-            console.print(f"  transport: codex_oauth — {s}")
-        elif pc.transport == "minimax_oauth":
-            s = "[green]token OAuth OK[/green]" if pc.ready else f"[yellow]rode: okami login {name}[/yellow]"
-            console.print(f"  transport: minimax_oauth — {s}")
-        elif pc.api_key_env:
-            mark = "[green]ok[/green]" if pc.resolved_key() else f"[yellow]definir {pc.api_key_env}[/yellow]"
-            console.print(f"  chave: {mark}")
-        elif pc.api_key:
-            console.print("  chave: [green]literal/dummy[/green]")
-        else:
-            console.print("  chave: [dim]nenhuma[/dim]")
-        if pc.api_base:
-            ok, msg = _ping_models(pc.api_base)
-            color = "green" if ok else "red"
-            console.print(f"  endpoint {pc.api_base}: [{color}]{msg}[/{color}]")
-        if pc.notes:
-            console.print(f"  [dim]nota: {pc.notes}[/dim]")
-        console.print()
-
-    # --- memória (útil p/ setup distribuído via Tailscale) ---
-    mem = cfg.memory or {}
-    console.print(f"[bold]memória[/bold]: backend={mem.get('backend', 'sqlite-fts5')}")
-    emb = mem.get("embedder") or {}
-    if emb.get("enabled", True) and emb.get("model"):
-        from okami.memory import OpenAICompatEmbedder
-        e = OpenAICompatEmbedder(emb.get("api_base", "http://localhost:1234/v1"), emb["model"])
-        ok = e.available()
-        s = "[green]ok[/green]" if ok else "[yellow]offline → degrada p/ BM25[/yellow]"
-        console.print(f"  embedder {emb.get('api_base')}: {s}")
-    hc = mem.get("honcho")
-    if hc:
-        console.print(f"  honcho: {hc.get('base_url', '(base_url não definido)')}")
-    fl = mem.get("files", {})
-    console.print("  .md sempre injetados: identidade (SOUL/VOICE/PERSONA) + core (AGENTS/USER/MEMORY)")
-    console.print(f"  limites (chars): soul={fl.get('soul', 6000)} voice={fl.get('voice', 6000)} "
-                  f"persona={fl.get('persona', 6000)} agents={fl.get('agents', 4000)} "
-                  f"user={fl.get('user', 4000)} memory={fl.get('memory', 4000)}")
-
-    # --- toolchain & sistema (#13 self-review: doctor mais agressivo, estilo Hermes) ---
     import shutil
     import sqlite3
     import stat as _stat
 
-    console.print("\n[bold]toolchain[/bold]")
-    for tool, why in (("git", "skills/learn, checkpoints"), ("uv", "instalação/deps"),
-                      ("node", "ACP/IDE e alguns MCP"), ("docker", "sandbox/serviços (opcional)"),
-                      ("claude", "transporte claude_cli"), ("rg", "busca rápida (opcional)")):
+    from rich.text import Text
+
+    from okami.cli import _ui
+    cfg = _load()
+    console.print()
+    console.print(_ui.header("doctor",
+                             f"v{__version__} · {platform.system()} {platform.release()} · Python {platform.python_version()}"))
+    console.print()
+
+    # --- providers (auth + endpoint) ---
+    pt = _ui.data_table(
+        ("", {"width": 2, "no_wrap": True}),
+        ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+        ("transporte", {"style": _ui.MUTE, "no_wrap": True}),
+        ("auth", {"no_wrap": True}),
+        ("endpoint", {"style": _ui.MUTE, "overflow": "ellipsis", "no_wrap": True, "max_width": 46}),
+        title="providers",
+    )
+    for name, pc in cfg.providers.items():
+        mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
+        if pc.transport in ("codex_oauth", "minimax_oauth"):
+            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge("missing", f"okami login {name}")
+        elif pc.transport == "claude_cli":
+            auth = _ui.badge("ready", "CLI claude") if pc.ready else _ui.badge("missing", "instale o CLI")
+        elif pc.api_key_env:
+            auth = _ui.badge("ready", pc.api_key_env) if pc.resolved_key() else _ui.badge("missing", f"def {pc.api_key_env}")
+        elif pc.api_key:
+            auth = _ui.badge("ok", "literal/dummy")
+        else:
+            auth = _ui.badge("off", "nenhuma")
+        ep = Text("—", style=_ui.DIM)
+        if pc.api_base:
+            ok, msg = _ping_models(pc.api_base)
+            host = pc.api_base.replace("https://", "").replace("http://", "")
+            ep = Text()
+            ep.append_text(_ui.dot("ok" if ok else "fail"))
+            ep.append(f"  {host} · {msg[:34]}", style=_ui.MUTE)
+        pt.add_row(mark, name, pc.transport, auth, ep)
+    console.print(pt)
+    console.print()
+
+    # --- memória ---
+    mem = cfg.memory or {}
+    emb = mem.get("embedder") or {}
+    emb_v = Text("desligado", style=_ui.MUTE)
+    if emb.get("enabled", True) and emb.get("model"):
+        from okami.memory import OpenAICompatEmbedder
+        ok = OpenAICompatEmbedder(emb.get("api_base", "http://localhost:1234/v1"), emb["model"]).available()
+        emb_v = _ui.badge("ok", emb.get("api_base", "")) if ok else _ui.badge("warn", "offline → BM25")
+    fl = mem.get("files", {})
+    mem_rows = [
+        ("backend", Text(mem.get("backend", "sqlite-fts5"), style=_ui.FG)),
+        ("embedder", emb_v),
+        ("honcho", Text((mem.get("honcho") or {}).get("base_url", "—"), style=_ui.SOFT)),
+        ("arquivos .md", Text("SOUL · VOICE · PERSONA · AGENTS · USER · MEMORY", style=_ui.SOFT)),
+        ("limites (chars)", Text(f"soul {fl.get('soul', 6000)} · voice {fl.get('voice', 6000)} · "
+                                 f"persona {fl.get('persona', 6000)} · user {fl.get('user', 4000)}", style=_ui.MUTE)),
+    ]
+    console.print(_ui.card(_ui.kv(mem_rows), title="memória", accent=_ui.CYAN))
+
+    # --- ambiente / toolchain ---
+    tools_line = Text()
+    for tool in ("git", "uv", "node", "docker", "claude", "rg"):
         path = shutil.which(tool)
-        console.print(f"  {tool}: {f'[green]{path}[/green]' if path else '[yellow]não encontrado[/yellow]'} "
-                      f"[dim]({why})[/dim]")
-    try:                                              # SQLite FTS5 → memória híbrida (senão degrada p/ LIKE)
+        tools_line.append_text(_ui.dot("ok" if path else "off"))
+        tools_line.append(f" {tool}   ", style=_ui.SOFT if path else _ui.MUTE)
+    try:
         _c = sqlite3.connect(":memory:")
         _c.execute("CREATE VIRTUAL TABLE _t USING fts5(x)")
         _c.close()
         fts_ok = True
     except sqlite3.Error:
         fts_ok = False
-    console.print(f"  SQLite FTS5: {'[green]ok[/green]' if fts_ok else '[yellow]ausente → memória usa LIKE[/yellow]'}")
-
-    codex_auth = (Path.home() / ".codex" / "auth.json").exists() or \
-        (Path.home() / ".okami" / "credentials" / "codex.json").exists()
-    console.print(f"  codex auth: {'[green]logado[/green]' if codex_auth else '[yellow]rode: okami login codex[/yellow]'}")
-
+    codex_auth = ((Path.home() / ".codex" / "auth.json").exists()
+                  or (Path.home() / ".okami" / "credentials" / "codex.json").exists())
     from okami.config import global_env_path
     genv = global_env_path()
     if genv.exists():
         mode = _stat.S_IMODE(genv.stat().st_mode)
-        s = "[green](0600 ✓)[/green]" if mode == 0o600 else "[yellow](recomendado 0600)[/yellow]"
-        console.print(f"  ~/.okami/.env: existe · perm {oct(mode)} {s}")
+        env_v = _ui.badge("ok", "0600") if mode == 0o600 else _ui.badge("warn", f"{oct(mode)[2:]} → use 0600")
     else:
-        console.print("  ~/.okami/.env: [dim]nenhum (configure com `okami config set`)[/dim]")
-
-    mcp = getattr(cfg, "mcp", None) or {}
-    if mcp:
-        console.print(f"  MCP: {len(mcp)} servidor(es): {', '.join(list(mcp)[:6])}")
-    else:
-        console.print("  MCP: [dim]nenhum servidor configurado[/dim]")
-
+        env_v = Text("nenhum (okami config set …)", style=_ui.MUTE)
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", {}) or {})
-    real = ("[green]isolamento real[/green]" if sb.backend == "docker"
-            else "[yellow]cercas locais (sem confinar FS/rede)[/yellow]")
-    console.print(f"  sandbox: backend={sb.backend} · mode={sb.mode} · net={'on' if sb.network_on else 'off'} "
-                  f"· timeout={sb.timeout}s — {real}")
+    sb_v = Text()
+    sb_v.append(f"{sb.backend} · {sb.mode} · net {'on' if sb.network_on else 'off'}   ", style=_ui.FG)
+    sb_v.append_text(_ui.badge("ok", "isolamento real") if sb.backend == "docker"
+                     else _ui.badge("warn", "cercas locais"))
+    from okami.integrations.mcp import servers_of
+    srv = servers_of(getattr(cfg, "mcp", None))
+    env_rows = [
+        ("toolchain", tools_line),
+        ("SQLite FTS5", _ui.badge("ok", "híbrida") if fts_ok else _ui.badge("warn", "LIKE (sem FTS5)")),
+        ("codex auth", _ui.badge("ok", "logado") if codex_auth else _ui.badge("missing", "okami login codex")),
+        (".env global", env_v),
+        ("MCP", Text(f"{len(srv)} servidor(es): {', '.join(list(srv)[:6])}" if srv else "nenhum",
+                     style=_ui.SOFT if srv else _ui.MUTE)),
+        ("sandbox", sb_v),
+    ]
+    console.print(_ui.card(_ui.kv(env_rows), title="ambiente", accent=_ui.MAGENTA))
 
     if fix:
         from okami.config import global_env_path

@@ -61,4 +61,5 @@ def test_status_shows_resolved_view(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
     out = runner.invoke(app, ["status"]).output
-    assert "Okami status" in out and "lmstudio" in out and "openai/x" in out
+    assert "OKAMI" in out and "sessão" in out          # header + card de sessão (visual novo)
+    assert "lmstudio" in out and "openai/x" in out      # tabela de providers

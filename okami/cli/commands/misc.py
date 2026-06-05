@@ -27,18 +27,29 @@ def auth_main(ctx: typer.Context) -> None:
 @auth_app.command("list")
 def auth_list() -> None:
     """Lista os perfis de auth — tipo (oauth/cli/api_key), status, e ONDE mora a credencial (sem o valor)."""
+    from rich.text import Text
+
+    from okami.cli import _ui
     from okami.core.auth_profiles import build_auth_profiles
     profs = build_auth_profiles(_load())
-    t = Table(title="perfis de auth", border_style="#3d3e50", header_style="bold #ff7527")
-    for col in ("provider", "tipo", "tier", "assinatura", "status", "credencial (onde)"):
-        t.add_column(col)
-    sm = {"ready": "[green]ready[/green]", "missing": "[red]missing[/red]", "expired": "[yellow]expired[/yellow]"}
+    console.print()
+    console.print(_ui.header("auth", "perfis de credencial · sem expor o valor"))
+    console.print()
+    t = _ui.data_table(
+        ("", {"width": 2, "no_wrap": True}),
+        ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+        ("tipo", {"style": _ui.MUTE, "no_wrap": True}),
+        ("sub", {"justify": "center", "no_wrap": True}),
+        ("status", {"no_wrap": True}),
+        ("credencial (onde)", {"style": _ui.SOFT, "overflow": "ellipsis", "no_wrap": True}),
+    )
     for p in profs:
-        star = " [bold #ff7527]★[/]" if p["default"] else ""
-        t.add_row(p["name"] + star, p["kind"], p["tier"],
-                  "✓" if p["subscription"] else "—", sm.get(p["status"], p["status"]), p["location"])
+        mark = Text("★", style=_ui.ORANGE) if p["default"] else Text(" ")
+        sub = Text("✓", style=f"bold {_ui.GREEN}") if p["subscription"] else Text("—", style=_ui.MUTE)
+        t.add_row(mark, p["name"], p["kind"], sub, _ui.badge(p["status"]), p["location"])
     console.print(t)
-    console.print("[dim]★ = default_provider · assinatura ✓ = OAuth/CLI (nunca pay-as-you-go)[/dim]")
+    console.print(_ui.hint("★ default · sub ✓ = assinatura OAuth/CLI (nunca pay-as-you-go) · okami login <provider>"))
+    console.print()
 
 
 @auth_app.command("status")
@@ -254,18 +265,27 @@ def clean(
 @app.command()
 def tools() -> None:
     """Lista as ferramentas do agente (categoria · tier · sensibilidade) — registro declarativo (#14)."""
+
+    from okami.cli import _ui
     from okami.core.tool_registry import by_category, missing
     from okami.core.tools import default_registry
     names = set(default_registry())
-    t = Table(title="[bold #ff7527]Ferramentas do Okami[/]", box=None, padding=(0, 2, 0, 0))
-    t.add_column("ferramenta", style="bold #ff39d1")
-    t.add_column("categoria")
-    t.add_column("tier")
-    t.add_column("sensibilidade")
-    _dc = {"safe": "green", "sensitive": "yellow", "dangerous": "red"}
-    for cat, specs in by_category(names).items():
+    console.print()
+    console.print(_ui.header("tools", f"{len(names)} ferramentas do agente · por categoria"))
+    console.print()
+    t = _ui.data_table(
+        ("ferramenta", {"style": f"bold {_ui.MAGENTA}", "no_wrap": True}),
+        ("categoria", {"style": _ui.MUTE, "no_wrap": True}),
+        ("tier", {"style": _ui.MUTE, "no_wrap": True}),
+        ("sensibilidade", {"no_wrap": True}),
+    )
+    _state = {"safe": "ok", "sensitive": "warn", "dangerous": "fail"}
+    cats = by_category(names)
+    for ci, (cat, specs) in enumerate(cats.items()):
+        if ci:
+            t.add_row("", "", "", "")                 # respiro entre categorias
         for s in specs:
-            t.add_row(s.name, cat, s.tier, f"[{_dc.get(s.danger, 'white')}]{s.danger}[/]")
+            t.add_row(s.name, cat, s.tier, _ui.badge(_state.get(s.danger, "dim"), s.danger))
     console.print(t)
     drift = missing(names)
     if drift:
@@ -277,8 +297,6 @@ def status(
     json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
 ) -> None:
     """Visão resolvida (estilo hermes/openclaw status): agente, modelo, providers, memória, toggles."""
-    from rich.panel import Panel
-    from rich.table import Table as _T
     try:
         cfg = _load()
     except Exception as e:  # noqa: BLE001
@@ -306,6 +324,9 @@ def status(
         import json as _json
         console.print_json(_json.dumps(payload, ensure_ascii=False))
         raise typer.Exit(0)
+    from rich.text import Text
+
+    from okami.cli import _ui
     default_agent = (cfg.agents or {}).get("default", "—")
     pc = cfg.provider()
     appr = (cfg.approvals or {}).get("mode", "manual")
@@ -313,15 +334,24 @@ def status(
     learn = cfg.learning or {}
     voice_on = bool((cfg.voice or {}).get("stt") or (cfg.voice or {}).get("tts"))
     think = pc.reasoning_effort or "—"
-    body = (f"[bold #ff7527]agente[/] {default_agent}   "
-            f"[bold #ff7527]modelo[/] {pc.model} [dim]({cfg.default_provider})[/dim]   "
-            f"[dim]think[/] {think}\n"
-            f"[dim]memória[/] {cfg.memory.get('backend', 'sqlite-fts5')}   "
-            f"[dim]aprovação[/] {appr}   "
-            f"[dim]persona[/] {'on' if persona_on else 'off'}   "
-            f"[dim]voz[/] {'on' if voice_on else 'off'}   "
-            f"[dim]auto-skill[/] {'on' if learn.get('auto_skill') else 'off'}")
-    console.print(Panel(body, title="[bold #ff7527]Okami status[/]", border_style="#ff7527"))
+
+    console.print()
+    console.print(_ui.header("status", "visão resolvida do agente"))
+    console.print()
+    model_v = Text(pc.model, style=f"bold {_ui.CYAN}")
+    model_v.append(f"   {cfg.default_provider} · {pc.tier}", style=_ui.MUTE)
+    ident = _ui.kv([
+        ("agente", Text(default_agent, style=f"bold {_ui.FG}")),
+        ("modelo", model_v),
+        ("raciocínio", Text(think, style=_ui.FG)),
+        ("memória", Text(cfg.memory.get("backend", "sqlite-fts5"), style=_ui.FG)),
+        ("aprovação", _ui.badge("ok" if appr in ("manual", "smart") else "warn", appr)),
+        ("persona", _ui.badge("on" if persona_on else "off", "ativa" if persona_on else "desligada")),
+        ("voz", _ui.badge("on" if voice_on else "off", "on" if voice_on else "off")),
+        ("auto-skill", _ui.badge("on" if learn.get("auto_skill") else "off",
+                                 "on" if learn.get("auto_skill") else "off")),
+    ])
+    console.print(_ui.card(ident, title="sessão", subtitle="okami.yaml + overrides"))
     try:                                              # tokens/custo acumulados do agente default (§A5)
         from okami.gateway.sessions import TranscriptStore
         from okami.llm.usage import estimate_cost, format_tokens, summarize_store
@@ -330,19 +360,30 @@ def status(
         if u.total_tokens:
             cr = estimate_cost(u, transport=pc.transport, provider=cfg.default_provider, model=pc.model)
             extra = f" · {format_tokens(u.cache_read_tokens)} cache" if u.cache_read_tokens else ""
-            console.print(f"  [dim]tokens[/] {format_tokens(u.input_tokens)} in · "
-                          f"{format_tokens(u.output_tokens)} out{extra}   [dim]custo[/] {cr.label}")
+            usage = Text("  ")
+            usage.append("uso ", style=_ui.MUTE)
+            usage.append(f"{format_tokens(u.input_tokens)} in", style=_ui.FG)
+            usage.append(f" · {format_tokens(u.output_tokens)} out{extra}", style=_ui.SOFT)
+            usage.append(f"   custo {cr.label}", style=_ui.MAGENTA)
+            console.print(usage)
     except Exception:  # noqa: BLE001
         pass
-    t = _T(title="Providers (auth)", border_style="#3d3e50")
-    t.add_column("provider", style="bold")
-    t.add_column("modelo")
-    t.add_column("pronto?")
+    console.print()
+    t = _ui.data_table(
+        ("", {"width": 2, "no_wrap": True}),
+        ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
+        ("modelo", {"style": _ui.SOFT}),
+        ("tier", {"style": _ui.MUTE, "no_wrap": True}),
+        ("estado", {"no_wrap": True}),
+        title="providers",
+    )
     for name, p in cfg.providers.items():
-        flag = "[green]✓[/green]" if p.ready else "[yellow]falta auth[/yellow]"
-        mark = name + (" [cyan](default)[/cyan]" if name == cfg.default_provider else "")
-        t.add_row(mark, p.model, flag)
+        mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
+        state = _ui.badge("ready", "pronto") if p.ready else _ui.badge("missing", "falta auth")
+        t.add_row(mark, name, p.model, p.tier, state)
     console.print(t)
+    console.print(_ui.hint("okami doctor — diagnóstico · okami auth — credenciais · okami config — ajustar"))
+    console.print()
 
 
 # Grupos do `okami help` (visão geral amigável; cada item é um comando real).

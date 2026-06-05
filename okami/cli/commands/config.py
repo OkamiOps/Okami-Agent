@@ -117,6 +117,48 @@ def _config_effective_yaml() -> str:
     return _yaml.safe_dump(_redact(raw), allow_unicode=True, sort_keys=False)
 
 
+def _config_file_rows():
+    from okami.config import global_env_path
+    return [("base", Path("okami.yaml")), ("overrides", Path("okami.local.yaml")),
+            (".env projeto", Path(".env")), (".env global", global_env_path()),
+            ("policy", Path("okami.policy.yaml"))]
+
+
+def _files_card():
+    from rich.text import Text
+
+    from okami.cli import _ui
+    rows = []
+    for lbl, p in _config_file_rows():
+        ex = p.exists()
+        loc = str(p if p.is_absolute() else p.resolve())
+        v = Text()
+        v.append_text(_ui.dot("ok" if ex else "off"))
+        v.append(f"  {loc}", style=_ui.SOFT if ex else _ui.MUTE)
+        rows.append((lbl, v))
+    return _ui.card(_ui.kv(rows), title="arquivos", subtitle="segredo só no .env (gitignored)")
+
+
+def _render_config_view(diff: bool = False) -> None:
+    from rich.syntax import Syntax
+
+    from okami.cli import _ui
+    console.print()
+    console.print(_ui.header("config", "configuração efetiva"))
+    console.print()
+    console.print(_files_card())
+    if diff:
+        p = Path("okami.local.yaml")
+        if not p.exists():
+            console.print(_ui.hint("sem overrides — okami.local.yaml não existe"))
+            return
+        body = Syntax(p.read_text(encoding="utf-8"), "yaml", theme="ansi_dark", background_color="default")
+        console.print(_ui.card(body, title="overrides", subtitle="okami.local.yaml"))
+        return
+    body = Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark", background_color="default")
+    console.print(_ui.card(body, title="efetiva", subtitle="okami.yaml + overrides · segredos mascarados"))
+
+
 @config_app.callback(invoke_without_command=True)
 def config_main(ctx: typer.Context) -> None:
     """`okami config` SEM subcomando: mostra a config efetiva e abre um menu (não exige argumentos).
@@ -125,16 +167,11 @@ def config_main(ctx: typer.Context) -> None:
     `config` e cai num painel: ver / mudar / ler / editar / paths / validar."""
     if ctx.invoked_subcommand is not None:
         return
-    from rich.panel import Panel
-    from rich.syntax import Syntax
-    console.print(Panel(Syntax(_config_effective_yaml(), "yaml", theme="ansi_dark",
-                               background_color="default"),
-                        title="[bold #ff7527]config efetiva[/]", border_style="#3d3e50",
-                        subtitle="[dim]okami.yaml + okami.local.yaml · segredos mascarados[/]"))
-    config_path()
+    from okami.cli import _ui
+    _render_config_view()
     from okami import menu
     if not menu._interactive():                       # script/pipe: só mostra (não trava pedindo input)
-        console.print("[dim]subcomandos: show · get · set · edit · path · check[/dim]")
+        console.print(_ui.hint("show · get <k> · set <k> <v> · edit · path · check"))
         return
     while True:
         pick = menu.select("config — o que fazer?", [
@@ -171,10 +208,13 @@ def config_main(ctx: typer.Context) -> None:
 @config_app.command("show")
 def config_show(diff: bool = typer.Option(False, "--diff", help="Só os overrides (okami.local.yaml).")) -> None:
     """Mostra a config efetiva (okami.yaml + overrides), com segredos mascarados."""
-    import yaml as _yaml
+    if console.is_terminal:                           # TTY → visão bonita (cards + arquivos)
+        _render_config_view(diff=diff)
+        return
+    import yaml as _yaml                               # pipe/script → YAML cru (greppável), segredos mascarados
     if diff:
         p = Path("okami.local.yaml")
-        console.print(p.read_text(encoding="utf-8") if p.exists() else "[dim](sem overrides)[/dim]")
+        console.print(p.read_text(encoding="utf-8") if p.exists() else "(sem overrides)")
         return
     from okami.config import load_raw
     raw, _ = load_raw()
@@ -258,12 +298,7 @@ def config_unset(key: str = typer.Argument(..., help="Chave pontilhada a remover
 @config_app.command("path")
 def config_path() -> None:
     """Mostra onde ficam os arquivos de config (incl. o .env GLOBAL de segredos)."""
-    from okami.config import global_env_path
-    rows = [("config base    ", Path("okami.yaml")), ("overrides      ", Path("okami.local.yaml")),
-            ("segredos projeto", Path(".env")), ("segredos GLOBAL ", global_env_path())]
-    for label, p in rows:
-        mark = "[green]✓[/green]" if p.exists() else "[dim]—[/dim]"
-        console.print(f"{mark} {label}: {p.resolve() if not p.is_absolute() else p}")
+    console.print(_files_card())
 
 
 @config_app.command("edit")
