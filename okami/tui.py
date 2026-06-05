@@ -446,16 +446,17 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
 
 
 def help_table() -> Table:
-    """Tabela dos slash commands — gerada do REGISTRO declarativo (okami/commands.py)."""
+    """Tabela dos slash commands — gerada do REGISTRO declarativo (okami/commands.py). Localizada."""
     from okami import commands as _cmds
-    t = Table(title="Comandos", border_style=ORANGE, title_style=f"bold {ORANGE}")
-    t.add_column("categoria", style=f"bold {CYAN}")
-    t.add_column("comando", style=f"bold {MAGENTA}")
-    t.add_column("o que faz", style=SOFT)
+    from okami.i18n import t as _t
+    t = Table(title=_t("tui.help.title"), border_style=ORANGE, title_style=f"bold {ORANGE}")
+    t.add_column(_t("tui.help.col.category"), style=f"bold {CYAN}")
+    t.add_column(_t("tui.help.col.command"), style=f"bold {MAGENTA}")
+    t.add_column(_t("tui.help.col.does"), style=SOFT)
     for cat, cmds in _cmds.by_category().items():
         for i, c in enumerate(cmds):
             name = "/" + c.name + (f" {c.args}" if c.args else "")
             if c.aliases:
                 name += f"  ({', '.join('/' + a for a in c.aliases)})"
-            t.add_row(cat if i == 0 else "", name, c.desc)
+            t.add_row(_cmds.category_label(cat) if i == 0 else "", name, _cmds.desc_of(c))
     return t

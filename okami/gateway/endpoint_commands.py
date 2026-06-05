@@ -17,13 +17,14 @@ class EndpointCommandsMixin:
 
     def _help(self) -> str:
         from okami import commands as _cmds
+        from okami.i18n import t
         ess = ", ".join("/" + c.name for cs in _cmds.by_category(tier="essential").values() for c in cs)
-        return (f"Sou o agente '{self.agent_id}'. Manda a tarefa.\n"
-                f"Essenciais: {ess}\n/commands lista TODOS por categoria.")
+        return t("chat.help", agent=self.agent_id, ess=ess)
 
     def _commands_text(self) -> str:
         from okami import commands as _cmds
-        return "📜 comandos por categoria:\n" + "\n".join(_cmds.help_lines())
+        from okami.i18n import t
+        return t("chat.commands_header") + "\n" + "\n".join(_cmds.help_lines())
 
     def _usage_text(self, chat_id) -> str:
         from okami.llm.usage import CanonicalUsage, estimate_cost, format_tokens

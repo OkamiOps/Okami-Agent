@@ -321,8 +321,12 @@ def _root(
     ctx: typer.Context,
     _version: bool = typer.Option(False, "--version", "-V", help="Mostra a versão e sai.",
                                   callback=_version_cb, is_eager=True),
+    lang: str = typer.Option(None, "--lang", help="Idioma: en | pt (default: en; ou OKAMI_LANG / config lang:)."),
 ) -> None:
     """Okami Agent — CLI. Sem comando, mostra a visão geral."""
+    if lang:                                          # --lang vence env/config nesta invocação
+        from okami.i18n import set_lang
+        set_lang(lang)
     try:                                              # migra ~/skills e ~/agents soltos → ~/.okami (1×, idempotente)
         import sys as _sys
 

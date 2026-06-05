@@ -18,8 +18,8 @@ def test_registry_resolve_and_suggest():
 
 def test_registry_help_and_autocomplete():
     cats = cmds.by_category()
-    assert "sessão" in cats and "modelo" in cats and "info" in cats
-    assert any(c.name == "new" for c in cats["sessão"])
+    assert "session" in cats and "model" in cats and "info" in cats   # chaves de categoria estáveis (EN)
+    assert any(c.name == "new" for c in cats["session"])
     names = cmds.all_slash_names()
     assert "/new" in names and "/reset" in names        # inclui aliases
     assert cmds.help_lines()                             # não-vazio
@@ -56,7 +56,7 @@ def _ep(tmp_path):
 def test_new_commands_dispatch(tmp_path):
     ep, ch = _ep(tmp_path)
     ep.handle("c1", "/commands")
-    assert "comandos por categoria" in ch.sent[-1] and "sessão:" in ch.sent[-1]
+    assert "commands by category" in ch.sent[-1] and "session:" in ch.sent[-1]   # EN é o default agora
     ep.handle("c1", "/tools")
     assert "ferramentas:" in ch.sent[-1] and "read_file" in ch.sent[-1]
     ep.handle("c1", "/whoami")
