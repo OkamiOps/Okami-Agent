@@ -443,7 +443,17 @@ class Harness:
             if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
                 self.messages, promoted = _compaction.compact(self.messages, self.memory)
                 self._emit("compact", promoted=promoted)
-            out = self.generate(self.messages, self._action_schema)
+            try:
+                out = self.generate(self.messages, self._action_schema)
+            except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
+                from okami.core.errors import Action as _Act
+                from okami.core.errors import classify_provider
+                fail = classify_provider(e)
+                self.events.emit("failure", scope="generate", kind=fail.kind.value,
+                                 action=fail.action.value, reason=fail.reason, status=fail.status)
+                if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
+                    continue                      # tenta no modelo mais forte (resiliência, não crash)
+                return self._fail(t, f"provider falhou: {fail.reason}")
             comp = as_completion(out)              # tolera str (JSON-em-texto) E Completion (nativo)
             self.messages.append({"role": "assistant", "content": comp.text})
             action = _action_from_tool_calls(comp.tool_calls) or parse_action(comp.text)
@@ -562,12 +572,20 @@ class Harness:
 
             # circuit breaker de falha repetida
             if not res.ok:
+                from okami.core.errors import FailureKind, classify_tool
+                fail = classify_tool(res)
+                self.events.emit("failure", scope="tool", tool=action.tool, kind=fail.kind.value,
+                                 action=fail.action.value, reason=fail.reason)
                 key = f"{action.tool}:{res.output[:60]}"
                 self._failures[key] = self._failures.get(key, 0) + 1
-                if self._failures[key] >= 3:
+                # determinístico (sandbox/bad_request) NÃO melhora repetindo → corta logo; senão, 3x.
+                deterministic = fail.kind in (FailureKind.SANDBOX_DENY, FailureKind.BAD_REQUEST)
+                if deterministic or self._failures[key] >= 3:
+                    why = ("BLOQUEADO (determinístico/sandbox): repetir não resolve."
+                           if deterministic else
+                           "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro.")
                     self.messages.append({"role": "user", "content":
-                        "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro. "
-                        "Mude de estratégia ou declare task_blocked."})
+                        f"{why} Mude de estratégia ou declare task_blocked."})
 
             # watchdog / stall (§3.3)
             self._steps_without_effect = 0 if res.effect else self._steps_without_effect + 1

@@ -171,6 +171,40 @@ def test_escalation_to_stronger_model_when_stuck(tmp_path):
     assert any(e["kind"] == "escalate" for e in events)
 
 
+class _HTTPErr(Exception):
+    def __init__(self, msg, status):
+        super().__init__(msg)
+        self.status_code = status
+
+
+def test_generate_provider_error_escalates_when_transient(tmp_path):
+    """generate() que ESTOURA com erro transitório (rate-limit) escala p/ o forte (resiliência)."""
+    def weak(messages, schema=None):
+        raise RuntimeError("rate limit: too many requests")
+
+    def strong(messages, schema=None):
+        return J("task_complete", summary="o forte salvou o turno")
+
+    events = []
+    t = Task(goal="x")
+    h = Harness(weak, t, tmp_path, on_event=events.append, escalate=strong)
+    r = h.run()
+    assert r.state == TaskState.COMPLETE and any(e["kind"] == "escalate" for e in events)
+
+
+def test_generate_provider_error_aborts_when_deterministic(tmp_path):
+    """400 (determinístico) NÃO escala — repetir falharia igual; o turno termina em FAILED."""
+    def weak(messages, schema=None):
+        raise _HTTPErr("bad request body", 400)
+
+    def strong(messages, schema=None):
+        return J("task_complete", summary="não deveria ser chamado")
+
+    t = Task(goal="x")
+    h = Harness(weak, t, tmp_path, escalate=strong)
+    assert h.run().state == TaskState.FAILED
+
+
 def test_approval_blocks_sensitive_write_when_denied(tmp_path):
     outputs = [
         J("write_file", path="SOUL.md", content="identidade sequestrada"),  # sensível → go/no-go
