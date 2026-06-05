@@ -76,8 +76,19 @@ def list_providers() -> None:
 
 
 @app.command()
-def doctor(fix: bool = typer.Option(False, "--fix", help="Conserta o que dá: lock órfão, perms do .env, temp.")) -> None:
-    """Diagnostica config, chaves e conectividade dos providers. `--fix` repara o que for seguro."""
+def doctor(
+    fix: bool = typer.Option(False, "--fix", help="Conserta o que dá: lock órfão, perms do .env, temp."),
+    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
+) -> None:
+    """Diagnostica config, chaves e conectividade dos providers. `--fix` repara; `--json` p/ máquina."""
+    if json_out:                                    # caminho máquina: relatório estruturado + health
+        import json as _json
+
+        from okami.core.doctor import build_report, health_ok
+        rep = build_report(_load(), ping=_ping_models)
+        rep["healthy"] = health_ok(rep)
+        console.print_json(_json.dumps(rep, ensure_ascii=False))
+        raise typer.Exit(0 if rep["healthy"] else 1)
     console.print(f"[bold]Okami[/bold] v{__version__} — doctor")
     console.print(
         f"[dim]{platform.system()} {platform.release()} · Python {platform.python_version()}[/dim]"
