@@ -337,34 +337,86 @@ def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 
     return t
 
 
+# ── Emojis p/ leitura visual INSTANTÂNEA do que o agente faz (pedido do usuário: tool→🛠️, etc.). ──
+# Por FERRAMENTA (categoria) — "que tipo de coisa está rolando agora":
+_TOOL_EMOJI = {
+    "run_shell": "🐚",
+    "read_file": "📖", "list_dir": "📂", "find_files": "🔎",
+    "write_file": "✍️", "edit_file": "✏️",
+    "remember": "🧠", "recall_memory": "🧠", "remember_user": "🧠",
+    "use_skill": "✨", "spawn": "🤖", "browse": "🌐", "generate_image": "🎨", "need_input": "❓",
+    "process_start": "🐚", "process_write": "⌨️", "process_poll": "🐚", "process_wait": "⏳",
+    "process_log": "📜", "process_list": "📋", "process_kill": "🛑", "process_signal": "🛑",
+}
+
+
+def tool_emoji(tool: str) -> str:
+    """Emoji da CATEGORIA de uma tool (🛠️ genérico p/ desconhecida). Reuso TUI + REPL."""
+    if tool in _TOOL_EMOJI:
+        return _TOOL_EMOJI[tool]
+    t = (tool or "").lower()
+    if t.startswith("process_") or any(k in t for k in ("shell", "exec", "bash")):
+        return "🐚"
+    if any(k in t for k in ("search", "grep", "glob", "find")):
+        return "🔎"
+    if any(k in t for k in ("read", "cat", "open", "view")):
+        return "📖"
+    if any(k in t for k in ("write", "edit", "patch", "create", "apply")):
+        return "✍️"
+    if any(k in t for k in ("memor", "remember", "recall")):
+        return "🧠"
+    if any(k in t for k in ("browse", "fetch", "http", "web", "url")):
+        return "🌐"
+    if "git" in t:
+        return "🌿"
+    if "test" in t:
+        return "🧪"
+    return "🛠️"
+
+
+def author_rule(name: str, *, color: str, emoji: str, when: str = ""):
+    """Separador de turno FORTE: régua horizontal com avatar+nome+hora que CRUZA a tela. Resolve
+    'a corzinha do lado do nome não basta' — fica óbvio onde um turno termina e o outro começa."""
+    from rich.rule import Rule
+    title = Text()
+    title.append(f"{emoji} ", style=color)
+    title.append(name, style=f"bold {color}")
+    if when:
+        title.append(f"  {when}", style=MUTE)
+    return Rule(title=title, align="left", characters="─", style=color)
+
+
 def event_line(e: dict, detail: str = "collapsed") -> Text | None:
     """Linha ao vivo p/ um evento do harness (tool-call, loop, compaction…). None = não mostrar.
 
     É o que faz o terminal sentir VIVO: em vez de 'pensando…' por 30s e cuspir tudo, mostra cada
-    passo enquanto acontece. `detail` (/details) controla o quanto de tool-call aparece:
-    hidden = só o resultado final · collapsed = 1 linha por passo (default) · expanded = com os args."""
+    passo enquanto acontece — agora com EMOJI por tipo (🛠️ tool · 🔁 loop · 🧠 escalar…) p/ você bater
+    o olho e saber o que tá rolando. `detail` (/details): hidden = só o final · collapsed = 1 linha por
+    passo (default) · expanded = com os args."""
     k = e.get("kind")
     if k == "step":
         if detail == "hidden":                          # /details hidden → não polui com tool-calls
             return None
         args = e.get("args") or {}
         prev = _args_full(args) if detail == "expanded" else _args_preview(args)
-        mark = f"[{CYAN}]✓[/]" if e.get("ok") else "[red]✗[/]"
-        t = Text.from_markup(f"  {mark} [{SOFT}]{e['tool']}[/]" + (f" [{MUTE}]{prev}[/]" if prev else ""))
+        emoji = tool_emoji(e["tool"])                   # 🛠️/🐚/📖/✍️… = QUE tipo de coisa o agente faz
+        markc, mark = (CYAN, "✓") if e.get("ok") else ("red", "✗")
+        t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{e['tool']}[/]"
+                             + (f" [{MUTE}]{prev}[/]" if prev else ""))
         return t
     if k == "approval_request":
-        return Text.from_markup(f"  [{ORANGE}]⚠ aprovação:[/] [{SOFT}]{e.get('reason', '')}[/]")
+        return Text.from_markup(f"  🔐 [{ORANGE}]aprovação:[/] [{SOFT}]{e.get('reason', '')}[/]")
     if k == "loop":
-        return Text.from_markup(f"  [{ORANGE}]⟲ loop detectado[/] [{MUTE}](x{e.get('repeats', '?')})[/]")
+        return Text.from_markup(f"  🔁 [{ORANGE}]loop detectado[/] [{MUTE}](x{e.get('repeats', '?')})[/]")
     if k == "stall":
-        return Text.from_markup(f"  [{ORANGE}]… sem progresso, mudando de abordagem[/]")
+        return Text.from_markup("  🤔 [%s]sem progresso, mudando de abordagem[/]" % ORANGE)
     if k == "escalate":
-        return Text.from_markup(f"  [{MAGENTA}]⬆ escalando p/ modelo mais forte[/] [{MUTE}]({e.get('why', '')})[/]")
+        return Text.from_markup(f"  🧠 [{MAGENTA}]escalando p/ modelo mais forte[/] [{MUTE}]({e.get('why', '')})[/]")
     if k == "compact":
-        return Text.from_markup(f"  [{CYAN}]⊟ compactando contexto[/] [{MUTE}]({e.get('promoted', 0)} → memória)[/]")
+        return Text.from_markup(f"  🗜️ [{CYAN}]compactando contexto[/] [{MUTE}]({e.get('promoted', 0)} → memória)[/]")
     if k == "complete_rejected":
         miss = ", ".join(e.get("missing", []))
-        return Text.from_markup(f"  [{ORANGE}]✗ ainda falta:[/] [{SOFT}]{miss}[/]")
+        return Text.from_markup(f"  🚧 [{ORANGE}]ainda falta:[/] [{SOFT}]{miss}[/]")
     return None
 
 

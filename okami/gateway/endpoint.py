@@ -634,7 +634,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 _typing(chat_id)
             except Exception:  # noqa: BLE001 — typing nunca quebra o turno
                 pass
-        self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")
+        self.channel.send(chat_id, f"🧠 {self.agent_id} está pensando…")
         self._react(chat_id, "👀")                       # 👀 = processando (Telegram)
         try:
             approve = self._approve(chat_id, s)

@@ -25,7 +25,7 @@ class TerminalChannel(Channel):
     # Prefixos que ENVOLVEM uma resposta do agente (corpo pode ter markdown/código).
     _REPLY_MARKS = {"✅", "⚠", "❌", "❓"}
     # Notificações de sistema de 1 linha (não renderizar como markdown).
-    _SYS_MARKS = {"💭", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
+    _SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
 
     # --- saída -----------------------------------------------------------------
     def _print(self, text: str) -> None:
@@ -35,11 +35,23 @@ class TerminalChannel(Channel):
         head = text[:1]
         is_reply = head in self._REPLY_MARKS or head not in self._SYS_MARKS   # fala do agente, não sistema
         body = text[1:].strip() if head in self._REPLY_MARKS else text
+        if is_reply:
+            try:
+                self._console.print(self._turn_rule())                        # separa o turno do agente
+            except Exception:  # noqa: BLE001 — a régua é cosmética; nunca impede a resposta
+                pass
         if is_reply and ("```" in body or "\n" in body.strip()):             # código/lista → Markdown
             from rich.markdown import Markdown
             self._console.print(Markdown(body))
         else:
             self._console.print(self._render(text))
+
+    def _turn_rule(self):
+        """Régua de turno do agente (🐺 okami · hora) — separação clara no REPL, igual à TUI."""
+        from datetime import datetime
+        from okami import tui as _tui
+        return _tui.author_rule(self.agent_id, color="#ff7527", emoji="🐺",
+                                when=datetime.now().strftime("%H:%M"))
 
     @staticmethod
     def _render(text: str) -> str:

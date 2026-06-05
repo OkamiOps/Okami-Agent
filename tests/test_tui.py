@@ -70,3 +70,32 @@ def test_event_line_renders_steps_and_skips_noise():
     assert loop is not None and "loop" in _render(loop).lower()
     assert tui.event_line({"kind": "start", "goal": "x"}) is None       # ruído: não mostra no chat
     assert tui.event_line({"kind": "complete", "summary": "y"}) is None  # a resposta já vai pelo canal
+
+
+def test_tool_emoji_maps_categories():
+    # Conhecidas → emoji da categoria; desconhecida → 🛠️ genérico (pedido do usuário: ver O QUE rola).
+    assert tui.tool_emoji("run_shell") == "🐚"
+    assert tui.tool_emoji("read_file") == "📖"
+    assert tui.tool_emoji("write_file") == "✍️"
+    assert tui.tool_emoji("recall_memory") == "🧠"
+    assert tui.tool_emoji("browse") == "🌐"
+    assert tui.tool_emoji("process_kill") == "🛑"
+    assert tui.tool_emoji("git_status") == "🌿"        # heurística por substring
+    assert tui.tool_emoji("totally_unknown_tool") == "🛠️"
+
+
+def test_event_line_has_emoji_per_kind():
+    # Cada tipo de evento ganha um emoji distinto → leitura visual instantânea.
+    step = _render(tui.event_line({"kind": "step", "tool": "run_shell", "args": {}, "ok": True}))
+    assert "🐚" in step
+    assert "🔁" in _render(tui.event_line({"kind": "loop", "repeats": 2}))
+    assert "🧠" in _render(tui.event_line({"kind": "escalate", "why": "x"}))
+    assert "🔐" in _render(tui.event_line({"kind": "approval_request", "reason": "rm -rf"}))
+    assert "🚧" in _render(tui.event_line({"kind": "complete_rejected", "missing": ["t"]}))
+
+
+def test_author_rule_is_a_strong_separator():
+    # A régua de turno cruza a tela e carrega avatar + nome + hora (não só a corzinha do lado).
+    out = _render(tui.author_rule("okami", color="#ff7527", emoji="🐺", when="21:36"))
+    assert "🐺" in out and "okami" in out and "21:36" in out
+    assert "─" in out                                  # régua horizontal de verdade

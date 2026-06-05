@@ -38,8 +38,8 @@ except Exception:  # noqa: BLE001 — sem textual: o chamador cai no REPL
 # Prefixos que ENVOLVEM uma resposta do agente vs. notificações de sistema de 1 linha (espelha o
 # TerminalChannel pra renderização consistente entre REPL e TUI).
 _REPLY_MARKS = {"✅", "⚠", "❌", "❓"}
-_SYS_MARKS = {"💭", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
-_SYS_COLOR = {"💭": "dim", "🧬": "magenta", "🎨": "magenta", "🎭": "magenta", "⏰": "blue",
+_SYS_MARKS = {"💭", "🧠", "🧬", "🎨", "🎭", "⏰", "↻", "🧹", "⏹", "⚡", "🔒", "🚫", "🔊", "▶"}
+_SYS_COLOR = {"💭": "dim", "🧠": "dim", "🧬": "magenta", "🎨": "magenta", "🎭": "magenta", "⏰": "blue",
               "↻": "blue", "🧹": "dim", "⏹": "yellow", "⚡": "yellow", "🔒": "dim", "🚫": "red",
               "🔊": "cyan", "▶": "dim", "✅": "green", "⚠": "yellow", "❌": "red", "❓": "cyan"}
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -197,7 +197,7 @@ if _HAS_TEXTUAL:
         def sink_message(self, chat_id, text: str) -> None:
             from rich.text import Text
             head = text[:1]
-            if head == "💭":                              # "está pensando…" → indicador animado, não polui o log
+            if head in ("💭", "🧠"):                       # "está pensando…" → indicador animado, não polui o log
                 return
             log = self.query_one("#log", RichLog)
             if head in _SYS_MARKS and head not in _REPLY_MARKS:   # nota de sistema (🧬 🎭 ↻ 🧹 ⏰ …)
@@ -388,13 +388,9 @@ if _HAS_TEXTUAL:
             from datetime import datetime
             return datetime.now().strftime("%H:%M")
 
-        def _author_line(self, name: str, color: str):
-            from rich.text import Text
-            t = Text()
-            t.append("▌ ", style=color)
-            t.append(name, style=f"bold {color}")
-            t.append("  " + self._now(), style="#3d3e50")
-            return t
+        def _author_line(self, name: str, color: str, emoji: str = "🐺"):
+            # Régua de turno FORTE (avatar+nome+hora que cruza a tela) — não só a corzinha do lado.
+            return _tui.author_rule(name, color=color, emoji=emoji, when=self._now())
 
         def _agent_block(self, body: str):
             from rich.console import Group
@@ -402,13 +398,14 @@ if _HAS_TEXTUAL:
             from rich.padding import Padding
             from rich.text import Text
             inner = Markdown(body) if body.strip() else Text("(sem resposta)", style="#6c6d80")
-            return Group(self._author_line(self._agent, "#ff7527"), Padding(inner, (0, 0, 1, 2)))
+            return Group(Text(""), self._author_line(self._agent, "#ff7527", "🐺"),
+                         Padding(inner, (0, 0, 1, 2)))
 
         def _user_block(self, text: str):
             from rich.console import Group
             from rich.padding import Padding
             from rich.text import Text
-            return Group(self._author_line("você", "#00dfe8"),
+            return Group(Text(""), self._author_line("você", "#00dfe8", "🧑"),
                          Padding(Text(text, style="#f4f4f8"), (0, 0, 1, 2)))
 
 
@@ -428,7 +425,7 @@ if _HAS_TEXTUAL:
             t = Text(no_wrap=True, overflow="ellipsis")          # nunca quebra linha (terminal estreito)
             if busy:
                 t.append(f" {_SPINNER[self._spin]} ", style="bold #ff7527")
-                t.append("trabalhando ", style="#ffb86c")
+                t.append("🧠 pensando ", style="#ffb86c")
             elif pending:
                 t.append(" ✍ ", style="bold #ff39d1")
                 t.append("responda acima ", style="#ff39d1")

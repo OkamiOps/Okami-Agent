@@ -78,7 +78,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
         except Exception:  # noqa: BLE001
             pct, turns = 0, 0
-        state = ("⏳ trabalhando" if _busy()
+        state = ("🧠 pensando" if _busy()
                  else "✍ responda a aprovação" if cid in ep._pending else "● pronto")
         q = f"  ·  {len(inflight)} na fila" if inflight else ""
         return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
