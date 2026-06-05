@@ -425,7 +425,8 @@ class ProcessStart(Tool):
                    "servidor que fica de pé, build/teste demorado, watch. Depois: process_poll/log/wait/kill.")
     args_schema = {"cmd": "comando a rodar em background",
                    "notify": "(opc) avisar no chat quando terminar (true/false)",
-                   "watch": "(opc) lista de regex a vigiar no log (ex.: ['Listening on','ERROR'])"}
+                   "watch": "(opc) lista de regex a vigiar no log (ex.: ['Listening on','ERROR'])",
+                   "interactive": "(opc) PTY com stdin — use process_write p/ mandar input (true/false)"}
     required = ("cmd",)
 
     def run(self, args, ctx):
@@ -445,13 +446,32 @@ class ProcessStart(Tool):
             watch = [watch]
         try:
             meta = ProcessManager(ctx.workspace).start(
-                cmd, policy, notify=bool(args.get("notify")), watch=watch)
+                cmd, policy, notify=bool(args.get("notify")), watch=watch,
+                interactive=bool(args.get("interactive")))
         except ValueError as e:
             return ToolResult(False, str(e))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"falha ao iniciar processo: {e}")
-        return ToolResult(True, f"processo {meta['id']} no ar (pid {meta['pid']}, backend {meta.get('backend')}): "
+        tag = " · interativo (process_write)" if meta.get("interactive") else ""
+        return ToolResult(True, f"processo {meta['id']} no ar (pid {meta['pid']}, backend {meta.get('backend')}){tag}: "
                           f"{cmd[:80]}", effect=True)
+
+
+class ProcessWrite(Tool):
+    name = "process_write"
+    description = ("Manda input p/ o stdin de um processo INTERATIVO (process_start interactive=true). "
+                   "`submit` (default true) acrescenta Enter. Depois leia com process_log/process_poll.")
+    args_schema = {"id": "id do processo", "data": "texto a enviar",
+                   "submit": "(opc) acrescenta Enter (default true)"}
+    required = ("id", "data")
+
+    def run(self, args, ctx):
+        from okami.core.processes import ProcessManager
+        submit = args.get("submit", True)
+        ok = ProcessManager(ctx.workspace).write(args["id"], str(args.get("data", "")),
+                                                 submit=bool(submit) if submit is not None else True)
+        return ToolResult(ok, "input enviado" if ok else "processo não é interativo / não existe / já terminou",
+                          effect=ok)
 
 
 class ProcessPoll(Tool):
@@ -574,6 +594,7 @@ class NeedInput(Tool):
 def default_registry() -> dict[str, Tool]:
     tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(),
              ProcessStart(), ProcessPoll(), ProcessWait(), ProcessLog(), ProcessKill(), ProcessList(),
+             ProcessWrite(),
              RememberFact(), RecallMemory(), RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

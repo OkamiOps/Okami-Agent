@@ -26,6 +26,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -49,10 +50,12 @@ class ProcessManager:
         return self.dir / f"{pid_id}.exit"
 
     # ----------------------------------------------------------------- start
-    def start(self, cmd: str, policy=None, *, notify: bool = False, watch=None) -> dict:
+    def start(self, cmd: str, policy=None, *, notify: bool = False, watch=None,
+              interactive: bool = False) -> dict:
         """Sobe `cmd` em background sob a política do run_shell (#5). ValueError se bloqueado.
 
         `notify` → entra em drain_completed() ao terminar. `watch` → lista de regex monitoradas no log.
+        `interactive` → PTY com stdin via FIFO (process_write), só backend local (#1/#8).
         Backend docker (efetivo) → processo ISOLADO; docker EXIGIDO sem Docker → recusa (não cai no local).
         Log/exit são RELATIVOS ao workspace → o wrapper funciona igual dentro do container."""
         import secrets
@@ -64,6 +67,11 @@ class ProcessManager:
         if eff == "docker" and not shutil.which("docker"):
             raise ValueError("sandbox: backend=docker exigido, mas Docker ausente — process_start DESABILITADO "
                              "(não caio no local inseguro). Use backend=auto/local, ou instale o Docker.")
+        if interactive:
+            if eff == "docker":
+                raise ValueError("modo interativo (PTY) só no backend local — docker interativo entre turnos "
+                                 "não é suportado ainda.")
+            return self._start_interactive(cmd, policy, notify=notify, watch=watch)
         self.dir.mkdir(parents=True, exist_ok=True)
         pid_id = secrets.token_hex(4)
         logrel = shlex.quote(f".okami/processes/{pid_id}.log")    # RELATIVO ao cwd=workspace (vale local E docker)
@@ -87,6 +95,54 @@ class ProcessManager:
                 "notify": bool(notify), "watch": list(watch or []), "notified": False}
         self._write_meta(pid_id, meta)
         return meta
+
+    def _ctrlf(self, pid_id):
+        return self.dir / f"{pid_id}.in"
+
+    def _start_interactive(self, cmd: str, policy=None, *, notify=False, watch=None) -> dict:
+        """PTY interativo: supervisor detached segura o mestre + FIFO de input (#1/#8)."""
+        import secrets
+
+        from okami.core.tools import sanitized_env
+        self.dir.mkdir(parents=True, exist_ok=True)
+        pid_id = secrets.token_hex(4)
+        logp, exitp, ctrlp = self._logf(pid_id), self._exitf(pid_id), self._ctrlf(pid_id)
+        if ctrlp.exists():
+            ctrlp.unlink()
+        os.mkfifo(str(ctrlp))                          # canal de input p/ qualquer turno
+        pre = None
+        if policy is not None:
+            from okami.core.sandbox import _rlimit_preexec
+            pre = _rlimit_preexec(policy)
+        argv = [sys.executable, "-m", "okami.core.ptyproc", cmd, str(logp), str(exitp), str(ctrlp)]
+        proc = subprocess.Popen(argv, cwd=str(self.ws), env=sanitized_env(), start_new_session=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, preexec_fn=pre)
+        meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
+                "start_time": _proc_start(proc.pid), "backend": "local", "container": "",
+                "notify": bool(notify), "watch": list(watch or []), "notified": False,
+                "interactive": True}
+        self._write_meta(pid_id, meta)
+        return meta
+
+    def write(self, pid_id: str, data: str, *, submit: bool = True) -> bool:
+        """Injeta `data` no stdin de um processo INTERATIVO (via FIFO). `submit` acrescenta \\n (Enter)."""
+        meta = self._read_meta(pid_id)
+        if not meta or not meta.get("interactive"):
+            return False
+        ctrlp = self._ctrlf(pid_id)
+        if not ctrlp.exists():                         # supervisor já saiu → FIFO removido
+            return False
+        payload = data + ("\n" if submit and not data.endswith("\n") else "")
+        try:
+            fd = os.open(str(ctrlp), os.O_WRONLY | os.O_NONBLOCK)   # supervisor segura o read end → não bloqueia
+        except OSError:
+            return False
+        try:
+            os.write(fd, payload.encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
 
     def _write_meta(self, pid_id, meta) -> None:
         self._meta(pid_id).write_text(json.dumps(meta), encoding="utf-8")
@@ -212,6 +268,11 @@ class ProcessManager:
                 ok = ok or False
         if ok and not self._exitf(pid_id).exists():
             self._exitf(pid_id).write_text("-15", encoding="utf-8")   # marca terminado por SIGTERM (poll determinístico)
+        if self._ctrlf(pid_id).exists():
+            try:
+                self._ctrlf(pid_id).unlink()                          # remove o FIFO do interativo
+            except OSError:
+                pass
         return ok
 
     # ----------------------------------------------------------------- list / notify / prune
@@ -248,7 +309,7 @@ class ProcessManager:
             exitf = self._exitf(pid_id)
             ts = (exitf.stat().st_mtime if exitf.exists() else f.stat().st_mtime)
             if now - ts > ttl_seconds:
-                for path in (self._meta(pid_id), self._logf(pid_id), self._exitf(pid_id)):
+                for path in (self._meta(pid_id), self._logf(pid_id), self._exitf(pid_id), self._ctrlf(pid_id)):
                     if path.exists():
                         path.unlink()
                 removed.append(pid_id)
