@@ -351,8 +351,10 @@ class Harness:
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
         self.on_event = on_event or (lambda e: None)
+        import secrets
         from okami.observability.events import EventLog
-        self.events = EventLog(workspace)   # timeline JSONL p/ replay/debug (.okami/events.jsonl)
+        # trace_id por turno (P2): amarra todos os eventos desta execução no timeline (replay/debug)
+        self.events = EventLog(workspace, trace_id=secrets.token_hex(4))
         self.messages: list[dict] = []
         self._action_schema = action_schema(self.registry)
         self._fingerprints: deque[str] = deque(maxlen=12)

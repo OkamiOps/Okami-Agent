@@ -52,6 +52,20 @@ def events(
 
 
 @app.command()
+def clean(
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+    lock_stale: float = typer.Option(300.0, "--lock-stale", help="Idade (s) p/ considerar um .lock órfão."),
+) -> None:
+    """Faxina de disco (P2): lock órfão + temporários (.tmp) + áudio temporário (voz/TTS)."""
+    from okami.core.maintenance import clean_workspace
+    rep = clean_workspace(workspace, lock_stale=lock_stale)
+    kb = rep["bytes_freed"] / 1024
+    console.print(f"[green]✓ faxina[/green] [dim]({workspace})[/dim]: "
+                  f"{rep['locks_removed']} lock(s), {rep['temp_removed']} temp, {rep['audio_removed']} áudio "
+                  f"[dim]· {kb:.1f} KB liberados[/dim]")
+
+
+@app.command()
 def tools() -> None:
     """Lista as ferramentas do agente (categoria · tier · sensibilidade) — registro declarativo (#14)."""
     from okami.core.tool_registry import by_category, missing

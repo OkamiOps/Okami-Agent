@@ -17,9 +17,10 @@ from typing import Any
 class EventLog:
     """Append-only de eventos da task em `.okami/<name>.jsonl` (seq monotônico + ts + redação)."""
 
-    def __init__(self, workspace: Path, *, name: str = "events") -> None:
+    def __init__(self, workspace: Path, *, name: str = "events", trace_id: str = "") -> None:
         self._path = Path(workspace) / ".okami" / f"{name}.jsonl"
         self._seq = itertools.count(1)
+        self.trace_id = trace_id            # amarra os eventos de UM turno (P2 observabilidade)
 
     @property
     def path(self) -> Path:
@@ -29,7 +30,10 @@ class EventLog:
         try:
             from okami.core.redact import redact
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            rec = {"seq": next(self._seq), "ts": round(time.time(), 3), "type": type, **data}
+            rec = {"seq": next(self._seq), "ts": round(time.time(), 3), "type": type}
+            if self.trace_id:
+                rec["trace"] = self.trace_id
+            rec.update(data)
             line = json.dumps(rec, ensure_ascii=False, default=str)
             with self._path.open("a", encoding="utf-8") as f:
                 f.write(redact(line) + "\n")

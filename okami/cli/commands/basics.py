@@ -76,8 +76,8 @@ def list_providers() -> None:
 
 
 @app.command()
-def doctor() -> None:
-    """Diagnostica config, chaves e conectividade dos providers."""
+def doctor(fix: bool = typer.Option(False, "--fix", help="Conserta o que dá: lock órfão, perms do .env, temp.")) -> None:
+    """Diagnostica config, chaves e conectividade dos providers. `--fix` repara o que for seguro."""
     console.print(f"[bold]Okami[/bold] v{__version__} — doctor")
     console.print(
         f"[dim]{platform.system()} {platform.release()} · Python {platform.python_version()}[/dim]"
@@ -177,6 +177,17 @@ def doctor() -> None:
             else "[yellow]cercas locais (sem confinar FS/rede)[/yellow]")
     console.print(f"  sandbox: backend={sb.backend} · mode={sb.mode} · net={'on' if sb.network_on else 'off'} "
                   f"· timeout={sb.timeout}s — {real}")
+
+    if fix:
+        from okami.config import global_env_path
+        from okami.core.maintenance import clean_stale_locks, fix_env_perms, prune_temp
+        console.print("\n[bold]--fix[/bold]")
+        locks = clean_stale_locks(".")
+        env_fixed = fix_env_perms(global_env_path())
+        rm_t, freed = prune_temp(".")
+        console.print(f"  locks órfãos removidos: [bold]{len(locks)}[/bold]")
+        console.print(f"  ~/.okami/.env perms: {'[yellow]corrigido → 0600[/yellow]' if env_fixed else '[green]ok[/green]'}")
+        console.print(f"  temporários removidos: [bold]{len(rm_t)}[/bold] [dim]({freed / 1024:.1f} KB)[/dim]")
 
 
 @app.command()
