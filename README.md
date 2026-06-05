@@ -375,6 +375,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami skills` / `okami learn <fonte>` / `okami scan <path>` | Skills + scan de segurança. |
 | `okami agent new\|list` | Multi-agente (`agents/<id>`). |
 | `okami gateway` / `okami serve` / `okami room` | Telegram bots / API HTTP / sala multi-agente. |
+| `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway como serviço do SO (launchd/systemd, sobe no boot) + log ao vivo. |
 | `okami cron add\|list\|remove\|run\|tick` | Agendamento. |
 | `okami hooks` / `okami mcp` | Event hooks / servidores MCP. |
 | `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voz, STT, TTS, imagem. |

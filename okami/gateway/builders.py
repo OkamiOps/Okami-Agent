@@ -81,11 +81,17 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
                              max_sessions=int(gw.get("max_sessions", 500)))
 
     eps: list[AgentEndpoint] = []
+    seen_tokens: dict[str, str] = {}                   # token → 1º agente que o usou (anti-conflito multi-profile)
     for aid, spec in agents.items():
         chans = spec.raw.get("channels") or {}
         cfg = None
         tg = chans.get("telegram") or {}
+        if tg.get("token") and tg["token"] in seen_tokens:   # 2 agentes, MESMO token → caos (msgs duplicadas)
+            emit(f"⚠ [{aid}] usa o MESMO token de Telegram de '{seen_tokens[tg['token']]}' — pulei este "
+                 f"agente (um token por agente). Crie outro bot no @BotFather p/ '{aid}'.")
+            tg = {}                                     # zera → não sobe este canal
         if tg.get("token"):                            # Telegram (mantém make_channel p/ os testes)
+            seen_tokens[tg["token"]] = aid
             cfg = effective_config(global_raw, spec)
             if not tg.get("allow_chats") and not tg.get("allow_all"):   # fail-closed: avisa ALTO
                 emit(f"⚠ [{aid}] Telegram SEM allowlist → deny-by-default (bot não responde ninguém). "

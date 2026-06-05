@@ -218,6 +218,18 @@ def test_build_endpoints_only_agents_with_token():
     assert [e.agent_id for e in eps] == ["a"]
 
 
+def test_build_endpoints_rejects_duplicate_telegram_token():
+    specs = {
+        "a": AgentSpec("a", Path("."), {"channels": {"telegram": {"token": "DUP", "allow_chats": [1]}}}),
+        "b": AgentSpec("b", Path("."), {"channels": {"telegram": {"token": "DUP", "allow_chats": [1]}}}),
+    }
+    graw = {"default_provider": "lmstudio", "providers": {"lmstudio": {"model": "openai/x", "api_key": "k"}}}
+    warns: list[str] = []
+    eps = build_endpoints(graw, specs, emit=warns.append, make_channel=FakeChannel, run_task=_runner_ok)
+    assert [e.agent_id for e in eps] == ["a"]               # 'b' pulado (mesmo token = caos)
+    assert any("MESMO token" in w for w in warns)
+
+
 # ----------------------------------------------------------------- GROUP (§10 turn-taking) ----------
 from okami.channels.base import Inbound          # noqa: E402
 from okami.gateway import GroupEndpoint          # noqa: E402

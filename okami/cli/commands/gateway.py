@@ -212,6 +212,92 @@ def route(source: str = typer.Argument(..., help="Origem (ex.: telegram:12345) p
     console.print(f"{source} → [bold]{target or '(sem agente; defina agents.default)'}[/bold]")
 
 
+service_app = typer.Typer(invoke_without_command=True,
+                          help="Gateway como SERVIÇO (sobe no boot, reinicia se cair): launchd/systemd.")
+app.add_typer(service_app, name="service")
+
+
+@service_app.callback(invoke_without_command=True)
+def _service_main(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        from okami.gateway import service
+        service.control("status", emit=console.print)
+
+
+@service_app.command("install")
+def service_install() -> None:
+    """Instala o gateway como serviço do SO (roda `okami gateway --foreground` no boot, reinicia se cair)."""
+    from okami.gateway import service
+    if service.install(emit=console.print):
+        console.print("[dim]controle: okami service start|stop|restart|status · logs: okami logs -f[/dim]")
+
+
+@service_app.command("uninstall")
+def service_uninstall() -> None:
+    """Remove o serviço do SO."""
+    from okami.gateway import service
+    service.uninstall(emit=console.print)
+
+
+@service_app.command("start")
+def service_start() -> None:
+    """Inicia o serviço."""
+    from okami.gateway import service
+    service.control("start", emit=console.print)
+
+
+@service_app.command("stop")
+def service_stop() -> None:
+    """Para o serviço."""
+    from okami.gateway import service
+    service.control("stop", emit=console.print)
+
+
+@service_app.command("restart")
+def service_restart() -> None:
+    """Reinicia o serviço."""
+    from okami.gateway import service
+    service.control("restart", emit=console.print)
+
+
+@service_app.command("status")
+def service_status() -> None:
+    """Mostra se o serviço está no ar."""
+    from okami.gateway import service
+    service.control("status", emit=console.print)
+
+
+@app.command()
+def logs(
+    follow: bool = typer.Option(False, "-f", "--follow", help="Segue o log ao vivo (tail -f)."),
+    lines: int = typer.Option(200, "-n", "--lines", help="Quantas linhas finais mostrar."),
+) -> None:
+    """Mostra o log do gateway (serviço em ~/.okami/logs/gateway.log, ou o background em .okami/gateway.log)."""
+    import time as _t
+
+    from okami.gateway import service
+    candidates = [service.log_path(), Path(".okami") / "gateway.log"]
+    log = next((p for p in candidates if p.exists()), None)
+    if log is None:
+        console.print("[dim]sem log ainda (suba o gateway: okami gateway · ou okami service install)[/dim]")
+        return
+    console.print(f"[dim]{log}[/dim]")
+    with log.open("r", encoding="utf-8", errors="ignore") as f:
+        tail = f.readlines()[-max(1, lines):]
+        console.print("".join(tail), end="")
+        if not follow:
+            return
+        try:
+            while True:                                   # tail -f simples
+                line = f.readline()
+                if line:
+                    console.print(line, end="")
+                else:
+                    _t.sleep(0.4)
+        except KeyboardInterrupt:
+            return
+
+
 @app.command("mcp")
 def mcp_cmd() -> None:
     """Lista os servidores MCP configurados e as tools que eles expõem."""
