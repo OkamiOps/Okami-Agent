@@ -46,6 +46,8 @@ class Budget:
     max_loop_breaks: int = 3     # quebras de loop antes de FAILED
     max_total_turns: int = 300   # backstop bem acima de max_steps → o limite que vale é o de passos
     max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
+    max_wall_seconds: float = 240.0  # TETO de relógio do turno → nunca pendura ~6min e morre silencioso;
+                                     # estourou → termina LIMPO (BLOCKED) com mensagem clara
 
 
 # ----------------------------------------------------------------------------- protocolo

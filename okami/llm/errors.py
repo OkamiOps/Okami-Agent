@@ -66,7 +66,9 @@ def classify(exc) -> ClassifiedError:
     if s == 404 or _NOTFOUND.search(msg):
         return ClassifiedError("not_found", s, retryable=False, fallback=True)
     if _TIMEOUT.search(msg):
-        return ClassifiedError("timeout", s, retryable=True)
+        # timeout costuma ser contexto grande / modelo lento → vale ENCOLHER (compress) E trocar de
+        # provider (fallback), não só re-tentar o mesmo no mesmo tamanho (era o que travava 6min e morria).
+        return ClassifiedError("timeout", s, retryable=True, fallback=True, compress=True)
     if s == 400:
         return ClassifiedError("bad_request", s, retryable=False)
     if s is not None and s >= 500:

@@ -219,7 +219,7 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
     try:
         if use_docker:
             r = subprocess.run(docker_argv(cmd, workspace, policy),
-                               capture_output=True, text=True, timeout=policy.timeout)
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=policy.timeout)
         else:
             if env is None:
                 from okami.core.tools import sanitized_env
@@ -230,8 +230,11 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                 proxy.start()
                 env = {**env, **proxy.proxy_env()}  # curl/pip/npm/requests passam pelo filtro
             # shell=True é o PROPÓSITO do sandbox local (rodar o comando); a defesa é o backend docker, não evitar shell.
+            # stdin=DEVNULL: comando que ESPERA input (read, prompt, cat sem args) recebe EOF e SAI — não
+            # pendura os 60s do timeout esperando algo que nunca vem (era causa de "trava no shell").
             r = subprocess.run(  # nosec B602
-                cmd, shell=True, cwd=str(workspace), capture_output=True, text=True,  # nosemgrep — sandbox (B602 liberado na linha de cima)
+                cmd, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,  # nosemgrep — sandbox (B602 liberado abaixo)
+                capture_output=True, text=True,
                 timeout=policy.timeout, env=env, preexec_fn=_rlimit_preexec(policy),
             )
     except subprocess.TimeoutExpired:

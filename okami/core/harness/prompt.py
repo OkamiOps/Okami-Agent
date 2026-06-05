@@ -71,7 +71,8 @@ Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa 
 
 # Teto do resultado de tool QUE VAI PRO CONTEXTO do modelo (chars). Output maior é truncado no
 # contexto e persistido inteiro em .okami/tool_outputs/ (o registro/transcrição guardam o completo).
-_TOOL_RESULT_BUDGET = 12_000
+# 8K (era 12K): 6 resultados grandes na cauda inchavam o contexto → chamadas lentas → timeout.
+_TOOL_RESULT_BUDGET = 8_000
 
 
 def format_observation(step_n: int, tool: str, res: ToolResult) -> str:

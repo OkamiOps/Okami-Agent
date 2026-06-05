@@ -21,6 +21,10 @@ import urllib.request
 from okami.config import ProviderConfig
 from okami.llm.usage import Completion, normalize_usage
 
+# Teto por CHAMADA (read timeout). Antes 300s → um turno podia pendurar ~6min e morrer. Curto o
+# suficiente p/ FALHAR RÁPIDO e o harness encolher+failover; longo o bastante p/ uma geração normal.
+_CALL_TIMEOUT = 150
+
 
 def _split_model(pc: ProviderConfig, model: str | None) -> str:
     """Remove o prefixo de roteamento ('claude-subscription/x' -> 'x')."""
@@ -79,9 +83,9 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
         prompt = f"({directive})\n\n{prompt}"        # nudge de extended thinking p/ o Claude
     cmd = [binary, "-p", "--output-format", "json", "--model", model_short]
     try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=300)
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=_CALL_TIMEOUT)
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError("claude -p timeout (300s)") from e
+        raise RuntimeError(f"claude -p timeout ({_CALL_TIMEOUT}s)") from e
     if r.returncode != 0:
         raise RuntimeError(f"claude -p falhou (exit {r.returncode}): {r.stderr.strip()[:400]}")
     out = r.stdout.strip()
@@ -247,7 +251,7 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "text/event-stream")
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT) as resp:  # noqa: S310
             text, usage, tool_calls = _codex_sse(resp)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:300]

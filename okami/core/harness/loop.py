@@ -157,8 +157,17 @@ class Harness:
 
         step_n = 0
         turns = 0
+        import time as _wt
+        _wall0 = _wt.monotonic()                          # relógio do turno (teto anti-travamento)
+        self._shrunk_retry = False                        # recuperação por encolhimento: 1x por episódio de falha
         while True:
             turns += 1
+            if _wt.monotonic() - _wall0 > self.budget.max_wall_seconds:   # estourou o tempo → para LIMPO
+                t.state = TaskState.BLOCKED
+                t.reason = (f"passei do tempo limite do turno (~{int(self.budget.max_wall_seconds)}s) e parei "
+                            "pra não travar. Tenta de novo (ou divide em passos menores) que eu sigo.")
+                self._emit("blocked", reason=t.reason)
+                return t
             if turns > self.budget.max_total_turns:
                 return self._fail(t, "backstop de turnos do harness atingido")
             if step_n >= self.budget.max_steps:
@@ -180,10 +189,22 @@ class Harness:
                 fail = classify_provider(e)
                 self.events.emit("failure", scope="generate", kind=fail.kind.value,
                                  action=fail.action.value, reason=fail.reason, status=fail.status)
+                # RECUPERAÇÃO 1ª (a que faltava): timeout/lento ≈ CONTEXTO GRANDE. ENCOLHE forte (keep_tail=3)
+                # e re-gera 1x — chamada menor = mais rápida, e cabe até no fallback local. Antes só escalava
+                # p/ um modelo mais forte com o MESMO contexto gigante → pendurava de novo e morria.
+                if fail.action in (_Act.RETRY, _Act.ESCALATE) and not self._shrunk_retry:
+                    self._shrunk_retry = True
+                    before = _compaction.estimate_chars(self.messages)
+                    self.messages, promoted = _compaction.compact(self.messages, self.memory, keep_tail=3)
+                    if _compaction.estimate_chars(self.messages) < before:
+                        self._emit("compact", promoted=promoted)
+                        continue                  # re-gera com contexto MENOR (mais rápido, sem trocar modelo)
+                # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
                 if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
-                    continue                      # tenta no modelo mais forte (resiliência, não crash)
+                    continue
                 return self._fail(t, f"provider falhou: {fail.reason}")
             comp = as_completion(out)              # tolera str (JSON-em-texto) E Completion (nativo)
+            self._shrunk_retry = False             # gerou com sucesso → libera novo encolhimento p/ falha futura
             _u = comp.usage                         # usage POR CHAMADA no trajeto (P2 observabilidade)
             self.events.emit("llm_call", provider=comp.provider, model=comp.model,
                              finish_reason=getattr(comp, "finish_reason", ""),

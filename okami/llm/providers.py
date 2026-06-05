@@ -106,7 +106,7 @@ def _kwargs(
     if pc.reasoning_effort:                          # esforço de raciocínio (litellm normaliza por provider)
         kw["reasoning_effort"] = pc.reasoning_effort
     kw.update(overrides)                             # override por chamada (/think) vence o default
-    kw.setdefault("timeout", 600)                    # NUNCA pendurar p/ sempre numa conexão travada
+    kw.setdefault("timeout", 150)                    # FALHA RÁPIDO (era 600s) → harness encolhe+failover
     return kw
 
 
