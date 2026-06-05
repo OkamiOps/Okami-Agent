@@ -34,6 +34,20 @@ def _is_secret_leaf(leaf: str) -> bool:
     return bool(_SECRET_LEAF.search(low))
 
 
+def _header_literal_secret(hv: str) -> bool:
+    """Header MCP que carrega CREDENCIAL LITERAL (não env ref, não valor trivial) — #P2.
+
+    Env ref em QUALQUER posição (`${TOKEN}`, `Bearer ${TOKEN}`) → ok (resolvido em runtime). Senão:
+    padrão de segredo conhecido (sk-/Bearer x/…) OU token opaco longo alfanumérico = literal."""
+    from okami.core.envref import has_env_ref
+    v = (hv or "").strip()
+    if has_env_ref(v):
+        return False
+    if _looks_real_secret(v):                        # sk-/Bearer …/AKIA/JWT (redator central)
+        return True
+    return len(v) >= 16 and " " not in v and bool(re.search(r"[A-Za-z]", v)) and bool(re.search(r"[0-9]", v))
+
+
 def _looks_real_secret(value: str) -> bool:
     """Distingue um SEGREDO real (sk-…, JWT, token longo) de um dummy/local ('lm-studio', 'not-needed')."""
     from okami.core.redact import redact
@@ -122,9 +136,11 @@ def lint_posture(cfg, *, base_yaml: Path | None = None, env_path: Path | None = 
             f.append(Finding(f"mcp.{name}.url", "fail", f"MCP '{name}' http remoto com insecure:true (plaintext).",
                              "use https:// ou um servidor local."))
         for hk, hv in (conf.get("headers") or {}).items():
-            if isinstance(hv, str) and len(hv) > 8 and not hv.strip().startswith("${"):
+            # #P2: só reprova SEGREDO LITERAL. `Bearer ${TOKEN}` (resolve_env_map resolve) passa, pois
+            # tem env ref. Antes, `not startswith("${")` reprovava `Bearer ${TOKEN}` (falso-positivo).
+            if isinstance(hv, str) and _header_literal_secret(hv):
                 f.append(Finding(f"mcp.{name}.headers", "fail", f"MCP '{name}' header {hk} com segredo literal.",
-                                 "use ${ENV_VAR}."))
+                                 "use ${ENV_VAR} (ex.: 'Bearer ${TOKEN}')."))
 
     # 5) perms do .env --------------------------------------------------------
     from okami.config import global_env_path

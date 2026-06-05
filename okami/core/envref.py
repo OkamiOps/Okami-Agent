@@ -24,3 +24,8 @@ def resolve_env(value):
 def resolve_env_map(d: dict | None) -> dict:
     """Aplica resolve_env nos VALORES string de um dict (ex.: headers/env de MCP)."""
     return {k: resolve_env(v) for k, v in (d or {}).items()}
+
+
+def has_env_ref(value) -> bool:
+    """True se a string contém uma referência ${VAR}/$VAR — usado p/ aceitar `Bearer ${TOKEN}` no lint."""
+    return isinstance(value, str) and bool(_ENV_REF.search(value))

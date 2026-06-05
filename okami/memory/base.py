@@ -9,6 +9,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def is_secret_item(item) -> bool:
+    """True se o item NÃO deve persistir (contém segredo) — gate COMUM a todo backend (#P1).
+
+    A política prepare() já recusa nos callers explícitos; mas compaction/learning chamam
+    memory.write() DIRETO. Este gate, chamado no topo de cada backend.write(), fecha o bypass."""
+    from okami.core.redact import looks_secret
+    text = item if isinstance(item, str) else getattr(item, "text", "")
+    if looks_secret(text):
+        from okami import log
+        log.warn("memory: bloqueei escrita de item com cara de segredo (write direto/compaction/learning).")
+        return True
+    return False
+
+
 @dataclass
 class MemoryItem:
     text: str

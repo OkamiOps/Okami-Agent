@@ -28,6 +28,25 @@ def test_off_mode_warns(tmp_path):
     assert _levels(f)["approvals.mode"] == "warn"
 
 
+def test_mcp_header_with_env_ref_not_flagged(tmp_path):
+    """#P2: `Bearer ${TOKEN}` (env ref em qualquer posição) é legítimo — não reprova."""
+    for hv in ("${MCP_TOKEN}", "Bearer ${MCP_TOKEN}", "token $MCP_TOKEN"):
+        f = lint_posture(_cfg(mcp={"docs": {"headers": {"Authorization": hv}}}), base_yaml=tmp_path / "n.yaml")
+        assert "mcp.docs.headers" not in _levels(f), hv
+
+
+def test_mcp_header_literal_secret_flagged(tmp_path):
+    bearer = "Bearer sk-" + "livekey1234567890abcd"   # literal, sem env ref → reprova
+    f = lint_posture(_cfg(mcp={"docs": {"headers": {"Authorization": bearer}}}), base_yaml=tmp_path / "n.yaml")
+    assert _levels(f)["mcp.docs.headers"] == "fail"
+
+
+def test_mcp_header_trivial_value_not_flagged(tmp_path):
+    # valor curto/trivial não é credencial → não reprova
+    f = lint_posture(_cfg(mcp={"docs": {"headers": {"Accept": "application/json"}}}), base_yaml=tmp_path / "n.yaml")
+    assert "mcp.docs.headers" not in _levels(f)
+
+
 def test_manual_mode_passes(tmp_path):
     f = lint_posture(_cfg(), base_yaml=tmp_path / "none.yaml")
     assert _levels(f)["approvals.mode"] == "pass"

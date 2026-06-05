@@ -70,6 +70,9 @@ class HonchoMemory(Memory):
         return Honcho(**kwargs)
 
     def write(self, item: MemoryItem) -> int:
+        from okami.memory.base import is_secret_item
+        if is_secret_item(item):                 # #P1: segredo não vai pro Honcho remoto (gate comum)
+            return 0
         peer = self.assistant if item.source in ("agent", "task", "okami") else self.user
         try:
             self.session.add_messages([peer.message(item.text)])
@@ -86,10 +89,16 @@ class HonchoMemory(Memory):
         chat = getattr(peer, "chat", None)
         if not callable(chat):
             return ""
-        for kw in (dict(target=target, session=self.session, reasoning_level="low"),
-                   dict(target=target, session=self.session),
-                   dict(target=target), {}):
-            kw = {k: v for k, v in kw.items() if v is not None}   # target=None some → chat global do peer
+        if target is not None:
+            # #P2: target FOI pedido → SÓ tentativas COM target. Se nenhuma colar (SDK antigo sem o
+            # kwarg), retorna "" e o _dialectic cai p/ user.chat() — NUNCA chama assistant.chat(query)
+            # sem target (isso voltaria a perguntar sobre a PRÓPRIA Okami = bug antigo).
+            attempts = (dict(target=target, session=self.session, reasoning_level="low"),
+                        dict(target=target, session=self.session), dict(target=target))
+        else:
+            attempts = (dict(session=self.session, reasoning_level="low"), dict(session=self.session), {})
+        for kw in attempts:
+            kw = {k: v for k, v in kw.items() if v is not None}
             try:
                 return _text_of(chat(query, **kw))
             except TypeError:

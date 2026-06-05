@@ -45,6 +45,81 @@ def test_remember_tool_does_not_persist_secret(tmp_path):
     m.close()
 
 
+def test_direct_backend_write_skips_secret(tmp_path):
+    """#P1: write() DIRETO (compaction/learning não passam por prepare) também é bloqueado."""
+    m = open_memory(tmp_path, backend="sqlite-fts5")
+    m.write(MemoryItem(text=f"[user] o token é {_SK}", kind="turn", source="user"))   # estilo compaction
+    assert m.count() == 0
+    m.write(MemoryItem(text="fato normal sem segredo nenhum", kind="fact"))
+    assert m.count() == 1                       # não-segredo passa
+    m.close()
+
+
+def test_holographic_backend_write_skips_secret(tmp_path):
+    m = open_memory(tmp_path, backend="holographic")
+    m.write(MemoryItem(text=f"chave de deploy {_AKIA}", kind="lesson"))
+    assert m.count() == 0
+    m.close()
+
+
+def test_honcho_write_skips_secret():
+    from tests.test_layered_honcho import FakeHonchoClient
+    m = HonchoMemory(client=FakeHonchoClient())
+    m.write(MemoryItem(text=f"o segredo é {_SK}", source="user"))
+    assert m.count() == 0                       # add_messages nem foi chamado
+
+
+def test_is_secret_item_helper():
+    from okami.memory.base import is_secret_item
+    assert is_secret_item(MemoryItem(text=f"x {_SK}")) is True
+    assert is_secret_item(MemoryItem(text="texto comum")) is False
+    assert is_secret_item(f"raw {_AKIA}") is True   # aceita str crua também
+
+
+# ----------------------------------------------------------------- P2: Honcho nunca volta ao self-model
+def test_honcho_old_sdk_never_asks_self_model():
+    """#P2: SDK antigo (chat só aceita query) → NUNCA chama assistant.chat sem target; cai p/ user.chat."""
+    class _OldPeer:
+        def __init__(self, pid):
+            self.id, self.calls = pid, []
+
+        def message(self, t):
+            return t
+
+        def chat(self, query):                  # SÓ query — sem target/session/reasoning
+            self.calls.append(query)
+            return f"resposta-de-{self.id}"
+
+    class _OldSession:
+        def add_peers(self, p):
+            pass
+
+        def add_messages(self, m):
+            pass
+
+        def messages(self):
+            return []
+
+        def context(self, **k):
+            raise TypeError("old sdk sem kwargs")
+
+    class _OldClient:
+        def __init__(self):
+            self._s, self._p = _OldSession(), {}
+
+        def peer(self, pid):
+            return self._p.setdefault(pid, _OldPeer(pid))
+
+        def session(self, sid):
+            return self._s
+
+    m = HonchoMemory(client=_OldClient())
+    hits = m.recall("quem é o usuário?")
+    assert m.assistant.calls == []              # assistant NUNCA chamado (todas as tentativas tinham target → TypeError)
+    assert m.user.calls == ["quem é o usuário?"]   # caiu p/ user.chat global (correto, não self-model)
+    assert hits and "resposta-de-user" in hits[0].text
+
+
 # ----------------------------------------------------------------- P2: save_messages explícito
 def test_save_turn_off_by_default(tmp_path):
     m = open_memory(tmp_path, backend="sqlite-fts5")

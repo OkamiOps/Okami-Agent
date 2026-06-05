@@ -110,6 +110,9 @@ class SqliteFTS5Memory(Memory):
 
     # ------------------------------------------------------------------ write
     def write(self, item: MemoryItem) -> int:
+        from okami.memory.base import is_secret_item
+        if is_secret_item(item):                 # #P1: segredo não persiste (gate comum, fecha o bypass)
+            return 0
         ts = item.ts or self.clock()
         importance = item.importance if item.importance is not None else _heuristic_importance(item)
         emb = None
