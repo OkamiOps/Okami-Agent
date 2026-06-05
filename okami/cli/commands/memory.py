@@ -168,6 +168,42 @@ def memory_explain(
             console.print(f"    · {when}  score={r['score']:.2f} rank={r['rank']}  “{(r['query'] or '')[:60]}”")
 
 
+@mem_app.command("stats")
+def memory_stats(
+    workspace: str = _WS,
+    global_: bool = _GLOBAL,
+    json_out: bool = typer.Option(False, "--json", help="Saída JSON (pra script/CI)."),
+) -> None:
+    """Métricas da memória (#13): composição, compactness, integridade do forget e health score."""
+    from okami.memory import metrics
+
+    store = _crud_store(workspace, global_)
+    rep = metrics.report(store)
+    store.close()
+    if json_out:
+        import json
+        console.print_json(json.dumps(rep, ensure_ascii=False))
+        return
+    st, obs, integ = rep["stats"], rep["observed"], rep["integrity"]
+    score = rep["health_score"]
+    color = "green" if score >= 0.8 else "yellow" if score >= 0.6 else "red"
+    console.print(f"🧠 [bold]memória[/bold] · {st.get('total_active', 0)} ativos / {st.get('total_all', 0)} total "
+                  f"· health [{color}]{score:.2f}[/{color}]")
+    console.print(f"  composição: {st.get('by_kind', {})}")
+    console.print(f"  escopo: {st.get('by_scope', {})} · confiança: {st.get('by_confidence', {})} "
+                  f"· status: {st.get('by_status', {})}")
+    console.print(f"  recall: {(st.get('retrievals') or {}).get('count', 0)} buscas · "
+                  f"score médio {obs['avg_retrieval_score']} "
+                  f"· compactness {obs['context_compactness']} itens/consulta")
+    fs = integ["forget_success_rate"]
+    fc = "green" if fs >= 1.0 else "red"
+    console.print(f"  integridade do forget: [{fc}]{fs:.2f}[/{fc}] "
+                  f"({integ['leaked_forgotten']} vazaram de {integ['inactive_total']} inativos) "
+                  f"· consolidado {obs['consolidation_rate']}")
+    console.print("  [dim]precision/recall/scope: rode o harness com casos rotulados "
+                  "(okami.memory.metrics.evaluate)[/dim]")
+
+
 @mem_app.command("consolidate")
 def memory_consolidate(
     workspace: str = _WS,

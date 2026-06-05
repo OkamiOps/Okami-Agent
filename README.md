@@ -369,7 +369,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami auth list\|status` | Perfis de auth (metadata, sem segredo). |
 | `okami policy check\|init\|show` | Conformance autorada (`--strict` p/ GA). |
 | `okami config show\|get\|set\|unset\|path\|edit\|check` | Config efetiva (segredo → `.env`). |
-| `okami memory add\|search\|list\|explain\|forget\|archive\|consolidate\|export` | Memória híbrida + auditoria/CRUD/consolidação (`--global` = casa `~/.okami`). |
+| `okami memory add\|search\|list\|explain\|forget\|archive\|consolidate\|stats\|export` | Memória híbrida + auditoria/CRUD/consolidação/métricas (`--global` = casa `~/.okami`). |
 | `okami taste like\|dislike\|different\|show\|steer` | Taste model de design. |
 | `okami persona-init\|persona-evolve\|persona-log\|persona-rollback` | Identidade evolutiva. |
 | `okami skills` / `okami learn <fonte>` / `okami scan <path>` | Skills + scan de segurança. |

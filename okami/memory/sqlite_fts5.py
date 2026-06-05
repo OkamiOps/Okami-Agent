@@ -409,6 +409,30 @@ class SqliteFTS5Memory(Memory):
                         "importance": it.importance, "ts": it.ts, "superseded": bool(row[14])})
         return out
 
+    # ------------------------------------------------------------------ métricas (#13)
+    def stats(self) -> dict:
+        """Agregados CRUS p/ métricas (composição + retrieval_logs) — tudo do próprio DB, sem rótulo."""
+        c = self.conn
+
+        def _by(col: str, where: str = "") -> dict:
+            rows = c.execute(f"SELECT {col}, count(*) FROM items {where} GROUP BY {col}").fetchall()
+            return {str(k): int(n) for k, n in rows}
+
+        total_active = int(c.execute("SELECT count(*) FROM items WHERE superseded = 0").fetchone()[0])
+        total_all = int(c.execute("SELECT count(*) FROM items").fetchone()[0])
+        rc, ravg, rdist, rq = c.execute(
+            "SELECT count(*), avg(score), count(DISTINCT item_id), count(DISTINCT query) "
+            "FROM retrieval_logs").fetchone() or (0, None, 0, 0)
+        return {
+            "total_active": total_active, "total_all": total_all,
+            "by_status": _by("status"),
+            "by_kind": _by("kind", "WHERE superseded = 0"),
+            "by_scope": _by("scope", "WHERE superseded = 0"),
+            "by_confidence": _by("confidence", "WHERE superseded = 0"),
+            "retrievals": {"count": int(rc or 0), "avg_score": float(ravg) if ravg is not None else 0.0,
+                           "distinct_items": int(rdist or 0), "queries": int(rq or 0)},
+        }
+
     # ------------------------------------------------------------------ consolidação (#7)
     def consolidate(self, now: float | None = None, *, scan: int = 400, dup_jaccard: float = 0.8) -> dict:
         """Consolidação HEURÍSTICA (sem LLM): expira TTL vencido e funde quase-duplicatas — mantém a mais
