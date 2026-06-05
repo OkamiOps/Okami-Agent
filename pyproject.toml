@@ -35,6 +35,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["okami"]
 
+[tool.ruff]
+# Gate de qualidade = `ruff check` (lint; o CI roda `uv run ruff check okami tests`). NÃO usamos
+# `ruff format` DE PROPÓSITO: o estilo de comentários ALINHADOS (`x = 1        # nota`) é intencional —
+# denso, mas legível — e o formatter colapsaria isso em ~230 arquivos, matando a leitura. Lint é a barra;
+# format não é enforçado. Defaults do ruff (F + E4/E7/E9); exceções pontuais via `# noqa`.
+target-version = "py311"
+
 [tool.bandit]
 # Postura de segurança VERSIONADA — fonte única p/ CI e local (`bandit -c pyproject.toml`).
 # Okami é um agente de CÓDIGO: shelling out, urllib p/ provedores e cleanup best-effort são a FUNÇÃO,
