@@ -91,10 +91,12 @@ class TelegramClient:
         except Exception:  # noqa: BLE001 — typing é best-effort
             pass
 
-    def send_approval(self, chat_id, text: str) -> dict:
-        """Aprovação com BOTÕES inline (✅/❌) — a resposta volta por callback_query (sem digitar /yes)."""
-        kb = {"inline_keyboard": [[{"text": "✅ Aprovar", "callback_data": "okapprove:yes"},
-                                   {"text": "❌ Negar", "callback_data": "okapprove:no"}]]}
+    def send_approval(self, chat_id, text: str, nonce: str = "") -> dict:
+        """Aprovação com BOTÕES inline (✅/❌). `nonce` (P1.3) amarra o clique a ESTE pedido — clique
+        velho/deslocado de outra ação não aprova (anti-stale). Sem nonce mantém o formato antigo."""
+        sfx = f"{nonce}:" if nonce else ""
+        kb = {"inline_keyboard": [[{"text": "✅ Aprovar", "callback_data": f"okapprove:{sfx}yes"},
+                                   {"text": "❌ Negar", "callback_data": f"okapprove:{sfx}no"}]]}
         return self._call("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": kb})
 
     def answer_callback(self, callback_id: str, text: str = "") -> None:
@@ -157,7 +159,10 @@ class TelegramChannel(Channel):
                     continue
                 if self.allow and frm not in self.allow and not self.allow_all:  # auth POR CLICADOR
                     continue
-                out.append(Inbound("telegram", str(chat), text="/yes" if data.endswith(":yes") else "/no"))
+                rest = data[len("okapprove:"):]                  # "yes" (antigo) | "<nonce>:yes" (P1.3)
+                nonce, verdict = rest.rsplit(":", 1) if ":" in rest else ("", rest)
+                cmd = "/yes" if verdict == "yes" else "/no"
+                out.append(Inbound("telegram", str(chat), text=(f"{cmd}:{nonce}" if nonce else cmd)))
                 continue
             msg = u.get("message") or {}
             chat = (msg.get("chat") or {}).get("id")
@@ -190,8 +195,8 @@ class TelegramChannel(Channel):
     def send_typing(self, chat_id) -> None:
         self.client.send_chat_action(chat_id, "typing")
 
-    def send_approval(self, chat_id, text: str) -> None:
-        self.client.send_approval(chat_id, text)
+    def send_approval(self, chat_id, text: str, nonce: str = "") -> None:
+        self.client.send_approval(chat_id, text, nonce)
 
     def send_audio(self, chat_id, audio_path) -> None:
         self.client.send_audio(chat_id, audio_path)

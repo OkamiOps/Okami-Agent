@@ -353,11 +353,16 @@ class AgentEndpoint:
                 return True
             if self.approval_mode == "off":                # "off" = não pergunta → NEGA sensível (fail-closed)
                 return False
+            import secrets
+            nonce = secrets.token_hex(4)                 # amarra o botão a ESTE pedido (P1.3 anti-stale)
             q: queue.Queue = queue.Queue()
-            self._pending[str(chat_id)] = q
+            self._pending[str(chat_id)] = (q, nonce)
             _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
             if _sa:
-                _sa(chat_id, f"⚠ Aprovar: {req['reason']}?")
+                try:
+                    _sa(chat_id, f"⚠ Aprovar: {req['reason']}?", nonce=nonce)
+                except TypeError:                        # canal sem suporte a nonce → compat
+                    _sa(chat_id, f"⚠ Aprovar: {req['reason']}?")
             else:
                 self.channel.send(chat_id, f"⚠ Aprovar: {req['reason']}? (/yes ou /no)")
             try:
@@ -378,7 +383,16 @@ class AgentEndpoint:
         text = (text or "").strip()
         cid = str(chat_id)
         if cid in self._pending:                       # resposta a uma aprovação pendente
-            self._pending[cid].put(text)
+            pend = self._pending[cid]
+            q, want = pend if isinstance(pend, tuple) else (pend, "")   # tolera fila pura (compat)
+            verb, _, got = text.partition(":")         # "/yes" | "/yes:<nonce>" (botão)
+            if got and want and got != want:           # nonce velho/errado = clique stale → IGNORA
+                self.channel.send(chat_id, "⌛ esse botão expirou (outra ação aconteceu). Use /yes ou /no.")
+                return
+            q.put(verb)
+            return
+        if text.partition(":")[0].lower() in ("/yes", "/no"):   # aprovação sem nada pendente (clique dup/stale)
+            self.channel.send(chat_id, "nada pendente pra aprovar agora.")
             return
         s = self.session(chat_id)
         low = text.lower()
