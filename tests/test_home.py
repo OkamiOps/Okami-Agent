@@ -79,6 +79,23 @@ def test_migrate_skips_folders_without_okami_markers(tmp_path, monkeypatch):
     assert not (tmp_path / ".okami" / "migrations.json").exists()       # nada movido → sem manifesto
 
 
+def test_migrate_moves_only_marked_children_leaves_generic(tmp_path, monkeypatch):
+    # P2: ~/skills com coisa genérica + 1 skill do Okami → move SÓ a skill; o genérico fica.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("OKAMI_HOME", raising=False)
+    (tmp_path / "skills" / "minha-skill").mkdir(parents=True)
+    (tmp_path / "skills" / "minha-skill" / "SKILL.md").write_text("x", encoding="utf-8")
+    (tmp_path / "skills" / "fotos-ferias").mkdir(parents=True)            # genérica, sem marcador
+    (tmp_path / "skills" / "fotos-ferias" / "praia.png").write_text("x", encoding="utf-8")
+    (tmp_path / "skills" / "notas.txt").write_text("x", encoding="utf-8")  # arquivo solto
+    moved = home.migrate_stray()
+    assert moved == ["skills"]
+    assert (tmp_path / ".okami" / "skills" / "minha-skill" / "SKILL.md").exists()   # a skill foi
+    assert (tmp_path / "skills" / "fotos-ferias" / "praia.png").exists()            # o genérico FICOU
+    assert (tmp_path / "skills" / "notas.txt").exists()
+    assert home.migrate_stray() == []                                               # idempotente
+
+
 def test_migrate_skips_when_home_is_a_project(tmp_path, monkeypatch):
     # se a home É um projeto (okami.yaml na home), NÃO mexe nas pastas — são intencionais
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))

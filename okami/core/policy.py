@@ -138,7 +138,11 @@ def evaluate(cfg, policy: dict, *, raw: dict | None = None, channels: dict | Non
     # sandbox: forced local + isolamento exigido em instalação exposta --------
     sbpol = policy.get("sandbox") or {}
     sb = dict(getattr(cfg, "sandbox", None) or {})
-    exposed = bool(getattr(cfg, "gateway", None) or {}) or bool(channels)
+    # EXPOSTO = tem CANAL de verdade (ingress: telegram/slack…) OU o gateway faz bind de REDE (host/port).
+    # Um bloco `gateway:` só com tuning de display (reactions/auto_resume/max_sessions) NÃO expõe nada.
+    gw = getattr(cfg, "gateway", None) or {}
+    gw_binds = any(gw.get(k) for k in ("host", "bind", "port", "public", "webhook_url"))
+    exposed = gw_binds or bool(channels)
     if sbpol.get("forbid_forced_local_on_exposed", True) and exposed and sb.get("backend") == "local":
         f.append(Finding("policy.sandbox", "warn", "backend:local EXPLÍCITO numa instalação exposta "
                          "→ desliga o auto-harden por superfície.", "remova o backend fixo ou use profile: hardened."))

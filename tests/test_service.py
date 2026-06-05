@@ -40,6 +40,24 @@ def test_paths_under_home(monkeypatch, tmp_path):
     assert service.systemd_unit_path() == tmp_path / ".config" / "systemd" / "user" / "okami-gateway.service"
 
 
+def test_systemd_argv_quotes_paths_with_spaces():
+    unit = service.render_systemd(["/opt/my okami/bin/okami", "gateway", "--foreground"],
+                                  "/proj", "/h/.okami/logs/g.log", "/h/.okami")
+    assert 'ExecStart="/opt/my okami/bin/okami" gateway --foreground' in unit   # path com espaço entre aspas
+
+
+def test_gateway_files_live_in_home_not_cwd(monkeypatch, tmp_path):
+    from okami.cli.commands.gateway import _gateway_files
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path / "home"))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    pid, log = _gateway_files()
+    assert pid == tmp_path / "home" / "runtime" / "gateway.pid"
+    assert log == tmp_path / "home" / "logs" / "gateway.log"
+    assert not (work / ".okami").exists()                       # NÃO espalha estado no CWD
+
+
 def test_log_path_respects_okami_home(monkeypatch, tmp_path):
     monkeypatch.setenv("OKAMI_HOME", str(tmp_path / "h"))
     assert service.log_path() == tmp_path / "h" / "logs" / "gateway.log"

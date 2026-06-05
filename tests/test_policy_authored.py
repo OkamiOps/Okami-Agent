@@ -127,6 +127,18 @@ def test_strict_gate_fails_exposed_without_isolation(tmp_path):
     assert "policy.sandbox.isolation" not in _levels(okp)
 
 
+def test_gateway_display_tuning_is_not_exposed(tmp_path):
+    # gateway só com tuning de DISPLAY (reactions/auto_resume) NÃO é superfície exposta → strict ok sem isolamento
+    from okami.core.policy import strict_policy
+    g = evaluate(_cfg(gateway={"reactions": True}), strict_policy(DEFAULT_POLICY),
+                 channels={}, base_yaml=tmp_path / "n.yaml")
+    assert "policy.sandbox.isolation" not in _levels(g)
+    # mas gateway com BIND de rede (host) volta a contar como exposto → exige isolamento
+    gb = evaluate(_cfg(gateway={"host": "0.0.0.0"}), strict_policy(DEFAULT_POLICY),
+                  channels={}, base_yaml=tmp_path / "n.yaml")
+    assert _levels(gb).get("policy.sandbox.isolation") == "fail"
+
+
 def test_strict_cli_flag(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 

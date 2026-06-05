@@ -62,6 +62,11 @@ def render_launchd(argv: list[str], workdir: str, log: str, okami_home: str, lab
     )
 
 
+def _systemd_argv(argv: list[str]) -> str:
+    """ExecStart systemd-safe: cada arg com espaço/aspas vai entre aspas (path com espaço não quebra)."""
+    return " ".join(f'"{a}"' if (" " in a or '"' in a or "'" in a) else a for a in argv)
+
+
 def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str) -> str:
     return (
         "[Unit]\n"
@@ -70,7 +75,7 @@ def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str) -> 
         "[Service]\nType=simple\n"
         f"WorkingDirectory={workdir}\n"
         f"Environment=OKAMI_HOME={okami_home}\n"
-        f"ExecStart={' '.join(argv)}\n"
+        f"ExecStart={_systemd_argv(argv)}\n"
         "Restart=on-failure\nRestartSec=5\n"
         f"StandardOutput=append:{log}\nStandardError=append:{log}\n\n"
         "[Install]\nWantedBy=default.target\n"

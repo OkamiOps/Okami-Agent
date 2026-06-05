@@ -13,9 +13,17 @@ from okami.cli._shared import (
 
 
 def _gateway_files() -> tuple[Path, Path]:
-    d = Path(".okami")
-    d.mkdir(parents=True, exist_ok=True)
-    return d / "gateway.pid", d / "gateway.log"
+    """Estado do gateway na CASA (~/.okami), não espalhado no CWD: runtime/gateway.pid + logs/gateway.log.
+    Lê do legado .okami/ do CWD só pra migração (não cria mais lá)."""
+    from okami.home import okami_home
+    home = okami_home()
+    (home / "runtime").mkdir(parents=True, exist_ok=True)
+    (home / "logs").mkdir(parents=True, exist_ok=True)
+    pid, log = home / "runtime" / "gateway.pid", home / "logs" / "gateway.log"
+    legacy = Path(".okami") / "gateway.pid"
+    if not pid.exists() and legacy.exists():          # gateway antigo subiu no CWD → reaproveita o pid p/ stop/status
+        pid = legacy
+    return pid, log
 
 
 def _pid_alive(pid: int) -> bool:

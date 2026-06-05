@@ -88,12 +88,12 @@ def _looks_like_okami(folder: Path, marker: str) -> bool:
 
 
 def migrate_stray(*, emit=lambda m: None) -> list[str]:
-    """Move `~/skills` e `~/agents` SOLTOS na home pra dentro de `~/.okami/` — mas SÓ quando são
-    comprovadamente do Okami (têm o arquivo-marcador). Idempotente, não-clobbera, registra manifesto.
+    """Move os FILHOS do Okami de `~/skills`/`~/agents` pra dentro de `~/.okami/` — só os subdiretórios
+    que têm o arquivo-marcador (SKILL.md / agent.yaml). Idempotente, não-clobbera, registra manifesto.
 
-    Não invasivo de propósito: um `~/skills` genérico (sem nenhum SKILL.md) ou `~/agents` sem nenhum
-    agent.yaml NÃO é tocado — só avisa. Assim o primeiro `okami` num PC alheio nunca sequestra uma
-    pasta que não é nossa. Também respeita a home-como-projeto (okami.yaml na home → não mexe)."""
+    POR-FILHO de propósito: se `~/skills` tem 20 coisas genéricas suas e UMA subpasta com SKILL.md, só
+    essa subpasta vai — o resto fica onde está (nunca sequestra a pasta inteira). Respeita home-como-
+    projeto (okami.yaml na home → não mexe). Limpa `~/skills`/`~/agents` se ficarem vazios depois."""
     home = okami_home()
     if (Path.home() / "okami.yaml").exists() or (Path.home() / "okami.yml").exists():
         return []                                    # home É um projeto explícito → respeita, não mexe
@@ -101,18 +101,28 @@ def migrate_stray(*, emit=lambda m: None) -> list[str]:
     for sub, marker in _STRAY_MARKERS.items():
         stray = Path.home() / sub
         target = home / sub
-        if not (stray.is_dir() and not stray.is_symlink()) or target.exists():
+        if not (stray.is_dir() and not stray.is_symlink()) or stray.resolve() == target.resolve():
             continue
-        if stray.resolve() == target.resolve():
-            continue
-        if not _looks_like_okami(stray, marker):
-            emit(f"… ~/{sub} existe mas sem {marker} — não parece do Okami; deixei como está.")
-            continue
-        try:
-            home.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(stray), str(target))
+        children = []                                # move só os FILHOS com marcador (não a pasta inteira)
+        for child in sorted(p for p in stray.iterdir() if p.is_dir() and not p.is_symlink()):
+            if next(child.rglob(marker), None) is None:
+                continue                             # subpasta genérica (sem SKILL.md/agent.yaml) → fica
+            dst = target / child.name
+            if dst.exists():
+                continue                             # não clobbera o que já está na casa
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(child), str(dst))
+                children.append(child.name)
+            except OSError:
+                pass
+        if children:
             moved.append(sub)
-            emit(f"📦 movido ~/{sub} → {target} (Okami agora guarda tudo em {home})")
+            emit(f"📦 movi {len(children)} do Okami: ~/{sub}/* → {target}/ "
+                 f"({', '.join(children[:5])}{'…' if len(children) > 5 else ''})")
+        try:                                         # ~/skills/~/agents vazio depois → remove o resíduo
+            if stray.is_dir() and not any(stray.iterdir()):
+                stray.rmdir()
         except OSError:
             pass
     if moved:
