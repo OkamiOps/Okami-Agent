@@ -1,11 +1,14 @@
+<!-- 🇧🇷 [Português](README.pt-BR.md) · **English** -->
 <div align="center">
+
+**English** · [Português](README.pt-BR.md)
 
 # 🐺 Okami Agent
 
-**IA com soberania para PMEs.**
-Agente de codificação **confiável**, com **paridade de capacidade entre LLMs**, **auto-melhoria**
-(skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
-ou onde você quiser.
+**Sovereign AI for SMBs.**
+A **reliable** coding agent with **capability parity across LLMs**, **self-improvement**
+(skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
+or wherever you want.
 
 ![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
@@ -14,76 +17,76 @@ ou onde você quiser.
 ![tests](https://img.shields.io/badge/tests-880%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
-**[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
+**[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
 
 </div>
 
 ---
 
-> 🐺 **Alpha público (`v0.1.0-alpha`).** O Okami está aberto pra você experimentar. A superfície de
-> comandos/config ainda pode mudar entre alphas — para expor publicamente, rode `okami policy check
-> --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md).
+> 🐺 **Public alpha (`v0.1.0-alpha`).** Okami is open for you to try. The command/config surface may
+> still change between alphas — before exposing it publicly, run `okami policy check --strict` first.
+> Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
-O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
+`okami chat` opens a **full-screen TUI** in the brand identity (Onyx + Heat Orange / Volt Cyan):
 
 ![okami chat welcome](docs/images/chat-welcome.svg)
 
-Cada turno tem separação clara, emoji por evento (🧠 pensar · 🛠️ tool) e um **rodapé de custo por
-resposta** (ctx · tokens · tempo) — você sabe exatamente o que gastou:
+Every turn has clear separation, per-event emoji (🧠 thinking · 🛠️ tool) and a **per-response cost
+footer** (ctx · tokens · time) — so you know exactly what it cost:
 
 ![okami chat](docs/images/chat-demo.svg)
 
-**Paridade multi-modelo** com assinatura-only (Codex/Claude por OAuth/CLI, LMStudio local, MiniMax/MiMo
-por Token Plan), com fallback automático:
+**Multi-model parity** with subscription-only auth (Codex/Claude via OAuth/CLI, LMStudio local,
+MiniMax/MiMo via Token Plan), with automatic fallback:
 
 ![okami providers](docs/images/providers.svg)
 
-E a prontidão de release é um comando só (`okami readiness` — CI verde · strict verde · strict no HEAD):
+And release-readiness is a single command (`okami readiness` — CI green · strict green · strict on HEAD):
 
 ![okami readiness](docs/images/readiness.svg)
 
-> Documentação completa em **[okamiagent.com/docs](https://okamiagent.com/docs)**. No repo:
-> [Arquitetura](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Estrutura](docs/STRUCTURE.md) ·
-> [Produção/GA](docs/PRODUCTION.md) · [Pesquisa competitiva](docs/COMPETITIVE_RESEARCH.md).
+> Full documentation at **[okamiagent.com/docs](https://okamiagent.com/docs)**. In the repo:
+> [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Structure](docs/STRUCTURE.md) ·
+> [Production/GA](docs/PRODUCTION.md) · [Competitive research](docs/COMPETITIVE_RESEARCH.md).
 
 ---
 
-## Por que o Okami existe (as duas dores)
+## Why Okami exists (the two pains)
 
-1. **Harness não-confiável** — o agente diz *"vou fazer"* e não age; cobrado, diz *"pera, tô fazendo"*
-   e nunca conclui. Loop sem invariante de ação e sem detecção de conclusão real.
-2. **Não adere a skills / design system** — você pede ShadCN/HeroUI e ele inventa CSS feio. Skill como
-   sugestão, não como **gate**; sem verificação mecânica.
+1. **Unreliable harness** — the agent says *"I'll do it"* and doesn't act; when pushed, says *"hold on,
+   I'm on it"* and never finishes. A loop with no action invariant and no real completion detection.
+2. **Doesn't adhere to skills / design system** — you ask for ShadCN/HeroUI and it invents ugly CSS.
+   The skill is a suggestion, not a **gate**; no mechanical verification.
 
-O Okami resolve as duas **por construção** (harness com *action-or-terminate* + *verification gates*)
-e leva o resto além: memória de verdade, **auto-melhoria**, **persona que evolui** e **gosto que
-aprende** — tudo plugável e funcionando **com qualquer LLM** (do GPT-5/Claude ao seu modelo local no
+Okami solves both **by construction** (a harness with *action-or-terminate* + *verification gates*)
+and takes the rest further: real memory, **self-improvement**, an **evolving persona** and **taste that
+learns** — all pluggable and working **with any LLM** (from GPT-5/Claude to your local model in
 LMStudio).
 
 ---
 
-## Destaques
+## Highlights
 
 | | |
 |---|---|
-| 🧠 **Harness confiável** | *Action-or-Terminate*, anti-loop, anti-alucinação, *exit criteria* verificados mecanicamente. Protocolo JSON **+** tool-calling nativo (dual-mode). |
-| 🔀 **Paridade multi-modelo** | LMStudio (local), **Codex/GPT-5**, **Claude**, MiniMax, MiMo — com **fallback automático** entre eles. **Assinatura-only** (OAuth/CLI), nunca pay-as-you-go. |
-| 🎨 **Aderência a design system** | *Contracts* (ShadCN/HeroUI) + *verification gates* que **reprovam** hex inline, CSS cru, e import fora do `@/components/ui`. |
-| 🧬 **Auto-melhoria** | Persona que evolui (SOUL/VOICE/PERSONA, com go/no-go), **taste model** (curte/rejeita design), e *closed learning loop* que destila skills. |
-| 🗄️ **Memória plugável** | `sqlite-fts5` (default), holográfica, Honcho, ou em camadas — com embeddings, **auto-compaction** e citação de origem. |
-| 🛡️ **Segurança fail-closed** | Sandbox real (Docker), aprovação go/no-go persistente, guarda anti-SSRF, redator central de segredos, *trust store* de MCP, journal de checkpoints com HMAC. |
-| 📜 **Conformance autorada** | `okami.policy.yaml` versionado + `okami policy check` (gate de CI) + `--strict` (postura de produção/GA). |
-| 💬 **Multi-canal** | Terminal (TUI), Telegram (botões inline), Slack, Discord, Mattermost, **API HTTP**, Paperclip e **ACP** (IDE Zed/VS Code). |
-| 🔭 **Observabilidade** | Event log com `trace_id`, **replay de trajetória** por turno, `doctor --json/--lint`, usage + custo por sessão, audit log. |
-| ⚙️ **Operável** | Processos em background com **PTY interativo**, cron, hooks, hot-reload de config, faxina de disco, perfis de auth. |
+| 🧠 **Reliable harness** | *Action-or-Terminate*, anti-loop, anti-hallucination, mechanically verified *exit criteria*. JSON protocol **+** native tool-calling (dual-mode). |
+| 🔀 **Multi-model parity** | LMStudio (local), **Codex/GPT-5**, **Claude**, MiniMax, MiMo — with **automatic fallback** between them. **Subscription-only** (OAuth/CLI), never pay-as-you-go. |
+| 🎨 **Design-system adherence** | *Contracts* (ShadCN/HeroUI) + *verification gates* that **reject** inline hex, raw CSS, and imports outside `@/components/ui`. |
+| 🧬 **Self-improvement** | An evolving persona (SOUL/VOICE/PERSONA, with go/no-go), a **taste model** (likes/rejects design), and a *closed learning loop* that distills skills. |
+| 🗄️ **Pluggable memory** | `sqlite-fts5` (default), holographic, Honcho, or layered — with embeddings, **auto-compaction** and source citation. |
+| 🛡️ **Fail-closed security** | Real sandbox (Docker), persistent go/no-go approval, anti-SSRF guard, central secret redactor, MCP *trust store*, checkpoint journal with HMAC. |
+| 📜 **Authored conformance** | Versioned `okami.policy.yaml` + `okami policy check` (CI gate) + `--strict` (production/GA posture). |
+| 💬 **Multi-channel** | Terminal (TUI), Telegram (inline buttons), Slack, Discord, Mattermost, **HTTP API**, Paperclip and **ACP** (Zed/VS Code IDE). |
+| 🔭 **Observability** | Event log with `trace_id`, per-turn **trajectory replay**, `doctor --json/--lint`, usage + cost per session, audit log. |
+| ⚙️ **Operable** | Background processes with an **interactive PTY**, cron, hooks, config hot-reload, disk cleanup, auth profiles. |
 
 ---
 
-## Instalação
+## Installation
 
-**O único pré-requisito é o `git`.** O instalador usa o [uv](https://docs.astral.sh/uv/) como motor —
-ele baixa o Python, cria o ambiente isolado e instala tudo. **Você não precisa de Python instalado**
-e não sofre com long-path no Windows (o uv usa um diretório curto).
+**The only prerequisite is `git`.** The installer uses [uv](https://docs.astral.sh/uv/) as its engine —
+it downloads Python, creates the isolated environment and installs everything. **You don't need Python
+installed** and you won't fight long-path issues on Windows (uv uses a short directory).
 
 **Linux / macOS / WSL:**
 ```bash
@@ -95,367 +98,376 @@ curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/i
 irm https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.ps1 | iex
 ```
 
-Depois (reabra o terminal se `okami` não for achado):
+Then (reopen the terminal if `okami` isn't found):
 ```bash
-okami setup     # configura em 2-3 cliques (detecta seus providers)
-okami chat      # conversa no terminal
+okami setup     # configure in 2-3 clicks (detects your providers)
+okami chat      # chat in the terminal
 ```
 
-**Tudo numa pasta só — `~/.okami/`** (ou `$OKAMI_HOME`), como o `~/.openclaw`/`~/.hermes`: o instalador
-não espalha pelo SO. O código fica em `~/.okami/src`, o venv isolado em `~/.okami/tools`, o launcher em
-`~/.okami/bin`, e os dados (skills, agents, sessões, `.env`, credenciais) em `~/.okami/` em runtime.
-Atualizar/desinstalar = rodar o instalador de novo / `uv tool uninstall okami-agent`.
+**Everything in one folder — `~/.okami/`** (or `$OKAMI_HOME`), like `~/.openclaw`/`~/.hermes`: the
+installer doesn't scatter across the OS. The code lives in `~/.okami/src`, the isolated venv in
+`~/.okami/tools`, the launcher in `~/.okami/bin`, and the data (skills, agents, sessions, `.env`,
+credentials) in `~/.okami/` at runtime. Update/uninstall = run the installer again /
+`uv tool uninstall okami-agent`.
 
-<details><summary><b>Dev (rodar do código, sem instalar global)</b></summary>
+<details><summary><b>Dev (run from source, without a global install)</b></summary>
 
 ```bash
-uv sync                       # cria o venv + deps a partir do pyproject
-uv run okami doctor           # roda sem ativar nada
+uv sync                       # create the venv + deps from pyproject
+uv run okami doctor           # runs without activating anything
 uv run okami chat
-# editável global:  uv tool install -e .   (recarregue deps novas com --force)
-make test                     # = uv run pytest -q   (suíte completa em pytest)
+# editable global:  uv tool install -e .   (reload new deps with --force)
+make test                     # = uv run pytest -q   (full pytest suite)
 ```
-Sem uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`
-(no Windows use um caminho curto p/ o venv — ex. `C:\okv` — por causa do long-path do litellm.)
+Without uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`
+(on Windows use a short path for the venv — e.g. `C:\okv` — because of litellm's long paths.)
 </details>
 
-<details><summary><b>Docker (qualquer SO)</b></summary>
+<details><summary><b>Docker (any OS)</b></summary>
 
 ```bash
 make docker-build                                            # docker build -f deploy/Dockerfile
 docker compose -f deploy/docker-compose.yml run --rm okami doctor
-docker compose -f deploy/docker-compose.yml run --rm okami task "crie hello.txt" -e file_exists:hello.txt
-docker run --rm --entrypoint python okami-agent -m pytest -q  # roda a suíte na imagem Linux
+docker compose -f deploy/docker-compose.yml run --rm okami task "create hello.txt" -e file_exists:hello.txt
+docker run --rm --entrypoint python okami-agent -m pytest -q  # run the suite in the Linux image
 ```
-> Para um LMStudio na máquina host, aponte `api_base` para `http://host.docker.internal:PORT/v1`.
+> For an LMStudio on the host machine, point `api_base` at `http://host.docker.internal:PORT/v1`.
 </details>
 
-**Extras opcionais** (`uv sync --extra <nome>`): `voice` (Whisper + Edge TTS) · `browser`
-(Playwright) · `honcho` (memória Honcho) · `dev` (pytest).
+**Optional extras** (`uv sync --extra <name>`): `voice` (Whisper + Edge TTS) · `browser`
+(Playwright) · `honcho` (Honcho memory) · `dev` (pytest).
 
 ---
 
-## Primeiros passos
+## First steps
 
 ```bash
-okami                      # visão geral dos comandos (= okami help)
-okami setup                # assistente de configuração (menus de seta ↑↓)
-okami doctor               # diagnostica config, chaves e conectividade
-okami chat                 # conversa no terminal (TUI com sessão persistente)
-okami chat "diga oi"       # uma pergunta e sai (scripts/pipe)
-okami task "crie um endpoint /health em FastAPI" \
+okami                      # command overview (= okami help)
+okami setup                # configuration wizard (arrow menus ↑↓)
+okami doctor               # diagnoses config, keys and connectivity
+okami chat                 # chat in the terminal (TUI with a persistent session)
+okami chat "say hi"        # one question and exit (scripts/pipe)
+okami task "create a /health endpoint in FastAPI" \
   -e file_exists:app/health.py -e "file_contains:app/health.py:/health"
-okami gateway              # sobe os bots de Telegram (1 por agente)
+okami gateway              # bring up the Telegram bots (1 per agent)
 ```
 
-- **Configuração** é sempre por **menu de seta** (↑↓ Enter); sem terminal interativo, cai num menu numerado.
-- **Segredos** vão pro `.env` (projeto) ou `$OKAMI_HOME/.env` (global, default `~/.okami/.env`) — **nunca** pro `okami.yaml`, que é versionado.
-- Sem instalar o entry point, dá para rodar com `python -m okami.cli ...`.
+- **Configuration** is always via **arrow menus** (↑↓ Enter); without an interactive terminal it falls back to a numbered menu.
+- **Secrets** go in `.env` (project) or `$OKAMI_HOME/.env` (global, default `~/.okami/.env`) — **never** in `okami.yaml`, which is versioned.
+- Without installing the entry point, you can run it with `python -m okami.cli ...`.
 
 ---
 
-## O Harness confiável (resolve a Dor #1)
+## The reliable harness (solves Pain #1)
 
-O coração do Okami é um loop ReAct com **invariantes de confiabilidade** — não é "deixa o modelo
-conversar até cansar":
+The heart of Okami is a ReAct loop with **reliability invariants** — not "let the model chat until it
+gets tired":
 
-- **Action-or-Terminate** — todo passo OU executa uma tool OU termina explicitamente
-  (`task_complete` / `task_blocked` / `need_input`). Não existe "tô pensando" infinito.
-- **Exit criteria verificados** — você declara o critério (`file_exists:x`, `file_contains:x:txt`,
-  `cmd_succeeds:pytest -q`) e o harness **confere mecanicamente** antes de aceitar a conclusão. Se o
-  modelo declara `task_complete` mas o critério falha → `complete_rejected`, ele continua.
-- **Anti-loop / anti-stall** — *fingerprint* das ações detecta repetição; comandos read-only não
-  enganam o watchdog (`shell_has_effect`).
-- **Dual-mode** — protocolo JSON (`{"tool": ..., "args": ...}`) para paridade entre LLMs **e**
-  tool-calling nativo (Responses API do Codex; opt-in por provider).
-- **Checkpoints & rollback** — toda escrita registra o estado anterior num journal append-only com
-  **lock + HMAC encadeado**; `okami rollback N` desfaz as últimas N escritas.
-- **Orçamento** — teto de passos/tokens por turno; *auto-compaction* da história quando o contexto enche.
+- **Action-or-Terminate** — every step EITHER runs a tool OR terminates explicitly
+  (`task_complete` / `task_blocked` / `need_input`). There's no infinite "I'm thinking".
+- **Verified exit criteria** — you declare the criterion (`file_exists:x`, `file_contains:x:txt`,
+  `cmd_succeeds:pytest -q`) and the harness **checks it mechanically** before accepting completion. If
+  the model declares `task_complete` but the criterion fails → `complete_rejected`, it keeps going.
+- **Anti-loop / anti-stall** — action *fingerprints* detect repetition; read-only commands don't fool
+  the watchdog (`shell_has_effect`).
+- **Dual-mode** — JSON protocol (`{"tool": ..., "args": ...}`) for parity across LLMs **and** native
+  tool-calling (Codex Responses API; opt-in per provider).
+- **Checkpoints & rollback** — every write records the previous state in an append-only journal with a
+  **lock + chained HMAC**; `okami rollback N` undoes the last N writes.
+- **Budget** — a step/token ceiling per turn; *auto-compaction* of history when the context fills up.
 
 ---
 
-## Skills, Contracts & Verification Gates (resolve a Dor #2)
+## Skills, Contracts & Verification Gates (solves Pain #2)
 
-- **Skills** (`skills/<nome>/SKILL.md`) são procedimentos versionados que o agente carrega sob demanda
-  (`use_skill`). Já vêm várias: `frontend-shadcn`, `frontend-heroui`, `tdd`, `writing-plans`,
+- **Skills** (`skills/<name>/SKILL.md`) are versioned procedures the agent loads on demand
+  (`use_skill`). Several ship in the box: `frontend-shadcn`, `frontend-heroui`, `tdd`, `writing-plans`,
   `delegate-codex`, `humanizer`, `kanban-orchestrator`, …
-- **Supply-chain** — toda skill instalada passa por **scan de segurança** (prompt-injection, malware,
-  exfiltração de segredo, *trojan-source*, unicode oculto); **HIGH/CRITICAL é bloqueado**. Um
-  `skills-lock.json` (sha256) detecta adulteração.
-- **Contracts** (`okami.yaml → contracts.ui`) declaram o design system: `library: shadcn`,
+- **Supply-chain** — every installed skill goes through a **security scan** (prompt injection, malware,
+  secret exfiltration, *trojan-source*, hidden unicode); **HIGH/CRITICAL is blocked**. A
+  `skills-lock.json` (sha256) detects tampering.
+- **Contracts** (`okami.yaml → contracts.ui`) declare the design system: `library: shadcn`,
   `forbid_inline_hex`, `forbid_raw_css`, `require_component_source`.
-- **Verification gates** — `okami gate <dir>` (e os gates internos) **reprovam** mecanicamente código
-  que viola o contrato. Skill deixa de ser sugestão e vira **gate**.
+- **Verification gates** — `okami gate <dir>` (and the internal gates) mechanically **reject** code that
+  violates the contract. The skill stops being a suggestion and becomes a **gate**.
 
 ---
 
-## Providers & paridade multi-modelo
+## Providers & multi-model parity
 
-Roteador via **LiteLLM** + transportes próprios. **Política dura: Claude e Codex são SEMPRE por
-assinatura (OAuth/CLI), NUNCA pay-as-you-go.**
+A router via **LiteLLM** + custom transports. **Hard policy: Claude and Codex are ALWAYS by
+subscription (OAuth/CLI), NEVER pay-as-you-go.**
 
-| Provider | Modelo (default) | Auth | Tier |
+| Provider | Model (default) | Auth | Tier |
 |---|---|---|---|
-| **lmstudio** | `qwen3.5-4b-mtp` (local) | api_key local | local |
+| **lmstudio** | `qwen3.5-4b-mtp` (local) | local api_key | local |
 | **codex** | `gpt-5.5` | **OAuth device flow** (`okami login codex`) | strong |
-| **claude** | `claude-opus-4-8` | **CLI oficial `claude`** (assinatura) | strong |
-| **minimax** | `MiniMax-M3` | OAuth device flow | weak |
-| **mimo** | `mimo-v2.5-pro` | API key (`MIMO_API_KEY` no `.env`) | weak |
+| **claude** | `claude-opus-4-8` | **official `claude` CLI** (subscription) | strong |
+| **minimax** | `MiniMax-M3` | **Token Plan Subscription Key** (`MINIMAX_API_KEY`) | weak |
+| **mimo** | `mimo-v2.5-pro` | **Token Plan API key** (`MIMO_API_KEY` in `.env`) | weak |
 
-- **Fallback automático** — cada provider tem uma cadeia (`codex → [claude, minimax, lmstudio]`); se
-  o principal cair (529/timeout/resposta vazia) o turno faz *failover* sem morrer.
-- **Capability profile adaptativo** — `tier` (`strong`/`weak`/`local`) e `tool_mode`
-  (`json_constrained`) preparam o agente para o modelo que você tem.
-- **Descoberta ao vivo** — `okami provider models <nome>` lista os modelos via `/v1/models`, senão cai
-  no catálogo. Troque o modelo da sessão com `/model <id>` e o esforço de raciocínio com `/think`.
-- **Usage & custo** — tokens (incl. *cache read*) e custo acumulados por sessão; `okami status`/`/usage`.
-
----
-
-## Memória plugável
-
-- **Backends**: `sqlite-fts5` (default, BM25), **holográfica** (vetores `dim=1024`), **Honcho** (SaaS),
-  ou **em camadas**. Busca **híbrida** (léxica + embeddings quando disponível; degrada p/ BM25 offline).
-- **Política de escrita** — classifica cada fato (fato/preferência/decisão/skill/erro) e **barra o
-  efêmero/trivial** antes de persistir.
-- **Citação de origem** — toda memória injetada vem com `[categoria · origem · confiança]`.
-- **Auto-compaction** — quando o contexto enche, turnos antigos viram nós de *summary* sem perder o fio.
-- **Escopo + memória global** — `scope` (global/workspace/…) por item; com `memory.global`, preferências
-  `scope=global` moram em `~/.okami` e valem em **qualquer** projeto, mas memória de um projeto **não**
-  contamina outro. Schema com `confidence`, `expires_at` (TTL) e `supersedes_id` (consolidação).
-- **Auditoria** — cada recall é logado (`retrieval_logs`); `okami memory explain <id>` mostra de onde a
-  memória veio e quando/por que apareceu. `forget` (some) e `archive` (some, marcado) são reversíveis no histórico.
-- **Consolidação** (heurística, sem LLM) — pós-tarefa e via `okami memory consolidate`: expira TTL vencido e
-  funde quase-duplicatas (marca `superseded`, **não apaga**), respeitando confiança (não rebaixa preferência
-  explícita por inferência fraca).
-- **Persona Compiler** (`okami/learning/compiler.py`) — bloco CURTO de direção por turno (read-only): puxa p/
-  precisão quando um papo casual tem assunto técnico, e adapta a abertura ao estado emocional da pessoa (sem
-  distorcer a solução). A identidade inteira (SOUL/VOICE/PERSONA) segue sempre injetada; isto é só o delta do turno.
-- CLI: `okami memory add|search|list|explain|forget|archive|consolidate|export` (`--global` p/ a casa). Arquivos
-  de identidade/core (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`) são sempre injetados (limites configuráveis).
+- **Automatic fallback** — each provider has a chain (`codex → [claude, minimax, lmstudio]`); if the
+  primary goes down (529/timeout/empty response) the turn *fails over* without dying.
+- **Adaptive capability profile** — `tier` (`strong`/`weak`/`local`) and `tool_mode`
+  (`json_constrained`) prepare the agent for the model you have.
+- **Live discovery** — `okami provider models <name>` lists models via `/v1/models`, otherwise falls
+  back to the catalog. Switch the session model with `/model <id>` and reasoning effort with `/think`.
+- **Usage & cost** — tokens (incl. *cache read*) and cost accumulated per session; `okami status`/`/usage`.
 
 ---
 
-## Auto-melhoria (vai além do Hermes)
+## Pluggable memory
 
-- **Persona evolutiva** — `SOUL.md` (quem é), `VOICE.md` (como fala), `PERSONA.md` (tom). Evoluem a
-  partir de feedback (`/feedback`, `okami persona-evolve`) **com go/no-go + changelog + rollback**.
-  O `SOUL.md` **nunca** evolui sozinho.
-- **Taste model** — `okami taste like|dislike|different`: aprovações viram *atratores*, rejeições
-  viram *repulsores*, e o *steering* resultante é injetado nos prompts de UI.
-- **Closed learning loop** — tarefa não-trivial e bem-sucedida é refletida e pode **destilar uma
-  skill** nova (que ainda passa pelo scan de segurança).
+- **Backends**: `sqlite-fts5` (default, BM25), **holographic** (`dim=1024` vectors), **Honcho** (SaaS),
+  or **layered**. **Hybrid** search (lexical + embeddings when available; degrades to BM25 offline).
+- **Write policy** — classifies each fact (fact/preference/decision/skill/error) and **blocks the
+  ephemeral/trivial** before persisting.
+- **Source citation** — every injected memory comes with `[category · source · confidence]`.
+- **Auto-compaction** — when the context fills up, old turns become *summary* nodes without losing the thread.
+- **Scope + global memory** — `scope` (global/workspace/…) per item; with `memory.global`,
+  `scope=global` preferences live in `~/.okami` and apply in **any** project, while one project's memory
+  does **not** contaminate another. Schema with `confidence`, `expires_at` (TTL) and `supersedes_id`
+  (consolidation).
+- **Auditing** — every recall is logged (`retrieval_logs`); `okami memory explain <id>` shows where the
+  memory came from and when/why it surfaced. `forget` (removes) and `archive` (removes, marked) are
+  reversible in history.
+- **Consolidation** (heuristic, no LLM) — post-task and via `okami memory consolidate`: expires stale
+  TTLs and merges near-duplicates (marks `superseded`, **does not delete**), respecting confidence
+  (won't demote an explicit preference because of a weak inference).
+- **Persona Compiler** (`okami/learning/compiler.py`) — a SHORT per-turn steering block (read-only):
+  pulls toward precision when a casual chat has a technical subject, and adapts the opening to the
+  person's emotional state (without distorting the solution). The whole identity (SOUL/VOICE/PERSONA)
+  is always injected; this is only the per-turn delta.
+- CLI: `okami memory add|search|list|explain|forget|archive|consolidate|export` (`--global` for home).
+  Identity/core files (`SOUL/VOICE/PERSONA/AGENTS/USER/MEMORY`) are always injected (configurable limits).
 
 ---
 
-## O terminal (TUI)
+## Self-improvement (goes beyond Hermes)
 
-`okami chat` é um **TUI de tela cheia em Textual**, na identidade da Okami (Onyx/Bone + Heat Orange
+- **Evolving persona** — `SOUL.md` (who it is), `VOICE.md` (how it talks), `PERSONA.md` (tone). They
+  evolve from feedback (`/feedback`, `okami persona-evolve`) **with go/no-go + changelog + rollback**.
+  `SOUL.md` **never** evolves on its own.
+- **Taste model** — `okami taste like|dislike|different`: approvals become *attractors*, rejections
+  become *repulsors*, and the resulting *steering* is injected into UI prompts.
+- **Closed learning loop** — a non-trivial, successful task is reflected on and can **distill a new
+  skill** (which still goes through the security scan).
+
+---
+
+## The terminal (TUI)
+
+`okami chat` is a **full-screen Textual TUI**, in the Okami identity (Onyx/Bone + Heat Orange
 `#ff7527` · Volt Cyan `#00dfe8` · Neon Magenta `#ff39d1`):
 
-- **Regiões fixas** — header · log rolável · painel de aprovação · input · barra de status pinada.
-- **Digite enquanto o agente trabalha** — fila FIFO; 1 worker, sem corrida (via `call_from_thread`).
-- **Tool-calls ao vivo** — cada passo aparece com ✓/✗; *loop detectado* e *aprovação* sinalizados.
-- **Aprovação por botão** — go/no-go sem digitar; **Ctrl-C** aborta o turno, **Ctrl-D** sai.
-- **Mouse + scroll**, status com *spinner* e *gauge* de contexto.
-- **Fallback gracioso** — sem TTY (pipe/CI) cai num REPL concorrente; `--no-tui` força o REPL simples.
+- **Fixed regions** — header · scrollable log · approval panel · input · pinned status bar.
+- **Type while the agent works** — FIFO queue; 1 worker, no race (via `call_from_thread`).
+- **Live tool-calls** — each step shows ✓/✗; *loop detected* and *approval* are signaled.
+- **Button approval** — go/no-go without typing; **Ctrl-C** aborts the turn, **Ctrl-D** exits.
+- **Mouse + scroll**, status with a *spinner* and a context *gauge*.
+- **Graceful fallback** — without a TTY (pipe/CI) it drops to a concurrent REPL; `--no-tui` forces the simple REPL.
 
-Dentro do chat, **comandos `/`** (saem de um registro declarativo único — help, autocomplete, "did you
+Inside the chat, **`/` commands** (from a single declarative registry — help, autocomplete, "did you
 mean"):
 
-| categoria | comandos |
+| category | commands |
 |---|---|
-| sessão | `/new` `/stop` `/retry` `/compact` `/sessions` `/resume <n>` `/export [arq]` `/exit` |
-| modelo | `/model [id]` `/models` `/think <nível>` |
-| identidade | `/feedback <texto>` `/persona <preset>` `/undo` `/like` `/dislike` `/different` |
+| session | `/new` `/stop` `/retry` `/compact` `/sessions` `/resume <n>` `/export [file]` `/exit` |
+| model | `/model [id]` `/models` `/think <level>` |
+| identity | `/feedback <text>` `/persona <preset>` `/undo` `/like` `/dislike` `/different` |
 | info | `/help` `/commands` `/status` `/usage` `/tools` `/whoami` |
-| sistema | `/yolo` `/normal` `/config` `/reload` |
+| system | `/yolo` `/normal` `/config` `/reload` |
 
 ---
 
-## Canais & Gateway
+## Channels & Gateway
 
-Uma interface `Channel` única; cada canal é *deny-by-default* (allowlist explícita).
+A single `Channel` interface; every channel is *deny-by-default* (explicit allowlist).
 
-- **Telegram** — botões inline para aprovação (com **nonce** anti-stale), *split* de mensagens >4096,
-  retry/backoff, dedup por turno, *typing*, e nota de voz → transcrição.
-- **Slack · Discord · Mattermost** — REST-polling, mesma interface, anti-loop (ignora o próprio bot).
-- **API HTTP** — `okami serve` (POST `/chat`, **Bearer `OKAMI_API_TOKEN`** fail-closed, bind `127.0.0.1`).
-- **Paperclip** — `okami heartbeat` pega a issue atribuída e trabalha (com go/no-go).
-- **ACP** — `okami acp`: a IDE (Zed/VS Code) dirige o Okami pelo Agent Client Protocol.
+- **Telegram** — inline buttons for approval (with an anti-stale **nonce**), message *split* >4096,
+  retry/backoff, per-turn dedup, *typing*, and voice note → transcription.
+- **Slack · Discord · Mattermost** — REST-polling, same interface, anti-loop (ignores its own bot).
+- **HTTP API** — `okami serve` (POST `/chat`, **Bearer `OKAMI_API_TOKEN`** fail-closed, bind `127.0.0.1`).
+- **Paperclip** — `okami heartbeat` picks up the assigned issue and works on it (with go/no-go).
+- **ACP** — `okami acp`: the IDE (Zed/VS Code) drives Okami via the Agent Client Protocol.
 
-`okami gateway` sobe **1 bot por agente**; `okami room` é um **brainstorm multi-agente** com moderador
-que decide quem fala (ou ninguém), com cooldown e caps anti-stampede.
+`okami gateway` brings up **1 bot per agent**; `okami room` is a **multi-agent brainstorm** with a
+moderator that decides who speaks (or no one), with cooldown and anti-stampede caps.
 
-> **Default de segurança:** sem `allow_chats`, o bot **não responde ninguém** (deny-by-default).
-> Libere com `channels.telegram.allow_chats: [<seu_id>]` (ou `allow_all: true`, inseguro).
-
----
-
-## Voz, imagem, browser e processos
-
-- **Voz** — `okami voice` (turn-based: fala no mic → o agente responde **falando**), `okami transcribe`
-  (Whisper local), `okami say` (Edge TTS).
-- **Imagem** — `okami image "..."` (gpt-image-2 via assinatura Codex; `--ref foto.png` para edição).
-- **Browser** — tool `browse` (Playwright; sem ela, *fetch* read-only) — **toda URL passa pela guarda
-  anti-SSRF**.
-- **Processos em background** — `process_start/poll/wait/log/list/kill/write/signal`: roda comando longo
-  sem bloquear o turno, com estado em disco que **sobrevive ao restart**, **PTY interativo**
-  (`process_write` manda stdin), `notify_on_complete`, `watch_patterns` com *strikes*, e *reconcile* de
-  órfão. Tudo sob a mesma política de sandbox do `run_shell`.
+> **Security default:** without `allow_chats`, the bot **responds to no one** (deny-by-default).
+> Open it with `channels.telegram.allow_chats: [<your_id>]` (or `allow_all: true`, insecure).
 
 ---
 
-## Modelo de Segurança
+## Voice, image, browser and processes
 
-Segurança *fail-closed* é o diferencial do Okami para uso real/exposto. (Detalhes operacionais em
+- **Voice** — `okami voice` (turn-based: speak into the mic → the agent responds **out loud**),
+  `okami transcribe` (local Whisper), `okami say` (Edge TTS).
+- **Image** — `okami image "..."` (gpt-image-2 via Codex subscription; `--ref photo.png` for editing).
+- **Browser** — the `browse` tool (Playwright; without it, read-only *fetch*) — **every URL goes
+  through the anti-SSRF guard**.
+- **Background processes** — `process_start/poll/wait/log/list/kill/write/signal`: run a long command
+  without blocking the turn, with on-disk state that **survives a restart**, an **interactive PTY**
+  (`process_write` sends stdin), `notify_on_complete`, `watch_patterns` with *strikes*, and orphan
+  *reconcile*. All under the same sandbox policy as `run_shell`.
+
+---
+
+## Security model
+
+*Fail-closed* security is Okami's differentiator for real/exposed use. (Operational details in
 [docs/PRODUCTION.md](docs/PRODUCTION.md).)
 
-- **Assinatura-only & segredos** — Claude/Codex sempre por OAuth/CLI; chaves só no `.env`
-  (projeto ou global `$OKAMI_HOME/.env`, default `~/.okami/.env`, `chmod 600`), **nunca** no YAML versionado. O `config set` recusa
-  segredo literal em chave pontilhada e manda usar `${ENV}`.
-- **Aprovação go/no-go** — modos `manual` · `smart` (auto-aprova risco baixo) · `off`
-  (**fail-closed**: sem prompt = nega o sensível) · `yolo` (bypass explícito por sessão). A aprovação é
-  um **objeto persistente single-use** (`approval_id`, `args_hash`, `expires_at`, `used_at`) — clicar de
-  novo (mesmo após restart) é recusado, e ela é amarrada aos **args exatos** da ação.
-- **Sandbox** — backend **local** (cwd + env sanitizado + timeout + teto de saída + rlimits) ou
-  **docker** (isolamento real: `--network none`, **não-root**, `--cap-drop ALL`, rootfs read-only, só o
-  workspace montado, no-new-privileges). Perfis `dev` / `hardened` / `hardened-strict`, **endurecimento
-  por superfície** (Telegram/API/… endurecem por padrão) e **egress allowlist** via proxy filtrante
-  (com bloqueio anti-rede-interna).
-- **Anti-SSRF** — `okami/core/net_guard.py`: toda URL controlada por usuário/modelo valida esquema
-  http(s), resolve o host e **recusa** loopback/privada/link-local (incl. `169.254.169.254` metadata) e
-  revalida cada redirect.
-- **Redator central** — segredos (chaves, Bearer, JWT, AWS/GitHub/Slack tokens) são mascarados antes de
-  ir pra log, saída de tool, audit (`.okami/audit.jsonl`) ou contexto do modelo.
-- **File-safety** — *jail* de workspace (anti path-traversal/symlink), escrita atômica, teto de tamanho.
-- **MCP trust store** — capabilities por tool (read/write/network/shell/secret-access), níveis de trust
-  (`untrusted`/`reviewed`/`trusted`), HTTPS/local-only, e go/no-go por capability; tool de servidor
-  não-confiável **sem manifesto** exige aprovação (não confia no nome bonitinho).
-- **Checkpoints com integridade** — journal sob lock, **HMAC encadeado** (adulterar/inserir quebra a
-  cadeia → rollback ignora a entrada forjada).
+- **Subscription-only & secrets** — Claude/Codex always via OAuth/CLI; keys only in `.env`
+  (project or global `$OKAMI_HOME/.env`, default `~/.okami/.env`, `chmod 600`), **never** in the
+  versioned YAML. `config set` refuses a literal secret in a dotted key and tells you to use `${ENV}`.
+- **Go/no-go approval** — modes `manual` · `smart` (auto-approves low risk) · `off`
+  (**fail-closed**: no prompt = denies the sensitive action) · `yolo` (explicit per-session bypass).
+  An approval is a **persistent single-use object** (`approval_id`, `args_hash`, `expires_at`,
+  `used_at`) — clicking again (even after a restart) is refused, and it's bound to the **exact args** of
+  the action.
+- **Sandbox** — a **local** backend (cwd + sanitized env + timeout + output ceiling + rlimits) or
+  **docker** (real isolation: `--network none`, **non-root**, `--cap-drop ALL`, read-only rootfs, only
+  the workspace mounted, no-new-privileges). `dev` / `hardened` / `hardened-strict` profiles,
+  **per-surface hardening** (Telegram/API/… harden by default) and an **egress allowlist** via a
+  filtering proxy (with internal-network blocking).
+- **Anti-SSRF** — `okami/core/net_guard.py`: every user/model-controlled URL validates the http(s)
+  scheme, resolves the host and **refuses** loopback/private/link-local (incl. `169.254.169.254`
+  metadata) and re-validates each redirect.
+- **Central redactor** — secrets (keys, Bearer, JWT, AWS/GitHub/Slack tokens) are masked before they
+  reach a log, tool output, the audit (`.okami/audit.jsonl`) or the model's context.
+- **File-safety** — workspace *jail* (anti path-traversal/symlink), atomic writes, size ceiling.
+- **MCP trust store** — per-tool capabilities (read/write/network/shell/secret-access), trust levels
+  (`untrusted`/`reviewed`/`trusted`), HTTPS/local-only, and go/no-go per capability; a tool from an
+  untrusted server **without a manifest** requires approval (it doesn't trust a pretty name).
+- **Integrity checkpoints** — journal under a lock, **chained HMAC** (tampering/inserting breaks the
+  chain → rollback ignores the forged entry).
 
 ---
 
-## Conformance & Política
+## Conformance & Policy
 
-Estilo OpenClaw *policy*: a postura é um **artefato autorado e versionado**.
+OpenClaw *policy* style: the posture is an **authored, versioned artifact**.
 
 ```bash
-okami policy check            # avalia config+workspace contra okami.policy.yaml (gate de CI)
-okami policy check --strict   # postura de PRODUÇÃO/GA (exposto sem isolamento real = FAIL)
-okami policy show [--strict]  # política efetiva
-okami policy init             # scaffold de okami.policy.yaml
-okami doctor --lint           # lint de postura (pass/warn/fail) — aprovação, segredo, sandbox, MCP…
-okami auth list               # perfis de auth (tipo/status/onde mora a credencial — nunca o valor)
-okami status --json           # status resolvido p/ monitoramento
+okami policy check            # evaluate config+workspace against okami.policy.yaml (CI gate)
+okami policy check --strict   # PRODUCTION/GA posture (exposed without real isolation = FAIL)
+okami policy show [--strict]  # effective policy
+okami policy init             # scaffold an okami.policy.yaml
+okami doctor --lint           # posture lint (pass/warn/fail) — approval, secrets, sandbox, MCP…
+okami auth list               # auth profiles (type/status/where the credential lives — never its value)
+okami status --json           # resolved status for monitoring
 ```
 
-O `okami.policy.yaml` governa: `approvals.mode_allow`, allowlist de **providers** e **modelos**,
-**ingress** de canal (proíbe `allow_all`), **trust** de MCP, segredo fora do YAML, exposição do gateway,
-metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **gate de prontidão para GA**.
+`okami.policy.yaml` governs: `approvals.mode_allow`, the allowlist of **providers** and **models**,
+channel **ingress** (forbids `allow_all`), MCP **trust**, secrets out of the YAML, gateway exposure,
+tool metadata and retention. The `--strict` mode (production overlay) is the **GA-readiness gate**.
 
 ---
 
-## Observabilidade
+## Observability
 
-- **Event log** — `.okami/events.jsonl` (timeline append-only, redigida, com `trace_id` por turno).
-- **Replay de trajetória** — `okami replay` lista os turnos; `okami replay <trace>` reconstrói o turno
-  (▶ start · 🧠 llm · ✓✗ step · ⚠ approval · ⨯ failure · ■ desfecho); `--json` para ferramenta.
-- **Doctor** — `okami doctor` (config/chaves/toolchain/sandbox), `--json` (saúde p/ CI), `--fix`
-  (lock órfão, perms do `.env`, temp), `--lint` (postura).
-- **Audit & usage** — `.okami/audit.jsonl` (toda tool + decisão de aprovação) e tokens/custo por sessão.
-- **Faxina** — `okami clean [--deep]` (lock órfão, temp, áudio, sessões, checkpoints, process logs).
+- **Event log** — `.okami/events.jsonl` (append-only, redacted timeline, with a per-turn `trace_id`).
+- **Trajectory replay** — `okami replay` lists the turns; `okami replay <trace>` reconstructs the turn
+  (▶ start · 🧠 llm · ✓✗ step · ⚠ approval · ⨯ failure · ■ outcome); `--json` for tooling.
+- **Doctor** — `okami doctor` (config/keys/toolchain/sandbox), `--json` (health for CI), `--fix`
+  (orphan lock, `.env` perms, temp), `--lint` (posture).
+- **Audit & usage** — `.okami/audit.jsonl` (every tool + approval decision) and tokens/cost per session.
+- **Cleanup** — `okami clean [--deep]` (orphan lock, temp, audio, sessions, checkpoints, process logs).
 
 ---
 
-## Referência de comandos (CLI)
+## Command reference (CLI)
 
-<details><summary><b>Ver todos os comandos</b></summary>
+<details><summary><b>See all commands</b></summary>
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `okami setup` | Assistente de configuração (providers, login, memória, identidade, canal). |
-| `okami chat [msg]` | Conversa no terminal (TUI); `-a <agente>`, `--no-tui`. |
-| `okami task <goal> -e <crit>` | Roda o harness até COMPLETE/BLOCKED/NEEDS_INPUT/FAILED. |
-| `okami run <prompt> [-p prov]` | Ida-e-volta crua ao provider (sem sessão/harness). |
-| `okami doctor [--json\|--fix\|--lint]` | Diagnóstico / saúde / reparo / lint de postura. |
-| `okami status [--json]` | Visão resolvida (agente, modelo, providers, toggles). |
-| `okami login <provider>` | Autentica provider de assinatura (device flow / CLI). |
-| `okami provider add\|list\|remove\|default\|login\|models` | Gerencia providers (menu de seta). |
-| `okami auth list\|status` | Perfis de auth (metadata, sem segredo). |
-| `okami policy check\|init\|show` | Conformance autorada (`--strict` p/ GA). |
-| `okami config show\|get\|set\|unset\|path\|edit\|check` | Config efetiva (segredo → `.env`). |
-| `okami memory add\|search\|list\|explain\|forget\|archive\|consolidate\|stats\|export` | Memória híbrida + auditoria/CRUD/consolidação/métricas (`--global` = casa `~/.okami`). |
-| `okami taste like\|dislike\|different\|show\|steer` | Taste model de design. |
-| `okami persona-init\|persona-evolve\|persona-log\|persona-rollback` | Identidade evolutiva. |
-| `okami skills` / `okami learn <fonte>` / `okami scan <path>` | Skills + scan de segurança. |
-| `okami agent new\|list` | Multi-agente (`agents/<id>`). |
-| `okami gateway` / `okami serve` / `okami room` | Telegram bots / API HTTP / sala multi-agente. |
-| `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway como serviço do SO (launchd/systemd, sobe no boot) + log ao vivo. |
-| `okami ps` / `okami process log\|kill\|signal\|wait\|clean` | Supervisão dos processos em background do agente, do terminal (kill real, sinais, PTY). |
-| Telegram: menu `/` (setMyCommands) · reações 👀/👍/👎 (`gateway.reactions`) · botões inline de aprovação ✅/❌ | UX nativa do Telegram. |
-| `okami cron add\|list\|remove\|run\|tick` | Agendamento. |
-| `okami hooks` / `okami mcp` | Event hooks / servidores MCP. |
-| `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voz, STT, TTS, imagem. |
-| `okami paperclip` / `okami heartbeat` / `okami acp` / `okami route` | Paperclip / ACP / roteamento. |
-| `okami gate <dir>` | Verification gate de design. |
-| `okami events` / `okami replay [trace]` | Timeline / replay de trajetória. |
-| `okami rollback [N]` / `okami clean [--deep]` | Desfaz escritas / faxina de disco. |
-| `okami tools` / `okami tune` / `okami version` | Tools do agente / auto-tune / versão. |
+| `okami setup` | Configuration wizard (providers, login, memory, identity, channel). |
+| `okami chat [msg]` | Chat in the terminal (TUI); `-a <agent>`, `--no-tui`. |
+| `okami task <goal> -e <crit>` | Run the harness until COMPLETE/BLOCKED/NEEDS_INPUT/FAILED. |
+| `okami run <prompt> [-p prov]` | Raw round-trip to the provider (no session/harness). |
+| `okami doctor [--json\|--fix\|--lint]` | Diagnosis / health / repair / posture lint. |
+| `okami status [--json]` | Resolved view (agent, model, providers, toggles). |
+| `okami login <provider>` | Authenticate a subscription provider (device flow / CLI). |
+| `okami provider add\|list\|remove\|default\|login\|models` | Manage providers (arrow menu). |
+| `okami auth list\|status` | Auth profiles (metadata, no secrets). |
+| `okami policy check\|init\|show` | Authored conformance (`--strict` for GA). |
+| `okami config show\|get\|set\|unset\|path\|edit\|check` | Effective config (secret → `.env`). |
+| `okami memory add\|search\|list\|explain\|forget\|archive\|consolidate\|stats\|export` | Hybrid memory + auditing/CRUD/consolidation/metrics (`--global` = `~/.okami` home). |
+| `okami taste like\|dislike\|different\|show\|steer` | Design taste model. |
+| `okami persona-init\|persona-evolve\|persona-log\|persona-rollback` | Evolving identity. |
+| `okami skills` / `okami learn <source>` / `okami scan <path>` | Skills + security scan. |
+| `okami agent new\|list` | Multi-agent (`agents/<id>`). |
+| `okami gateway` / `okami serve` / `okami room` | Telegram bots / HTTP API / multi-agent room. |
+| `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway as an OS service (launchd/systemd, starts at boot) + live log. |
+| `okami ps` / `okami process log\|kill\|signal\|wait\|clean` | Supervise the agent's background processes from the terminal (real kill, signals, PTY). |
+| Telegram: `/` menu (setMyCommands) · reactions 👀/👍/👎 (`gateway.reactions`) · inline approval buttons ✅/❌ | Native Telegram UX. |
+| `okami cron add\|list\|remove\|run\|tick` | Scheduling. |
+| `okami hooks` / `okami mcp` | Event hooks / MCP servers. |
+| `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voice, STT, TTS, image. |
+| `okami paperclip` / `okami heartbeat` / `okami acp` / `okami route` | Paperclip / ACP / routing. |
+| `okami gate <dir>` | Design verification gate. |
+| `okami events` / `okami replay [trace]` | Timeline / trajectory replay. |
+| `okami rollback [N]` / `okami clean [--deep]` | Undo writes / disk cleanup. |
+| `okami tools` / `okami tune` / `okami version` | Agent tools / auto-tune / version. |
 
 </details>
 
-## Ferramentas do agente
+## Agent tools
 
-26 tools declaradas com **categoria · tier · sensibilidade** (`okami tools` lista; um teste anti-drift
-garante que toda tool tem metadata):
+26 tools declared with **category · tier · sensitivity** (`okami tools` lists them; an anti-drift test
+ensures every tool has metadata):
 
 `respond` `read_file` `write_file` `edit_file` `list_dir` `find_files` · `run_shell` ·
 `process_start/poll/wait/log/list/write/signal/kill` · `remember` `recall_memory` `remember_user` ·
-`use_skill` · `spawn` (subagente) · `browse` · `generate_image` · `finish_setup` `task_complete`
+`use_skill` · `spawn` (subagent) · `browse` · `generate_image` · `finish_setup` `task_complete`
 `task_blocked` `need_input`.
 
-A **policy por superfície** restringe o que cada canal pode (ex.: Telegram sem `run_shell`, grupo mais
-restrito ainda); ações sensíveis sempre passam por go/no-go.
+The **per-surface policy** restricts what each channel can do (e.g. Telegram without `run_shell`, an
+even more restricted group); sensitive actions always go through go/no-go.
 
 ---
 
-## Configuração
+## Configuration
 
-| Arquivo | Papel | Versionado? |
+| File | Role | Versioned? |
 |---|---|---|
-| `okami.yaml` | Config base (providers, memória, contracts, voz, learning). | ✅ sim |
-| `okami.local.yaml` | Overrides locais (ex.: IP do LMStudio). | ❌ gitignored |
-| `.env` / `$OKAMI_HOME/.env` (default `~/.okami/.env`) | **Segredos** (chaves de API, tokens). | ❌ gitignored |
-| `okami.policy.yaml` | Postura de conformance autorada. | ✅ sim |
+| `okami.yaml` | Base config (providers, memory, contracts, voice, learning). | ✅ yes |
+| `okami.local.yaml` | Local overrides (e.g. LMStudio IP). | ❌ gitignored |
+| `.env` / `$OKAMI_HOME/.env` (default `~/.okami/.env`) | **Secrets** (API keys, tokens). | ❌ gitignored |
+| `okami.policy.yaml` | Authored conformance posture. | ✅ yes |
 
-Cada provider tem `model` (string LiteLLM), `api_base` opcional, `api_key_env`/`api_key`, `transport`,
-`tier`, `fallback` e `capability`. Segredo nunca vai no YAML — `okami config set OPENAI_API_KEY <v>`
-roteia pro `.env`; `okami config set providers.x.api_key '${OPENAI_API_KEY}'` referencia por env.
+Each provider has a `model` (LiteLLM string), an optional `api_base`, `api_key_env`/`api_key`,
+`transport`, `tier`, `fallback` and `capability`. A secret never goes in the YAML —
+`okami config set OPENAI_API_KEY <v>` routes it to `.env`;
+`okami config set providers.x.api_key '${OPENAI_API_KEY}'` references it via env.
+
+> **Language (i18n):** the UI is **English by default**, with Portuguese available. Switch with
+> `okami --lang pt`, `OKAMI_LANG=pt`, or `lang: pt` in `okami.yaml`.
 
 ---
 
-## Desenvolvimento & CI
+## Development & CI
 
 ```bash
-make test           # uv run pytest -q   → suíte completa
+make test           # uv run pytest -q   → full suite
 make doctor
-bash scripts/secret-scan.sh              # mesmo gate da CI (allowlist por `# pragma: allowlist secret`)
+bash scripts/secret-scan.sh              # same gate as CI (allowlist via `# pragma: allowlist secret`)
 ```
 
-A CI (`.github/workflows/ci.yml`) é **gate de verdade** (sem `|| true`), com actions **pinadas por SHA**:
+CI (`.github/workflows/ci.yml`) is a **real gate** (no `|| true`), with **SHA-pinned** actions:
 
-- **test** — `pytest` + **`okami policy check --json`** (conformance, com artefato) + build do wheel + smoke.
-- **secret-scan** — script compartilhado (CI ≡ pytest); vetor fake de teste é marcado e auditável.
+- **test** — `pytest` + **`okami policy check --json`** (conformance, with an artifact) + wheel build + smoke.
+- **secret-scan** — shared script (CI ≡ pytest); the fake test vector is marked and auditable.
 - **security** — **Ruff** · **Bandit (HIGH)** · **pip-audit** (CVE) · **Semgrep** (`p/security-audit`).
 
-> CodeQL exige GitHub Advanced Security (indisponível em repo privado) → trocado por **Semgrep**, que
-> roda 100% no runner e mostra os achados no log.
+> CodeQL requires GitHub Advanced Security (unavailable on a private repo) → swapped for **Semgrep**,
+> which runs 100% on the runner and surfaces findings in the log.
 
 ---
 
-## Estrutura do projeto
+## Project structure
 
 ```
 okami/
@@ -467,27 +479,28 @@ okami/
   gateway/     AgentEndpoint, GroupEndpoint, sessions, checkpoints, approvals
   cli/         _app, _shared, commands/ (basics, task, chat, config, policy, auth, …)
   voice/       bridge, tts, stt          observability/  events, trajectory
-  learning/    reflexão → memória → skill          skills/  lockfile + scan
-agents/        perfis multi-agente (agents/<id>/agent.yaml + identidade)
-skills/        skills versionadas (frontend-shadcn, tdd, …)
+  learning/    reflection → memory → skill          skills/  lockfile + scan
+  i18n.py · locales/   en (default) + pt
+agents/        multi-agent profiles (agents/<id>/agent.yaml + identity)
+skills/        versioned skills (frontend-shadcn, tdd, …)
 docs/          ARCHITECTURE · ROADMAP · STRUCTURE · PRODUCTION · COMPETITIVE_RESEARCH
 deploy/        Dockerfile + docker-compose.yml      scripts/  install.sh/.ps1 · secret-scan.sh
-tests/         suíte completa (pytest)
+tests/         full suite (pytest)
 ```
 
 ---
 
-## Documentação
+## Documentation
 
-- 🌐 **Site**: [okamiagent.com](https://okamiagent.com) — visão geral do produto.
-- 📚 **Docs**: [okamiagent.com/docs](https://okamiagent.com/docs) — guia completo de uso.
-- 🎨 **Landing (fonte)**: [github.com/OkamiOps/Okami-Agent-LP](https://github.com/OkamiOps/Okami-Agent-LP).
+- 🌐 **Site**: [okamiagent.com](https://okamiagent.com) — product overview.
+- 📚 **Docs**: [okamiagent.com/docs](https://okamiagent.com/docs) — full usage guide.
+- 🎨 **Landing (source)**: [github.com/OkamiOps/Okami-Agent-LP](https://github.com/OkamiOps/Okami-Agent-LP).
 - 📦 **Releases**: [github.com/OkamiOps/Okami-Agent/releases](https://github.com/OkamiOps/Okami-Agent/releases) · [CHANGELOG](CHANGELOG.md).
 
-No repositório:
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura completa (harness, skills, providers,
-  memória, auto-melhoria, multi-agente, segurança).
-- [docs/PRODUCTION.md](docs/PRODUCTION.md) — checklist de GA + como ligar a postura hostil.
+In the repository:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — full architecture (harness, skills, providers, memory,
+  self-improvement, multi-agent, security).
+- [docs/PRODUCTION.md](docs/PRODUCTION.md) — GA checklist + how to turn on the hostile posture.
 - [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/STRUCTURE.md](docs/STRUCTURE.md) ·
   [docs/COMPETITIVE_RESEARCH.md](docs/COMPETITIVE_RESEARCH.md) (Hermes × OpenClaw × Okami).
 
@@ -495,7 +508,7 @@ No repositório:
 
 <div align="center">
 
-**Okami Agent** — © OkamiOps · [okamiagent.com](https://okamiagent.com). Construído com
+**Okami Agent** — © OkamiOps · [okamiagent.com](https://okamiagent.com). Built with
 [uv](https://docs.astral.sh/uv/) · [LiteLLM](https://github.com/BerriAI/litellm) ·
 [Textual](https://textual.textualize.io/).
 
