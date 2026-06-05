@@ -48,3 +48,23 @@ jobs:
             echo "::error::possível segredo versionado"; exit 1
           fi
           echo "sem segredos versionados ✓"
+
+  # Hardening de supply-chain (P2). Informativo por enquanto (|| true) — vira gate quando triado.
+  # TODO: pinar as actions por SHA (não por @v4/@v5) e gerar SBOM/assinatura no release.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Ruff — estilo + regras de segurança (informativo)
+        run: uvx ruff check okami tests || true
+      - name: Bandit — segurança Python (informativo)
+        run: uvx bandit -r okami -ll || true
+      - name: pip-audit — CVEs de dependência / OSV (informativo)
+        run: |
+          uv export --frozen --no-dev -o /tmp/reqs.txt 2>/dev/null \
+            || uv export --frozen -o /tmp/reqs.txt 2>/dev/null || : > /tmp/reqs.txt
+          uvx pip-audit -r /tmp/reqs.txt || true
