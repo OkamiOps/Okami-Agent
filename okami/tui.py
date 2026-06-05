@@ -183,15 +183,21 @@ def _skill_category(s) -> str:
 def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
     """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
 
-    Retorna: exit · help · approval · stop · queue · handle.
+    Retorna: exit · help · details · agents · approval · stop · queue · handle.
+    - comandos de DISPLAY (help/details/agents) são CLIENTE — não vão pro endpoint;
     - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
     - /stop sempre passa direto (cancela mesmo ocupado);
     - digitou enquanto ocupado → `queue` (vai pra fila FIFO, processa quando terminar)."""
     low = line.strip().lower()
+    head = low.split(maxsplit=1)[0] if low else ""
     if low in ("/exit", "/quit", "exit", "quit", ":q"):
         return "exit"
     if low == "/help":
         return "help"
+    if head == "/details":                              # verbosidade dos tool-calls (cliente)
+        return "details"
+    if head in ("/agents", "/tasks"):                   # painel de atividade (cliente)
+        return "agents"
     if pending_approval:
         return "approval"
     if low in ("/stop", "/cancel", "/parar"):
@@ -292,14 +298,50 @@ def _args_preview(args: dict) -> str:
     return ""
 
 
-def event_line(e: dict) -> Text | None:
+def _args_full(args: dict) -> str:
+    """Todos os args numa linha (k=v) p/ o modo /details expanded — sem truncar tão cedo."""
+    if not isinstance(args, dict) or not args:
+        return ""
+    parts = []
+    for k, v in args.items():
+        sv = str(v).replace("\n", " ")
+        parts.append(f"{k}={sv[:120] + ('…' if len(sv) > 120 else '')}")
+    return " · ".join(parts)[:240]
+
+
+_DETAIL_LEVELS = ("hidden", "collapsed", "expanded")
+
+
+def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 0) -> Text:
+    """Painel /agents (alias /tasks): o que está rodando AGORA — turno atual, /background e fila."""
+    bg = bg or {}
+    t = Text()
+    t.append("⚙ atividade\n", style=f"bold {CYAN}")
+    t.append("  turno atual: ", style=MUTE)
+    t.append(("ocupado" if busy else "livre") + "\n", style=ORANGE if busy else SOFT)
+    if bg:
+        t.append(f"  background ({len(bg)}):\n", style=MUTE)
+        for bid, desc in list(bg.items())[:10]:
+            t.append(f"    ▶ #{bid} {desc}\n", style=SOFT)
+    else:
+        t.append("  background: nenhum\n", style=MUTE)
+    if queued:
+        t.append(f"  fila: {queued} aguardando\n", style="#ffb86c")
+    return t
+
+
+def event_line(e: dict, detail: str = "collapsed") -> Text | None:
     """Linha ao vivo p/ um evento do harness (tool-call, loop, compaction…). None = não mostrar.
 
     É o que faz o terminal sentir VIVO: em vez de 'pensando…' por 30s e cuspir tudo, mostra cada
-    passo enquanto acontece. Mesmos eventos que o `okami task` já renderiza — agora no chat também."""
+    passo enquanto acontece. `detail` (/details) controla o quanto de tool-call aparece:
+    hidden = só o resultado final · collapsed = 1 linha por passo (default) · expanded = com os args."""
     k = e.get("kind")
     if k == "step":
-        prev = _args_preview(e.get("args") or {})
+        if detail == "hidden":                          # /details hidden → não polui com tool-calls
+            return None
+        args = e.get("args") or {}
+        prev = _args_full(args) if detail == "expanded" else _args_preview(args)
         mark = f"[{CYAN}]✓[/]" if e.get("ok") else "[red]✗[/]"
         t = Text.from_markup(f"  {mark} [{SOFT}]{e['tool']}[/]" + (f" [{MUTE}]{prev}[/]" if prev else ""))
         return t

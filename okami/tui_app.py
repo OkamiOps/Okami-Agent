@@ -138,6 +138,7 @@ if _HAS_TEXTUAL:
             self._spin = 0
             self._exit_armed = 0.0
             self._busy_since: float | None = None
+            self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
 
         # ---- layout ----------------------------------------------------------
@@ -193,7 +194,7 @@ if _HAS_TEXTUAL:
             log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
-            line = _tui.event_line(e)
+            line = _tui.event_line(e, self._details)
             if line is not None:
                 self.query_one("#log", RichLog).write(line)
 
@@ -250,6 +251,10 @@ if _HAS_TEXTUAL:
                         break
                     if d == "help":
                         self.call_from_thread(lambda: self.query_one("#log", RichLog).write(_tui.help_table()))
+                    elif d == "details":
+                        self.call_from_thread(self._cmd_details, line)
+                    elif d == "agents":
+                        self.call_from_thread(self._cmd_agents)
                     elif d in ("approval", "stop"):
                         self._safe_handle(line)
                     else:                                  # handle | queue → fila (1 só produtor)
@@ -265,6 +270,21 @@ if _HAS_TEXTUAL:
                 self.ep.handle(self._cid, line)
             except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a TUI
                 self.call_from_thread(self.sink_note, f"erro: {e}")
+
+        def _cmd_details(self, line: str) -> None:
+            from rich.text import Text
+            arg = line.split(maxsplit=1)[1].strip().lower() if " " in line else ""
+            if arg in _tui._DETAIL_LEVELS:
+                self._details = arg
+            else:                                          # sem arg → cicla hidden→collapsed→expanded
+                self._details = _tui._DETAIL_LEVELS[
+                    (_tui._DETAIL_LEVELS.index(self._details) + 1) % len(_tui._DETAIL_LEVELS)]
+            self.query_one("#log", RichLog).write(Text(f"  🔎 detalhes dos tool-calls: {self._details}", style="dim"))
+
+        def _cmd_agents(self) -> None:
+            s = self.ep.sessions.get(self._cid)
+            self.query_one("#log", RichLog).write(
+                _tui.activity_panel(bg=self.ep._bg, busy=self._busy(), queued=len(s.queued) if s else 0))
 
         # ---- timer: atividade + status + barra de aprovação ------------------
         def _tick(self) -> None:

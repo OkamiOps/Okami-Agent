@@ -107,6 +107,20 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         if decision == "help":
             console.print(tui.help_table())
             continue
+        if decision == "details":                       # cliente: verbosidade dos tool-calls
+            arg = line.split(maxsplit=1)[1].strip().lower() if " " in line else ""
+            lv = getattr(ep, "_details", "collapsed")
+            if arg in tui._DETAIL_LEVELS:
+                lv = arg
+            else:                                       # sem arg → cicla
+                lv = tui._DETAIL_LEVELS[(tui._DETAIL_LEVELS.index(lv) + 1) % len(tui._DETAIL_LEVELS)]
+            ep._details = lv
+            console.print(f"[dim]🔎 detalhes dos tool-calls: {lv}[/dim]")
+            continue
+        if decision == "agents":                        # cliente: painel de atividade
+            sx = ep.sessions.get(cid)
+            console.print(tui.activity_panel(bg=ep._bg, busy=_busy(), queued=len(sx.queued) if sx else 0))
+            continue
         if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
             inflight.append(line)
             if decision == "queue":
@@ -231,13 +245,14 @@ def chat(
     from okami.channels.terminal import TerminalChannel
 
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
-        line = tui.event_line(e)
+        line = tui.event_line(e, getattr(ep, "_details", "collapsed"))
         if line is not None:
             console.print(line)
 
     ch = TerminalChannel(name, console=console)
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
                        approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
+    ep._details = "collapsed"                         # verbosidade dos tool-calls (/details) — estado do cliente
     if new:
         ep.session(cid).history.clear()
         ep.store.reset(cid)

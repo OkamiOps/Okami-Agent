@@ -55,6 +55,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("status", "estado da sessão (trocas, modelo, yolo)", "info", tier="essential"),
     CommandDef("usage", "tokens + custo acumulados da sessão", "info"),
     CommandDef("tools", "lista as ferramentas que o agente tem", "info"),
+    CommandDef("details", "verbosidade dos tool-calls: hidden | collapsed | expanded", "info",
+               args="[nível]", scope="chat", tier="power"),
+    CommandDef("agents", "painel de atividade: turno, /background e fila", "info", ("tasks",),
+               scope="chat", tier="power"),
     CommandDef("whoami", "mostra seu chat id (p/ allowlist)", "info", ("id",), tier="power"),
     # ---- sistema ----
     CommandDef("yolo", "auto-aprova ações sensíveis nesta sessão", "sistema"),
