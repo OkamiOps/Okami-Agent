@@ -58,8 +58,9 @@ def memory_search(
     if not items:
         console.print("[dim]nada encontrado[/dim]")
         return
+    from okami.memory.citation import cite
     for i in items:
-        console.print(f"- [dim][{i.kind}][/dim] {i.text[:160]}")
+        console.print(f"- {i.text[:160]}  [dim]{cite(i)}[/dim]")
 
 
 @mem_app.command("list")

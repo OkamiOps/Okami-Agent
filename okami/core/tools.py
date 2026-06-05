@@ -297,7 +297,8 @@ class RecallMemory(Tool):
         items = ctx.memory.recall(args.get("query", ""), 5)
         if not items:
             return ToolResult(True, "(nada encontrado na memória)")
-        return ToolResult(True, "\n".join(f"- {i.text[:200]}" for i in items))
+        from okami.memory.citation import cited_line       # cada hit vem com [categoria · origem · confiança]
+        return ToolResult(True, "\n".join(cited_line(i) for i in items))
 
 
 class RememberUser(Tool):

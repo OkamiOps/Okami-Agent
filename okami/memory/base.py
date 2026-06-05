@@ -39,15 +39,17 @@ class Memory:
         raise NotImplementedError
 
     def inject(self, query: str = "", limit: int = 5) -> str:
-        """Bloco de memória relevante para o system prompt."""
+        """Bloco de memória relevante para o system prompt, COM citação de origem (#11)."""
+        from okami.memory.citation import cited_line
         items = self.recall(query, limit) if query.strip() else self.recent(limit)
-        relevant = ("fact", "decision", "summary", "anti_pattern", "lesson")
+        # inclui as categorias da write policy (#10): preferência/decisão/skill/erro ancoram a resposta.
+        relevant = ("fact", "preference", "decision", "skill", "error", "summary", "anti_pattern", "lesson")
         items = [i for i in items if i.kind in relevant] or items
         if not items:
             return ""
-        lines = ["O QUE VOCÊ JÁ SABE (use pra ancorar a resposta no contexto real — não recite isto "
-                 "nem diga 'na memória consta'):"]
-        lines += [f"- {i.text.strip()[:200]}" for i in items]
+        lines = ["O QUE VOCÊ JÁ SABE (ancore a resposta nisto — cada item traz [categoria · origem · "
+                 "confiança]; NÃO recite as tags nem diga 'na memória consta'):"]
+        lines += [cited_line(i) for i in items]
         return "\n".join(lines)
 
     def reflect(self) -> None:  # curadoria/dreaming (opcional)
