@@ -474,18 +474,18 @@ class Harness:
                 # → isso É a resposta dele. Não rejeita nem mostra "emita JSON" (seria UX de robô num
                 # papo). Só vale em conversa pura, sem ação pedida e sem tentativa de tool malformada.
                 if (action is None and is_conversational(t) and not self._action_expected
-                        and not FUTURE_INTENT.search(out)        # promessa "vou fazer" NÃO é resposta
-                        and '"tool"' not in out and len(out.strip()) >= 2):
+                        and not FUTURE_INTENT.search(comp.text)  # promessa "vou fazer" NÃO é resposta
+                        and '"tool"' not in comp.text and len(comp.text.strip()) >= 2):
                     t.state = TaskState.COMPLETE
-                    t.result = out.strip()
+                    t.result = comp.text.strip()
                     self._emit("complete", summary=t.result)
                     return t
                 self._consecutive_violations += 1
                 self._stats["violations"] += 1
                 hint = ""
-                if action is None and FUTURE_INTENT.search(out):
+                if action is None and FUTURE_INTENT.search(comp.text):
                     hint = " Você descreveu intenção em vez de agir."
-                self._emit("violation", n=self._consecutive_violations, text=out[:200])
+                self._emit("violation", n=self._consecutive_violations, text=comp.text[:200])
                 if self._consecutive_violations >= self.budget.max_consecutive_violations:
                     if self._try_escalate("violações de Action-or-Terminate"):
                         continue

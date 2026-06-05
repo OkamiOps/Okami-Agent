@@ -81,7 +81,7 @@ def run_task(
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
             _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
-        return res.text
+        return res                      # Completion INTEIRO (tool_calls/finish_reason) → harness (P0.4)
 
     escalate = None
     if escalate_to:
@@ -90,7 +90,7 @@ def run_task(
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
                 _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
-            return res.text
+            return res                      # Completion inteiro (P0.4)
 
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
     all_skills = skillmod.load_skills(Path(skills_dir))

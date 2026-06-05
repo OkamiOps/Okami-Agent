@@ -163,6 +163,17 @@ def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict |
     return None
 
 
+def _extract_tool_calls(msg) -> list[dict]:
+    """tool_calls nativos do litellm → [{"id","name","arguments"}] (vazio = sem function-calling)."""
+    out = []
+    for tc in (getattr(msg, "tool_calls", None) or []):
+        fn = getattr(tc, "function", None)
+        out.append({"id": getattr(tc, "id", "") or "",
+                    "name": (getattr(fn, "name", "") if fn else "") or "",
+                    "arguments": (getattr(fn, "arguments", "") if fn else "") or ""})
+    return out
+
+
 def _complete_one(pc, messages, model, response_schema, overrides) -> Completion:
     via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
@@ -170,8 +181,14 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
     rf = _response_format(pc, response_schema)
     if rf is not None:
         overrides.setdefault("response_format", rf)
+    if getattr(pc, "native_tools", False) and "tools" not in overrides:   # P0.4: tool-calling nativo (opt-in)
+        from okami.core.tools import default_registry, openai_tools
+        overrides["tools"] = openai_tools(default_registry())
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
-    return Completion(text=resp.choices[0].message.content or "",
+    choice = resp.choices[0]
+    return Completion(text=choice.message.content or "",
+                      tool_calls=_extract_tool_calls(choice.message),       # antes JOGADO FORA (P0.4)
+                      finish_reason=getattr(choice, "finish_reason", "") or "stop",
                       usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
                       provider=pc.name, model=_effective_model(pc, model))
 
