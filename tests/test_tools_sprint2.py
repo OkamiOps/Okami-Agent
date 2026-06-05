@@ -68,3 +68,21 @@ def test_tool_result_budget_truncates_and_persists(tmp_path):
             Task(goal="lê o arquivo grande"), tmp_path).run()
     saved = tmp_path / ".okami" / "tool_outputs" / "step_1.txt"
     assert saved.exists() and len(saved.read_text(encoding="utf-8")) == 20_000   # completo persistido
+
+
+# ----------------------------------------------------------------- #1 fuzzy find_files
+def test_find_files_fuzzy_case_insensitive(tmp_path):
+    from okami.core.tools import FindFiles, ToolContext
+    (tmp_path / "Okami-Agent").mkdir()
+    (tmp_path / "Okami-Agent" / "README.md").write_text("x")
+    ctx = ToolContext(workspace=tmp_path)
+    assert "Okami-Agent" in FindFiles().run({"query": "okami_agent"}, ctx).output   # caso/underscore ignorados
+    assert "README.md" in FindFiles().run({"query": "readme"}, ctx).output
+    assert "nada casou" in FindFiles().run({"query": "zzzzzz"}, ctx).output
+
+
+# ----------------------------------------------------------------- #4 logger central
+def test_logger_does_not_raise():
+    from okami import log
+    log.dbg("debug best-effort")
+    log.warn("falha que afeta comportamento", exc_info=False)

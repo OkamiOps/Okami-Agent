@@ -215,6 +215,36 @@ class ListDir(Tool):
         return ToolResult(True, "\n".join(entries) or "(vazio)", effect=False)
 
 
+def _norm_name(s: str) -> str:
+    """Normaliza p/ busca fuzzy: só alfanum, minúsculo (hífen/underscore/espaço/caso somem).
+    'Okami-Agent' == 'okami_agent' == 'okamiagent'."""
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+class FindFiles(Tool):
+    name = "find_files"
+    description = ("Acha arquivos/pastas por nome no workspace — case-INSENSITIVE e fuzzy (acha "
+                   "'okami-agent' mesmo a pasta sendo 'Okami-Agent'). Prefira a isto em vez de `find` "
+                   "quando o nome pode variar em caso/hífen/underscore.")
+    args_schema = {"query": "parte do nome (caso/hífen/underscore/espaço são ignorados)"}
+    required = ("query",)
+    _SKIP = {".git", "__pycache__", ".venv", "node_modules", ".okami", ".pytest_cache", "dist"}
+
+    def run(self, args, ctx):
+        q = _norm_name(args.get("query", ""))
+        if not q:
+            return ToolResult(False, "find_files exige 'query' não-vazio.")
+        hits = []
+        for p in ctx.workspace.rglob("*"):
+            if any(part in self._SKIP for part in p.parts):
+                continue
+            if q in _norm_name(p.name):
+                hits.append(str(p.relative_to(ctx.workspace)) + ("/" if p.is_dir() else ""))
+                if len(hits) >= 60:
+                    break
+        return ToolResult(True, "\n".join(sorted(hits)) or f"(nada casou com '{args['query']}')", effect=False)
+
+
 class RunShell(Tool):
     name = "run_shell"
     description = "Executa um comando de shell no workspace (timeout 60s). Sandbox real virá na Fase 12."
@@ -403,7 +433,7 @@ class NeedInput(Tool):
 
 
 def default_registry() -> dict[str, Tool]:
-    tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), RunShell(), RememberFact(), RecallMemory(),
+    tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(), RememberFact(), RecallMemory(),
              RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(), FinishSetup(),
              TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

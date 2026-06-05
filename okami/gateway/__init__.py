@@ -263,8 +263,9 @@ class AgentEndpoint:
             for _ in persona.observe(self.ws, user_text, scale=int(pc.get("gradual_scale", 1)),
                                      emit=lambda m: self.channel.send(chat_id, f"🧬 saquei: {m}")):
                 pass
-        except Exception:  # noqa: BLE001 — nunca quebra o chat
-            pass
+        except Exception:  # noqa: BLE001 — nunca quebra o chat (mas registra: #4 self-review)
+            from okami import log
+            log.dbg("persona.observe falhou", exc_info=True)
 
     def _maybe_compact(self, chat_id) -> None:
         """Transcript longo → gera um nó SUMMARY (compaction §6.4). A cada 40 turnos depois de 60."""
@@ -283,7 +284,8 @@ class AgentEndpoint:
             if summary:
                 self.store.compact(chat_id, "[resumo da conversa anterior] " + summary[:1500])
         except Exception:  # noqa: BLE001 — compaction é best-effort
-            pass
+            from okami import log
+            log.dbg("compaction falhou", exc_info=True)
 
     def _observe_llm(self, chat_id, s: "Session") -> None:
         """A cada N turnos (persona.llm_every), uma leitura mais RICA por LLM (pega sarcasmo pelo tom,
@@ -297,7 +299,8 @@ class AgentEndpoint:
             persona.observe_llm(self.cfg, self.ws, s.history, scale=int(pc.get("gradual_scale", 1)),
                                 emit=lambda m: self.channel.send(chat_id, f"🧬 percebi: {m}"))
         except Exception:  # noqa: BLE001
-            pass
+            from okami import log
+            log.dbg("persona.observe_llm falhou", exc_info=True)
 
     def _approve(self, chat_id, s: Session) -> Callable[[dict], bool]:
         def approve(req: dict) -> bool:
