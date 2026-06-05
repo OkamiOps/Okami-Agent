@@ -93,12 +93,18 @@ providers:
       ANTHROPIC_API_KEY pay-as-you-go (ToS restringe reuse direto do token).
   minimax:                      # Token Plan (assinatura) via Subscription Key — OpenAI-compat (docs/token-plan)
     model: openai/MiniMax-M3
-    fallback: [lmstudio]
+    # failover NÃO termina no local: nem sempre tem LMStudio. Cai p/ os de assinatura (remoto) e o local
+    # por último — o harness pula automaticamente quem não está autenticado/disponível.
+    fallback: [codex, claude, lmstudio]
     api_base: https://api.minimax.io/v1   # OpenAI-compat: POST /v1/chat/completions. China: https://api.minimaxi.com/v1
     api_key_env: MINIMAX_API_KEY  # Subscription Key do Token Plan (Account ▸ Token Plan). Bearer. Só no .env.
     auth: api_key
     tier: weak
     context_window: 1000000
+    capability:
+      # FORÇA o protocolo de ação (JSON válido via response_format) — sem isto um modelo fraco/reasoning
+      # responde em TEXTO e NÃO chama tool. É o mesmo modo do LMStudio. (M3 OpenAI-compat suporta.)
+      tool_mode: json_constrained
     models:                       # https://platform.minimax.io/docs/api-reference/text-chat-openai
     - MiniMax-M3
     - MiniMax-M2.7
@@ -108,7 +114,7 @@ providers:
       `okami config set MINIMAX_API_KEY <key>` (vai pro .env). OpenAI-compat — sem OAuth.'
   mimo:                          # Xiaomi MiMo Token Plan (assinatura) — OpenAI-compat, endpoint REGIONAL token-plan
     model: openai/mimo-v2.5-pro
-    fallback: [lmstudio]
+    fallback: [codex, claude, lmstudio]   # não termina no local (ver minimax) — o harness pula indisponível
     # Endpoint do TOKEN PLAN (não é platform.xiaomimimo.com). Europa (mais perto do BR) por padrão;
     # troque a região: -sgp (Singapura) · -cn (China). https://platform.xiaomimimo.com/docs token plan.
     api_base: https://token-plan-ams.xiaomimimo.com/v1
@@ -116,6 +122,8 @@ providers:
     auth: api_key
     tier: weak
     context_window: 128000
+    capability:
+      tool_mode: json_constrained   # força o protocolo de ação (senão modelo fraco só conversa, não chama tool)
     models:
     - mimo-v2.5-pro
     - mimo-v2.5

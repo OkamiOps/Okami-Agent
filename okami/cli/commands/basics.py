@@ -366,13 +366,30 @@ def login(
             raise typer.Exit(1)
         raise typer.Exit(rc)
 
-    if pc.oauth:  # device flow nativo genérico (MiniMax)
+    if pc.oauth:  # device flow nativo genérico
         try:
             oauth.device_login(provider, pc.oauth, lambda m: console.print(m))
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]Falha no login:[/red] {e}")
             raise typer.Exit(1)
         console.print(f"[green]✓ login '{provider}' concluído[/green]")
+        return
+
+    if pc.api_key_env:  # provider por API KEY (minimax/mimo/openai/…): "autenticar" = gravar a chave no .env
+        if pc.resolved_key():
+            console.print(f"[green]✓ '{provider}' já autenticado[/green] [dim]({pc.api_key_env} no .env)[/dim] — "
+                          f"cole de novo só p/ trocar.")
+        from okami import menu
+        from okami.cli._shared import _set_env_var
+        key = menu.text(f"Cole a API key de '{provider}' ({pc.api_key_env}) — fica oculta, vai pro .env",
+                        password=True).strip()
+        if not key:
+            console.print(f"[yellow]cancelado.[/yellow] Defina {pc.api_key_env} quando tiver a chave "
+                          f"(ou: okami config set {pc.api_key_env} <key>).")
+            raise typer.Exit(1)
+        _set_env_var(pc.api_key_env, key)               # .env GLOBAL, atômico + 0600
+        console.print(f"[green]✓ '{provider}' autenticado[/green] [dim]({pc.api_key_env} salvo no .env)[/dim] — "
+                      "confira com: okami doctor")
         return
 
     console.print(f"[yellow]'{provider}' não tem fluxo de login.[/yellow] Use .env/api_key.")

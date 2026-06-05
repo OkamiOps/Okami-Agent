@@ -20,6 +20,25 @@ def test_config_check_json(tmp_path, monkeypatch):
     assert '"model"' in res.output                          # consistente com doctor/policy --json
 
 
+def test_login_api_key_provider_saves_key(tmp_path, monkeypatch):
+    # BUG do usuário: `okami login minimax` dizia "não tem fluxo de login". Agora provider api_key
+    # PEDE a chave e grava no .env (autenticar = ter a chave).
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(
+        "default_provider: lmstudio\nproviders:\n"
+        "  lmstudio: {model: openai/x, api_key: lm, tier: local}\n"
+        "  mimo: {model: openai/m, api_key_env: MIMO_API_KEY, tier: weak}\n", encoding="utf-8")
+    import okami.menu as _menu
+    monkeypatch.setattr(_menu, "text", lambda *a, **k: "tp-secret123")    # usuário cola a chave
+    saved: dict = {}
+    import okami.cli._shared as _sh
+    monkeypatch.setattr(_sh, "_set_env_var", lambda k, v, **kw: saved.update({k: v}))
+    res = runner.invoke(app, ["login", "mimo"])
+    assert res.exit_code == 0
+    assert saved.get("MIMO_API_KEY") == "tp-secret123"   # gravou no .env
+    assert "autenticado" in res.output
+
+
 def test_experimental_provider_marked_not_broken(tmp_path, monkeypatch):
     # provider experimental: aparece como 'experimental' (opt-in), NÃO como 'falta auth'/quebrado.
     monkeypatch.chdir(tmp_path)
