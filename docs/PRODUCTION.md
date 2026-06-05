@@ -47,7 +47,7 @@ rootfs read-only, só o workspace montado). Sem Docker, recusa — fail-closed.
 - [ ] Segredos só em `.env` (`${ENV}` no YAML) — `okami doctor --lint` limpo.
 - [ ] MCP de terceiro com `trust: reviewed` + manifesto por-tool (nunca `trusted` cego).
 - [ ] Retenção/limpeza agendada (`okami clean --deep` no cron) ou bloco `retention:`.
-- [ ] CI verde nos gates (ruff, bandit HIGH, pip-audit, secret-scan, `policy check`, CodeQL).
+- [ ] CI verde nos gates (ruff, bandit HIGH, pip-audit, secret-scan, `policy check`, Semgrep).
 
 Enquanto o `require_isolation_on_exposed` do `okami.policy.yaml` versionado seguir `false`, o projeto
 está em modo **dogfood** — o que é o certo para agora. O `--strict` é o caminho para GA sem mexer no

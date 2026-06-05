@@ -25,12 +25,16 @@ def compact(messages: list[dict], memory: Memory | None, *,
 
     promoted = 0
     if memory is not None:
+        from okami.memory.base import is_secret_item
         for m in head:
             content = (m.get("content") or "").strip()
-            if content:
-                memory.write(MemoryItem(text=f"[{m.get('role', '?')}] {content}",
-                                        kind="turn", source=source))
-                promoted += 1
+            if not content:
+                continue
+            item = MemoryItem(text=f"[{m.get('role', '?')}] {content}", kind="turn", source=source)
+            if is_secret_item(item):      # segredo NÃO persiste → não infla a contagem de promovidas
+                continue
+            memory.write(item)
+            promoted += 1
         note = (f"RESUMO (auto-compaction): {promoted} mensagens antigas foram PROMOVIDAS à "
                 "memória de longo prazo e são recuperáveis com a tool recall_memory. "
                 "Nada foi perdido — continue.")

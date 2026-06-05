@@ -11,14 +11,15 @@ Recursos "confiável pra coisa longa" (#1/#8):
 - **notify_on_complete**: `drain_completed()` entrega quem terminou (o gateway avisa no chat);
 - **watch_patterns**: `watch_hits()` diz quais regex apareceram no log (ex.: "Listening on", "ERROR");
 - **paginação de log**: `log_page(offset, limit)` p/ navegar log grande sem despejar tudo;
-- **cap de log** (pós-saída) + **TTL/prune** → disco não cresce sem limite.
-
-Ainda NÃO Hermes-grade (limites conhecidos, documentados): stdin/write/submit interativo e PTY —
-processo detached + pipe entre turnos é um buraco à parte; fica p/ um próximo passo.
+- **cap de log** (pós-saída) + **TTL/prune** → disco não cresce sem limite;
+- **stdin/write interativo + PTY**: `start(interactive=True)` sobe um supervisor (okami/core/ptyproc)
+  que segura o mestre do PTY; `write()` injeta input via FIFO (com retry/backoff anti-corrida);
+- **sinais**: `signal()` manda TERM/INT/HUP/KILL/USR1… no grupo (ou `docker kill --signal`).
 """
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -134,9 +135,18 @@ class ProcessManager:
         if not ctrlp.exists():                         # supervisor já saiu → FIFO removido
             return False
         payload = data + ("\n" if submit and not data.endswith("\n") else "")
-        try:
-            fd = os.open(str(ctrlp), os.O_WRONLY | os.O_NONBLOCK)   # supervisor segura o read end → não bloqueia
-        except OSError:
+        # O_WRONLY|O_NONBLOCK num FIFO dá ENXIO até o supervisor abrir o read end. Sob carga, ProcessStart
+        # pode voltar antes disso → RETRY curto com backoff (em vez de falhar na cara do chamador).
+        fd = None
+        for attempt in range(40):                      # ~2s no total (40 × até 50ms)
+            try:
+                fd = os.open(str(ctrlp), os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError as e:
+                if e.errno != errno.ENXIO or not ctrlp.exists():
+                    return False                       # erro real / FIFO sumiu (processo terminou)
+                time.sleep(min(0.05, 0.005 * (attempt + 1)))
+        if fd is None:
             return False
         try:
             os.write(fd, payload.encode("utf-8"))

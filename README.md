@@ -10,7 +10,7 @@ ou onde você quiser.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-629%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-passing-3fb950)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 
 </div>
@@ -91,7 +91,7 @@ uv sync                       # cria o venv + deps a partir do pyproject
 uv run okami doctor           # roda sem ativar nada
 uv run okami chat
 # editável global:  uv tool install -e .   (recarregue deps novas com --force)
-make test                     # = uv run pytest -q   (629 testes)
+make test                     # = uv run pytest -q   (suíte completa em pytest)
 ```
 Sem uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`
 (no Windows use um caminho curto p/ o venv — ex. `C:\okv` — por causa do long-path do litellm.)
@@ -403,7 +403,7 @@ roteia pro `.env`; `okami config set providers.x.api_key '${OPENAI_API_KEY}'` re
 ## Desenvolvimento & CI
 
 ```bash
-make test           # uv run pytest -q   → 629 testes
+make test           # uv run pytest -q   → suíte completa
 make doctor
 bash scripts/secret-scan.sh              # mesmo gate da CI (allowlist por `# pragma: allowlist secret`)
 ```
@@ -436,7 +436,7 @@ agents/        perfis multi-agente (agents/<id>/agent.yaml + identidade)
 skills/        skills versionadas (frontend-shadcn, tdd, …)
 docs/          ARCHITECTURE · ROADMAP · STRUCTURE · PRODUCTION · COMPETITIVE_RESEARCH
 deploy/        Dockerfile + docker-compose.yml      scripts/  install.sh/.ps1 · secret-scan.sh
-tests/         629 testes
+tests/         suíte completa (pytest)
 ```
 
 ---

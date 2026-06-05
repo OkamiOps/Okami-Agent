@@ -62,6 +62,23 @@ def test_dotenv_versioned_is_caught(tmp_path):
     assert r.returncode == 1 and ".env" in (r.stdout + r.stderr)
 
 
+@pytest.mark.skipif(not _SCRIPT.exists(), reason="precisa do script")
+def test_filesystem_fallback_catches_secret_without_git(tmp_path):
+    """#P1: FORA de um worktree git (sdist/tarball), o scanner NÃO pode dar falso-verde."""
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(_SCRIPT, tmp_path / "scripts" / "secret-scan.sh")
+    fake = "sk-" + "Z" * 30
+    # caso 1: vetor SEM marcador, sem .git → fallback de filesystem PEGA (exit 1)
+    (tmp_path / "leak.py").write_text(f'K = "{fake}"\n', encoding="utf-8")
+    r = subprocess.run(["bash", "scripts/secret-scan.sh"], cwd=str(tmp_path), capture_output=True, text=True)
+    assert r.returncode == 1, f"fora do git deveria pegar o segredo:\n{r.stdout}\n{r.stderr}"
+    assert "filesystem" in (r.stdout + r.stderr).lower()      # avisou que está no fallback
+    # caso 2: o MESMO vetor marcado → passa mesmo no fallback
+    (tmp_path / "leak.py").write_text(f'K = "{fake}"  # pragma: allowlist secret\n', encoding="utf-8")
+    r2 = subprocess.run(["bash", "scripts/secret-scan.sh"], cwd=str(tmp_path), capture_output=True, text=True)
+    assert r2.returncode == 0, f"marcado deveria passar:\n{r2.stdout}\n{r2.stderr}"
+
+
 def test_ci_uses_the_shared_script():
     ci = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "scripts/secret-scan.sh" in ci, "a CI precisa chamar o script compartilhado"

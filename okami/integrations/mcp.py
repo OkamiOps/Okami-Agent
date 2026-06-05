@@ -286,8 +286,10 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
         if url and not _mcp_url_ok(url) and not conf.get("insecure"):   # #8: HTTPS/local-only por padrão
             emit(f"⚠ MCP '{name}' RECUSADO: {url} não é HTTPS nem local — use https:// (ou insecure: true, perigoso).")
             continue
+        from okami.core.envref import has_env_ref
         for hk, hv in (conf.get("headers") or {}).items():            # #8/#6: header com segredo literal
-            if isinstance(hv, str) and len(hv) > 8 and not hv.strip().startswith("${"):
+            # consistente com o lint: env ref em qualquer posição (`Bearer ${TOKEN}`) NÃO é avisado.
+            if isinstance(hv, str) and len(hv) > 8 and not has_env_ref(hv):
                 emit(f"⚠ MCP '{name}' header {hk}: parece SEGREDO em texto — use ${{ENV_VAR}} (não versione token).")
         trust = _trust_of(conf)                      # #11: untrusted (default) | reviewed | trusted
         trusted = trust == "trusted"
