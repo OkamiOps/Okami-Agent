@@ -83,5 +83,17 @@ def test_status_shows_resolved_view(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
     out = runner.invoke(app, ["status"]).output
-    assert "OKAMI" in out and "Sessão" in out and "Providers" in out   # relatório multi-seção
+    assert "OKAMI" in out and "Session" in out and "Providers" in out   # multi-section report (EN default)
     assert "lmstudio" in out and "openai/x" in out                      # tabela de providers
+
+
+def test_status_localizes_to_portuguese(tmp_path, monkeypatch):
+    from okami import i18n
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
+    i18n.set_lang("pt")                                  # PT continua disponível (i18n bilíngue)
+    try:
+        out = runner.invoke(app, ["status"]).output
+        assert "Sessão" in out and "Próximos passos" in out and "Canais" in out
+    finally:
+        i18n.set_lang(None)

@@ -67,14 +67,18 @@ def _catalog(lang: str) -> dict:
         return {}
 
 
-def t(key: str, /, **kwargs) -> str:
-    """Traduz `key` no locale atual. Ausente → EN → a própria key. Interpola via str.format(**kwargs)."""
+def t(key: str, /, _default: str | None = None, **kwargs) -> str:
+    """Traduz `key` no locale atual. Ordem: catálogo do locale → catálogo EN → `_default` → a própria key.
+
+    `_default` deixa o INGLÊS inline no código como fonte (padrão gettext: o texto-fonte é o EN); só o PT
+    precisa ir pro catálogo. Sem `_default`, uma key ausente cai na própria key (visível/debugável).
+    Interpola via str.format(**kwargs)."""
     lang = current_lang()
     s = _catalog(lang).get(key)
     if s is None and lang != DEFAULT_LANG:
         s = _catalog(DEFAULT_LANG).get(key)
     if s is None:
-        s = key
+        s = _default if _default is not None else key
     try:
         return s.format(**kwargs) if kwargs else s
     except (KeyError, IndexError, ValueError):        # placeholder solto não pode derrubar a saída

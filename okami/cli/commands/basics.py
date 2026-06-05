@@ -12,6 +12,7 @@ from okami.cli._app import app, console
 from okami.cli._shared import (
     _load, _ping_models,
 )
+from okami.i18n import t
 
 
 @app.command()
@@ -126,8 +127,8 @@ def doctor(
             console.print(f"{icon.get(x.level, '?')} [bold]{x.check}[/bold]: {x.message}"
                           + (f"\n   [dim]→ {x.fix}[/dim]" if x.fix and x.level != "pass" else ""))
         s = summarize(findings)
-        console.print(f"\n[dim]{s['counts']['pass']} ok · {s['counts']['warn']} avisos · "
-                      f"{s['counts']['fail']} falhas[/dim]")
+        console.print("\n[dim]" + t("doctor.lint_summary", _default="{p} ok · {w} warnings · {f} failures",
+                                    p=s["counts"]["pass"], w=s["counts"]["warn"], f=s["counts"]["fail"]) + "[/dim]")
         raise typer.Exit(0 if s["ok"] else 1)
     if json_out:                                    # caminho máquina: relatório estruturado + health
         import json as _json
@@ -164,23 +165,25 @@ def doctor(
         mark = Text("★", style=_ui.ORANGE) if is_default else Text(" ")
         # EXPERIMENTAL: opt-in, fora do failover → não pinga (não alarma com 401/parse de coisa em obras).
         if pc.experimental and not is_default:
-            pt.add_row(mark, name, _ui.badge("warn", "experimental"),
-                       Text("opt-in · não verificado", style=_ui.MUTE))
+            pt.add_row(mark, name, _ui.badge("warn", t("doctor.prov.experimental", _default="experimental")),
+                       Text(t("doctor.prov.experimental_hint", _default="opt-in · unverified"), style=_ui.MUTE))
             continue
         # provider NÃO-pronto: é ERRO só se for o default; senão é OPCIONAL (não configurado), sem alarme.
         nrv = "missing" if is_default else "off"
-        opt = "" if is_default else " · opcional"
+        opt = "" if is_default else " · " + t("doctor.prov.optional", _default="optional")
         if pc.transport in ("codex_oauth", "minimax_oauth"):
-            auth = _ui.badge("ready", "logado") if pc.ready else _ui.badge(nrv, f"login {name}{opt}")
+            auth = (_ui.badge("ready", t("doctor.prov.logged_in", _default="logged in")) if pc.ready
+                    else _ui.badge(nrv, f"login {name}{opt}"))
         elif pc.transport == "claude_cli":
-            auth = _ui.badge("ready", "CLI claude") if pc.ready else _ui.badge(nrv, f"instale o CLI{opt}")
+            auth = (_ui.badge("ready", "CLI claude") if pc.ready
+                    else _ui.badge(nrv, t("doctor.prov.install_cli", _default="install the CLI") + opt))
         elif pc.api_key_env:
             auth = (_ui.badge("ready", pc.api_key_env) if pc.resolved_key()
-                    else _ui.badge(nrv, f"def {pc.api_key_env}{opt}"))
+                    else _ui.badge(nrv, t("doctor.prov.set_env", _default="set {env}", env=pc.api_key_env) + opt))
         elif pc.api_key:
             auth = _ui.badge("ok", "literal/dummy")
         else:
-            auth = _ui.badge("off", "nenhuma")
+            auth = _ui.badge("off", t("doctor.prov.none", _default="none"))
         # só pinga quem DEVERIA estar pronto (default ou autenticado) — não alarma com 401 de opcional.
         ep = Text("—", style=_ui.DIM)
         if pc.api_base and (is_default or pc.ready):
@@ -191,14 +194,14 @@ def doctor(
             ep.append_text(_ui.dot("ok" if ok else ("fail" if is_default else "warn")))
             ep.append(f" {host}", style=_ui.MUTE)
         elif not pc.ready:
-            ep = Text("não configurado", style=_ui.MUTE)
+            ep = Text(t("doctor.prov.not_configured", _default="not configured"), style=_ui.MUTE)
         pt.add_row(mark, name, auth, ep)
     cards.append(_ui.panel(pt, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
     # ◆ Memória ----------------------------------------------------------------
     mem = cfg.memory or {}
     emb = mem.get("embedder") or {}
-    emb_v = Text("desligado", style=_ui.MUTE)
+    emb_v = Text(t("doctor.mem.off", _default="off"), style=_ui.MUTE)
     if emb.get("enabled", True) and emb.get("model"):
         from okami.memory import OpenAICompatEmbedder
         ok = OpenAICompatEmbedder(emb.get("api_base", "http://localhost:1234/v1"), emb["model"]).available()
@@ -207,9 +210,10 @@ def doctor(
         ("backend", Text(mem.get("backend", "sqlite-fts5"), style=f"bold {_ui.FG}")),
         ("embedder", emb_v),
         ("honcho", Text((mem.get("honcho") or {}).get("base_url", "—"), style=_ui.SOFT)),
-        ("arquivos", Text("SOUL · VOICE · PERSONA · USER · MEMORY", style=_ui.SOFT)),
+        (t("doctor.mem.files", _default="files"), Text("SOUL · VOICE · PERSONA · USER · MEMORY", style=_ui.SOFT)),
     ]
-    cards.append(_ui.panel(_ui.fields(mem_rows, label_w=10), title="Memória", accent=_ui.CYAN))
+    cards.append(_ui.panel(_ui.fields(mem_rows, label_w=10), title=t("doctor.card.memory", _default="Memory"),
+                           accent=_ui.CYAN))
 
     # ◆ Ambiente / toolchain ---------------------------------------------------
     # git/uv = essenciais; node/docker/claude/rg = recomendados (não quebram o core se faltarem).
@@ -220,7 +224,8 @@ def doctor(
         tools_line.append_text(_ui.dot("ok" if path else ("warn" if tool in _RECOMMENDED else "off")))
         tools_line.append(f" {tool}  ", style=_ui.SOFT if path else _ui.MUTE)
     if not shutil.which("rg"):                       # busca do agente usa grep como fallback — só recomendado
-        tools_line.append("\nrg (ripgrep) ausente — recomendado p/ busca rápida; sem ele o agente usa grep.",
+        tools_line.append("\n" + t("doctor.env.rg_missing",
+                          _default="rg (ripgrep) missing — recommended for fast search; without it the agent uses grep."),
                           style=_ui.MUTE)
     try:
         _c = sqlite3.connect(":memory:")
@@ -238,33 +243,38 @@ def doctor(
         mode = _stat.S_IMODE(genv.stat().st_mode)
         env_v = _ui.badge("ok", "0600") if mode == 0o600 else _ui.badge("warn", f"{oct(mode)[2:]} → use 0600")
     else:
-        env_v = Text("nenhum (okami config set …)", style=_ui.MUTE)
+        env_v = Text(t("doctor.env.no_env", _default="none (okami config set …)"), style=_ui.MUTE)
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", {}) or {})
     sb_v = Text()
     sb_v.append(f"{sb.backend}·{sb.mode} ", style=_ui.FG)
-    sb_v.append_text(_ui.badge("ok", "isolado") if sb.backend == "docker"
-                     else _ui.badge("warn", "cercas locais"))
+    sb_v.append_text(_ui.badge("ok", t("doctor.env.isolated", _default="isolated")) if sb.backend == "docker"
+                     else _ui.badge("warn", t("doctor.env.local_fences", _default="local fences")))
     from okami.integrations.mcp import servers_of
     srv = servers_of(getattr(cfg, "mcp", None))
     env_rows = [
         ("toolchain", tools_line),
-        ("SQLite FTS5", _ui.badge("ok", "híbrida") if fts_ok else _ui.badge("warn", "LIKE (sem FTS5)")),
-        ("codex auth", _ui.badge("ok", "logado") if codex_auth else _ui.badge("missing", "okami login codex")),
+        ("SQLite FTS5", _ui.badge("ok", t("doctor.env.hybrid", _default="hybrid")) if fts_ok
+         else _ui.badge("warn", t("doctor.env.like_no_fts", _default="LIKE (no FTS5)"))),
+        ("codex auth", _ui.badge("ok", t("doctor.prov.logged_in", _default="logged in")) if codex_auth
+         else _ui.badge("missing", "okami login codex")),
         (".env global", env_v),
-        ("MCP", Text(f"{len(srv)} servidor(es)" if srv else "nenhum", style=_ui.SOFT if srv else _ui.MUTE)),
+        ("MCP", Text(t("doctor.env.servers", _default="{n} server(s)", n=len(srv)) if srv
+                     else t("doctor.prov.none", _default="none"), style=_ui.SOFT if srv else _ui.MUTE)),
         ("sandbox", sb_v),
     ]
-    cards.append(_ui.panel(_ui.fields(env_rows, label_w=12), title="Ambiente", accent=_ui.ORANGE))
+    cards.append(_ui.panel(_ui.fields(env_rows, label_w=12),
+                           title=t("doctor.card.environment", _default="Environment"), accent=_ui.ORANGE))
 
     # ◆ Disco (medidores) ------------------------------------------------------
-    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True), title="Disco", accent=_ui.MAGENTA))
+    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True),
+                           title=t("doctor.card.disk", _default="Disk"), accent=_ui.MAGENTA))
 
     console.print(_ui.grid(cards, width=console.width))
-    console.print(_ui.footer("Próximos passos:", [
-        ("okami doctor --lint", "lint de postura de segurança"),
-        ("okami clean --deep --dry-run", "prévia da poda de disco (quota versionada)"),
-        ("okami login <provider>", "autenticar provider de assinatura"),
+    console.print(_ui.footer(t("doctor.next_steps", _default="Next steps:"), [
+        ("okami doctor --lint", t("doctor.step.lint", _default="security posture lint")),
+        ("okami clean --deep --dry-run", t("doctor.step.clean", _default="disk cleanup preview (versioned quota)")),
+        ("okami login <provider>", t("doctor.step.login", _default="authenticate a subscription provider")),
     ]))
     console.print()
 
@@ -276,9 +286,12 @@ def doctor(
         env_p = global_env_path()
         env_fixed = fix_env_perms(env_p)
         rm_t, freed = prune_temp(".")
-        console.print(f"  locks órfãos removidos: [bold]{len(locks)}[/bold]")
-        console.print(f"  {env_p} perms: {'[yellow]corrigido → 0600[/yellow]' if env_fixed else '[green]ok[/green]'}")
-        console.print(f"  temporários removidos: [bold]{len(rm_t)}[/bold] [dim]({freed / 1024:.1f} KB)[/dim]")
+        console.print("  " + t("doctor.fix.locks", _default="orphan locks removed: [bold]{n}[/bold]", n=len(locks)))
+        _perms = ("[yellow]" + t("doctor.fix.perms_fixed", _default="fixed → 0600") + "[/yellow]") if env_fixed \
+            else "[green]ok[/green]"
+        console.print(f"  {env_p} perms: {_perms}")
+        console.print("  " + t("doctor.fix.temp", _default="temp files removed: [bold]{n}[/bold] [dim]({kb:.1f} KB)[/dim]",
+                               n=len(rm_t), kb=freed / 1024))
 
 
 @app.command()

@@ -7,6 +7,7 @@ from okami import __version__
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import _load
+from okami.i18n import t
 
 
 @app.command()
@@ -146,7 +147,8 @@ def status(
     cc = cs["counts"]
 
     # masthead: estado-resumo à direita (conforme / N falhas) -------------------
-    right = "● tudo conforme" if cs["ok"] else f"✗ {cc['fail']} falha(s) de conformance"
+    right = ("● " + t("status.all_conformant", _default="all conformant") if cs["ok"]
+             else "✗ " + t("status.conformance_fail", _default="{n} conformance failure(s)", n=cc["fail"]))
     console.print()
     console.print(_ui.masthead(__version__, right=right))
     console.print()
@@ -157,70 +159,77 @@ def status(
     model_v = Text(pc.model, style=f"bold {_ui.CYAN}", overflow="fold")
     model_v.append(f"\n{cfg.default_provider} · {pc.tier}", style=_ui.MUTE)
     toggles = Text()
-    for lbl, on in (("persona", persona_on), ("voz", voice_on), ("auto-skill", learn.get("auto_skill"))):
+    for lbl, on in ((t("status.persona", _default="persona"), persona_on),
+                    (t("status.voice", _default="voice"), voice_on),
+                    ("auto-skill", learn.get("auto_skill"))):
         toggles.append_text(_ui.dot("on" if on else "off"))
         toggles.append(f" {lbl}  ", style=_ui.SOFT if on else _ui.MUTE)
     cards.append(_ui.panel(_ui.fields([
-        ("agente", Text(default_agent, style=f"bold {_ui.FG}")),
-        ("modelo", model_v),
-        ("raciocínio", think),
-        ("memória", cfg.memory.get("backend", "sqlite-fts5")),
-        ("aprovação", _ui.badge("ok" if appr in ("manual", "smart") else "warn", appr)),
-        ("recursos", toggles),
-    ], label_w=11), title="Sessão", accent=_ui.ORANGE))
+        (t("status.agent", _default="agent"), Text(default_agent, style=f"bold {_ui.FG}")),
+        (t("status.model", _default="model"), model_v),
+        (t("status.reasoning", _default="reasoning"), think),
+        (t("status.memory", _default="memory"), cfg.memory.get("backend", "sqlite-fts5")),
+        (t("status.approval", _default="approval"), _ui.badge("ok" if appr in ("manual", "smart") else "warn", appr)),
+        (t("status.features", _default="features"), toggles),
+    ], label_w=11), title=t("status.card.session", _default="Session"), accent=_ui.ORANGE))
 
     # ◆ Providers --------------------------------------------------------------
-    t = _ui.data_table(
+    tbl = _ui.data_table(
         ("", {"width": 1, "no_wrap": True}),
         ("provider", {"style": f"bold {_ui.FG}", "no_wrap": True}),
-        ("modelo", {"style": _ui.SOFT, "overflow": "ellipsis", "max_width": 18}),
-        ("estado", {"no_wrap": True}),
+        (t("status.col.model", _default="model"), {"style": _ui.SOFT, "overflow": "ellipsis", "max_width": 18}),
+        (t("status.col.state", _default="state"), {"no_wrap": True}),
     )
     for name, p in cfg.providers.items():
         mark = Text("★", style=_ui.ORANGE) if name == cfg.default_provider else Text(" ")
         if p.experimental:
-            state = _ui.badge("warn", "experimental")
+            state = _ui.badge("warn", t("status.experimental", _default="experimental"))
         else:
-            state = _ui.badge("ready", "pronto") if p.ready else _ui.badge("missing", "falta auth")
-        t.add_row(mark, name, p.model, state)
-    cards.append(_ui.panel(t, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
+            state = (_ui.badge("ready", t("status.ready", _default="ready")) if p.ready
+                     else _ui.badge("missing", t("status.missing_auth", _default="needs auth")))
+        tbl.add_row(mark, name, p.model, state)
+    cards.append(_ui.panel(tbl, title=f"Providers ({len(cfg.providers)})", accent=_ui.MAGENTA))
 
     # ◆ Canais & Gateway -------------------------------------------------------
     ch_rows = []                                          # raw, channels já coletados acima (lint consistente)
     for (owner, ctype), conf in (channels or {}).items():
         if conf.get("allow_all"):
-            st = _ui.badge("warn", "ingress ABERTO")
+            st = _ui.badge("warn", t("status.ingress_open", _default="ingress OPEN"))
         elif conf.get("allow_chats"):
-            st = _ui.badge("ok", f"allowlist ({len(conf['allow_chats'])})")
+            st = _ui.badge("ok", t("status.allowlist", _default="allowlist ({n})", n=len(conf["allow_chats"])))
         else:
             st = _ui.badge("off", "deny-by-default")
         ch_rows.append((ctype + ("" if owner == "(global)" else f"·{owner}"), st))
     if not ch_rows:
-        ch_rows.append(("canais", Text("nenhum — DM local (okami chat)", style=_ui.MUTE)))
+        ch_rows.append((t("status.channels", _default="channels"),
+                        Text(t("status.no_channels", _default="none — local DM (okami chat)"), style=_ui.MUTE)))
     host = (cfg.gateway or {}).get("host", "127.0.0.1")
     api_tok = bool(_os.getenv("OKAMI_API_TOKEN"))
     api_v = Text()
     api_v.append_text(_ui.dot("ok" if (host in ("127.0.0.1", "localhost") or api_tok) else "warn"))
     api_v.append(f" {host} · token {'set' if api_tok else 'OFF'}", style=_ui.SOFT)
     ch_rows.append(("API", api_v))
-    cards.append(_ui.panel(_ui.fields(ch_rows, label_w=14), title="Canais & Gateway", accent=_ui.CYAN))
+    cards.append(_ui.panel(_ui.fields(ch_rows, label_w=14),
+                           title=t("status.card.channels", _default="Channels & Gateway"), accent=_ui.CYAN))
 
     # ◆ MCP + Conformance ------------------------------------------------------
     from okami.integrations.mcp import _trust_of, servers_of
     srv = servers_of(cfg.mcp)
     cf = Text()
-    cf.append_text(_ui.badge("ok", "conforme") if cs["ok"] else _ui.badge("fail", f"{cc['fail']} falha(s)"))
-    cf.append(f"  {cc['pass']} ok · {cc['warn']} avisos", style=_ui.MUTE)
+    cf.append_text(_ui.badge("ok", t("status.conformant", _default="conformant")) if cs["ok"]
+                   else _ui.badge("fail", t("status.failures", _default="{n} failure(s)", n=cc["fail"])))
+    cf.append("  " + t("status.ok_warn", _default="{p} ok · {w} warnings", p=cc["pass"], w=cc["warn"]), style=_ui.MUTE)
     mcp_rows = [("conformance", cf)]
     if srv:
         for n, c in srv.items():
             mcp_rows.append((f"mcp·{n}", Text(f"trust={_trust_of(c or {})}", style=_ui.SOFT)))
     else:
-        mcp_rows.append(("mcp", Text("nenhum servidor", style=_ui.MUTE)))
+        mcp_rows.append(("mcp", Text(t("status.no_mcp", _default="no server"), style=_ui.MUTE)))
     cards.append(_ui.panel(_ui.fields(mcp_rows, label_w=14), title="MCP & Conformance", accent=_ui.ORANGE))
 
     # ◆ Disco (medidores) ------------------------------------------------------
-    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True), title="Disco", accent=_ui.MAGENTA))
+    cards.append(_ui.panel(_disk_renderable(cfg, as_meters=True),
+                           title=t("status.card.disk", _default="Disk"), accent=_ui.MAGENTA))
 
     # ◆ Uso (tokens/custo) -----------------------------------------------------
     try:
@@ -236,16 +245,16 @@ def status(
             usage.append(f" · {format_tokens(u.output_tokens)} out", style=_ui.SOFT)
             if u.cache_read_tokens:
                 usage.append(f" · {format_tokens(u.cache_read_tokens)} cache", style=_ui.MUTE)
-            usage.append(f"\ncusto {cr.label}", style=_ui.MAGENTA)
-            cards.append(_ui.panel(usage, title="Uso", accent=_ui.CYAN))
+            usage.append("\n" + t("status.cost", _default="cost {label}", label=cr.label), style=_ui.MAGENTA)
+            cards.append(_ui.panel(usage, title=t("status.card.usage", _default="Usage"), accent=_ui.CYAN))
     except Exception:  # noqa: BLE001
         pass
 
     console.print(_ui.grid(cards, width=console.width))
-    console.print(_ui.footer("Próximos passos:", [
-        ("okami chat", "conversa no terminal"),
-        ("okami doctor", "diagnóstico de config/chaves/conectividade"),
-        ("okami policy check --strict", "prontidão de GA"),
+    console.print(_ui.footer(t("status.next_steps", _default="Next steps:"), [
+        ("okami chat", t("status.step.chat", _default="chat in the terminal")),
+        ("okami doctor", t("status.step.doctor", _default="config/keys/connectivity diagnosis")),
+        ("okami policy check --strict", t("status.step.ga", _default="GA readiness")),
     ]))
     console.print()
 
