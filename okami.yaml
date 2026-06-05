@@ -66,7 +66,7 @@ providers:
     notes: Liste os modelos com 'okami doctor'. Troque o model à vontade.
   codex:
     model: openai-codex/gpt-5.5
-    fallback: [claude, lmstudio]   # se o codex cair (529/timeout/vazio) → tenta estes, em ordem (sem experimentais)
+    fallback: [claude, minimax, lmstudio]   # se o codex cair (529/timeout/vazio) → tenta estes, em ordem
     auth: oauth_subscription
     transport: codex_oauth
     tier: strong
@@ -80,7 +80,7 @@ providers:
     notes: 'Login: okami login codex (device flow; habilite Device Code no ChatGPT).'
   claude:
     model: claude-subscription/claude-opus-4-8
-    fallback: [codex, lmstudio]
+    fallback: [codex, minimax, lmstudio]
     auth: oauth_subscription
     transport: claude_cli
     tier: strong
@@ -91,28 +91,28 @@ providers:
     - claude-haiku-4-5-20251001
     notes: Usa o CLI `claude` (assinatura/OAuth/refresh cuidados pelo CLI). NÃO usar
       ANTHROPIC_API_KEY pay-as-you-go (ToS restringe reuse direto do token).
-  minimax:
+  minimax:                      # Token Plan (assinatura) via Subscription Key — OpenAI-compat (docs/token-plan)
     model: openai/MiniMax-M3
-    experimental: true          # OAuth device flow ainda não verificado ponta-a-ponta → opt-in (não failover)
     fallback: [lmstudio]
-    api_base: https://api.minimax.io/v1
-    context_window: 1000000
-    transport: minimax_oauth
-    auth: oauth_subscription
-    oauth:
-      client_id: minimax-cli
-      device_authorization_url: https://api.minimax.io/oauth/code
-      token_url: https://api.minimax.io/oauth/token
-      scope: ''
+    api_base: https://api.minimax.io/v1   # OpenAI-compat: POST /v1/chat/completions. China: https://api.minimaxi.com/v1
+    api_key_env: MINIMAX_API_KEY  # Subscription Key do Token Plan (Account ▸ Token Plan). Bearer. Só no .env.
+    auth: api_key
     tier: weak
-    notes: 'EXPERIMENTAL. Login: `okami login minimax` (device flow OAuth). Confirmar
-      client_id/endpoints nos docs antes de promover a suportado.'
-  mimo:
+    context_window: 1000000
+    models:                       # https://platform.minimax.io/docs/api-reference/text-chat-openai
+    - MiniMax-M3
+    - MiniMax-M2.7
+    - MiniMax-M2.5
+    - MiniMax-M2.1
+    notes: 'Token Plan (assinatura): pegue a Subscription Key em Account ▸ Token Plan e rode
+      `okami config set MINIMAX_API_KEY <key>` (vai pro .env). OpenAI-compat — sem OAuth.'
+  mimo:                          # Xiaomi MiMo Token Plan (assinatura) — OpenAI-compat, endpoint REGIONAL token-plan
     model: openai/mimo-v2.5-pro
-    experimental: true          # parse da API ainda em ajuste → opt-in (não entra no failover automático)
     fallback: [lmstudio]
-    api_base: https://platform.xiaomimimo.com/v1
-    api_key_env: MIMO_API_KEY
+    # Endpoint do TOKEN PLAN (não é platform.xiaomimimo.com). Europa (mais perto do BR) por padrão;
+    # troque a região: -sgp (Singapura) · -cn (China). https://platform.xiaomimimo.com/docs token plan.
+    api_base: https://token-plan-ams.xiaomimimo.com/v1
+    api_key_env: MIMO_API_KEY     # chave 'tp-xxxxx' da Subscription Management. Bearer. Só no .env.
     auth: api_key
     tier: weak
     context_window: 128000

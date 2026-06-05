@@ -19,10 +19,20 @@ def test_every_preset_is_well_formed():
 
 
 def test_subscription_providers_use_oauth_or_cli():
-    # restrição dura: codex/claude/minimax NUNCA pay-as-you-go
-    for key in ("codex", "claude", "minimax"):
+    # restrição dura: codex/claude SEMPRE assinatura via OAuth/CLI — NUNCA pay-as-you-go (ToS).
+    for key in ("codex", "claude"):
         p = preset(key)
         assert p.base.get("auth") == "oauth_subscription" and p.login, key
+
+
+def test_minimax_uses_token_plan_subscription_key_not_payg():
+    # MiniMax Token Plan (assinatura) = Subscription Key em Bearer (OpenAI-compat), conforme a doc oficial.
+    # NÃO é pay-as-you-go: a chave vem do Token Plan e mora SÓ no .env (MINIMAX_API_KEY).
+    p = preset("minimax")
+    assert p.base.get("auth") == "api_key"
+    secrets = [f for f in p.fields if f.kind == "secret"]
+    assert secrets and secrets[0].env == "MINIMAX_API_KEY"
+    assert "subscription" in p.hint.lower() or "token plan" in (secrets[0].q or "").lower()
 
 
 def test_catalog_has_broad_coverage():
