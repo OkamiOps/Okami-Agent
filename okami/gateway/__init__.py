@@ -458,6 +458,10 @@ class AgentEndpoint:
             self._save_meta(chat_id, s)
             self.channel.send(chat_id, "🔒 aprovação normal.")
             return
+        if low in ("/reload", "/reloadconfig"):        # #12: hot-reload de config (sem reiniciar)
+            ok, msg = self.reload_config()
+            self.channel.send(chat_id, f"🔄 config recarregada — {msg}" if ok else f"✗ config inválida: {msg}")
+            return
         if low == "/stop":
             s.cancel = True
             self.channel.send(chat_id, "⏹ parando após o passo atual…")
@@ -699,6 +703,30 @@ class AgentEndpoint:
                 self.handle(msg.chat_id, text)
         self._notify_completed_processes()
 
+    def apply_config(self, cfg) -> list[str]:
+        """Re-aplica em quente SÓ os campos seguros da nova config (#12). Devolve o que mudou."""
+        changed = []
+        new_mode = (getattr(cfg, "approvals", None) or {}).get("mode", self.approval_mode)
+        if new_mode != self.approval_mode:
+            self.approval_mode = new_mode
+            changed.append(f"aprovação={new_mode}")
+        old_sb = (getattr(self.cfg, "sandbox", None) or {})
+        new_sb = (getattr(cfg, "sandbox", None) or {})
+        if new_sb != old_sb:
+            changed.append("sandbox")
+        self.cfg = cfg                                  # persona/sandbox/modelo entram na próxima tarefa
+        return changed
+
+    def reload_config(self) -> tuple[bool, str]:
+        """Recarrega okami.yaml/local do disco e aplica os campos seguros. (False, erro) se inválida."""
+        from okami.config import load_config
+        try:
+            cfg = load_config()                        # valida ANTES de aplicar (config quebrada não derruba)
+        except Exception as e:  # noqa: BLE001
+            return False, str(e)
+        changed = self.apply_config(cfg)
+        return True, (", ".join(changed) if changed else "sem mudanças aplicáveis em quente")
+
     def _notify_completed_processes(self) -> None:
         """notify_on_complete (#1/#8): avisa no chat os processos com notify=True que terminaram."""
         chat = getattr(self, "_last_chat", None)
@@ -714,8 +742,18 @@ class AgentEndpoint:
                               f"{str(st.get('cmd', ''))[:60]}")
 
     def loop(self) -> None:
+        try:                                            # SIGHUP → hot-reload (convenção de daemon)
+            import signal as _sig
+            _sig.signal(_sig.SIGHUP, lambda *_: setattr(self, "_reload_req", True))
+        except (ValueError, AttributeError, OSError):
+            pass                                        # não-main-thread / sem SIGHUP (Windows)
         while self.running:
             try:
+                if getattr(self, "_reload_req", False):
+                    self._reload_req = False
+                    ok, msg = self.reload_config()
+                    from okami import log
+                    (log.dbg if ok else log.warn)(f"SIGHUP reload: {'ok ' if ok else 'falhou '}{msg}")
                 self.poll_once()
                 pace = getattr(self.channel, "poll_interval", 0)   # Telegram long-polla (0); REST espera
                 if pace:

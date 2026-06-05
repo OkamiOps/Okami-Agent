@@ -55,6 +55,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("yolo", "auto-aprova ações sensíveis nesta sessão", "sistema"),
     CommandDef("normal", "volta a aprovação normal", "sistema"),
     CommandDef("config", "mostra a config efetiva (segredos mascarados)", "sistema", tier="power"),
+    CommandDef("reload", "recarrega a config em quente (sem reiniciar)", "sistema", ("reloadconfig",), tier="power"),
 ]
 
 CATEGORY_ORDER = ["sessão", "modelo", "identidade", "info", "sistema"]
