@@ -8,7 +8,7 @@ from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
-    _load, _persona_ws,
+    _load, _persona_ws, _resolve_agent,
 )
 
 
@@ -35,6 +35,64 @@ def say(
 
     EdgeTTS(voice=voice).synthesize(text, out)
     console.print(f"[green]✓ áudio gerado:[/green] {out}")
+
+
+@app.command()
+def voice(
+    agent: str = typer.Option(None, "-a", "--agent", help="Conversa por voz como um agente."),
+    workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
+    seconds: float = typer.Option(6.0, "--seconds", help="Duração de cada captura do mic."),
+    whisper: str = typer.Option("base", "--whisper", help="Modelo whisper: tiny|base|small."),
+    tts_voice: str = typer.Option("pt-BR-AntonioNeural", "--tts-voice", help="Voz do Edge TTS."),
+    once: bool = typer.Option(False, "--once", help="Um turno só (em vez do loop)."),
+    yolo: bool = typer.Option(False, "-y", "--yolo", help="Auto-aprova ações (sem clique por voz)."),
+) -> None:
+    """Conversa por VOZ (turn-based): fala no mic → o agente responde FALANDO. Ctrl-C sai.
+
+    Reusa o STT (whisper) + TTS (edge) já existentes via okami.voice.bridge. Precisa das deps de
+    voz + um mic/alto-falante na máquina (sounddevice/soundfile + afplay/ffplay)."""
+    from okami.channels.terminal import TerminalChannel
+    from okami.cli.commands.chat import _wait_for_turn
+    from okami.gateway import AgentEndpoint
+    from okami.runner import run_task
+    from okami.voice.bridge import VoiceBridge, play_file, record_mic
+    from okami.voice.stt import WhisperSTT
+    from okami.voice.tts import EdgeTTS
+
+    cfg, ws, name = _resolve_agent(agent, workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+
+    class _CaptureChannel(TerminalChannel):     # captura a fala do agente p/ o TTS (e mostra no terminal)
+        def __init__(self):
+            super().__init__(name, console=console)
+            self.last = ""
+
+        def send(self, chat_id, text: str) -> None:
+            self.last = text
+            super().send(chat_id, text)
+
+    ch = _CaptureChannel()
+    mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
+    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode)
+    cid = "voice"
+
+    def respond(user_text: str) -> str:
+        ch.last = ""
+        ep.handle(cid, user_text)
+        _wait_for_turn(ep, cid)
+        return ch.last
+
+    bridge = VoiceBridge(transcribe=WhisperSTT(model=whisper).transcribe, respond=respond,
+                         synthesize=EdgeTTS(voice=tts_voice).synthesize,
+                         record=lambda: record_mic(seconds), play=play_file)
+    console.print(f"[dim]🎙️ voz ({name}) — fala ({seconds}s por turno). Silêncio ou Ctrl-C encerra.[/dim]")
+    try:
+        if once:
+            bridge.turn()
+        else:
+            bridge.loop(on_turn=lambda u, r, a: u and console.print(f"[bold]você:[/bold] {u}"))
+    except KeyboardInterrupt:
+        console.print("\n[dim]voz encerrada.[/dim]")
 
 
 @app.command("paperclip")
