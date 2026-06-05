@@ -22,6 +22,10 @@ _STOP = frozenset({
     "nosso", "nossa", "tudo", "coisa", "sobre", "depois", "antes", "tipo", "assim", "la", "ne", "so",
     "tem", "ter", "deu", "vamo", "preciso", "gostaria", "outros", "outro", "outra", "melhorou", "toda",
     "todo", "todas", "todos", "cada", "ainda", "tambem", "tb", "mesmo", "qualquer", "algum", "alguma",
+    # vocativos/carinho conversacionais (poluíam o nome: 'amor-eu-fiz-...') → fora
+    "amor", "amore", "mano", "cara", "veio", "vei", "rapa", "chefe", "querido", "querida", "lindo",
+    "linda", "fofo", "fofa", "po", "olha", "olhar", "deixa", "deixar", "consigo", "fica", "ficar",
+    "mas", "acho", "enquanto", "gatona", "gato", "gata", "porem", "entretanto", "talvez", "acessar",
     # EN
     "the", "an", "of", "and", "or", "to", "in", "on", "for", "with", "please", "can", "could", "you",
     "i", "now", "here", "this", "that", "is", "be", "do", "make", "let", "want", "would", "my", "your",

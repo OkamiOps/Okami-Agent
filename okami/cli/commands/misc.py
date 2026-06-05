@@ -321,8 +321,10 @@ def _root(
     try:                                              # migra ~/skills e ~/agents soltos → ~/.okami (1×, idempotente)
         import sys as _sys
 
-        from okami.home import migrate_stray
+        from okami.home import migrate_stray, skills_dir
         migrate_stray(emit=lambda m: print(m, file=_sys.stderr))   # stderr: não polui --json na 1ª vez
+        from okami.skills import tidy_skill_names      # P0: nome de skill gigante (auto-distill antigo) → canônico
+        tidy_skill_names(skills_dir(), emit=lambda m: print(m, file=_sys.stderr))
     except Exception:  # noqa: BLE001 — migração nunca derruba um comando
         pass
     if ctx.invoked_subcommand is None:

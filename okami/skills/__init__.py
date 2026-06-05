@@ -31,6 +31,7 @@ class Skill:
     body: str
     path: Path
     intent_examples: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)      # nomes antigos (migração) → use_skill ainda resolve
 
 
 def parse_skill(path: Path) -> Skill:
@@ -47,10 +48,64 @@ def parse_skill(path: Path) -> Skill:
         triggers=[str(t).lower() for t in (meta.get("triggers") or [])],
         # frases reais de pedido ("amor, analisa o okami-agent de novo") → casam por INTENÇÃO, não literal.
         intent_examples=[str(x) for x in (meta.get("intent_examples") or [])],
+        aliases=[str(a) for a in (meta.get("aliases") or [])],
         meta=meta,
         body=body,
         path=path,
     )
+
+
+def _name_is_bad(name: str) -> bool:
+    """Nome RUIM = frase literal gigante OU com filler conversacional (resíduo de auto-distill antigo).
+    Bom = curto, enxuto e estável sob o canonicalizador (short_name não o encurtaria)."""
+    from okami.core.naming import short_name
+    if len(name) > 28 or name.count("-") > 3:
+        return True
+    canon = short_name(name.replace("-", " "), fallback=name)
+    return canon != name and len(canon) < len(name)      # canonicalizar ENCURTA → tinha filler ('amor-…')
+
+
+def tidy_skill_names(root: Path, *, emit=lambda m: None) -> list[tuple[str, str]]:
+    """Migra skills de nome RUIM (longo/literal, geralmente sem frontmatter) p/ o nome canônico CURTO,
+    pra o catálogo parar de mostrar 'amor-eu-fiz-mudancas-...'. Reescreve o frontmatter (name canônico +
+    alias antigo + description) e renomeia a pasta. Idempotente; não toca em nomes já bons."""
+    import yaml as _yaml
+
+    from okami.core.naming import short_name
+    root = Path(root)
+    if not root.exists():
+        return []
+    renamed: list[tuple[str, str]] = []
+    for md in sorted(root.rglob("SKILL.md")):
+        d = md.parent
+        old = d.name
+        if not _name_is_bad(old):
+            continue
+        sk = parse_skill(md)
+        title = old.replace("-", " ")
+        first = sk.body.splitlines()[0] if sk.body else ""
+        if first.startswith("# "):
+            title = first[2:].strip() or title
+        canon = short_name(title, fallback="skill")
+        if not canon or canon == old or _name_is_bad(canon):
+            continue
+        n, i = canon, 2
+        while (root / n).exists():                        # colisão → sufixo
+            n = f"{canon}-{i}"
+            i += 1
+        meta = dict(sk.meta or {})
+        meta["name"] = n
+        meta["aliases"] = list(dict.fromkeys([*sk.aliases, old]))
+        meta.setdefault("description", (sk.description or title)[:120])
+        try:
+            md.write_text("---\n" + _yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
+                          + "---\n" + sk.body.rstrip() + "\n", encoding="utf-8", newline="\n")
+            d.rename(root / n)
+            renamed.append((old, n))
+            emit(f"🏷  skill renomeada: {old[:40]} → {n}")
+        except OSError:
+            pass
+    return renamed
 
 
 def load_skills(root: Path) -> list[Skill]:

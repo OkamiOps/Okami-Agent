@@ -36,6 +36,42 @@ def _write_rich(tmp_path, name, *, description, triggers=(), intent_examples=())
                                 encoding="utf-8")
 
 
+def test_tidy_renames_bad_skill_keeps_alias_in_catalog(tmp_path):
+    # P0: skill auto-distilada antiga (nome-pasta gigante, SEM frontmatter) → catálogo mostrava o lixo.
+    bad = tmp_path / "amor-eu-fiz-mudancas-grandes-agora-faca-de-novo-a-analise"
+    bad.mkdir()
+    (bad / "SKILL.md").write_text(
+        "# amor eu fiz mudancas grandes agora faca a analise do codigo de novo\n\n## Quando usar\nx\n",
+        encoding="utf-8")
+    renamed = skillmod.tidy_skill_names(tmp_path)
+    assert renamed and renamed[0][0].startswith("amor")
+    new = renamed[0][1]
+    assert len(new) <= 24 and new.count("-") <= 2 and "amor" not in new   # canônico curto, sem filler
+    sk = skillmod.load_skills(tmp_path)[0]
+    assert sk.name == new                                                 # catálogo mostra o NOVO nome
+    assert any("amor" in a for a in sk.aliases)                           # antigo guardado como alias
+    cat = skillmod.catalog([sk])
+    assert new in cat and "amor-eu-fiz" not in cat
+    assert skillmod.tidy_skill_names(tmp_path) == []                      # idempotente
+
+
+def test_tidy_leaves_good_names_untouched(tmp_path):
+    for ok in ("frontend-shadcn", "kanban-orchestrator", "communication-131"):
+        d = tmp_path / ok
+        d.mkdir()
+        (d / "SKILL.md").write_text(f"---\nname: {ok}\ndescription: d\n---\ncorpo", encoding="utf-8")
+    assert skillmod.tidy_skill_names(tmp_path) == []        # nomes bons → intocados
+
+
+def test_tidy_strips_conversational_filler_even_when_short(tmp_path):
+    # nome curto MAS com filler ('amor') → canonicaliza (encurta), não fica no catálogo
+    d = tmp_path / "amor-ajustei-diversas"
+    d.mkdir()
+    (d / "SKILL.md").write_text("# amor ajustei diversas coisas no projeto\n", encoding="utf-8")
+    renamed = skillmod.tidy_skill_names(tmp_path)
+    assert renamed and "amor" not in renamed[0][1]
+
+
 def test_parse_intent_examples(tmp_path):
     _write_rich(tmp_path, "x", description="d", triggers=["t1"], intent_examples=["faça de novo a avaliação"])
     sk = skillmod.load_skills(tmp_path)[0]

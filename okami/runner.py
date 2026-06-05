@@ -117,7 +117,11 @@ def run_task(
     # turn_steer primeiro (direção base); extra_context (com overlay de sessão) pode sobrepor depois.
     system_extra = "\n\n".join(x for x in (turn_steer, extra_context, taste_block,
                                            skillmod.render_block(routed), catalog) if x)
-    skills_map = {s.name: s.body for s in safe}
+    skills_map = {}
+    for s in safe:                                    # nome canônico + aliases antigos → use_skill resolve os dois
+        skills_map[s.name] = s.body
+        for a in s.aliases:
+            skills_map.setdefault(a, s.body)
 
     mem = open_memory(ws, backend=cfg.memory.get("backend", "sqlite-fts5"),
                       embedder=embedder, config=cfg.memory)
