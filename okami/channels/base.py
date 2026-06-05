@@ -16,6 +16,7 @@ class Inbound:
     text: str = ""
     audio: str | None = None   # caminho do áudio baixado (voz) → STT transcreve
     image: str | None = None   # caminho da imagem baixada (vision §6) → modelo multimodal
+    msg_id: str = ""           # id único da mensagem no canal → idempotência por turno (#3)
 
 
 class Channel:

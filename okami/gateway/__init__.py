@@ -115,6 +115,8 @@ class AgentEndpoint:
         self.sessions: dict[str, Session] = {}
         self._pending: dict[str, queue.Queue] = {}
         self._img: dict[str, str] = {}       # imagem pendente por chat (vision §6)
+        from collections import OrderedDict
+        self._seen_msgs: OrderedDict = OrderedDict()   # idempotência por turno (#3): msg_id já processado
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
         self.running = True
 
@@ -650,6 +652,13 @@ class AgentEndpoint:
 
     def poll_once(self) -> None:
         for msg in self.channel.poll():
+            mid = getattr(msg, "msg_id", "")
+            if mid:                                        # idempotência por turno (#3): entrega duplicada → ignora
+                if mid in self._seen_msgs:
+                    continue
+                self._seen_msgs[mid] = True
+                if len(self._seen_msgs) > 1000:            # LRU simples (descarta o mais antigo)
+                    self._seen_msgs.popitem(last=False)
             text = msg.text
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
                 try:

@@ -43,7 +43,7 @@ class MattermostChannel(RestChannel):
                 continue                                  # próprio bot / sistema → ignora
             msg = p.get("message")
             if msg:
-                out.append(Inbound("mattermost", self.channel_id, text=msg))
+                out.append(Inbound("mattermost", self.channel_id, text=msg, msg_id=str(pid)))
         return out
 
     def send(self, chat_id, text: str) -> None:

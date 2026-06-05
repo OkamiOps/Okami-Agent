@@ -186,7 +186,8 @@ class TelegramChannel(Channel):
                     pass
             txt = msg.get("text")
             if txt:
-                out.append(Inbound("telegram", str(chat), text=txt))
+                mid = str(msg.get("message_id") or u.get("update_id") or "")
+                out.append(Inbound("telegram", str(chat), text=txt, msg_id=mid))
         return out
 
     def send(self, chat_id, text: str) -> None:

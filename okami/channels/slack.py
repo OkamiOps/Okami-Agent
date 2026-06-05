@@ -43,7 +43,7 @@ class SlackChannel(RestChannel):
                 continue                                  # próprio bot / sistema → ignora
             text = m.get("text")
             if text:
-                out.append(Inbound("slack", self.channel_id, text=text))
+                out.append(Inbound("slack", self.channel_id, text=text, msg_id=str(ts)))
         return out
 
     def send(self, chat_id, text: str) -> None:

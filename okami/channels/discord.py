@@ -41,7 +41,7 @@ class DiscordChannel(RestChannel):
                 continue                                   # bot / próprio → ignora (anti-loop)
             text = m.get("content")
             if text:
-                out.append(Inbound("discord", self.channel_id, text=text))
+                out.append(Inbound("discord", self.channel_id, text=text, msg_id=mid))
         return out
 
     def send(self, chat_id, text: str) -> None:
