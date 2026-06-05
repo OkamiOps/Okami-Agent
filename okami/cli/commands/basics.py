@@ -1,7 +1,6 @@
 """Comandos básicos: run · providers · doctor · login · gate."""
 from __future__ import annotations
 
-import json
 import platform
 import sys
 
