@@ -276,9 +276,13 @@ class RememberFact(Tool):
     def run(self, args, ctx):
         if ctx.memory is None:
             return ToolResult(False, "memória não ativa")
-        from okami.memory.base import MemoryItem
-        ctx.memory.write(MemoryItem(text=args["text"], kind="fact", source="agent"))
-        return ToolResult(True, f"lembrado: {args['text'][:80]}", effect=True)
+        from okami.memory.policy import prepare
+        item = prepare(args.get("text", ""), source="agent")   # classifica + barra efêmero/trivial
+        if item is None:
+            return ToolResult(True, "(contexto efêmero/trivial — não guardei na memória de longo prazo)",
+                              effect=False)
+        ctx.memory.write(item)
+        return ToolResult(True, f"lembrado [{item.kind}]: {item.text[:80]}", effect=True)
 
 
 class RecallMemory(Tool):

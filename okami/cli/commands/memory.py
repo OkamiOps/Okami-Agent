@@ -33,13 +33,17 @@ def memory_add(
     text: str = typer.Argument(..., help="Fato a guardar."),
     workspace: str = typer.Option("workspaces/default", "--workspace", "-w"),
 ) -> None:
-    """Guarda um fato na memória do workspace."""
-    from okami.memory import MemoryItem
+    """Guarda um fato na memória do workspace (a política classifica a categoria)."""
+    from okami.memory.policy import prepare
 
+    item = prepare(text, source="cli", force=True)   # usuário explícito → sempre persiste, mas classificado
+    if item is None:
+        console.print("[yellow]nada a guardar (texto vazio).[/yellow]")
+        raise typer.Exit(1)
     m = _open_mem(workspace)
-    m.write(MemoryItem(text=text, kind="fact", source="cli"))
+    m.write(item)
     m.close()
-    console.print("[green]✓ lembrado[/green]")
+    console.print(f"[green]✓ lembrado[/green] [dim]({item.kind})[/dim]")
 
 
 @mem_app.command("search")

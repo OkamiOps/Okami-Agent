@@ -670,9 +670,11 @@ class Harness:
         if self.memory is None or not t.result:
             return
         from okami.memory import files as _mfiles
-        from okami.memory.base import MemoryItem
-        self.memory.write(MemoryItem(text=f"{t.goal} → {t.result}", kind="summary", source="task"))
-        self.events.emit("memory_write", kind="summary", text=f"{t.goal} → {t.result}"[:200])
+        from okami.memory.policy import prepare
+        item = prepare(f"{t.goal} → {t.result}", source="task", kind="summary")   # passa pela política
+        if item is not None:
+            self.memory.write(item)
+            self.events.emit("memory_write", kind=item.kind, text=item.text[:200])
         _mfiles.append_fact(self.ctx.workspace, f"{t.goal} → {t.result}")
 
     def _fail(self, t: Task, reason: str) -> Task:
