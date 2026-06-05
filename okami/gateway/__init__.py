@@ -82,6 +82,7 @@ class Session:
         self.persona_overlay = ""        # persona TEMPORÁRIA da sessão (/persona) — não grava
         self.resume_attempts = 0         # guarda anti-loop de auto-resume (Hermes #7536)
         self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
+        self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
 
     def interrupted(self) -> bool:
         """Tarefa interrompida = histórico termina numa fala do USER sem resposta do AGENTE."""
@@ -166,10 +167,81 @@ class AgentEndpoint:
                                        f"«{last[:80]}». Mande /retry pra eu continuar.")
 
     def _help(self) -> str:
+        from okami import commands as _cmds
+        ess = ", ".join("/" + c.name for cs in _cmds.by_category(tier="essential").values() for c in cs)
         return (f"Sou o agente '{self.agent_id}'. Manda a tarefa.\n"
-                "Comandos: /new · /status · /stop · /retry (retoma tarefa interrompida) · /yolo · /normal · "
-                "/feedback <como agir> · /undo · /persona <preset|off> (tom só desta sessão) · "
-                "/think <minimal|low|medium|high|off> (raciocínio) · /help")
+                f"Essenciais: {ess}\n/commands lista TODOS por categoria.")
+
+    def _commands_text(self) -> str:
+        from okami import commands as _cmds
+        return "📜 comandos por categoria:\n" + "\n".join(_cmds.help_lines())
+
+    def _usage_text(self, chat_id) -> str:
+        from okami.llm.usage import CanonicalUsage, estimate_cost, format_tokens
+        e = (self.store.entry(chat_id) if self.store else {}) or {}
+        u = CanonicalUsage.from_dict(e.get("usage") or {})
+        if not u.total_tokens:
+            return "📊 ainda sem tokens contabilizados nesta sessão."
+        line = f"📊 {format_tokens(u.input_tokens)} in · {format_tokens(u.output_tokens)} out"
+        if u.cache_read_tokens:
+            line += f" · {format_tokens(u.cache_read_tokens)} cache"
+        pc = self.cfg.provider() if self.cfg else None
+        if pc:
+            cr = estimate_cost(u, transport=pc.transport, provider=self.cfg.default_provider, model=pc.model)
+            line += f"   custo {cr.label}"
+        if e.get("served_by"):
+            line += f"\nservido por: {e['served_by']}"
+        return line
+
+    def _tools_text(self) -> str:
+        from okami.core.tools import default_registry
+        names = [n for n in default_registry() if not n.startswith("task_") and n != "need_input"]
+        return "🧰 ferramentas: " + ", ".join(sorted(names))
+
+    def _config_text(self) -> str:
+        import yaml as _yaml
+        try:
+            from okami.cli import _redact
+            from okami.config import load_raw
+            raw, _ = load_raw()
+            dump = _yaml.safe_dump(_redact(raw), allow_unicode=True, sort_keys=False)
+            return "⚙ config efetiva (segredos mascarados):\n" + dump[:1500]
+        except Exception as e:  # noqa: BLE001
+            return f"❌ não consegui ler a config: {e}"
+
+    def _models_text(self) -> str:
+        if not self.cfg:
+            return "—"
+        pc = self.cfg.provider()
+        models = getattr(pc, "models", None) or [pc.model]
+        return (f"🧠 modelos de {self.cfg.default_provider}: " + ", ".join(models)
+                + "\nproviders: " + ", ".join(self.cfg.providers))
+
+    def _model_cmd(self, s: "Session", arg: str) -> str:
+        pc = self.cfg.provider() if self.cfg else None
+        if not arg:
+            cur = s.model_override or (pc.model if pc else "?")
+            return f"🧠 modelo: {cur}" + (" (override desta sessão)" if s.model_override else "") + " · /models lista"
+        s.model_override = arg
+        return f"🧠 modelo desta sessão → {arg} (vale nos próximos turnos; /model sem arg mostra)"
+
+    def _compact_now(self, chat_id, s: "Session") -> str:
+        if len(s.history) < 4:
+            return "🗜 nada relevante pra compactar ainda."
+        from okami.llm import providers as prov
+        try:
+            convo = "\n".join(f"{r}: {t}" for r, t in s.history[-40:])
+            summary = prov.complete_messages(self.cfg, [
+                {"role": "system", "content": "Resuma em 1 parágrafo, preservando decisões, fatos e pendências."},
+                {"role": "user", "content": convo}]).strip()
+            if not summary:
+                return "🗜 sem resumo (modelo vazio)."
+            node = "[resumo da conversa] " + summary[:1500]
+            self.store.compact(chat_id, node)
+            s.history[:] = [("SUMMARY", node), *s.history[-4:]]
+            return "🗜 contexto compactado (mantive as últimas trocas)."
+        except Exception as e:  # noqa: BLE001
+            return f"❌ compact falhou: {e}"
 
     def _evolve(self, chat_id, note: str) -> None:
         """Feedback EXPLÍCITO de estilo → evolui VOICE/PERSONA na hora (auto, sem go/no-go). §8."""
@@ -260,6 +332,19 @@ class AgentEndpoint:
             return
         s = self.session(chat_id)
         low = text.lower()
+        # --- slash registry: canonicaliza alias + "did you mean" (1 vez, no topo) ---
+        import re as _re
+        if text.startswith("/") and _re.match(r"^/[a-z?]+$", low.split(maxsplit=1)[0]):
+            from okami import commands as _cmds
+            tok = low.split(maxsplit=1)[0]
+            cdef = _cmds.resolve(tok)
+            if cdef is None:
+                sg = _cmds.suggest(tok)
+                hint = (" Você quis dizer " + ", ".join("/" + x for x in sg) + "?") if sg else " — /commands lista tudo."
+                self.channel.send(chat_id, f"❓ comando desconhecido: {tok}.{hint}")
+                return
+            text = "/" + cdef.name + text[len(tok):]       # reescreve pro canônico → as branches casam
+            low = text.lower()
         if low in ("/start", "/help", ""):
             self.channel.send(chat_id, self._help())
             return
@@ -344,6 +429,31 @@ class AgentEndpoint:
                 self.channel.send(chat_id, f"🎭 nesta sessão: {arg} (/persona off p/ voltar)")
             self._save_meta(chat_id, s)
             return
+        if low == "/commands":                          # registry: lista completa por categoria
+            self.channel.send(chat_id, self._commands_text())
+            return
+        if low == "/usage":
+            self.channel.send(chat_id, self._usage_text(chat_id))
+            return
+        if low == "/tools":
+            self.channel.send(chat_id, self._tools_text())
+            return
+        if low == "/config":
+            self.channel.send(chat_id, self._config_text())
+            return
+        if low == "/whoami":
+            self.channel.send(chat_id, f"🪪 chat id: {chat_id} · agente: {self.agent_id}")
+            return
+        if low == "/models":                            # ANTES de /model (startswith colide)
+            self.channel.send(chat_id, self._models_text())
+            return
+        if low.startswith("/model"):
+            self.channel.send(chat_id, self._model_cmd(s, text[len("/model"):].strip()))
+            self._save_meta(chat_id, s)
+            return
+        if low == "/compact":
+            self.channel.send(chat_id, self._compact_now(chat_id, s))
+            return
         from okami.automation.scheduler import Scheduler, infer_commitment   # §11: "me lembra de X amanhã" → agenda
         ic = infer_commitment(text, time.time())
         if ic:
@@ -413,6 +523,8 @@ class AgentEndpoint:
                 kw["on_event"] = on_ev
             if s.reasoning_effort:                        # /think desta sessão → vence o default do provider
                 kw["reasoning_effort"] = s.reasoning_effort
+            if s.model_override:                          # /model desta sessão → vence o default
+                kw["model"] = s.model_override
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             task = self.run_task(self.cfg, self.ws, text, **kw)

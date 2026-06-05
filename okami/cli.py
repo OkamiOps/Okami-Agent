@@ -1542,8 +1542,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     hist_dir = Path(".okami")
     hist_dir.mkdir(parents=True, exist_ok=True)
-    cmds = ["/help", "/new", "/status", "/stop", "/yolo", "/normal", "/think ", "/persona ",
-            "/feedback ", "/undo", "/retry", "/exit"]
+    from okami import commands as _cmds              # autocomplete vem do REGISTRO declarativo
+    cmds = _cmds.all_slash_names(scope="chat")
     session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
                             completer=WordCompleter(cmds, sentence=True, ignore_case=True))
     prompt_fmt = ANSI("\x1b[1;38;2;255;117;39m›\x1b[0m ")
@@ -1671,8 +1671,8 @@ def chat(
     cfg, ws, name = _resolve_agent(agent, workspace)
     ws.mkdir(parents=True, exist_ok=True)
 
-    def run_task(c, w, goal, **kw):                # honra -p/-m no chat de terminal
-        return _rt(c, w, goal, provider=provider, model=model, **kw)
+    def run_task(c, w, goal, **kw):                # honra -p/-m; mas /model da sessão (kw) vence
+        return _rt(c, w, goal, provider=kw.pop("provider", provider), model=kw.pop("model", model), **kw)
 
     mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
     cid = "terminal"

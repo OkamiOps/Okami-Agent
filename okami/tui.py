@@ -337,23 +337,16 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
 
 
 def help_table() -> Table:
-    """Tabela dos slash commands (resposta do /help)."""
+    """Tabela dos slash commands — gerada do REGISTRO declarativo (okami/commands.py)."""
+    from okami import commands as _cmds
     t = Table(title="Comandos", border_style=ORANGE, title_style=f"bold {ORANGE}")
+    t.add_column("categoria", style=f"bold {CYAN}")
     t.add_column("comando", style=f"bold {MAGENTA}")
     t.add_column("o que faz", style=SOFT)
-    rows = [
-        ("/help", "mostra esta ajuda"),
-        ("/new", "começa uma conversa nova (arquiva a atual)"),
-        ("/status", "estado da sessão (trocas, yolo)"),
-        ("/stop", "cancela a tarefa em andamento"),
-        ("/yolo · /normal", "liga/desliga auto-aprovação de ações sensíveis"),
-        ("/feedback <texto>", "molda o jeito do agente falar (evolui VOICE/PERSONA)"),
-        ("/persona <preset>", "muda o tom só nesta sessão (/persona off volta)"),
-        ("/think <nível>", "esforço de raciocínio: minimal·low·medium·high (/think off = default)"),
-        ("/undo", "reverte a última evolução de identidade"),
-        ("/retry", "retoma uma tarefa interrompida"),
-        ("/exit", "sai do chat (ou Ctrl-D)"),
-    ]
-    for c, d in rows:
-        t.add_row(c, d)
+    for cat, cmds in _cmds.by_category().items():
+        for i, c in enumerate(cmds):
+            name = "/" + c.name + (f" {c.args}" if c.args else "")
+            if c.aliases:
+                name += f"  ({', '.join('/' + a for a in c.aliases)})"
+            t.add_row(cat if i == 0 else "", name, c.desc)
     return t

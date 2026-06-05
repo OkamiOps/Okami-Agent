@@ -44,7 +44,7 @@ def test_terminal_slash_commands_work():
     ws = tempfile.mkdtemp()
     ch, ep = _ep(ws)
     ep.handle("terminal", "/help")
-    assert any("Comandos" in t for _, t in ch.sent)
+    assert any("Essenciais" in t and "/commands" in t for _, t in ch.sent)   # _help vem do registro
     ep.handle("terminal", "/status")
     assert any("livre" in t for _, t in ch.sent)
 
