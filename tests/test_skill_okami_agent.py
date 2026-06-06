@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from okami.skills import load_skills, parse_skill, rank_skills
+from okami.skills import is_self_query, load_skills, parse_skill, rank_skills, route
 from okami.skills.skill_security import scan_path
 
 REPO_SKILLS = Path(__file__).resolve().parent.parent / "skills"
@@ -42,6 +42,39 @@ def test_okami_agent_skill_ranks_top_for_meta_queries():
                  "como o okami troca de provider?"):
         scores = {s.name: score for s, score in rank_skills(goal, skills)}
         assert scores["okami-agent"] > scores["tdd"], f"okami-agent não subiu em: {goal}"
+
+
+def test_harness_forces_okami_agent_on_self_queries():
+    # O harness INJETA a skill inteira (não só catálogo) quando o pedido é sobre o próprio Okami —
+    # assim o agente sabe suas capacidades sem depender de lembrar de chamar use_skill.
+    skills = load_skills(REPO_SKILLS)
+    for goal in ("what can you do?",
+                 "quais são as capacidades do okami?",
+                 "how does okami switch provider?",
+                 "analisa o okami-agent de novo",
+                 "que ferramentas você tem?",
+                 "explain okami's harness and exit criteria"):
+        routed = [s.name for s in route(goal, {}, skills)]
+        assert "okami-agent" in routed, f"não forçou a skill em: {goal!r}"
+
+
+def test_harness_does_not_force_okami_agent_on_unrelated_tasks():
+    # Conservador: task de dev comum (mesmo citando 'okami' como caminho) NÃO arrasta a doc inteira.
+    skills = load_skills(REPO_SKILLS)
+    for goal in ("crie um endpoint /health em FastAPI",
+                 "some os números 2 e 3",
+                 "fix the failing test in app/utils.py",
+                 "renomeie a variável no arquivo db.py"):
+        routed = [s.name for s in route(goal, {}, skills)]
+        assert "okami-agent" not in routed, f"forçou indevidamente em: {goal!r}"
+
+
+def test_is_self_query_phrases_and_meta_combo():
+    assert is_self_query("what can you do?")                       # frase basta (sem 'okami')
+    assert is_self_query("como você funciona?")                    # PT, sem 'okami'
+    assert is_self_query("como o okami troca de provider?")        # 'okami' + palavra-meta
+    assert not is_self_query("add a provider class to fastapi")    # palavra-meta SEM 'okami' → não
+    assert not is_self_query("o que essa função faz?")             # genérico, não é sobre o agente
 
 
 def test_okami_agent_skill_documents_real_surface():

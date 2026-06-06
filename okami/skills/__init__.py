@@ -21,6 +21,35 @@ FRONTEND_KEYWORDS = {
 
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
+# Pedido sobre o PRÓPRIO Okami → o harness força a skill de auto-referência `okami-agent`
+# (capacidades · tools · comandos · providers · harness · segurança). Conservador DE PROPÓSITO: só
+# dispara quando o pedido é claramente META — senão inflaria o prompt de QUALQUER task que cite 'okami'.
+SELF_DOC_SKILL = "okami-agent"
+# Frases que, por si só (mesmo sem 'okami'), já são uma pergunta sobre o agente:
+_SELF_PHRASES = (
+    "okami-agent", "okami agent",
+    "what can you do", "what can okami do", "what are your capabilities", "your capabilities",
+    "okami's capabilities", "how do you work", "how does okami work",
+    "what tools do you", "which tools do you", "list your commands", "which commands do you",
+    "o que você consegue fazer", "o que voce consegue fazer", "o que o okami faz",
+    "quais suas capacidades", "quais são suas capacidades", "quais sao suas capacidades",
+    "capacidades do okami", "como você funciona", "como voce funciona", "como o okami funciona",
+    "quais comandos", "que comandos", "quais ferramentas", "que ferramentas você", "que ferramentas voce",
+)
+# Palavras-meta que SÓ forçam quando 'okami' também aparece (evita disparar em task de dev comum):
+_SELF_META_KW = (
+    "capabilit", "capacidade", "/model", "/think", "provider", "gateway", "harness",
+    "fallback", "exit criteri", "critério de saída", "criterio de saida", "readiness", "slash command",
+)
+
+
+def is_self_query(goal: str) -> bool:
+    """True se o pedido é sobre o PRÓPRIO Okami — aí vale forçar a skill `okami-agent` no contexto."""
+    g = (goal or "").lower()
+    if any(p in g for p in _SELF_PHRASES):
+        return True
+    return "okami" in g and any(k in g for k in _SELF_META_KW)
+
 
 @dataclass
 class Skill:
@@ -128,6 +157,11 @@ def route(goal: str, contracts: dict, skills: list[Skill]) -> list[Skill]:
         sk = by_name.get(f"frontend-{lib}")
         if sk:
             forced.append(sk)
+    # Auto-documentação: pedido sobre o PRÓPRIO Okami → injeta a `okami-agent` inteira (não só catálogo),
+    # pro agente saber exatamente suas capacidades sem depender de lembrar de chamar use_skill.
+    self_sk = by_name.get(SELF_DOC_SKILL)
+    if self_sk and self_sk not in forced and is_self_query(goal):
+        forced.append(self_sk)
     return forced
 
 
