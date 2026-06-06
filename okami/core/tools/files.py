@@ -158,15 +158,27 @@ class RunShell(Tool):
     name = "run_shell"
     description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "
                    "sanitizado; isolamento real com backend docker). Em perfil read-only, comando que "
-                   "altera estado é bloqueado.")
-    args_schema = {"cmd": "comando a executar"}
+                   "altera estado é bloqueado. Comando demorado: passe timeout=N (máx 1800s) ou, p/ algo "
+                   "realmente longo (servidor/build), use process_start (background, sem teto).")
+    args_schema = {"cmd": "comando a executar",
+                   "timeout": "(opc) segundos até cortar o comando — default 120, máx 1800"}
     required = ("cmd",)
+    _MAX_TIMEOUT = 1800           # 30min de teto p/ UM comando — acima disso é trabalho de background (process_start)
 
     def run(self, args, ctx):
+        import dataclasses
         from okami.core.sandbox import default_policy, run_sandboxed
         cmd = args["cmd"]
         eff = shell_has_effect(cmd)   # read-only (ls/grep/cat…) → effect=False (não engana o watchdog)
         policy = ctx.sandbox or default_policy()
+        # timeout POR-CHAMADA: comando sabidamente demorado (teste/build grande, transformar arquivo enorme)
+        # pode pedir mais tempo sem mexer no default global. Clamp p/ não virar "trava pra sempre".
+        to = args.get("timeout")
+        if to is not None:
+            try:
+                policy = dataclasses.replace(policy, timeout=max(1, min(int(to), self._MAX_TIMEOUT)))
+            except (TypeError, ValueError):
+                pass                                              # timeout inválido → ignora, usa o da policy
         mode = getattr(policy, "mode", "")
         if mode == "read-only" and eff:                          # defesa em profundidade (perfil)
             return ToolResult(False, f"sandbox read-only: comando que altera estado bloqueado ({cmd[:80]})",
@@ -176,4 +188,9 @@ class RunShell(Tool):
                               f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
                               effect=False)
         res = run_sandboxed(cmd, ctx.workspace, policy)
-        return ToolResult(res.returncode == 0, f"exit={res.returncode}\n{res.output}", effect=eff)
+        out = f"exit={res.returncode}\n{res.output}"
+        if getattr(res, "timed_out", False):                     # cortou no teto → ensina a recuperar (não é "falha real")
+            out += (f"\n[o comando passou de {policy.timeout}s e foi cortado. Se é legítimo e demora mesmo: "
+                    f"rode de novo com timeout=N (máx {self._MAX_TIMEOUT}), ou use process_start p/ rodar "
+                    "em background sem teto e acompanhar com process_poll/process_log.]")
+        return ToolResult(res.returncode == 0, out, effect=eff)

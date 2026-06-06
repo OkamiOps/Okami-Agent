@@ -46,3 +46,40 @@ def test_docker_argv_isolation():
     assert "--memory" in argv and "--pids-limit" in argv         # cgroups
     net = docker_argv("ls", Path("/tmp/ws"), SandboxPolicy(backend="docker", mode="yolo"))
     assert net[net.index("--network") + 1] == "bridge"          # yolo libera a rede
+
+
+def test_run_shell_per_call_timeout_override(tmp_path):
+    # run_shell aceita timeout por chamada → comando sabidamente demorado pode pedir mais tempo,
+    # sem mexer no default global. Aqui REDUZIMOS p/ provar o override (sleep 3 com timeout=1 → corta).
+    from okami.core.tools import RunShell, ToolContext
+    ctx = ToolContext(workspace=tmp_path)
+    res = RunShell().run({"cmd": "sleep 3", "timeout": 1}, ctx)
+    assert not res.ok and "exit=124" in res.output
+    assert "process_start" in res.output and "timeout=N" in res.output   # ensina a recuperar
+
+
+def test_run_shell_timeout_override_is_clamped(tmp_path, monkeypatch):
+    # valor absurdo é limitado ao TETO (1800); piso de 1s; inválido → usa o default — nunca "trava pra sempre".
+    import okami.core.sandbox as _sb           # run_sandboxed é importado lazy de cá dentro do run()
+    from okami.core.sandbox import SandboxResult
+    from okami.core.tools import RunShell, ToolContext
+    seen = {}
+
+    def spy(cmd, ws, policy):
+        seen["timeout"] = policy.timeout
+        return SandboxResult(0, "ok")
+    monkeypatch.setattr(_sb, "run_sandboxed", spy)
+    ctx = ToolContext(workspace=tmp_path)
+
+    RunShell().run({"cmd": "echo ok", "timeout": 999999}, ctx)
+    assert seen["timeout"] == RunShell._MAX_TIMEOUT       # clampado no teto (30min)
+    RunShell().run({"cmd": "echo ok", "timeout": 0}, ctx)
+    assert seen["timeout"] == 1                            # piso de 1s
+    RunShell().run({"cmd": "echo ok", "timeout": "lixo"}, ctx)
+    assert seen["timeout"] == 120                          # inválido → default da policy (120)
+
+
+def test_default_shell_timeout_is_120():
+    # paridade com o critério shell_ok (120s) — menos cortes espúrios em pytest/npm install.
+    from okami.core.sandbox import default_policy
+    assert default_policy().timeout == 120

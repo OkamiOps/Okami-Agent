@@ -33,7 +33,7 @@ class SandboxPolicy:
     backend: str = "local"           # "local" | "docker" | "auto" (docker se houver, senão local)
     mode: str = "workspace-write"    # "read-only" | "workspace-write" | "yolo"
     network: bool = False            # rede liberada? (real só no docker; yolo liga)
-    timeout: int = 60                # segundos (relógio) — sempre vale
+    timeout: int = 120               # segundos (relógio) p/ UM comando — sempre vale; run_shell pode pedir mais (máx 1800)
     max_output: int = 100_000        # bytes de stdout+stderr devolvidos ao modelo — sempre vale
     mem_mb: int = 0                  # rlimit AS / docker --memory  (0 = não setar rlimit local)
     cpu_seconds: int = 0             # rlimit CPU                   (0 = não setar; confia no timeout)
