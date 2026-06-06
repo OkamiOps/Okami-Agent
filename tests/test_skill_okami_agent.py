@@ -47,6 +47,9 @@ def test_okami_agent_skill_ranks_top_for_meta_queries():
 def test_okami_agent_skill_documents_real_surface():
     # Guarda anti-drift: a doc precisa cobrir a superfície de fato (não virar casca vazia).
     body = parse_skill(OKAMI_SKILL).body.lower()
-    for anchor in ('"tool"', "task_complete", "file_exists:", "use_skill",
-                   "run_shell", "/model", "fallback", ".env", "ação-ou-termina"):
+    for anchor in ('"tool"', "task_complete", "task_blocked", "need_input",
+                   "file_exists:", "shell_ok:", "use_skill", "run_shell", "/model",
+                   "fallback", ".env", "action-or-terminate", "gateway", "mcp", "sandbox"):
         assert anchor in body, f"a skill okami-agent não menciona {anchor!r}"
+    # a doc é em INGLÊS (decisão do usuário): sem cabeçalhos PT antigos
+    assert "ferramentas (chame" not in body and "regras de ouro" not in body
