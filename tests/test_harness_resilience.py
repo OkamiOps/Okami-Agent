@@ -57,8 +57,7 @@ def test_shrink_retry_happens_only_once_per_episode(tmp_path, monkeypatch):
     monkeypatch.setattr(loop_mod._compaction, "compact", lambda m, mem, **k: ([m[0]], 0))
     monkeypatch.setattr(loop_mod._compaction, "estimate_chars", lambda m: 100 if len(m) <= 1 else 5000)
 
-    h = Harness(generate=gen, task=Task(goal="oi"), workspace=tmp_path,
-                budget=Budget(max_wall_seconds=30))
+    h = Harness(generate=gen, task=Task(goal="oi"), workspace=tmp_path)
     res = h.run()
     # 1ª gen (timeout) → encolhe+retry → 2ª gen (timeout) → sem mais encolher → escala/desiste.
     assert calls["gen"] <= 4                                 # não fica num loop infinito de encolher
@@ -93,13 +92,57 @@ def test_truly_empty_respond_reprompts_then_answers(tmp_path):
     assert res.state.name == "COMPLETE" and "Minerva" in (res.result or "")
 
 
-def test_wall_clock_budget_stops_cleanly(tmp_path):
-    # teto de relógio: estourou → termina BLOCKED com mensagem clara (não trava silencioso).
-    def gen(messages, schema):
-        return '{"tool": "task_complete", "args": {"summary": "ok"}}'
+def test_stall_blocks_only_when_no_step_completes(tmp_path, monkeypatch):
+    # ANTI-TRAVAMENTO (não teto de turno): se a agente fica sem CONCLUIR passo além do limite → BLOCKED.
+    import time as _time
+    clock = [0.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
 
-    h = Harness(generate=gen, task=Task(goal="oi"), workspace=tmp_path,
-                budget=Budget(max_wall_seconds=0))          # 0 → estoura na 1ª iteração
+    def gen(messages, schema):
+        clock[0] += 200                               # cada chamada "gasta" 200s e NÃO produz ação válida
+        return "só conversa, sem json nenhum"          # → violação, nenhum passo executado
+
+    # goal com verbo de ação → não cai no atalho de "conversa pura"; violações altas p/ isolar o stall.
+    h = Harness(generate=gen, task=Task(goal="crie o arquivo x.txt"), workspace=tmp_path,
+                budget=Budget(max_stall_seconds=300, max_consecutive_violations=999))
     res = h.run()
     assert res.state.name == "BLOCKED"
-    assert "tempo limite" in (res.reason or "")
+    assert "travei" in (res.reason or "") and "sem concluir" in (res.reason or "")
+
+
+def test_long_active_work_never_stalls(tmp_path, monkeypatch):
+    # O PONTO da mudança: trabalho longo de VERDADE (muitos passos com efeito) NÃO expira por tempo —
+    # mesmo "gastando" horas de relógio — porque cada passo reseta o anti-travamento.
+    import time as _time
+    clock = [0.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+    n = [0]
+
+    def gen(messages, schema):
+        clock[0] += 200                               # 200s POR passo → 30 passos = 6000s (100min) de relógio
+        n[0] += 1
+        if n[0] <= 30:                                # 30 escritas DISTINTAS (efeito real, sem loop)
+            return f'{{"tool": "write_file", "args": {{"path": "f{n[0]}.txt", "content": "{n[0]}"}}}}'
+        return '{"tool": "task_complete", "args": {"summary": "feito"}}'
+
+    h = Harness(generate=gen, task=Task(goal="crie 30 arquivos"), workspace=tmp_path,
+                budget=Budget(max_stall_seconds=300, max_steps=90))
+    res = h.run()
+    assert res.state.name == "COMPLETE", f"trabalho longo foi morto indevidamente: {res.reason!r}"
+    assert n[0] >= 31 and (tmp_path / "f30.txt").exists()
+
+
+def test_stall_guard_disabled_when_zero(tmp_path, monkeypatch):
+    # max_stall_seconds=0 → desliga o anti-travamento (confia no timeout por-chamada do transporte).
+    import time as _time
+    clock = [0.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+
+    def gen(messages, schema):
+        clock[0] += 10_000                            # tempo enorme, mas guard desligado
+        return '{"tool": "respond", "args": {"message": "oi"}}'
+
+    h = Harness(generate=gen, task=Task(goal="diga oi"), workspace=tmp_path,
+                budget=Budget(max_stall_seconds=0))
+    res = h.run()
+    assert res.state.name == "COMPLETE"               # não bloqueou por tempo

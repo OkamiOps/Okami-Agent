@@ -56,7 +56,10 @@ and exactly how. Don't improvise around the invariants below.
   `task_blocked` (state the blocker), `need_input` (ask the user a concrete question), `respond`
   (plain reply for a chat turn), `finish_setup`.
 - **Anti-loop / anti-stall** — action *fingerprints* detect repetition; a read-only command does not
-  fool the watchdog (`shell_has_effect`). There is a per-turn ceiling on steps, tokens and wall-clock.
+  fool the watchdog (`shell_has_effect`). Budgets are per-step and per-token. There is **no turn
+  time-cap** — long work (huge reviews, slow test suites) runs as long as it keeps making progress; a
+  stall guard only fires after `max_stall_seconds` with **no completed step** (a genuine hang), and a
+  hung single call is bounded by the per-call transport timeout.
 - **Checkpoints & rollback** — every write records the previous state in an append-only journal
   (lock + chained HMAC); undo with `okami rollback N`.
 - **Recovery** — if generation fails on a large context, the harness compacts and retries; prose

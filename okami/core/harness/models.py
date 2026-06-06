@@ -39,15 +39,18 @@ class Task:
 
 @dataclass
 class Budget:
-    max_steps: int = 90          # passos (ações) por tarefa — antes 24, baixo demais p/ tarefa real
+    max_steps: int = 200         # passos (ações) por tarefa — alto p/ trabalho longo de verdade (review/refactor)
     max_consecutive_violations: int = 3
     max_repeat: int = 3          # mesma ação N vezes → loop
     stall_limit: int = 4         # passos sem efeito observável → quebra
     max_loop_breaks: int = 3     # quebras de loop antes de FAILED
-    max_total_turns: int = 300   # backstop bem acima de max_steps → o limite que vale é o de passos
+    max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos
     max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
-    max_wall_seconds: float = 240.0  # TETO de relógio do turno → nunca pendura ~6min e morre silencioso;
-                                     # estourou → termina LIMPO (BLOCKED) com mensagem clara
+    # NÃO é teto de relógio do turno (isso matava trabalho longo legítimo — review de 1M linhas, pytest de 10min).
+    # É um detector de TRAVAMENTO: tempo MÁXIMO sem CONCLUIR um passo. Reseta a cada passo executado, então
+    # durante atividade nunca dispara — só quando a agente fica de fato parada (provider pendurado/spinning).
+    # 0 = desliga. Hang de uma chamada já tem timeout por-chamada no transporte; isto é a rede de segurança.
+    max_stall_seconds: float = 300.0
 
 
 # ----------------------------------------------------------------------------- protocolo

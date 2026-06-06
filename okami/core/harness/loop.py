@@ -160,14 +160,19 @@ class Harness:
         step_n = 0
         turns = 0
         import time as _wt
-        _wall0 = _wt.monotonic()                          # relógio do turno (teto anti-travamento)
+        # NÃO é teto de relógio (matava trabalho longo). É anti-TRAVAMENTO: mede o tempo desde o ÚLTIMO
+        # passo concluído. Reseta a cada passo (ver `_last_progress = …` abaixo) → durante atividade nunca
+        # dispara; só quando a agente fica parada de verdade. 0 = desliga (confia no timeout por-chamada).
+        _last_progress = _wt.monotonic()
         self._shrunk_retry = False                        # recuperação por encolhimento: 1x por episódio de falha
         while True:
             turns += 1
-            if _wt.monotonic() - _wall0 > self.budget.max_wall_seconds:   # estourou o tempo → para LIMPO
+            _stall = self.budget.max_stall_seconds
+            if _stall > 0 and _wt.monotonic() - _last_progress > _stall:   # travou (sem concluir passo) → para LIMPO
                 t.state = TaskState.BLOCKED
-                t.reason = (f"passei do tempo limite do turno (~{int(self.budget.max_wall_seconds)}s) e parei "
-                            "pra não travar. Tenta de novo (ou divide em passos menores) que eu sigo.")
+                t.reason = (f"travei: ~{int(_wt.monotonic() - _last_progress)}s sem concluir nenhum passo "
+                            "(provável travamento, não trabalho — durante atividade eu não paro). Tenta de novo "
+                            "que eu sigo.")
                 self._emit("blocked", reason=t.reason)
                 return t
             if turns > self.budget.max_total_turns:
@@ -322,6 +327,7 @@ class Harness:
                     self._stats["denials"] += 1
                     self._fingerprints.append(fp)
                     step_n += 1
+                    _last_progress = _wt.monotonic()      # passo concluído (mesmo negado) = atividade → reseta o anti-travamento
                     t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False))
                     self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                     self.messages.append({"role": "user", "content":
@@ -333,6 +339,7 @@ class Harness:
             if self.hooks is not None and not self.hooks.fire(
                     "before_tool", {"tool": action.tool, "args": action.args}):
                 step_n += 1
+                _last_progress = _wt.monotonic()          # passo concluído (vetado) = atividade → reseta o anti-travamento
                 t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False))
                 self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                 self.messages.append({"role": "user", "content":
@@ -347,6 +354,7 @@ class Harness:
             except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
                 res = ToolResult(False, f"erro na tool {action.tool}: {e}")
             step_n += 1
+            _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
             t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
             self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect)
             self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),

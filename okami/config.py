@@ -152,7 +152,7 @@ class OkamiConfig(BaseModel):
     hooks: dict[str, Any] = Field(default_factory=dict)      # {evento: ["cmd"]} event hooks (§11)
     sandbox: dict[str, Any] = Field(default_factory=dict)    # {"backend": "local|docker", "mode": ...} (§P0 #2)
     tools: dict[str, Any] = Field(default_factory=dict)      # {"surfaces": {telegram: {deny:[...], allow:[...]}}} (P1.4)
-    harness: dict[str, Any] = Field(default_factory=dict)    # {"max_steps": 90} — orçamento de passos por tarefa
+    harness: dict[str, Any] = Field(default_factory=dict)    # {max_steps:200, max_stall_seconds:300} — passos/anti-travamento
     retention: dict[str, Any] = Field(default_factory=dict)  # poda/quota de disco p/ gateway long-running (ver maintenance.py)
     paperclip: dict[str, Any] = Field(default_factory=dict)  # {"require_evidence": true} — control plane exige prova p/ done
 
