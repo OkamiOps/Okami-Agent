@@ -37,6 +37,36 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
+def test_tui_slash_shows_command_autocomplete(tmp_path):
+    # digitar '/' (ou '/mo') mostra o popup de comandos; texto normal esconde.
+    out = {}
+
+    async def scenario():
+        from textual.widgets import Input, Static
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panel = app.query_one("#cmdhints", Static)
+            app.on_input_changed(type("E", (), {"value": "/mo"})())    # digitou /mo → popup aparece
+            out["shown"] = panel.display
+            app.on_input_changed(type("E", (), {"value": "oi"})())     # texto normal → some
+            out["hidden"] = panel.display
+            _ = app.query_one("#input", Input)
+
+    asyncio.run(scenario())
+    assert out["shown"] is True and out["hidden"] is False
+    # conteúdo do popup (testável direto): casa /model, /models, /mouse com '/mo'
+    import io
+
+    from rich.console import Console
+    from okami import tui
+    buf = io.StringIO()
+    Console(width=80, file=buf, force_terminal=True).print(tui.command_hints("/mo"))
+    txt = buf.getvalue()
+    assert "/model" in txt and "/mouse" in txt
+
+
 def test_tui_renders_command_output_with_brain_emoji(tmp_path):
     # REGRESSÃO: /model responde "🧠 modelo: …" e o TUI NÃO pode engolir. Só o 💭 ("pensando") some.
     out = {}

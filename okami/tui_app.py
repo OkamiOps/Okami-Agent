@@ -30,6 +30,7 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Horizontal
+    from textual.suggester import SuggestFromList
     from textual.widgets import Button, Input, RichLog, Static
     _HAS_TEXTUAL = True
 except Exception:  # noqa: BLE001 — sem textual: o chamador cai no REPL
@@ -104,6 +105,8 @@ if _HAS_TEXTUAL:
         #header { height: 1; padding: 0 1; background: $surface; }
         #log { height: 1fr; padding: 1 2; background: $background; scrollbar-color: $primary; scrollbar-size: 1 1; }
         #activity { height: auto; display: none; padding: 0 2; }
+        #cmdhints { height: auto; max-height: 11; display: none; padding: 0 1; background: $panel;
+                    border-top: solid $accent; color: $text; }
         #approval { height: auto; display: none; padding: 1 2; background: $panel; border-top: solid $primary; }
         #approval-label { width: 1fr; content-align: left middle; color: $warning; }
         #input { border: round $panel; background: $surface; }
@@ -160,8 +163,10 @@ if _HAS_TEXTUAL:
                 yield Static("⚠ aprovar a ação pendente?", id="approval-label")
                 yield Button("Aprovar", id="approve", variant="success")
                 yield Button("Negar", id="deny", variant="error")
-            yield Input(placeholder="fala comigo…   ↵ envia · arraste p/ selecionar + ^C copia · /help · ^D sai",
-                        id="input")
+            yield Static("", id="cmdhints")           # autocomplete: aparece ao digitar '/'
+            from okami import commands as _cmds
+            yield Input(placeholder="fala comigo…   ↵ envia · / p/ comandos · → completa · ^C copia · ^D sai",
+                        id="input", suggester=SuggestFromList(_cmds.all_slash_names("chat"), case_sensitive=False))
             yield Static("", id="status")
 
         def on_mount(self) -> None:
@@ -225,9 +230,23 @@ if _HAS_TEXTUAL:
             self.call_from_thread(self.sink_event, e)
 
         # ---- input -----------------------------------------------------------
+        def on_input_changed(self, event) -> None:
+            # autocomplete: digitou '/' → mostra os comandos que casam (some ao apagar ou começar a digitar args)
+            hints = _tui.command_hints(event.value)
+            panel = self.query_one("#cmdhints", Static)
+            if hints is None:
+                panel.display = False
+            else:
+                panel.update(hints)
+                panel.display = True
+
         def on_input_submitted(self, event) -> None:
             text = event.value
             event.input.value = ""
+            try:
+                self.query_one("#cmdhints", Static).display = False   # esconde o popup ao enviar
+            except Exception:  # noqa: BLE001
+                pass
             if not text.strip():
                 return
             self.transcript.append(("user", text))

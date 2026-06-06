@@ -445,6 +445,32 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     return t
 
 
+def command_hints(typed: str, *, limit: int = 8):
+    """Autocomplete do TUI: comandos que casam com o que foi digitado depois de '/'. None = não mostrar
+    (não começa com '/' ou já está digitando argumentos). Devolve um renderable p/ o painel popup."""
+    s = (typed or "").lstrip()
+    if not s.startswith("/") or " " in s:            # só enquanto digita o NOME do comando (sem args)
+        return None
+    from okami import commands as _cmds
+    partial = s[1:].lower()
+    hits = [c for c in _cmds.COMMAND_REGISTRY
+            if c.scope in ("chat", "both")
+            and (not partial or any(n.startswith(partial) for n in (c.name, *c.aliases)))]
+    if not hits:
+        return None
+    t = Text(no_wrap=True, overflow="ellipsis")
+    t.append(" ⌨ comandos", style=f"bold {CYAN}")
+    t.append(f"  (/{partial}…)\n" if partial else "  (↵ envia · → completa)\n", style=MUTE)
+    for c in hits[:limit]:
+        t.append("  /" + c.name, style=f"bold {MAGENTA}")
+        if c.args:
+            t.append(f" {c.args}", style=MUTE)
+        t.append(f"   {_cmds.desc_of(c)}\n", style=SOFT)
+    if len(hits) > limit:
+        t.append(f"  …+{len(hits) - limit} mais\n", style=MUTE)
+    return t
+
+
 def help_table() -> Table:
     """Tabela dos slash commands — gerada do REGISTRO declarativo (okami/commands.py). Localizada."""
     from okami import commands as _cmds
