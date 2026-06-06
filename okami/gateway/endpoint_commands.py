@@ -66,16 +66,37 @@ class EndpointCommandsMixin:
     def _models_text(self) -> str:
         if not self.cfg:
             return "—"
-        pc = self.cfg.provider()
-        models = getattr(pc, "models", None) or [pc.model]
-        return (f"🧠 modelos de {self.cfg.default_provider}: " + ", ".join(models)
-                + "\nproviders: " + ", ".join(self.cfg.providers))
+        lines = ["🧠 providers (troque com /model <nome>):"]
+        for name, pc in self.cfg.providers.items():
+            star = "★ " if name == self.cfg.default_provider else "  "
+            if pc.experimental:
+                state = "experimental"
+            elif pc.ready:
+                state = "✓ pronto"
+            else:
+                state = f"⚠ falta: okami login {name}"
+            lines.append(f"  {star}{name} · {pc.model} [{state}]")
+        lines.append("dica: /model codex = OpenAI (GPT-5) pela sua assinatura do ChatGPT — sem API key.")
+        return "\n".join(lines)
 
     def _model_cmd(self, s: "Session", arg: str) -> str:
-        pc = self.cfg.provider() if self.cfg else None
+        provs = self.cfg.providers if self.cfg else {}
         if not arg:
-            cur = s.model_override or (pc.model if pc else "?")
-            return f"🧠 modelo: {cur}" + (" (override desta sessão)" if s.model_override else "") + " · /models lista"
+            prov = s.provider_override or (self.cfg.default_provider if self.cfg else "?")
+            cur = s.model_override or (provs[prov].model if prov in provs else "?")
+            tag = f" · provider {prov}" if s.provider_override else ""
+            ov = " (override desta sessão)" if (s.model_override or s.provider_override) else ""
+            return f"🧠 modelo: {cur}{tag}{ov} · /models lista os providers e modelos"
+        # `/model codex` (ou `/model codex gpt-5.4`): arg começa com um PROVIDER configurado → TROCA de
+        # provider (ex.: codex = OpenAI via assinatura, SEM API key). Senão, arg é só o modelo no provider atual.
+        first, _, rest = arg.partition(" ")
+        if first in provs:
+            s.provider_override = first
+            s.model_override = rest.strip()          # vazio → usa o modelo default daquele provider
+            pc = provs[first]
+            ready = "" if pc.ready else f" ⚠ precisa autenticar: okami login {first}"
+            return (f"🧠 provider desta sessão → {first} ({s.model_override or pc.model}).{ready} "
+                    "Próximos turnos usam ele.")
         s.model_override = arg
         return f"🧠 modelo desta sessão → {arg} (vale nos próximos turnos; /model sem arg mostra)"
 

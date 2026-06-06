@@ -122,6 +122,32 @@ def test_background_reconcile_marks_orphan_interrupted():
     assert ep._bgreg.reconcile() == 1 and ep._bgreg.list()[0]["state"] == "interrupted"
 
 
+def test_model_command_switches_provider(tmp_path):
+    # /model <provider> troca o PROVIDER da sessão (ex.: codex = OpenAI via assinatura, sem API key);
+    # /model <modelo> continua sendo override de modelo no provider atual.
+    import tempfile
+
+    from okami.config import build_config
+    cfg = build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "tier": "local", "api_key": "x"},
+        "codex": {"model": "openai-codex/gpt-5.5", "transport": "codex_oauth", "auth": "oauth_subscription"}}})
+    seen: dict = {}
+
+    def runner(c, ws, goal, *, provider=None, model=None, **kw):
+        seen.update(provider=provider, model=model)
+        return _ok_task(goal)
+
+    ch = FakeChannel()
+    ep = AgentEndpoint("dev", cfg=cfg, ws=tempfile.mkdtemp(), channel=ch, run_task=runner, spawn=lambda fn: fn())
+    ep.handle("7", "/model codex")
+    assert any("provider" in t and "codex" in t for _, t in ch.sent)
+    ep.handle("7", "faz algo")
+    assert seen["provider"] == "codex"                    # roteou pro codex
+    ep.handle("7", "/model gpt-5.4")                       # modelo desconhecido → override de MODELO, não provider
+    ep.handle("7", "de novo")
+    assert seen["provider"] == "codex" and seen["model"] == "gpt-5.4"
+
+
 def test_background_alias_and_requires_prompt():
     ep = _ep()
     ep.handle("7", "/background")

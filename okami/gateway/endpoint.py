@@ -30,6 +30,7 @@ class Session:
         self.resume_attempts = 0         # guarda anti-loop de auto-resume (Hermes #7536)
         self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
+        self.provider_override = ""      # provider desta sessão (/model <provider>) — ex.: codex (OpenAI via assinatura)
         self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
         self.voice_off = False           # /voice off → não responde em áudio (TTS) nesta sessão
         self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
@@ -813,6 +814,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                 kw["on_event"] = on_ev
             if s.reasoning_effort:                        # /think desta sessão → vence o default do provider
                 kw["reasoning_effort"] = s.reasoning_effort
+            if s.provider_override:                       # /model <provider> → troca o provider da sessão (codex…)
+                kw["provider"] = s.provider_override
             if s.model_override:                          # /model desta sessão → vence o default
                 kw["model"] = s.model_override
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
