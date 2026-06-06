@@ -132,6 +132,9 @@ subscription (OAuth/CLI), NEVER pay-as-you-go; never use a direct Anthropic API 
 - Switch the session model with `/model`, reasoning effort with `/think`. Discover models with
   `okami provider models <name>` (via `/v1/models`, else the catalog). minimax/mimo are experimental.
 - Subscription credentials (OAuth/CLI) live under the Okami home (`~/.okami/`), never in the repo.
+- **Re-auth / switch account** — `okami login <provider>` always runs the device flow again and
+  **replaces** the current login (use it for a higher-tier account or when a plan runs out);
+  `okami logout <provider>` signs out. For codex the device link is `auth.openai.com/codex/device`.
 
 ---
 

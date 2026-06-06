@@ -64,6 +64,26 @@ def _normalize(tok: dict, now: float) -> dict:
     }
 
 
+# RFC 8628: o estado "aguardando" do device flow chega como ERRO HTTP (4xx) com o motivo no CORPO.
+# A OpenAI devolve 403 + {"error":{"code":"deviceauth_authorization_pending"}} (não o flat clássico).
+# Sem desembrulhar isso, o poll tratava o "pending" como fatal e ABORTAVA o login (link morria na 1ª batida).
+def _err_payload(status: int, detail: str) -> dict:
+    """Extrai o erro OAuth REAL do corpo do HTTPError (flat `{"error":"..."}` ou aninhado `{"error":{"code"}}`)."""
+    err = None
+    try:
+        body = json.loads(detail)
+        e = body.get("error") if isinstance(body, dict) else None
+        err = (e.get("code") or e.get("type")) if isinstance(e, dict) else e
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return {"error": err or f"http_{status}", "_status": status, "_detail": (detail or "")[:300]}
+
+
+# estados NÃO-fatais do device flow (continua o poll); variantes flat (RFC) + namespaced (OpenAI).
+_DEVICE_PENDING = {"authorization_pending", "deviceauth_authorization_pending"}
+_DEVICE_SLOWDOWN = {"slow_down", "deviceauth_slow_down"}
+
+
 def _post_form(url: str, fields: dict) -> dict:
     body = urllib.parse.urlencode(fields).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST")
@@ -73,7 +93,7 @@ def _post_form(url: str, fields: dict) -> dict:
         with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        return {"error": f"http_{e.code}", "_detail": e.read().decode("utf-8", "ignore")[:300]}
+        return _err_payload(e.code, e.read().decode("utf-8", "ignore"))
 
 
 def device_login(provider: str, oauth: dict, emit: Callable[[str], None],
@@ -100,9 +120,10 @@ def device_login(provider: str, oauth: dict, emit: Callable[[str], None],
             save_tokens(provider, data)
             return data
         err = tok.get("error", "")
-        if err in ("authorization_pending", "slow_down"):
-            if err == "slow_down":
-                interval += 5
+        if err in _DEVICE_SLOWDOWN:
+            interval += 5
+            continue
+        if err in _DEVICE_PENDING:
             continue
         raise RuntimeError(f"device token erro: {tok}")
     raise RuntimeError("device login expirou")
@@ -158,7 +179,7 @@ def _post_json(url: str, payload: dict) -> dict:
         with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        return {"error": f"http_{e.code}", "_detail": e.read().decode("utf-8", "ignore")[:300]}
+        return _err_payload(e.code, e.read().decode("utf-8", "ignore"))
 
 
 def codex_device_login(emit: Callable[[str], None],
@@ -183,7 +204,12 @@ def codex_device_login(emit: Callable[[str], None],
             auth_code = poll["authorization_code"]
             code_verifier = poll.get("code_verifier", "")
             break
-        if poll.get("error") and poll["error"] not in ("authorization_pending", "slow_down"):
+        err = poll.get("error")
+        if err in _DEVICE_SLOWDOWN:
+            interval += 5
+            continue
+        # "authorization_pending" (vem como 403 + code deviceauth_authorization_pending) → segue o poll.
+        if err and err not in _DEVICE_PENDING:
             raise RuntimeError(f"poll erro: {poll}")
     if not auth_code:
         raise RuntimeError("device login expirou sem autorização")
@@ -276,3 +302,33 @@ def codex_account_id() -> str:
 
 def codex_logged_in() -> bool:
     return has_tokens("codex") or _CLI_AUTH.exists()
+
+
+def codex_email() -> str:
+    """E-mail da conta logada (do id_token) — p/ o 'logado como X' antes de re-autenticar/trocar de conta."""
+    data = load_tokens("codex")
+    if data:
+        idt = (data.get("raw") or {}).get("id_token", "")
+        claims = _decode_jwt_claims(idt) if idt else {}
+        email = claims.get("email") or claims.get("https://api.openai.com/profile", {}).get("email")
+        if email:
+            return email
+    return ""
+
+
+def logout(provider: str) -> dict:
+    """Apaga o token guardado de um provider (p/ trocar de conta / sair quando o plano acaba).
+
+    Retorna {removed: bool, cli_auth: bool} — cli_auth=True avisa que ainda existe o auth.json do
+    codex CLI (que serve de FALLBACK): um novo `okami login` sobrescreve o nosso store e passa a valer,
+    mas se você quer NÃO cair na conta antiga, remova/relogue o codex CLI também."""
+    p = _store_path(provider)
+    removed = False
+    if p.exists():
+        try:
+            p.unlink()
+            removed = True
+        except OSError:
+            pass
+    cli_auth = provider == "codex" and _CLI_AUTH.exists()
+    return {"removed": removed, "cli_auth": cli_auth}

@@ -98,3 +98,93 @@ def test_codex_account_id_from_id_token(tmp_path, monkeypatch):
     oauth.save_tokens("codex", {"access_token": "a", "expires_at": 9_999_999_999,
                                 "raw": {"id_token": f"h.{payload}.s"}})
     assert oauth.codex_account_id() == "ACC9"
+
+
+# ── regressão: o estado "pending" do device flow chega como ERRO HTTP (403) com o motivo no CORPO.
+# Antes, o poll tratava isso como fatal e ABORTAVA o login (o link aparecia e morria na 1ª batida).
+
+def test_err_payload_unwraps_nested_and_flat_oauth_error():
+    # OpenAI: 403 + {"error":{"code":"deviceauth_authorization_pending"}}  → extrai o code REAL
+    nested = oauth._err_payload(403, '{"error":{"code":"deviceauth_authorization_pending","message":"x"}}')
+    assert nested["error"] == "deviceauth_authorization_pending" and nested["_status"] == 403
+    # RFC clássico flat: {"error":"slow_down"}
+    assert oauth._err_payload(400, '{"error":"slow_down"}')["error"] == "slow_down"
+    # corpo não-JSON / vazio → cai no http_<code> (não explode)
+    assert oauth._err_payload(500, "<html>boom</html>")["error"] == "http_500"
+    assert oauth._err_payload(403, "")["error"] == "http_403"
+
+
+def test_codex_device_login_keeps_polling_through_403_pending(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(oauth, "_CLI_AUTH", tmp_path / "no_cli.json")
+    polls = {"n": 0}
+
+    def fake_post_json(url, payload):
+        if url.endswith("/usercode"):
+            return {"device_auth_id": "D1", "user_code": "WXYZ", "interval": 1, "expires_in": 100}
+        if url.endswith("/deviceauth/token"):
+            polls["n"] += 1
+            if polls["n"] == 1:   # 403 pending COMO NA OPENAI (aninhado) — não pode abortar
+                return oauth._err_payload(403, '{"error":{"code":"deviceauth_authorization_pending"}}')
+            if polls["n"] == 2:   # slow_down namespaced → segue (e aumenta o intervalo)
+                return oauth._err_payload(403, '{"error":{"code":"deviceauth_slow_down"}}')
+            return {"authorization_code": "AC", "code_verifier": "CV"}
+        return {}
+
+    monkeypatch.setattr(oauth, "_post_json", fake_post_json)
+    monkeypatch.setattr(oauth, "_post_form",
+                        lambda url, fields: {"access_token": "AT", "refresh_token": "RT",
+                                             "id_token": "h.y.s", "expires_in": 3600})
+    clock = [1000.0]
+    data = oauth.codex_device_login(
+        lambda m: None, now=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)
+    )
+    assert data["access_token"] == "AT" and polls["n"] == 3   # aguentou 2 "pending"/"slow_down" antes do code
+    assert oauth.codex_access_token(now=lambda: clock[0]) == "AT"
+
+
+def test_codex_device_login_still_raises_on_real_error(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(oauth, "_CLI_AUTH", tmp_path / "no_cli.json")
+
+    def fake_post_json(url, payload):
+        if url.endswith("/usercode"):
+            return {"device_auth_id": "D1", "user_code": "WXYZ", "interval": 1, "expires_in": 100}
+        return oauth._err_payload(400, '{"error":{"code":"expired_token"}}')   # erro REAL → aborta
+
+    monkeypatch.setattr(oauth, "_post_json", fake_post_json)
+    clock = [1000.0]
+    import pytest
+    with pytest.raises(RuntimeError):
+        oauth.codex_device_login(lambda m: None, now=lambda: clock[0],
+                                 sleep=lambda s: clock.__setitem__(0, clock[0] + s))
+
+
+def test_generic_device_login_tolerates_namespaced_pending(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    seq = iter([
+        {"device_code": "DC", "user_code": "U", "verification_uri": "https://x", "interval": 1, "expires_in": 50},
+        oauth._err_payload(403, '{"error":{"code":"deviceauth_authorization_pending"}}'),
+        {"access_token": "AT2", "refresh_token": "RT2", "expires_in": 3600},
+    ])
+    monkeypatch.setattr(oauth, "_post_form", lambda url, fields: next(seq))
+    clock = [0.0]
+    data = oauth.device_login("acme", {"client_id": "c", "device_authorization_url": "https://d",
+                                       "token_url": "https://t"},
+                              lambda m: None, now=lambda: clock[0],
+                              sleep=lambda s: clock.__setitem__(0, clock[0] + s))
+    assert data["access_token"] == "AT2"
+
+
+def test_logout_removes_store_and_flags_cli_fallback(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    cli = tmp_path / "codex_auth.json"
+    cli.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(oauth, "_CLI_AUTH", cli)
+    oauth.save_tokens("codex", {"access_token": "x", "expires_at": 9_999_999_999})
+    res = oauth.logout("codex")
+    assert res["removed"] is True and res["cli_auth"] is True
+    assert oauth.has_tokens("codex") is False
+    # idempotente: segunda vez não tem mais o store, mas ainda flagga o CLI
+    res2 = oauth.logout("codex")
+    assert res2["removed"] is False and res2["cli_auth"] is True

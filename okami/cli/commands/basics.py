@@ -349,12 +349,18 @@ def login(
         raise typer.Exit(1)
 
     if pc.transport == "codex_oauth":  # device flow NATIVO da OpenAI (sem codex CLI)
+        if oauth.codex_logged_in():     # re-login/troca de conta: diz quem está logado e que isto SUBSTITUI
+            who = oauth.codex_email() or oauth.codex_account_id() or "conta atual"
+            console.print(f"[dim]já logado como[/dim] [bold]{who}[/bold] [dim]— este login SUBSTITUI "
+                          f"(troca de conta / renova quando o plano acaba). Abra o link com a conta desejada.[/dim]")
         try:
             oauth.codex_device_login(lambda m: console.print(m))
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]Falha no login:[/red] {e}")
+            console.print("[dim]dica: confira a hora do sistema e a conexão; se persistir, rode "
+                          "`okami logout codex` e tente de novo.[/dim]")
             raise typer.Exit(1)
-        console.print(f"[green]✓ login '{provider}' concluído[/green]")
+        console.print(f"[green]✓ login '{provider}' concluído[/green] [dim](okami status mostra a conta)[/dim]")
         return
 
     if pc.login_cmd:  # delega ao CLI oficial (fallback opcional)
@@ -393,6 +399,36 @@ def login(
         return
 
     console.print(f"[yellow]'{provider}' não tem fluxo de login.[/yellow] Use .env/api_key.")
+
+
+@app.command()
+def logout(
+    provider: str = typer.Argument(..., help="Provider para sair (ex.: codex, minimax)."),
+) -> None:
+    """Sai de um provider: apaga a credencial guardada (p/ trocar de conta ou quando o plano acaba)."""
+    from okami.llm import oauth
+
+    cfg = _load()
+    try:
+        pc = cfg.provider(provider)
+    except KeyError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    if pc.api_key_env:   # api_key: a credencial é a env var no .env — não apagamos o .env, só orientamos
+        console.print(f"[yellow]'{provider}' usa API key ({pc.api_key_env}).[/yellow] Remova {pc.api_key_env} do "
+                      f".env (ou rode `okami login {provider}` p/ colar outra).")
+        return
+
+    res = oauth.logout(provider)
+    if res["removed"]:
+        console.print(f"[green]✓ saiu de '{provider}'[/green] [dim](credencial OAuth removida)[/dim]")
+    else:
+        console.print(f"[dim]'{provider}' já não tinha credencial guardada.[/dim]")
+    if res["cli_auth"]:   # o codex CLI tem auth.json próprio, que serve de FALLBACK — avise
+        console.print("[yellow]aviso:[/yellow] o codex CLI ainda tem login próprio (~/.codex), usado como "
+                      "fallback. Pra trocar de conta de vez, rode `codex logout` (ou relogue) também.")
+    console.print(f"[dim]re-autenticar: okami login {provider}[/dim]")
 
 
 @app.command()
