@@ -37,6 +37,26 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
+def test_tui_renders_command_output_with_brain_emoji(tmp_path):
+    # REGRESSÃO: /model responde "🧠 modelo: …" e o TUI NÃO pode engolir. Só o 💭 ("pensando") some.
+    out = {}
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.sink_message("terminal", "🧠 modelo: MiniMax-M3 · /models lista")
+            app.sink_message("terminal", "💭 okami está pensando…")
+            await pilot.pause()
+            out["t"] = list(app.transcript)
+
+    asyncio.run(scenario())
+    notes = [v for k, v in out["t"] if k == "note"]
+    assert any("modelo: MiniMax-M3" in n for n in notes), "/model foi engolido"
+    assert not any("pensando" in n for n in notes), "💭 não foi escondido"
+
+
 def test_ctrl_c_copies_selection_to_clipboard(tmp_path):
     # Copiar texto no CLI: com seleção (arraste do mouse), ^C copia (mouse segue ligado).
     out = {}

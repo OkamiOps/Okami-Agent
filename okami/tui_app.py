@@ -198,7 +198,9 @@ if _HAS_TEXTUAL:
         def sink_message(self, chat_id, text: str) -> None:
             from rich.text import Text
             head = text[:1]
-            if head in ("💭", "🧠"):                       # "está pensando…" → indicador animado, não polui o log
+            # Só o INDICADOR de "pensando" (💭) some — a barra de status já mostra "🧠 pensando". NÃO casar
+            # por 🧠 cru: comandos respondem com 🧠 (ex.: /model "🧠 modelo: …") e sumiam (bug do usuário).
+            if head == "💭":
                 return
             log = self.query_one("#log", RichLog)
             if head in _SYS_MARKS and head not in _REPLY_MARKS:   # nota de sistema (🧬 🎭 ↻ 🧹 ⏰ …)
