@@ -445,6 +445,31 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     return t
 
 
+def command_matches(typed: str, *, limit: int = 12):
+    """[(label, name)] dos slash commands (chat) que casam com o digitado depois de '/'. [] = nenhum.
+    `label` é um Text bonito (/nome args — descrição); `name` é o nome canônico p/ completar o input."""
+    s = (typed or "").lstrip()
+    if not s.startswith("/") or " " in s:            # só enquanto digita o NOME do comando (sem args)
+        return []
+    from okami import commands as _cmds
+    partial = s[1:].lower()
+    out = []
+    for c in _cmds.COMMAND_REGISTRY:
+        if c.scope not in ("chat", "both"):
+            continue
+        if partial and not any(n.startswith(partial) for n in (c.name, *c.aliases)):
+            continue
+        lbl = Text(no_wrap=True, overflow="ellipsis")
+        lbl.append("/" + c.name, style=f"bold {MAGENTA}")
+        if c.args:
+            lbl.append(f" {c.args}", style=MUTE)
+        lbl.append(f"   {_cmds.desc_of(c)}", style=SOFT)
+        out.append((lbl, c.name))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def command_hints(typed: str, *, limit: int = 8):
     """Autocomplete do TUI: comandos que casam com o que foi digitado depois de '/'. None = não mostrar
     (não começa com '/' ou já está digitando argumentos). Devolve um renderable p/ o painel popup."""

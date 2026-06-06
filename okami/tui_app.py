@@ -31,7 +31,8 @@ try:
     from textual.binding import Binding
     from textual.containers import Horizontal
     from textual.suggester import SuggestFromList
-    from textual.widgets import Button, Input, RichLog, Static
+    from textual.widgets import Button, Input, OptionList, RichLog, Static
+    from textual.widgets.option_list import Option
     _HAS_TEXTUAL = True
 except Exception:  # noqa: BLE001 — sem textual: o chamador cai no REPL
     _HAS_TEXTUAL = False
@@ -105,8 +106,9 @@ if _HAS_TEXTUAL:
         #header { height: 1; padding: 0 1; background: $surface; }
         #log { height: 1fr; padding: 1 2; background: $background; scrollbar-color: $primary; scrollbar-size: 1 1; }
         #activity { height: auto; display: none; padding: 0 2; }
-        #cmdhints { height: auto; max-height: 11; display: none; padding: 0 1; background: $panel;
-                    border-top: solid $accent; color: $text; }
+        #cmdmenu { height: auto; max-height: 11; display: none; background: $panel; border-top: solid $accent;
+                   scrollbar-size: 1 1; }
+        #cmdmenu:focus { border-top: solid $accent; }
         #approval { height: auto; display: none; padding: 1 2; background: $panel; border-top: solid $primary; }
         #approval-label { width: 1fr; content-align: left middle; color: $warning; }
         #input { border: round $panel; background: $surface; }
@@ -163,9 +165,9 @@ if _HAS_TEXTUAL:
                 yield Static("⚠ aprovar a ação pendente?", id="approval-label")
                 yield Button("Aprovar", id="approve", variant="success")
                 yield Button("Negar", id="deny", variant="error")
-            yield Static("", id="cmdhints")           # autocomplete: aparece ao digitar '/'
+            yield OptionList(id="cmdmenu")             # autocomplete navegável (↑↓ Enter) + clicável (mouse)
             from okami import commands as _cmds
-            yield Input(placeholder="fala comigo…   ↵ envia · / p/ comandos · → completa · ^C copia · ^D sai",
+            yield Input(placeholder="fala comigo…   / p/ comandos (↑↓ Enter ou clique) · ^C copia · ^D sai",
                         id="input", suggester=SuggestFromList(_cmds.all_slash_names("chat"), case_sensitive=False))
             yield Static("", id="status")
 
@@ -229,24 +231,69 @@ if _HAS_TEXTUAL:
         def _event_from_thread(self, e: dict) -> None:
             self.call_from_thread(self.sink_event, e)
 
-        # ---- input -----------------------------------------------------------
+        # ---- input + autocomplete -------------------------------------------
+        def _cmdmenu(self):
+            try:                                          # pode não existir durante o teardown da app
+                return self.query_one("#cmdmenu", OptionList)
+            except Exception:  # noqa: BLE001
+                return None
+
         def on_input_changed(self, event) -> None:
-            # autocomplete: digitou '/' → mostra os comandos que casam (some ao apagar ou começar a digitar args)
-            hints = _tui.command_hints(event.value)
-            panel = self.query_one("#cmdhints", Static)
-            if hints is None:
-                panel.display = False
-            else:
-                panel.update(hints)
-                panel.display = True
+            # autocomplete: digitou '/' → popula o menu navegável; some ao apagar ou começar os args.
+            menu = self._cmdmenu()
+            if menu is None:
+                return
+            matches = _tui.command_matches(event.value)
+            if not matches:
+                menu.display = False
+                return
+            menu.clear_options()
+            for label, name in matches:
+                menu.add_option(Option(label, id=name))
+            menu.display = True
+            menu.highlighted = 0
+
+        def _accept_cmd(self, name) -> None:
+            """Completa o input com '/<comando> ' e fecha o menu (foca o input p/ digitar os args)."""
+            menu = self._cmdmenu()
+            if menu is not None:
+                menu.display = False
+            inp = self.query_one("#input", Input)
+            inp.value = "/" + str(name) + " "
+            inp.cursor_position = len(inp.value)
+            inp.focus()
+
+        def _accept_highlighted(self) -> bool:
+            menu = self._cmdmenu()
+            if menu is None or not menu.display or not menu.option_count or menu.highlighted is None:
+                return False
+            self._accept_cmd(menu.get_option_at_index(menu.highlighted).id)
+            return True
+
+        def on_key(self, event) -> None:
+            # navega o menu de comandos pelo teclado (Input continua focado): ↑↓ move, Esc fecha.
+            menu = self._cmdmenu()
+            if menu is None or not menu.display or not menu.option_count:
+                return
+            if event.key in ("down", "up"):
+                (menu.action_cursor_down if event.key == "down" else menu.action_cursor_up)()
+                event.stop()
+                event.prevent_default()
+            elif event.key == "escape":
+                menu.display = False
+                event.stop()
+
+        def on_option_list_option_selected(self, event) -> None:
+            # clique do MOUSE (ou Enter dentro do menu) numa sugestão → completa.
+            self._accept_cmd(event.option.id)
+            event.stop()
 
         def on_input_submitted(self, event) -> None:
+            if self._accept_highlighted():               # Enter com o menu aberto → completa, não envia
+                return
             text = event.value
             event.input.value = ""
-            try:
-                self.query_one("#cmdhints", Static).display = False   # esconde o popup ao enviar
-            except Exception:  # noqa: BLE001
-                pass
+            self._cmdmenu().display = False
             if not text.strip():
                 return
             self.transcript.append(("user", text))

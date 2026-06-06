@@ -37,34 +37,42 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
-def test_tui_slash_shows_command_autocomplete(tmp_path):
-    # digitar '/' (ou '/mo') mostra o popup de comandos; texto normal esconde.
+def test_tui_slash_shows_navigable_command_menu(tmp_path):
+    # digitar '/mo' mostra o MENU navegável (/model /models /mouse); Enter completa o destacado; texto some.
     out = {}
 
     async def scenario():
-        from textual.widgets import Input, Static
+        from textual.widgets import Input, OptionList
         app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
                            run_task=_fake_runner, spawn=lambda fn: fn())
         async with app.run_test() as pilot:
             await pilot.pause()
-            panel = app.query_one("#cmdhints", Static)
-            app.on_input_changed(type("E", (), {"value": "/mo"})())    # digitou /mo → popup aparece
-            out["shown"] = panel.display
+            menu = app.query_one("#cmdmenu", OptionList)
+            app.on_input_changed(type("E", (), {"value": "/mo"})())    # digitou /mo → menu aparece
+            out["shown"] = menu.display
+            out["count"] = menu.option_count
+            out["ids"] = [menu.get_option_at_index(i).id for i in range(menu.option_count)]
+            # Enter com o menu aberto → COMPLETA o input com o destacado (não envia)
+            handled = app._accept_highlighted()
+            out["completed"] = app.query_one("#input", Input).value
+            out["handled"] = handled
+            out["hidden_after"] = menu.display
             app.on_input_changed(type("E", (), {"value": "oi"})())     # texto normal → some
-            out["hidden"] = panel.display
-            _ = app.query_one("#input", Input)
+            out["hidden"] = menu.display
 
     asyncio.run(scenario())
-    assert out["shown"] is True and out["hidden"] is False
-    # conteúdo do popup (testável direto): casa /model, /models, /mouse com '/mo'
-    import io
+    assert out["shown"] is True and out["count"] >= 3
+    assert {"model", "models", "mouse"} <= set(out["ids"])
+    assert out["handled"] is True and out["completed"] == "/model "    # completou o 1º destacado
+    assert out["hidden_after"] is False and out["hidden"] is False
 
-    from rich.console import Console
+
+def test_command_matches_filters_and_ignores_args():
     from okami import tui
-    buf = io.StringIO()
-    Console(width=80, file=buf, force_terminal=True).print(tui.command_hints("/mo"))
-    txt = buf.getvalue()
-    assert "/model" in txt and "/mouse" in txt
+    ids = [name for _, name in tui.command_matches("/mo")]
+    assert {"model", "models", "mouse"} <= set(ids)
+    assert tui.command_matches("/model x") == []      # já nos args → não sugere
+    assert tui.command_matches("oi") == []            # não é comando
 
 
 def test_tui_renders_command_output_with_brain_emoji(tmp_path):
