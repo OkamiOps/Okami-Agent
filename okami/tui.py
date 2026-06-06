@@ -445,9 +445,10 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     return t
 
 
-def command_matches(typed: str, *, limit: int = 12):
+def command_matches(typed: str, *, limit: int = 60):
     """[(label, name)] dos slash commands (chat) que casam com o digitado depois de '/'. [] = nenhum.
-    `label` é um Text bonito (/nome args — descrição); `name` é o nome canônico p/ completar o input."""
+    `label` é um Text bonito (/nome args — descrição); `name` é o nome canônico p/ completar o input.
+    limit alto DE PROPÓSITO: digitar '/' tem que listar TODOS (o menu rola); o usuário não decora os nomes."""
     s = (typed or "").lstrip()
     if not s.startswith("/") or " " in s:            # só enquanto digita o NOME do comando (sem args)
         return []

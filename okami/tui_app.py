@@ -106,7 +106,7 @@ if _HAS_TEXTUAL:
         #header { height: 1; padding: 0 1; background: $surface; }
         #log { height: 1fr; padding: 1 2; background: $background; scrollbar-color: $primary; scrollbar-size: 1 1; }
         #activity { height: auto; display: none; padding: 0 2; }
-        #cmdmenu { height: auto; max-height: 11; display: none; background: $panel; border-top: solid $accent;
+        #cmdmenu { height: auto; max-height: 14; display: none; background: $panel; border-top: solid $accent;
                    scrollbar-size: 1 1; }
         #cmdmenu:focus { border-top: solid $accent; }
         #approval { height: auto; display: none; padding: 1 2; background: $panel; border-top: solid $primary; }

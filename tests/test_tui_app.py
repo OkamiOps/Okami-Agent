@@ -68,11 +68,16 @@ def test_tui_slash_shows_navigable_command_menu(tmp_path):
 
 
 def test_command_matches_filters_and_ignores_args():
+    from okami import commands as _cmds
     from okami import tui
     ids = [name for _, name in tui.command_matches("/mo")]
     assert {"model", "models", "mouse"} <= set(ids)
     assert tui.command_matches("/model x") == []      # já nos args → não sugere
     assert tui.command_matches("oi") == []            # não é comando
+    # '/' lista TODOS os comandos de chat (não só os 12 primeiros) — o usuário não decora os nomes
+    all_ids = {name for _, name in tui.command_matches("/")}
+    chat = {c.name for c in _cmds.COMMAND_REGISTRY if c.scope in ("chat", "both")}
+    assert all_ids == chat and "model" in all_ids
 
 
 def test_tui_renders_command_output_with_brain_emoji(tmp_path):
