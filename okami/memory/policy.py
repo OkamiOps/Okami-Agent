@@ -37,6 +37,31 @@ _ERROR = re.compile(r"\b(?:erro|falh|bug|quebr|n[ãa]o funciona|exception|traceb
 _SKILL = re.compile(r"\b(?:passo a passo|passo \d|procedimento|como (?:fazer|configurar|rodar|usar|instalar)|"
                     r"receita|tutorial|how to|step.?by.?step|workflow)", re.I)
 
+# "Do NOT capture" (Hermes background_review.py:124-143): conhecimento que VIRA constraint self-imposed
+# e morde depois quando o ambiente muda. Bloqueado no caminho AUTOMÁTICO (agente/reflexão/review) — o
+# usuário explícito (`force`) ainda salva. É o filtro DETERMINÍSTICO que protege mesmo com modelo fraco.
+# (1) falha dependente de AMBIENTE/setup (o usuário conserta; não é regra durável):
+_ENV_FAILURE = re.compile(
+    r"\b(command not found|comando n[ãa]o encontrado|no such file|n[ãa]o existe o arquivo|"
+    r"not installed|n[ãa]o (?:est[áa] )?instalad[oa]|modulenotfounderror|cannot find module|"
+    r"missing (?:binary|dependency|depend[êe]ncia|module|m[óo]dulo|package|pacote)|"
+    r"permission denied|permiss[ãa]o negada|unconfigured|n[ãa]o (?:est[áa] )?configurad[oa]|"
+    r"missing credential|credential[^.\n]{0,20}not set)\b", re.I)
+# (2) claim NEGATIVO sobre uma TOOL/recurso do agente ("X não funciona" → endurece em refusal que ele
+# cita contra si mesmo por meses, mesmo depois do problema resolvido). Exige um sujeito-ferramenta perto.
+_NEGATIVE_TOOL = re.compile(
+    r"\b(?:tool|ferramenta|browser|navegador|playwright|docker|mcp|sandbox|run_shell|"
+    r"recurso|feature|comando|command)\b[^.\n]{0,40}"
+    r"(?:n[ãa]o funciona|doesn.?t work|don.?t work|is broken|est[áa] quebrad|"
+    r"n[ãa]o (?:consigo|d[áa] pra) usar|unavailable|indispon[íi]ve|not supported|n[ãa]o suporta)", re.I)
+
+
+def do_not_capture(text: str) -> bool:
+    """True se o texto cai na lista 'Do NOT capture' do Hermes (falha de ambiente OU claim negativo de
+    tool). Usado p/ barrar auto-escrita de lixo que vira constraint — independe da qualidade do modelo."""
+    t = text or ""
+    return bool(_ENV_FAILURE.search(t) or _NEGATIVE_TOOL.search(t))
+
 
 def classify(text: str, source: str = "") -> str:
     """Rotula o texto. Precedência: temp > decision > preference > error > skill > fact."""
@@ -74,6 +99,10 @@ def prepare(text: str, source: str = "", kind: str | None = None, *, force: bool
     if looks_secret(t):                              # P1: SEGREDO não vira memória de longo prazo —
         from okami import log                        # recusa (nem com force) p/ não vazar p/ sqlite/Honcho/holo
         log.warn("memory: recusei persistir conteúdo com cara de segredo (chave/token).")
+        return None
+    if not force and do_not_capture(t):              # Do-NOT-capture: auto-escrita de falha-de-ambiente/
+        from okami import log                        # claim-negativo NÃO vira memória (vira refusal depois)
+        log.dbg("memory: descartei (Do-NOT-capture: falha de ambiente / claim negativo de tool).")
         return None
     k = kind if kind in _SPECIFIC else classify(t, source)
     if not force and not should_persist(t, k):
