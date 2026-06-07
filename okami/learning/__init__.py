@@ -66,14 +66,44 @@ def _skill_name(text: str, *, tools: list[str] | None = None) -> str:
     return short_name(text, tools=tools, fallback="skill")
 
 
+# tools que NÃO contam como "trabalho" ao decidir destilar skill (terminais + meta).
+_META_TOOLS = {"task_complete", "task_blocked", "need_input", "respond", "use_skill", "finish_setup"}
+# assinatura do corpo auto-distilado determinístico — usada p/ podar o lixo já existente.
+AUTO_BODY_MARKER = "(sequência de tools que funcionou)"
+
+
+def is_auto_distilled(skill) -> bool:
+    """True se a skill foi gerada pelo auto_skill (p/ `okami skills --prune`). Sinais, em ordem:
+    marcador `origin: auto-distilled` (skills novas) OU a ASSINATURA do corpo — determinístico
+    ('(sequência de tools que funcionou)') ou por LLM ('## Quando usar' + '## Cuidados'). Nenhum
+    desses padrões aparece em skill CURADA do repo (verificado), então não há falso-positivo."""
+    if str((skill.meta or {}).get("origin", "")) == "auto-distilled":
+        return True
+    body = skill.body or ""
+    if AUTO_BODY_MARKER in body:
+        return True
+    return "## Quando usar" in body and "## Cuidados" in body
+
+
+def _is_distillable(task: Task) -> bool:
+    """Só vira SKILL a tarefa que MERECE um procedimento reusável: CONCLUÍDA e com EFEITO durável real
+    (≥4 passos de tool, ≥2 tools distintas, ≥2 com efeito). O gate de EFEITO é a chave: papo e
+    exploração read-only (ls/grep/cat/read_file → effect=False) NÃO viram skill — era a fábrica de lixo
+    ('pasta-okami-agent', 'deveria-intelignete-sabe' ancorado na frase literal do usuário, que depois
+    sequestrava o pedido seguinte e realimentava o erro)."""
+    if task.state != TaskState.COMPLETE:
+        return False
+    real = [s for s in task.steps if s.tool not in _META_TOOLS]
+    effectful = [s for s in real if getattr(s, "effect", False)]
+    return len(real) >= 4 and len({s.tool for s in real}) >= 2 and len(effectful) >= 2
+
+
 def distill_skill(task: Task, model_name: str = "?") -> dict | None:
     """Destila uma SKILL.md de uma tarefa BEM-sucedida e NÃO-trivial (≥4 passos, ≥2 tools distintas).
     Devolve {name, body} ou None. Determinístico (a versão por LLM entra depois)."""
-    if task.state != TaskState.COMPLETE:
+    if not _is_distillable(task):
         return None
-    tools = [s.tool for s in task.steps if s.tool not in ("task_complete", "task_blocked", "need_input")]
-    if len(tools) < 4 or len(set(tools)) < 2:
-        return None
+    tools = [s.tool for s in task.steps if s.tool not in _META_TOOLS]
     name = _skill_name(task.goal, tools=tools)             # nome CURTO de conteúdo, não a frase literal
     if not name:
         return None
@@ -88,7 +118,7 @@ def distill_skill(task: Task, model_name: str = "?") -> dict | None:
 def distill_skill_llm(cfg, task: Task, provider: str | None = None) -> dict | None:
     """Destila uma SKILL.md RICA via LLM (constrained): Quando usar / Como / Cuidados. Fallback p/ a
     versão determinística se o LLM falhar. cfg=None → pula direto p/ o determinístico."""
-    if cfg is None or task.state != TaskState.COMPLETE:
+    if cfg is None or not _is_distillable(task):
         return None
     from okami.llm import providers as prov
 
@@ -131,6 +161,7 @@ def _render_skill_md(sk: dict, task: Task) -> str:
         "name": sk["name"],
         "description": (sk.get("description") or goal)[:160],
         "intent_examples": [goal[:200]] if goal else [],   # a frase literal do usuário vira âncora de intenção
+        "origin": "auto-distilled",                        # marcado → `okami skills prune` poda com precisão
     }
     return "---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n" + body + "\n"
 

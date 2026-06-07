@@ -165,8 +165,10 @@ own channel binding (§6).
   prompt-injection, secret-leak attempts, destructive commands, remote download-and-run, hidden unicode
   (Trojan Source) and packaged binaries. A `skills-lock.json` (sha256) detects tampering. The runtime
   drops any blocked skill, so a shipped skill must scan clean.
-- **Auto-skill** — with `learning.auto_skill`, the agent distills a skill from a non-trivial task; the
-  new skill still passes the scan before it can be used.
+- **Auto-skill** — with `learning.auto_skill`, the agent distills a skill **only from a genuinely
+  productive task** (completed, ≥4 tool steps, ≥2 distinct tools, ≥2 with durable effect — chat and
+  read-only exploration never qualify). It is marked `origin: auto-distilled` and still passes the
+  scan. Clean low-value auto-skills with `okami skills --prune` (`--dry-run` to preview).
 - **Contracts** (`okami.yaml → contracts.ui`) declare the design system: `library: shadcn`,
   `forbid_inline_hex`, `forbid_raw_css`, `require_component_source`.
 - **Verification gates** mechanically REJECT code that violates the contract (inline hex, raw CSS,

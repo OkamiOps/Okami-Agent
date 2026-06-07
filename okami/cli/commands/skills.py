@@ -11,11 +11,20 @@ from okami.cli._shared import (
 
 
 @app.command()
-def skills() -> None:
-    """Lista as skills disponíveis (skills/*/SKILL.md)."""
+def skills(
+    prune: bool = typer.Option(False, "--prune", help="Poda skills auto-distiladas de baixo valor (lixo do auto_skill)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Com --prune: só lista o que removeria (não apaga)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Com --prune: remove sem confirmar."),
+    bad_names: bool = typer.Option(False, "--bad-names",
+                                   help="Com --prune: também poda nomes conversacionais ruins (heurística)."),
+) -> None:
+    """Lista as skills (skills/*/SKILL.md). `--prune` remove as auto-distiladas de baixo valor."""
     from okami import skills as skillmod
     from okami.home import skills_dir
 
+    if prune:
+        _prune_skills(skills_dir(), dry_run=dry_run, yes=yes, bad_names=bad_names)
+        return
     sks = skillmod.load_skills(skills_dir())
     if not sks:
         console.print(f"[dim]nenhuma skill em {skills_dir()}[/dim]")
@@ -25,8 +34,47 @@ def skills() -> None:
     table.add_column("triggers")
     table.add_column("descrição")
     for s in sks:
-        table.add_row(s.name, ", ".join(s.triggers[:5]), s.description[:60])
+        auto = "  [dim]·auto[/dim]" if str(s.meta.get("origin", "")) == "auto-distilled" else ""
+        table.add_row(s.name + auto, ", ".join(s.triggers[:5]), s.description[:60])
     console.print(table)
+    if any(str(s.meta.get("origin", "")) == "auto-distilled" for s in sks):
+        console.print("[dim]·auto = aprendida automaticamente. Limpe o lixo com: okami skills --prune[/dim]")
+
+
+def _prune_skills(root, *, dry_run: bool, yes: bool, bad_names: bool) -> None:
+    """Remove skills auto-distiladas de baixo valor (marcador origin OU assinatura do corpo antigo).
+    Curadas/instaladas ficam intactas."""
+    import shutil
+
+    from okami import learning
+    from okami import skills as skillmod
+
+    sks = skillmod.load_skills(root)
+    victims = [s for s in sks
+               if learning.is_auto_distilled(s) or (bad_names and skillmod._name_is_bad(s.name))]
+    if not victims:
+        console.print(f"[green]✓ nada a podar[/green] [dim]({len(sks)} skills em {root}, todas curadas)[/dim]")
+        return
+    console.print(f"[yellow]{len(victims)} skill(s) auto-distilada(s) de baixo valor:[/yellow]")
+    for s in victims:
+        console.print(f"  • [bold]{s.name}[/bold]  [dim]{(s.description or '')[:64]}[/dim]")
+    if dry_run:
+        console.print("[dim]--dry-run: nada removido.[/dim]")
+        return
+    if not yes:
+        from okami import menu
+        if not menu.confirm(f"Remover {len(victims)} skill(s)?", default=False):
+            console.print("[dim]cancelado.[/dim]")
+            return
+    removed = 0
+    for s in victims:
+        try:
+            shutil.rmtree(s.path.parent)
+            removed += 1
+        except OSError as e:
+            console.print(f"[red]falha em {s.name}: {e}[/red]")
+    console.print(f"[green]✓ removidas {removed} skill(s).[/green] "
+                  "[dim]o auto_skill agora só destila tarefa produtiva (não papo/exploração).[/dim]")
 
 
 @app.command()

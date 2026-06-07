@@ -141,6 +141,40 @@ def test_maybe_write_skill_blocks_insecure(tmp_path):
     assert not list(tmp_path.glob("*/SKILL.md"))
 
 
+def _explore_task(goal, tools):
+    """Tarefa de EXPLORAÇÃO/papo: passos sem efeito durável (ls/grep/cat/read) — effect=False."""
+    t = Task(goal=goal)
+    t.state, t.result = TaskState.COMPLETE, "respondi"
+    t.steps = [Step(i, tool, {}, "", False) for i, tool in enumerate(tools)]
+    return t
+
+
+def test_exploration_or_chat_does_not_distill(tmp_path):
+    # A FÁBRICA DE LIXO: tarefa só de exploração read-only / papo (sem efeito durável) NÃO vira skill.
+    # Reproduz o caso real 'pasta-okami-agent'/'deveria-intelignete-sabe' (muitos run_shell sem efeito).
+    flail = _explore_task("voce deveria achar a pasta okami-agent",
+                          ["list_dir", "run_shell", "run_shell", "read_file", "run_shell", "use_skill"])
+    assert learning.distill_skill(flail) is None
+    assert learning.maybe_write_skill(flail, skills_dir=str(tmp_path)) is None
+    assert not list(tmp_path.glob("*/SKILL.md"))          # nada gravado
+    # 1 efeito só (abaixo do mínimo de 2) também não destila
+    one_effect = _done_task("x", ["read_file", "run_shell"])
+    one_effect.steps = [Step(1, "read_file", {}, "", False), Step(2, "write_file", {}, "", True),
+                        Step(3, "run_shell", {}, "", False), Step(4, "list_dir", {}, "", False)]
+    assert learning.distill_skill(one_effect) is None
+
+
+def test_distilled_skill_is_marked_auto(tmp_path):
+    # skill auto-distilada é MARCADA (origin: auto-distilled) → prune poda com precisão.
+    name = learning.maybe_write_skill(
+        _done_task("configurar pipeline ci", ["read_file", "write_file", "run_shell", "write_file"]),
+        skills_dir=str(tmp_path))
+    from okami import skills as skillmod
+    sk = skillmod.parse_skill(tmp_path / name / "SKILL.md")
+    assert sk.meta.get("origin") == "auto-distilled"
+    assert learning.AUTO_BODY_MARKER in sk.body            # também detectável pelo corpo (lixo antigo)
+
+
 # ----------------------------------------------------------------- AUTO-TUNE (§7)
 def test_auto_tune_records_and_recommends_constrained(tmp_path):
     # 3 runs com muita violação (ação malformada) → recomenda json_constrained
