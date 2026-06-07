@@ -20,26 +20,40 @@ _TUNING = ".okami/tuning.json"
 
 
 def reflect(task: Task, model_name: str = "?") -> list[MemoryItem]:
-    """Extrai lições do resultado da tarefa (sem rede)."""
-    stats = task.stats or {}
-    n = len(task.steps)
-    out: list[MemoryItem] = []
+    """Aprende SÓ de falha COMPORTAMENTAL real — não vira post-mortem de TODA tarefa.
 
-    if task.state in (TaskState.FAILED, TaskState.BLOCKED):
-        out.append(MemoryItem(
+    Antes gravava 'COMO: para <frase> funcionou a sequência <tools>' em todo COMPLETE e um anti-padrão
+    em todo BLOCKED/FAILED, ANCORADOS na frase literal do usuário. Resultado: o recall enchia de lixo
+    re-descobrível que sequestrava o pedido seguinte e realimentava o erro. Alinhado ao Hermes: memória
+    de longo prazo só guarda conhecimento DURÁVEL e GENERALIZÁVEL — sequência de tools é re-descobrível
+    (não entra) e o sinal de qualidade por-tarefa já vai p/ task.stats → auto-tune do capability profile
+    (record_run), que é o lugar certo, sem poluir o recall.
+
+    Mantém UM anti-padrão GENERALIZADO (sem a frase literal → dedup no backend) só quando a falha tem
+    sinal comportamental real: estado FAILED com ≥2 violações OU ≥1 loop. BLOCKED (timeout/cancelamento/
+    need_input) é transitório → não vira memória."""
+    stats = task.stats or {}
+    viol = int(stats.get("violations", 0))
+    loops = int(stats.get("loops", 0))
+    if task.state == TaskState.FAILED and (viol >= 2 or loops >= 1):
+        return [MemoryItem(
             kind="anti_pattern", source="reflection",
-            text=(f"ANTI-PADRÃO ({model_name}): '{task.goal[:120]}' terminou {task.state.value} "
-                  f"— {task.reason}. (passos={n}, violations={stats.get('violations', 0)}, "
-                  f"loops={stats.get('loops', 0)}, rejeições={stats.get('gate_rejections', 0)}). "
-                  "Da próxima vez: decomponha mais, verifique antes de seguir, evite repetir a ação."),
-        ))
-    elif task.state == TaskState.COMPLETE and n >= 3:
-        seq = " → ".join(s.tool for s in task.steps)
-        out.append(MemoryItem(
-            kind="lesson", source="reflection",
-            text=f"COMO: para '{task.goal[:120]}' funcionou a sequência: {seq}.",
-        ))
-    return out
+            text=(f"ANTI-PADRÃO ({model_name}): tarefa falhou com {viol} violações / {loops} loops. "
+                  "Decompor em passos menores, verificar o resultado antes de seguir e NÃO repetir "
+                  "a mesma ação que já falhou."),
+        )]
+    return []
+
+
+def is_reflection_noise(item) -> bool:
+    """True p/ memória auto-aprendida de BAIXO valor (post-mortem ancorado na frase do pedido), p/ o
+    `okami memory prune`: a 'lesson' de sequência de tools (sempre lixo agora) e o anti-padrão ANTIGO
+    phrase-anchored ('… terminou BLOCKED/FAILED …'). O anti-padrão NOVO generalizado é preservado."""
+    kind = getattr(item, "kind", "") or ""
+    text = getattr(item, "text", "") or ""
+    if kind == "lesson" and text.startswith("COMO:"):
+        return True
+    return kind == "anti_pattern" and "terminou " in text
 
 
 def apply(memory, task: Task, model_name: str = "?") -> list[MemoryItem]:

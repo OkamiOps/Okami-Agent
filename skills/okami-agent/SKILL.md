@@ -184,8 +184,14 @@ own channel binding (§6).
 - **Scope + global memory** — with `memory.global`, `scope=global` preferences live in `~/.okami` and
   apply in any project, while one project's memory does not contaminate another. Schema with
   `confidence`, `expires_at` (TTL) and `supersedes_id` (consolidation).
-- Inspect/edit with `okami memory` (e.g. `memory explain <id>` shows where a memory came from). A
-  short per-turn steering block (Persona Compiler) is read-only.
+- **Auto-learning is disciplined** (Hermes-aligned): long-term memory stores only durable, generalizable
+  knowledge (facts/preferences/decisions/corrections). It does NOT write a post-mortem per task — a
+  tool-sequence "lesson" or a transient BLOCKED is never saved; only a genuine FAILED-with-repeated-loops
+  produces one generalized, deduped anti-pattern (no literal user phrase to hijack recall). Completed-work
+  summaries persist only when real durable effect happened.
+- Inspect/edit with `okami memory` (e.g. `memory explain <id>` shows where a memory came from);
+  `okami memory prune` clears low-value auto-learned noise. A short per-turn steering block (Persona
+  Compiler) is read-only.
 
 ---
 

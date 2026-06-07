@@ -22,33 +22,58 @@ class Script:
         return self.outputs.pop(0) if self.outputs else self.default
 
 
-# ----------------------------------------------------------------- reflexão
-def test_reflect_failed_creates_anti_pattern():
+# ----------------------------------------------------------------- reflexão (Hermes-aligned: sem lixo)
+def test_reflect_failed_with_behavior_signal_creates_generalized_anti_pattern():
     t = Task(goal="fazer deploy do frontend")
     t.state, t.reason, t.stats = TaskState.FAILED, "loop persistente", {"violations": 2, "loops": 3}
     lessons = learning.reflect(t, "haiku")
     assert lessons and lessons[0].kind == "anti_pattern"
     assert "ANTI-PADRÃO" in lessons[0].text and "haiku" in lessons[0].text
+    # GENERALIZADO: NÃO carrega mais a frase literal do usuário (não sequestra o recall)
+    assert "deploy" not in lessons[0].text.lower() and "frontend" not in lessons[0].text.lower()
 
 
-def test_reflect_complete_creates_lesson():
+def test_reflect_complete_writes_nothing():
+    # COMPLETE não vira mais 'lesson' — a sequência de tools era lixo re-descobrível ancorado na frase.
     t = Task(goal="criar dashboard")
     t.state = TaskState.COMPLETE
     t.steps = [Step(1, "list_dir", {}, "", False), Step(2, "write_file", {}, "", True),
                Step(3, "run_shell", {}, "", True)]
-    lessons = learning.reflect(t)
-    assert lessons and lessons[0].kind == "lesson" and "COMO" in lessons[0].text
+    assert learning.reflect(t) == []
 
 
-def test_apply_writes_lesson_recalled_next_time(tmp_path):
+def test_reflect_transient_or_oneoff_failure_writes_nothing():
+    # BLOCKED (timeout/cancelamento) é transitório → não é anti-padrão comportamental.
+    blocked = Task(goal="x")
+    blocked.state, blocked.reason, blocked.stats = TaskState.BLOCKED, "timeout", {"violations": 0, "loops": 0}
+    assert learning.reflect(blocked) == []
+    # FAILED sem sinal comportamental (one-off, sem violações/loops) também não vira memória.
+    oneoff = Task(goal="y")
+    oneoff.state, oneoff.stats = TaskState.FAILED, {"violations": 0, "loops": 0}
+    assert learning.reflect(oneoff) == []
+
+
+def test_apply_anti_pattern_dedups_and_drops_phrase(tmp_path):
     m = open_memory(tmp_path)
-    t = Task(goal="configurar CI no projeto")
-    t.state, t.reason, t.stats = TaskState.BLOCKED, "faltou permissão", {}
-    learning.apply(m, t)
-    # a lição volta no recall (e seria injetada na próxima tarefa parecida)
-    hits = m.recall("configurar CI", limit=5)
-    assert any(h.kind == "anti_pattern" for h in hits)
+    for goal in ("fazer deploy do frontend", "configurar o webpack do projeto"):
+        t = Task(goal=goal)
+        t.state, t.stats = TaskState.FAILED, {"violations": 3, "loops": 2}
+        learning.apply(m, t, "haiku")
+    anti = [i for i in m.recent(50) if i.kind == "anti_pattern"]
+    assert len(anti) == 1                                   # texto generalizado idêntico → dedup no backend
+    assert "deploy" not in anti[0].text.lower() and "webpack" not in anti[0].text.lower()
     m.close()
+
+
+def test_is_reflection_noise_targets_old_format_only():
+    from okami.memory.base import MemoryItem
+    old_lesson = MemoryItem(text="COMO: para 'x' funcionou a sequência: a → b", kind="lesson")
+    old_anti = MemoryItem(text="ANTI-PADRÃO (haiku): 'y' terminou BLOCKED — timeout.", kind="anti_pattern")
+    new_anti = MemoryItem(text="ANTI-PADRÃO (haiku): tarefa falhou com 3 violações / 2 loops.", kind="anti_pattern")
+    pref = MemoryItem(text="o usuário prefere tabs", kind="preference")
+    assert learning.is_reflection_noise(old_lesson) and learning.is_reflection_noise(old_anti)
+    assert not learning.is_reflection_noise(new_anti)      # generalizado novo é preservado
+    assert not learning.is_reflection_noise(pref)          # conhecimento curado fica
 
 
 # ----------------------------------------------------------------- validação de args

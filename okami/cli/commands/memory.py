@@ -138,6 +138,44 @@ def memory_forget(
         raise typer.Exit(1)
 
 
+@mem_app.command("prune")
+def memory_prune(
+    workspace: str = _WS,
+    global_: bool = _GLOBAL,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Só lista o que removeria (não apaga)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Remove sem confirmar."),
+) -> None:
+    """Poda memória auto-aprendida de baixo valor (post-mortems de tarefa ancorados na frase do pedido:
+    'COMO: para …' e 'ANTI-PADRÃO … terminou …'). Fatos/preferências/decisões ficam intactos."""
+    from okami import learning
+
+    store = _crud_store(workspace, global_)
+    victims = [i for i in store.recent(100000) if learning.is_reflection_noise(i)]
+    if not victims:
+        store.close()
+        console.print("[green]✓ nada a podar — sem memória auto-aprendida de baixo valor.[/green]")
+        return
+    console.print(f"[yellow]{len(victims)} item(ns) de memória auto-aprendida de baixo valor:[/yellow]")
+    for i in victims[:30]:
+        console.print(f"  • [dim][{i.kind}][/dim] {(i.text or '')[:88]}")
+    if len(victims) > 30:
+        console.print(f"  [dim]… +{len(victims) - 30}[/dim]")
+    if dry_run:
+        store.close()
+        console.print("[dim]--dry-run: nada removido.[/dim]")
+        return
+    if not yes:
+        from okami import menu
+        if not menu.confirm(f"Remover {len(victims)} item(ns)?", default=False):
+            store.close()
+            console.print("[dim]cancelado.[/dim]")
+            return
+    removed = sum(1 for i in victims if i.id is not None and store.forget_item(i.id))
+    store.close()
+    console.print(f"[green]✓ podados {removed} item(ns).[/green] "
+                  "[dim]reflect agora só aprende de falha real (não de papo/exploração).[/dim]")
+
+
 @mem_app.command("archive")
 def memory_archive(
     item_id: str = typer.Argument(..., help="#id do item (use g1/global:1 p/ a casa)."),

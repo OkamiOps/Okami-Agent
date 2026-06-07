@@ -466,8 +466,13 @@ class Harness:
         return True
 
     def _extract_on_complete(self, t: Task) -> None:
-        """Extract (§6.2 passo 4): promove o resumo da tarefa para memória + MEMORY.md."""
+        """Extract (§6.2 passo 4): promove o resumo da tarefa para memória + MEMORY.md.
+
+        SÓ p/ tarefa que fez TRABALHO durável (≥1 passo com efeito) — papo/exploração read-only não
+        viram 'fato' de memória (era a mesma fábrica de lixo da skill/reflexão, ancorada na frase)."""
         if self.memory is None or not t.result:
+            return
+        if not any(s.effect for s in t.steps):       # nada durável aconteceu → não persiste resumo
             return
         from okami.memory import files as _mfiles
         from okami.memory.policy import prepare
