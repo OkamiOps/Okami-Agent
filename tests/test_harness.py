@@ -316,3 +316,33 @@ def test_inspection_verb_expects_action(tmp_path):
                 J("respond", message="é uma pasta vazia")])
     r = Harness(s, Task(goal="analisa a pasta atual"), tmp_path).run()
     assert any(st.tool == "list_dir" for st in r.steps)        # executou, não só prometeu
+
+
+def test_system_prompt_orients_to_workspace(tmp_path):
+    # ROBUSTEZ p/ modelo FRACO: o prompt diz ONDE o agente está + a raiz, pra ele não tatear
+    # com ls/cd/find (era a causa do flailing 'ls /root', 'sudo ls ~', cd…).
+    from okami.core.harness.prompt import build_system_prompt
+    (tmp_path / "src").mkdir()
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (tmp_path / ".git").mkdir()                      # ruído → não deve aparecer na orientação
+    t = Task(goal="conserte o bug", exit_criteria=[{"type": "file_exists", "path": "a.py"}])
+    p = build_system_prompt(t, {}, workspace=tmp_path)
+    assert str(tmp_path) in p and "src/" in p and "README.md" in p
+    assert "find_files" in p and "ONDE VOCÊ ESTÁ" in p
+    assert ".git" not in p.split("Raiz:")[1][:200]   # pastas de ruído ocultadas
+    # conversa também é orientada (o caso real 'achar a pasta' era um papo)
+    assert str(tmp_path) in build_system_prompt(Task(goal="oi"), {}, workspace=tmp_path)
+    # sem workspace → compatível (nada de orientação)
+    assert "ONDE VOCÊ ESTÁ" not in build_system_prompt(t, {})
+
+
+def test_harness_injects_workspace_root_into_system_prompt(tmp_path):
+    # ponta-a-ponta: o Harness passa o workspace → a 1ª mensagem de sistema traz a raiz real.
+    (tmp_path / "app.py").write_text("print(1)", encoding="utf-8")
+
+    def gen(messages, schema):
+        return J("respond", message="oi")
+    h = Harness(generate=gen, task=Task(goal="oi"), workspace=tmp_path)
+    h.run()
+    sys_msg = h.messages[0]["content"]
+    assert "app.py" in sys_msg and str(tmp_path) in sys_msg

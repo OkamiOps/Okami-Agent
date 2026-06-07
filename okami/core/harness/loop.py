@@ -152,7 +152,8 @@ class Harness:
         # "Comecei." de execução de tarefa). Em TRABALHO o objetivo já está no system prompt.
         first = _user_start(self.images, text=t.goal) if is_conversational(t) else _user_start(self.images)
         self.messages = [
-            {"role": "system", "content": build_system_prompt(t, self.registry, extra)},
+            {"role": "system", "content": build_system_prompt(t, self.registry, extra,
+                                                              workspace=self.ctx.workspace)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)

@@ -13,7 +13,28 @@ def is_conversational(task: Task) -> bool:
     return not [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
 
 
-def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "") -> str:
+_ORIENT_SKIP = {".git", "__pycache__", ".venv", "node_modules", ".okami", ".pytest_cache",
+                "dist", ".mypy_cache", ".ruff_cache", "build", ".idea", ".vscode"}
+
+
+def _workspace_orientation(workspace) -> str:
+    """Onde o agente está + o que tem na raiz. Sem isto o modelo (sobretudo o FRACO) gasta passos
+    tateando com ls/cd/find pra se localizar — era a causa do flailing ('ls /root', 'sudo ls ~', cd…).
+    Dar a raiz de cara orienta e corta a exploração às cegas."""
+    from pathlib import Path
+    ws = Path(workspace)
+    try:
+        entries = sorted(ws.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        names = [e.name + ("/" if e.is_dir() else "") for e in entries if e.name not in _ORIENT_SKIP][:40]
+        tree = "  ".join(names) if names else "(vazio)"
+    except OSError:
+        tree = "(indisponível)"
+    return (f"ONDE VOCÊ ESTÁ: seu workspace é `{ws}` — já é o diretório atual das ferramentas de "
+            f"arquivo e do run_shell (NÃO precisa `cd` pra cá nem sair tateando com `ls`/`find`). Raiz:\n"
+            f"{tree}\nPra localizar algo cujo nome varia, use `find_files` (ignora caso/hífen/underscore).")
+
+
+def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None) -> str:
     lines = []
     for t in registry.values():
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
@@ -38,6 +59,8 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
 {tools_block}
 ==="""
 
+    orient = f"\n\n{_workspace_orientation(workspace)}" if workspace is not None else ""
+
     if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
         crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria
                                                   if c.get("type") not in (None, "model_declared")])
@@ -49,7 +72,7 @@ OBJETIVO:
 
 CRITÉRIOS DE SAÍDA (o harness verifica DE VERDADE — use `task_complete` só quando baterem; se
 travar, `task_blocked`; se faltar algo que só a pessoa sabe, `need_input`):
-{crit_txt}
+{crit_txt}{orient}
 
 {manual}
 
@@ -62,7 +85,7 @@ recite a memória nem anuncie que lembra ("como você sabe…", "lembrando que�
 
 Responda à PESSOA antes do problema — se ela desabafa, está cansada ou empolgada, reage a isso antes
 de entrar no técnico. Tenha opinião de verdade: concorda, discorda, fala que é furada quando for. Não
-descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo executável, age; senão, é papo.
+descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo executável, age; senão, é papo.{orient}
 
 {manual}
 
