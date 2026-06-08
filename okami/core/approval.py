@@ -57,6 +57,9 @@ _SHELL_RULES = [
     (re.compile(_CMDSTART + r"sudo\b", re.I), "sudo", "high"),
     (re.compile(_CMDSTART + r"git\s+push\b", re.I), "git_push", "medium"),
     (re.compile(_CMDSTART + r"(npm|pip|cargo)\s+publish\b", re.I), "publish", "high"),
+    # pipe-to-shell (curl … | bash / wget … | sh) = vetor #1 de RCE via prompt-injection → aprovação ALTA
+    # (audit 2026-06-08; pattern do Hermes). Antes só pegava curl -X POST.
+    (re.compile(r"\b(curl|wget)\b[^\n|]*\|\s*(?:[\w./]*/)?(?:ba|z|da)?sh\b", re.I), "remote_exec", "high"),
     (re.compile(r"\bcurl\b[^\n]*-X\s*(POST|PUT|DELETE)|\bwget\b[^\n]*--post", re.I), "network_write", "medium"),
     (re.compile(_CMDSTART + r"chmod\b|" + _CMDSTART + r"docker\s+(rm|rmi|system\s+prune)", re.I),
      "system_change", "medium"),
@@ -65,9 +68,20 @@ _SHELL_RULES = [
 # Quando o comando RE-EXECUTA o conteúdo entre aspas (sh -c '…', bash -c, eval), as aspas NÃO escondem
 # um argumento — escondem um COMANDO. Aí não dá pra ignorar as aspas; checa o cru contra os críticos.
 _RUNS_QUOTED = re.compile(r"\b(?:ba|z|da)?sh\s+-[a-z]*c\b|\beval\b", re.I)
+# bash -c '…' / eval: gate de APROVAÇÃO (destructive_shell). Amplo — qualquer rm -rf, etc. + desligamentos
+# (init 0/6, systemctl poweroff/reboot/halt/kexec, telinit 0/6 — audit 2026-06-08).
 _EVAL_DANGER = re.compile(
     r"\brm\s+(-[^\s]*\s+)*-[a-z]*[rf]|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*of=/dev/(sd|nvme|hd|mmcblk|vd|xvd)"
-    r"|:\(\)\s*\{\s*:|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b", re.I)
+    r"|:\(\)\s*\{\s*:|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b"
+    r"|\binit\s+[06]\b|\bsystemctl\s+(poweroff|reboot|halt|kexec)\b|\btelinit\s+[06]\b", re.I)
+# bash -c '…' / eval: bloqueio HARDLINE incondicional. Catástrofes SEM uso legítimo (rm de SISTEMA, não
+# todo rm -rf). Era o furo: detect_hardline usava só os patterns ancorados em _CMDPOS, que NÃO casam
+# DENTRO das aspas → `bash -c 'rm -rf /'` passava o yolo-proof (audit 2026-06-08).
+_HARDLINE_EVAL = re.compile(
+    r"\brm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)"
+    r"|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)|:\(\)\s*\{\s*:"
+    r"|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b|\binit\s+[06]\b"
+    r"|\bsystemctl\s+(poweroff|reboot|halt|kexec)\b|\btelinit\s+[06]\b", re.I)
 
 
 def _strip_quoted(cmd: str) -> str:
@@ -83,7 +97,7 @@ def _strip_quoted(cmd: str) -> str:
 # de aprovação). É a rede que o go/no-go não cobre: um yolo distraído não pode formatar o disco.
 _HARDLINE = [
     (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|"
-                r"/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*)?)(\s|$)", re.I),
+                r"/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)", re.I),
      "rm recursivo de / ou diretório de sistema"),
     (re.compile(r"\bmkfs(\.[a-z0-9]+)?\b", re.I), "formatar filesystem (mkfs)"),
     (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*", re.I), "dd p/ dispositivo cru"),
@@ -102,7 +116,9 @@ def detect_hardline(cmd: str) -> str | None:
     yolo passa). None se ok. Usa o mesmo strip de aspas do classify (não dispara em `grep 'mkfs'`)."""
     if not cmd:
         return None
-    c = cmd if _RUNS_QUOTED.search(cmd) else _strip_quoted(cmd)
+    if _RUNS_QUOTED.search(cmd):                      # bash -c '…'/eval: a catástrofe está DENTRO das aspas →
+        return "catástrofe via sh -c/eval" if _HARDLINE_EVAL.search(cmd) else None   # checa sem âncora
+    c = _strip_quoted(cmd)
     for rx, desc in _HARDLINE:
         if rx.search(c):
             return desc
@@ -123,6 +139,9 @@ def classify(tool: str, args: dict) -> Sensitive | None:
         for rx, cat, risk in _FILE_RULES:
             if rx.search(path):
                 return Sensitive(f"escrever em {cat}: {path}", cat, risk)
+        from okami.core.tools.base import _SENSITIVE_PATH   # MESMA cobertura do shell p/ ESCRITA: id_rsa,
+        if _SENSITIVE_PATH.search(path):                    # .ssh, .aws, history, gitconfig… (audit: write/edit
+            return Sensitive(f"escrever em caminho sensível: {path}", "secret_file", "high")  # ignorava-os)
     if tool in ("run_shell", "process_start"):           # process_start = shell em background → mesma trava
         cmd_raw = str(args.get("cmd", ""))
         if _RUNS_QUOTED.search(cmd_raw):                 # sh -c '…' / eval: aspas escondem COMANDO → checa cru
