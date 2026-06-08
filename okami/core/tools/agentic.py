@@ -18,6 +18,12 @@ class UseSkill(Tool):
         if not body:
             disp = ", ".join(ctx.skills) or "(nenhuma)"
             return ToolResult(False, f"skill '{args['name']}' não está no catálogo. Disponíveis: {disp}")
+        if getattr(ctx, "skills_dir", None):         # LRU p/ o curator: registra que esta skill foi usada
+            try:
+                from okami.learning.curator import record_skill_use
+                record_skill_use(ctx.skills_dir, args["name"])
+            except Exception:  # noqa: BLE001 — telemetria nunca derruba a tool
+                pass
         return ToolResult(True, f"SKILL '{args['name']}' (siga este procedimento):\n{body}")
 
 
@@ -27,9 +33,9 @@ class ManageSkill(Tool):
                    "de auto-aprimoramento. Nome no NÍVEL DE CLASSE (kebab-case, ≤3 palavras): NUNCA a frase do "
                    "pedido, número de PR, string de erro ou codinome. action=create|edit. Corpo em markdown "
                    "(## Quando usar / ## Como / ## Cuidados).")
-    args_schema = {"action": "create|edit", "name": "kebab-case curto (nível de classe)",
-                   "description": "1 linha (≤120 chars)", "body": "markdown do procedimento"}
-    required = ("action", "name", "body")
+    args_schema = {"action": "create|edit|archive", "name": "kebab-case curto (nível de classe)",
+                   "description": "1 linha (≤120 chars)", "body": "markdown do procedimento (create/edit)"}
+    required = ("action", "name")
 
     def run(self, args, ctx):
         import re as _re
@@ -42,6 +48,10 @@ class ManageSkill(Tool):
         if not root:
             return ToolResult(False, "manage_skill indisponível neste contexto (sem skills_dir).")
         name = str(args.get("name", "")).strip().lower()
+        if args.get("action") == "archive":          # arquiva (reversível) — usado pela consolidação
+            from okami.learning.curator import _archive_skill
+            return (ToolResult(True, f"skill '{name}' arquivada (.archive)", effect=True)
+                    if _archive_skill(root, name) else ToolResult(False, f"skill '{name}' não encontrada."))
         if not _re.match(r"^[a-z0-9][a-z0-9._-]{1,47}$", name) or name.count("-") > 3:
             return ToolResult(False, "nome inválido: kebab-case curto (≤48 chars, ≤3 hífens), nível de CLASSE "
                               "(não a frase do pedido / PR / erro / codinome).")

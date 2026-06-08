@@ -172,6 +172,11 @@ own channel binding (§6).
   list. The harness only times the question; the model curates. The old mechanical distiller
   (`learning.auto_skill`) is legacy/off. Auto-created skills are marked `origin: agent`; clean junk with
   `okami skills --prune`.
+- **Curator** (`okami curator`, slow tier) — consolidates auto-created skills: archives ones unused past
+  `--archive-days` (LRU; usage tracked on `use_skill`) and folds narrow/duplicate ones into class-level
+  umbrellas (model-driven). NEVER deletes — moves to `.archive/` after a tar.gz snapshot; `okami curator
+  rollback` undoes the last pass; `--dry-run` previews; `okami curator pin <name>` exempts. Curated/
+  installed skills (no `origin`) are untouchable.
 - **Contracts** (`okami.yaml → contracts.ui`) declare the design system: `library: shadcn`,
   `forbid_inline_hex`, `forbid_raw_css`, `require_component_source`.
 - **Verification gates** mechanically REJECT code that violates the contract (inline hex, raw CSS,

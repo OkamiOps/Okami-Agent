@@ -140,7 +140,9 @@ def tidy_skill_names(root: Path, *, emit=lambda m: None) -> list[tuple[str, str]
 def load_skills(root: Path) -> list[Skill]:
     if not root.exists():
         return []
-    return [parse_skill(p) for p in sorted(root.rglob("SKILL.md"))]
+    # pula dirs ocultos (.archive do curator, .snapshots, .git…) — skill arquivada NÃO volta ao catálogo.
+    return [parse_skill(p) for p in sorted(root.rglob("SKILL.md"))
+            if not any(part.startswith(".") for part in p.relative_to(root).parts)]
 
 
 def route(goal: str, contracts: dict, skills: list[Skill]) -> list[Skill]:
