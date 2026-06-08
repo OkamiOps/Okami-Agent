@@ -202,7 +202,8 @@ class RunShell(Tool):
                               f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
                               effect=False)
         res = run_sandboxed(cmd, ctx.workspace, policy)
-        out = f"exit={res.returncode}\n{res.output}"
+        from okami.core.redact import redact            # token impresso na saída (gh auth/build log) NÃO pode
+        out = f"exit={res.returncode}\n{redact(res.output)}"   # ir verbatim p/ o LLM/transcript (igual ao bg log)
         if getattr(res, "timed_out", False):                     # cortou no teto → ensina a recuperar (não é "falha real")
             out += (f"\n[o comando passou de {policy.timeout}s e foi cortado. Se é legítimo e demora mesmo: "
                     f"rode de novo com timeout=N (máx {self._MAX_TIMEOUT}), ou use process_start p/ rodar "

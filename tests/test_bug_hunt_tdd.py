@@ -91,6 +91,24 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_run_shell_output_redacts_secrets():
+    # BUG (defense-in-depth): a saída do run_shell síncrono ia VERBATIM p/ o contexto do LLM + transcript.
+    # Um token impresso por um comando (gh auth, build log, etc.) vazava. O log de processo em background e
+    # o event-log JÁ redigem — o run_shell síncrono não (inconsistente). redact() tem que valer aqui também.
+    from okami.core.sandbox import default_policy
+    from okami.core.tools.base import ToolContext
+    from okami.core.tools.files import RunShell
+    ws = pathlib.Path(tempfile.mkdtemp())
+    ctx = ToolContext(workspace=ws, sandbox=default_policy())
+    sk = "sk-" + "abcdef0123456789ABCDEF"            # tokens MONTADOS (sem literal contíguo → não aciona o
+    gh = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUV012345"      # secret-scan do repo), mas redact() casa em runtime
+    r = RunShell().run({"cmd": f"echo 'k={sk} Bearer {gh}'"}, ctx)
+    assert r.ok
+    assert sk not in r.output, "token sk- vazou na saída do run_shell"
+    assert gh not in r.output, "token GitHub vazou"
+    assert "exit=0" in r.output                      # estrutura preservada (só o segredo é mascarado)
+
+
 def test_compact_never_emits_consecutive_same_role():
     # BUG: compact insere a nota como 'user'; se tail[0] também é 'user' (acontece com keep_tail ÍMPAR — e o
     # harness usa keep_tail=3 na recuperação), saem DUAS mensagens 'user' seguidas. OpenAI tolera, mas
