@@ -56,6 +56,9 @@ and exactly how. Don't improvise around the invariants below.
   `task_blocked` (state the blocker), `need_input` (ask the user a concrete question), `respond`
   (plain reply for a chat turn), `finish_setup`.
 - **Execution-discipline gates** (adapted from Hermes, applied to EVERY model — esp. weak ones):
+  `<escopo>` do EXACTLY what was asked, no more — analyze/test/find-bugs/compare ⇒ deliver a REPORT, do
+  NOT edit/fix/delete/clean (`__pycache__`/`.bak`) unless the request explicitly says change/fix/create
+  ("find bugs so we can fix" = list them, don't fix); when unsure between reporting and mutating, report;
   `<persistencia>` keep going until complete AND verified, don't bail with a menu for a SAFE next step;
   `<use_ferramenta>` never answer from memory what a tool can check (file contents → read_file, system/
   git/time → run_shell, web → browse); `<verificacao>` before finishing, self-check correctness (every

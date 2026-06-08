@@ -222,6 +222,9 @@ def test_prompt_has_hermes_action_and_verification_gates():
     from okami.core.harness.prompt import build_system_prompt
     p = build_system_prompt(Task(goal="faz X"), {})
     low = p.lower()
+    # gate de ESCOPO: análise/teste = RELATÓRIO; não mutar/consertar/apagar sem pedido explícito
+    assert "<escopo>" in low and "relatório" in low
+    assert "não conserte" in low and ("faxina" in low or "__pycache__" in low)
     # gates de AÇÃO (Hermes): persistência + uso obrigatório de ferramenta + anti-bail
     assert "<persistencia>" in low and "<use_ferramenta>" in low
     assert "menu" in low and "permiss" in low and "memória" in low
