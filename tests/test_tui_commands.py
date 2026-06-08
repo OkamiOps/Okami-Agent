@@ -18,6 +18,22 @@ def test_event_line_detail_levels():
     assert event_line({"kind": "loop", "repeats": 3}, "hidden") is not None
 
 
+def test_event_line_escapes_markup_in_content():
+    # REGRESSÃO: cmd/razão com colchetes tipo markup ('[/]', '[x]') NÃO pode quebrar o render
+    # (era MarkupError "closing tag '[/]' … has nothing to close" → derrubava o turno inteiro).
+    for e in ({"kind": "step", "tool": "run_shell", "ok": True, "args": {"cmd": "grep 'a[/]b' && echo [done]"}},
+              {"kind": "step", "tool": "run_shell", "ok": False, "args": {"cmd": "x [/] y"}},
+              {"kind": "approval_request", "reason": "rm -rf [/] perigoso"},
+              {"kind": "escalate", "why": "loop [/]"},
+              {"kind": "complete_rejected", "missing": ["falta [x]"]}):
+        line = event_line(e, "collapsed")                    # não levanta MarkupError
+        assert line is not None
+    # o conteúdo (com colchetes) aparece LITERAL, não é interpretado como tag
+    txt = event_line({"kind": "step", "tool": "run_shell", "ok": True,
+                      "args": {"cmd": "echo [done]"}}, "expanded").plain
+    assert "[done]" in txt
+
+
 def test_detail_levels_order():
     assert _DETAIL_LEVELS == ("hidden", "collapsed", "expanded")
 

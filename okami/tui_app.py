@@ -319,7 +319,8 @@ if _HAS_TEXTUAL:
             """Abre o painel de aprovação com a AÇÃO (tool + arg) — chamado pelo send_approval do canal."""
             self._approval_text = ask or "⚠ aprovar a ação pendente?"
             try:
-                self.query_one("#approval-label", Static).update(self._approval_text)
+                from rich.markup import escape                # cmd com '[' / '[/]' quebraria o markup do Static
+                self.query_one("#approval-label", Static).update(escape(self._approval_text))
                 self.query_one("#approval").display = True
                 self.query_one("#approve", Button).focus()
             except Exception:  # noqa: BLE001

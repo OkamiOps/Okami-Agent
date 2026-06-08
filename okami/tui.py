@@ -406,29 +406,30 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
     passo enquanto acontece — agora com EMOJI por tipo (🛠️ tool · 🔁 loop · 🧠 escalar…) p/ você bater
     o olho e saber o que tá rolando. `detail` (/details): hidden = só o final · collapsed = 1 linha por
     passo (default) · expanded = com os args."""
-    k = e.get("kind")
-    if k == "step":
-        if detail == "hidden":                          # /details hidden → não polui com tool-calls
+    from rich.markup import escape                       # CONTEÚDO dinâmico (cmd/args/razão) pode ter '[/]'/
+    k = e.get("kind")                                     # '[x]' → escapa SEMPRE, senão from_markup quebra o turno
+    if k == "step":                                       # (MarkupError "closing tag '[/]' …"). Tags de estilo
+        if detail == "hidden":                            # ([cor]…[/]) ficam fora do escape, de propósito.
             return None
         args = e.get("args") or {}
         prev = _args_full(args) if detail == "expanded" else _args_preview(args)
         emoji = tool_emoji(e["tool"])                   # 🛠️/🐚/📖/✍️… = QUE tipo de coisa o agente faz
         markc, mark = (CYAN, "✓") if e.get("ok") else ("red", "✗")
-        t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{e['tool']}[/]"
-                             + (f" [{MUTE}]{prev}[/]" if prev else ""))
+        t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{escape(str(e['tool']))}[/]"
+                             + (f" [{MUTE}]{escape(str(prev))}[/]" if prev else ""))
         return t
     if k == "approval_request":
-        return Text.from_markup(f"  🔐 [{ORANGE}]aprovação:[/] [{SOFT}]{e.get('reason', '')}[/]")
+        return Text.from_markup(f"  🔐 [{ORANGE}]aprovação:[/] [{SOFT}]{escape(str(e.get('reason', '')))}[/]")
     if k == "loop":
-        return Text.from_markup(f"  🔁 [{ORANGE}]loop detectado[/] [{MUTE}](x{e.get('repeats', '?')})[/]")
+        return Text.from_markup(f"  🔁 [{ORANGE}]loop detectado[/] [{MUTE}](x{escape(str(e.get('repeats', '?')))})[/]")
     if k == "stall":
         return Text.from_markup("  🤔 [%s]sem progresso, mudando de abordagem[/]" % ORANGE)
     if k == "escalate":
-        return Text.from_markup(f"  🧠 [{MAGENTA}]escalando p/ modelo mais forte[/] [{MUTE}]({e.get('why', '')})[/]")
+        return Text.from_markup(f"  🧠 [{MAGENTA}]escalando p/ modelo mais forte[/] [{MUTE}]({escape(str(e.get('why', '')))})[/]")
     if k == "compact":
-        return Text.from_markup(f"  🗜️ [{CYAN}]compactando contexto[/] [{MUTE}]({e.get('promoted', 0)} → memória)[/]")
+        return Text.from_markup(f"  🗜️ [{CYAN}]compactando contexto[/] [{MUTE}]({escape(str(e.get('promoted', 0)))} → memória)[/]")
     if k == "complete_rejected":
-        miss = ", ".join(e.get("missing", []))
+        miss = escape(", ".join(str(m) for m in e.get("missing", [])))
         return Text.from_markup(f"  🚧 [{ORANGE}]ainda falta:[/] [{SOFT}]{miss}[/]")
     return None
 
