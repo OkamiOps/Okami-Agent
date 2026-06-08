@@ -35,63 +35,21 @@ def _PREFS_PATH():
     return _okami_home() / "prefs.json"
 
 
+# M3: tema e /details agora moram no MESMO prefs.json, via okami.prefs (fonte única, merge-safe, atômico).
+# tui_app não duplica mais o read/write — só delega a chave 'theme'. (Era a duplicação que o achado M3 criticava.)
 def _load_theme(default="okami"):
-    """Tema persistido, ou `default` se ausente/inválido. NUNCA levanta."""
-    try:
-        p = _PREFS_PATH()
-        if p.is_file():
-            import json as _json
-            data = _json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                v = data.get("theme")
-                if isinstance(v, str) and v:
-                    return v
-    except Exception:  # noqa: BLE001
-        pass
-    return "okami"
+    """Tema persistido (prefs unificado), ou `default` se ausente/inválido. NUNCA levanta."""
+    from okami import prefs
+    v = prefs.get_pref("theme", default)
+    return v if isinstance(v, str) and v else default
 
 
 def _save_theme(name):
-    """Persiste o tema. Escrita atômica (tmp + rename). Devolve True se salvou."""
+    """Persiste o tema no prefs unificado (merge — preserva repl_details etc.). True se salvou."""
     if not isinstance(name, str) or not name:
         return False
-    try:
-        import json as _json
-        import os as _os
-        import tempfile as _tempfile
-        home = _okami_home()
-        home.mkdir(parents=True, exist_ok=True)
-        current = {"theme": name}
-        # preserva outras chaves se prefs.json já existe
-        p = _PREFS_PATH()
-        if p.is_file():
-            try:
-                current = _json.loads(p.read_text(encoding="utf-8"))
-                if not isinstance(current, dict):
-                    current = {}
-            except Exception:  # noqa: BLE001
-                current = {}
-        current["theme"] = name
-        fd, tmp = _tempfile.mkstemp(prefix="prefs.", suffix=".tmp", dir=str(home))
-        try:
-            with _os.fdopen(fd, "w", encoding="utf-8") as f:
-                _json.dump(current, f, indent=2, sort_keys=True)
-                f.flush()
-                _os.fsync(f.fileno())
-            _os.replace(tmp, p)
-        except Exception:  # noqa: BLE001
-            try:
-                _os.unlink(tmp)
-            except Exception:  # noqa: BLE001
-                pass
-            raise
-        try:
-            _os.chmod(p, 0o644)
-        except Exception:  # noqa: BLE001
-            pass
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    from okami import prefs
+    return prefs.set_pref("theme", name)
 
 
 try:

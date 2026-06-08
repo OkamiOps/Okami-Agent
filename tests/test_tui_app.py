@@ -135,7 +135,7 @@ def test_skin_persists_to_home_prefs_json(tmp_path, monkeypatch):
     # /skin dracula grava em $OKAMI_HOME/prefs.json (NUNCA em CWD) e a proxima sessa o carrega.
     from okami.tui_app import _save_theme, _load_theme  # /skin persistente (embutido no tui_app)
     fake_home = tmp_path / "okami-home"
-    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    monkeypatch.setenv("OKAMI_HOME", str(fake_home))   # M3: redireciona okami_home (tui_app E prefs)
     assert _save_theme("dracula") is True
     assert (fake_home / "prefs.json").is_file()
     assert _load_theme("okami") == "dracula"
@@ -147,7 +147,7 @@ def test_skin_corrupt_file_falls_back_to_default(tmp_path, monkeypatch):
     fake_home = tmp_path / "okami-home2"
     fake_home.mkdir()
     (fake_home / "prefs.json").write_text("{ isto nao e json")
-    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    monkeypatch.setenv("OKAMI_HOME", str(fake_home))   # M3: redireciona okami_home (tui_app E prefs)
     assert _load_theme("okami") == "okami"
 
 
@@ -156,7 +156,7 @@ def test_skin_next_session_uses_saved_theme(tmp_path, monkeypatch):
     # (senao o /skin so vale 1 sessao, que era o bug que estamos fechando).
     from okami.tui_app import _save_theme  # /skin persistente (embutido no tui_app)
     fake_home = tmp_path / "okami-home3"
-    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    monkeypatch.setenv("OKAMI_HOME", str(fake_home))   # M3: redireciona okami_home (tui_app E prefs)
     assert _save_theme("gruvbox") is True
     app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
                        run_task=_fake_runner, spawn=lambda fn: fn())
@@ -169,7 +169,7 @@ def test_skin_app_crash_does_not_break_with_bad_prefs(tmp_path, monkeypatch):
     fake_home = tmp_path / "okami-home4"
     fake_home.mkdir()
     (fake_home / "prefs.json").write_text(_json.dumps({"theme": 123}))
-    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    monkeypatch.setenv("OKAMI_HOME", str(fake_home))   # M3: redireciona okami_home (tui_app E prefs)
     app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
                        run_task=_fake_runner, spawn=lambda fn: fn())
     assert str(app.theme) == "okami", f"esperava default okami, recebi {app.theme}"
