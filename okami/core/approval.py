@@ -101,7 +101,8 @@ _HARDLINE = [
     (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|"
                 r"/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)", re.I),
      "rm recursivo de / ou diretório de sistema"),
-    (re.compile(r"\bmkfs(\.[a-z0-9]+)?\b", re.I), "formatar filesystem (mkfs)"),
+    (re.compile(_CMDPOS + r"mkfs(\.[a-z0-9]+)?\b", re.I), "formatar filesystem (mkfs)"),   # ancorado: NÃO
+    #                                                       dispara em `head mkfs-howto.md` (nome de arquivo)
     (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*", re.I), "dd p/ dispositivo cru"),
     (re.compile(r">\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b", re.I), "redirect p/ dispositivo cru"),
     (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", re.I), "fork bomb"),
