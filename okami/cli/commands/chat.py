@@ -182,7 +182,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             else:                                       # sem arg → cicla
                 lv = tui._DETAIL_LEVELS[(tui._DETAIL_LEVELS.index(lv) + 1) % len(tui._DETAIL_LEVELS)]
             ep._details = lv
-            console.print(f"[dim]🔎 detalhes dos tool-calls: {lv}[/dim]")
+            from okami import prefs as _prefs                # M4: persiste a verbosidade → sobrevive ao restart
+            _prefs.set_pref("repl_details", lv)
+            console.print(f"[dim]🔎 detalhes dos tool-calls: {lv} (lembrado)[/dim]")
             continue
         if decision == "agents":                        # cliente: painel de atividade
             sx = ep.sessions.get(cid)
@@ -348,7 +350,9 @@ def chat(
     ch = TerminalChannel(name, console=console)
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
                        approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
-    ep._details = "collapsed"                         # verbosidade dos tool-calls (/details) — estado do cliente
+    from okami import prefs as _prefs                  # M4: retoma a verbosidade lembrada (default collapsed)
+    _saved_det = _prefs.get_pref("repl_details", "collapsed")
+    ep._details = _saved_det if _saved_det in tui._DETAIL_LEVELS else "collapsed"
     if new:
         ep.session(cid).history.clear()
         ep.store.reset(cid)
