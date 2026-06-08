@@ -287,6 +287,17 @@ class Harness:
                 t.reason = (f"travei: ~{int(_wt.monotonic() - _last_progress)}s sem concluir nenhum passo "
                             "(provável travamento, não trabalho — durante atividade eu não paro). Tenta de novo "
                             "que eu sigo.")
+                # ENTREGA PARCIAL antes de desistir mudo (mesmo no stall): a última geração pendurou (=
+                # contexto grande), então COMPACTA forte e tenta UMA vez entregar o que já levantou. Best-
+                # effort com timeout por-chamada: se pendurar/falhar de novo, fica só o BLOCKED seco.
+                try:
+                    self.messages, _pr = _compaction.compact(self.messages, self.memory, keep_tail=4)
+                except Exception:  # noqa: BLE001
+                    pass
+                _sv = self._salvage(t, t.reason)
+                if _sv:
+                    t.result = _sv
+                    self._emit("salvaged", reason="stall", chars=len(_sv))
                 self._emit("blocked", reason=t.reason)
                 return t
             if turns > self.budget.max_total_turns:

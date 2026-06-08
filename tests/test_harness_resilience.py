@@ -545,3 +545,47 @@ def test_entrega_skeleton_in_prompt():
     assert "## <título" in low or "## <titulo" in low            # esqueleto markdown presente
     assert "| suíte | passou | falhou |" in low                  # tabela de testes no esqueleto
     assert "parágrafo corrido" in low                            # proíbe paredão
+
+
+def test_stall_after_work_salvages_partial(tmp_path, monkeypatch):
+    # O CASO DO PRINT: travou (stall) DEPOIS de muito trabalho → não pode morrer mudo; entrega o parcial.
+    import time as _time
+    from okami.core.harness.models import Budget
+    clock = [0.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+    for f in "abcd":
+        (tmp_path / f"{f}.txt").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if messages and "ENTREGA final" in str(messages[-1].get("content", "")):      # pedido de salvage
+            return '{"tool":"respond","args":{"message":"PARCIAL: achei X em a.txt; nao terminei tudo."}}'
+        if calls["n"] <= 4:
+            clock[0] += 10                                # 4 passos DISTINTOS de trabalho real
+            return f'{{"tool":"read_file","args":{{"path":"{"abcd"[calls["n"]-1]}.txt"}}}}'
+        clock[0] += 400                                  # 5a geração PENDURA 400s (> stall 300) → trava
+        return "prosa sem acao"
+
+    h = Harness(generate=gen, task=Task(goal="analisa e ache bugs"), workspace=tmp_path,
+                budget=Budget(max_stall_seconds=300, max_consecutive_violations=999))
+    res = h.run()
+    assert res.state.name == "BLOCKED"
+    assert "PARCIAL" in (res.result or ""), f"travou sem entregar parcial: {res.result!r}"  # entregou
+
+
+def test_stall_with_no_work_stays_bare(tmp_path, monkeypatch):
+    # travou SEM trabalho (provider pendurou na 1a) → não há o que salvar; BLOCKED seco (sem chamada extra).
+    import time as _time
+    from okami.core.harness.models import Budget
+    clock = [0.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+
+    def gen(messages, schema):
+        clock[0] += 400
+        return "prosa sem acao"
+
+    h = Harness(generate=gen, task=Task(goal="crie o x"), workspace=tmp_path,
+                budget=Budget(max_stall_seconds=300, max_consecutive_violations=999))
+    res = h.run()
+    assert res.state.name == "BLOCKED" and not (res.result or "")   # nada de trabalho → nada salvo
