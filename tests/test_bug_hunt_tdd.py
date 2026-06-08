@@ -91,6 +91,24 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_read_file_errors_are_actionable_not_raw_oserror():
+    # BUG (thrash): read_file num DIRETÓRIO devolvia '[Errno 21] Is a directory: /private/var/...' (cru,
+    # com path de temp) e o agente RE-TENTAVA dezenas de vezes. read_file de inexistente não guiava. Erros
+    # têm que ser ACIONÁVEIS (→ list_dir / find_files) p/ o modelo parar de chutar caminho.
+    from okami.core.tools.base import ToolContext
+    from okami.core.tools.files import ReadFile
+    ws = pathlib.Path(tempfile.mkdtemp())
+    (ws / "subdir").mkdir()
+    ctx = ToolContext(workspace=ws)
+    rdir = ReadFile().run({"path": "subdir"}, ctx)
+    assert rdir.ok is False
+    assert "diret" in rdir.output.lower() and "list_dir" in rdir.output, f"erro de diretório não guia: {rdir.output!r}"
+    assert "Errno" not in rdir.output and "/private/var" not in rdir.output, "vazou OSError cru/path de temp"
+    rmiss = ReadFile().run({"path": "okami/cli/nope.py"}, ctx)
+    assert rmiss.ok is False
+    assert "find_files" in rmiss.output or "list_dir" in rmiss.output, f"not-found não guia: {rmiss.output!r}"
+
+
 def test_tools_dont_crash_on_malformed_args():
     # BUG (robustez): args None/tipo-errado (o modelo fraco emite {"cmd": null}) faziam a tool LEVANTAR
     # (TypeError/AttributeError) em vez de devolver ToolResult(False, msg clara). O harness contém, mas a

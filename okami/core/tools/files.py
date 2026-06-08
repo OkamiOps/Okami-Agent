@@ -14,20 +14,30 @@ class ReadFile(Tool):
     required = ("path",)
 
     def run(self, args, ctx):
-        rel = args["path"]
+        rel = args.get("path")
+        if not isinstance(rel, str) or not rel:
+            return ToolResult(False, "read_file: 'path' precisa ser uma string não-vazia.", effect=False)
         mode = getattr(ctx.sandbox, "mode", "")          # simetria com run_shell: read_file NÃO pode ser a
-        if mode != "yolo" and _SENSITIVE_PATH.search(str(rel)):  # porta dos fundos p/ exfiltrar segredo
+        if mode != "yolo" and _SENSITIVE_PATH.search(rel):  # porta dos fundos p/ exfiltrar segredo
             return ToolResult(False, "sandbox: arquivo sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
                               f"bloqueado p/ não vazar segredo. Use o perfil yolo se for de propósito. ({rel})",
                               effect=False)
         from okami.core.file_safety import read_text_capped
         try:
             p = _safe_path(ctx, rel)
+        except ValueError as e:
+            return ToolResult(False, str(e), effect=False)
+        # erros ACIONÁVEIS (anti-thrash): o modelo chutava caminho e levava OSError cru → re-tentava sem fim.
+        if p.is_dir():
+            return ToolResult(False, f"'{rel}' é um DIRETÓRIO, não um arquivo — use list_dir('{rel}') p/ ver "
+                              "o conteúdo (read_file é só p/ arquivo).", effect=False)
+        if not p.exists():
+            return ToolResult(False, f"arquivo não existe: {rel} — NÃO chute o caminho; use list_dir p/ navegar "
+                              "ou find_files p/ achar pelo nome.", effect=False)
+        try:
             text = read_text_capped(p)        # teto de tamanho → não estoura memória
-        except FileNotFoundError:
-            return ToolResult(False, f"arquivo não existe: {rel}")
-        except Exception as e:  # noqa: BLE001 — inclui FileTooLarge/PathEscape (msg clara)
-            return ToolResult(False, f"erro ao ler {rel}: {e}")
+        except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
+            return ToolResult(False, f"erro ao ler {rel}: {e}", effect=False)
         ctx.read_files.add(rel)
         return ToolResult(True, text, effect=False)
 

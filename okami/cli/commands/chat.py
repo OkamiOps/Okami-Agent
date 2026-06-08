@@ -309,7 +309,25 @@ def chat(
     # --- fallback: REPL de linha (prompt_toolkit) -----------------------------
     from okami.channels.terminal import TerminalChannel
 
+    # COALESCE a exploração read-only (read/list/find) numa linha-resumo → ~10 linhas em vez de 150 (igual
+    # Hermes). Em /details expanded mostra tudo; em collapsed (default) agrupa.
+    _READ_TOOLS = {"read_file", "list_dir", "find_files"}
+    _expl = {"n": 0, "ok": 0}
+
+    def _flush_expl() -> None:
+        if _expl["n"]:
+            fail = _expl["n"] - _expl["ok"]
+            tail = f" · [red]{fail} ✗[/]" if fail else ""
+            console.print(f"  🔎 [dim]explorou {_expl['n']} (read/list/find) — {_expl['ok']} ok{tail}[/dim]")
+            _expl["n"] = _expl["ok"] = 0
+
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
+        if (e.get("kind") == "step" and e.get("tool") in _READ_TOOLS
+                and getattr(ep, "_details", "collapsed") == "collapsed"):
+            _expl["n"] += 1
+            _expl["ok"] += 1 if e.get("ok") else 0
+            return                                # não imprime 1 linha por leitura — acumula
+        _flush_expl()                             # qualquer outro evento → descarrega o resumo antes
         line = tui.event_line(e, getattr(ep, "_details", "collapsed"))
         if line is not None:
             console.print(line)

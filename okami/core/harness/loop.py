@@ -553,13 +553,19 @@ class Harness:
                     self.messages.append({"role": "user", "content":
                         f"{why} Mude de estratégia ou declare task_blocked."})
 
-            # watchdog / stall (§3.3)
-            self._steps_without_effect = 0 if res.effect else self._steps_without_effect + 1
+            # watchdog / stall (§3.3). PROGRESSO ≠ só efeito colateral: uma leitura/busca que DEU CERTO é
+            # progresso (o agente aprendeu algo) — senão TODA análise/exploração (read/list/find/grep, que
+            # têm effect=False) era nagueada com "escreva algo", e o modelo thrashava chutando caminho.
+            _explored = res.ok and (action.tool in _BATCHABLE_READONLY
+                                    or (action.tool == "run_shell" and not res.effect))
+            self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
             if self._steps_without_effect >= self.budget.stall_limit:
                 self._emit("stall", steps=self._steps_without_effect)
                 self.messages.append({"role": "user", "content":
-                    "SEM PROGRESSO: vários passos sem efeito observável. Tome uma ação "
-                    "concreta (escreva/rode algo) ou declare task_blocked."})
+                    "SEM PROGRESSO: vários passos SEM RESULTADO (reads falhando / chutando caminho). Se está "
+                    "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
+                    "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
+                    "Ou task_blocked."})
                 self._steps_without_effect = 0
 
             obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
