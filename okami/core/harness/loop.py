@@ -446,10 +446,11 @@ class Harness:
                 self._punt_nudged = True
                 self._emit("violation", n=0, text="bail: pediu permissão/menu em vez de concluir")
                 self.messages.append({"role": "user", "content":
-                    "Você ENCERROU pedindo permissão ou oferecendo um menu ('1 ou 2', 'quer que eu…?', "
-                    "'posso seguir?') em vez de CONCLUIR. Não peça permissão pra próximo passo óbvio — "
-                    "faça agora e entregue o resultado COMPLETO de TODAS as partes do pedido. Se falta um "
-                    "dado que SÓ a pessoa tem, use need_input com UMA pergunta específica (não um menu)."})
+                    "Você ENCERROU pedindo permissão/menu ('1 ou 2', 'quer que eu…?', 'posso seguir?') em "
+                    "vez de CONCLUIR. Para próximos passos SEGUROS (ler/rodar/analisar/progredir) não peça "
+                    "permissão — faça e entregue o resultado COMPLETO. Ação destrutiva/sensível segue "
+                    "passando pela aprovação normal (chame a ferramenta, NÃO force). Se falta um dado que "
+                    "SÓ a pessoa tem, use need_input com UMA pergunta específica."})
                 return None
             t.state = TaskState.COMPLETE
             t.result = msg or "(sem resposta)"

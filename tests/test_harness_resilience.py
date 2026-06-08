@@ -223,3 +223,7 @@ def test_prompt_has_persistence_anti_bail_guidance():
     p = build_system_prompt(Task(goal="faz X"), {})
     assert "PERSISTÊNCIA" in p and "need_input" in p
     assert "menu" in p.lower() and "permiss" in p.lower()   # proíbe pedir permissão / oferecer menu
+    # SEGURANÇA: a guidance NÃO pode mandar forçar destrutivo — tem que deferir à aprovação go/no-go
+    low = p.lower()
+    assert "destrutiv" in low and ("go/no-go" in low or "aprovaç" in low)
+    assert "segurança vem antes" in low or "seguro" in low
