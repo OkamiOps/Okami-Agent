@@ -93,6 +93,10 @@ class ProviderConfig(BaseModel):
     # function_call estruturado (não JSON-em-texto). EXPERIMENTAL, opt-in por provider — o codex
     # converte o function_call de volta p/ o protocolo de ação; off = comportamento atual intacto.
     native_tools: bool = False
+    # tool_choice quando native_tools (OpenAI-compat): "auto" (modelo decide) | "required"/"any" (DEVE
+    # chamar uma tool — como respond/task_complete SÃO tools, isto força ação sem deixar o modelo fraco
+    # "só conversar"; substitui a função forçadora do json_constrained). Vazio = não envia (default do provider).
+    tool_choice: str = ""
     notes: str | None = None
 
     def resolved_key(self) -> str | None:

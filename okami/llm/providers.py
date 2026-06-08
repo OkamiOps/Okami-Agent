@@ -205,6 +205,8 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
     if getattr(pc, "native_tools", False) and "tools" not in overrides:   # P0.4: tool-calling nativo (opt-in)
         from okami.core.tools import default_registry, openai_tools
         overrides["tools"] = openai_tools(default_registry())
+        if getattr(pc, "tool_choice", "") and "tool_choice" not in overrides:   # força chamada de tool (sem bail)
+            overrides["tool_choice"] = pc.tool_choice
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     choice = resp.choices[0]
     return Completion(text=_message_text(choice.message),                   # content; vazio → reasoning_content

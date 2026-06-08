@@ -182,3 +182,34 @@ def test_complete_messages_scrubs_surrogates(monkeypatch):
     monkeypatch.setattr(prov, "_complete_one", fake_one)
     prov.complete_messages(cfg, [{"role": "user", "content": "oi\ud83dtchau"}], _sleep=lambda s: None)
     assert "\ud83d" not in seen["content"] and "oi" in seen["content"]
+
+
+def test_native_tools_sends_schemas_and_tool_choice(monkeypatch):
+    # VELOCIDADE (Hermes): provider native_tools manda os SCHEMAS das tools + tool_choice → o modelo
+    # emite tool_calls (paralelo possível) em vez de 1 JSON por turno. json_text → SEM response_format
+    # forçando objeto único (não conflita com tools).
+    cfg = build_config({"default_provider": "mm", "providers": {
+        "mm": {"model": "openai/MiniMax-M3", "api_key": "k", "native_tools": True, "tool_choice": "required"}}})
+    pc = cfg.providers["mm"]
+    seen = {}
+
+    class _Msg:
+        content = "ok"
+        tool_calls = None
+        reasoning_content = None
+
+    class _Choice:
+        message = _Msg()
+        finish_reason = "stop"
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = None
+
+    monkeypatch.setattr(prov, "_response_format", lambda *a, **k: None)   # json_text não força JSON
+    monkeypatch.setattr(prov.transports, "dispatch", lambda *a, **k: None)
+    monkeypatch.setattr(prov.litellm, "completion", lambda **kw: seen.update(kw) or _Resp())
+    prov._complete_one(pc, [{"role": "user", "content": "oi"}], pc.model, {"type": "object"}, {})
+    assert seen.get("tools") and len(seen["tools"]) > 0           # schemas das tools enviados (paralelo possível)
+    assert seen.get("tool_choice") == "required"                  # força chamar tool (sem bail pra prosa)
+    assert "response_format" not in seen                          # json_text: nada forçando objeto único

@@ -104,10 +104,15 @@ providers:
     auth: api_key
     tier: weak
     context_window: 1000000
+    # VELOCIDADE (como o Hermes faz com minimax/mimo/deepseek): tool-calling NATIVO → o modelo emite
+    # VÁRIAS tool_calls por turno (paralelo), o harness roda todas em lote (corta os round-trips, o
+    # gargalo). tool_choice=required força chamar tool (respond/task_complete SÃO tools) — substitui o
+    # json_constrained sem deixar o modelo fraco "só conversar". Se regredir (M3 não chamar tool), volte
+    # a `capability.tool_mode: json_constrained` e tire native_tools/tool_choice.
+    native_tools: true
+    tool_choice: required
     capability:
-      # FORÇA o protocolo de ação (JSON válido via response_format) — sem isto um modelo fraco/reasoning
-      # responde em TEXTO e NÃO chama tool. É o mesmo modo do LMStudio. (M3 OpenAI-compat suporta.)
-      tool_mode: json_constrained
+      tool_mode: json_text
     models:                       # https://platform.minimax.io/docs/api-reference/text-chat-openai
     - MiniMax-M3
     - MiniMax-M2.7
@@ -125,8 +130,10 @@ providers:
     auth: api_key
     tier: weak
     context_window: 128000
+    native_tools: true            # idem minimax: tool-calling nativo → várias tool_calls/turno (paralelo, rápido)
+    tool_choice: required         # força chamar tool (respond/task_complete são tools) — sem bail pra prosa
     capability:
-      tool_mode: json_constrained   # força o protocolo de ação (senão modelo fraco só conversa, não chama tool)
+      tool_mode: json_text        # (revert: tool_mode json_constrained + tirar native_tools/tool_choice)
     models:
     - mimo-v2.5-pro
     - mimo-v2.5
