@@ -91,6 +91,24 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_memory_bars_natural_language_credentials():
+    # BUG: looks_secret só casa token ESTRUTURADO (sk-/ghp_/AKIA/Bearer). Uma senha em LINGUAGEM NATURAL
+    # ("minha senha é X") passava → virava memória durável (persistida + recall → re-injetada no provider).
+    # O barramento de memória tem que recusar disclosure de credencial (over-bar é barato aqui).
+    from okami.memory.policy import prepare
+    for s in ("minha senha do banco é hunter2correcthorse",
+              "password is supersecret123",
+              "a senha do servidor: trocaisso999",
+              "meu PIN é 837465",
+              "the db credential = p0stgr3sR00t"):
+        assert prepare(s, source="test:user") is None, f"credencial NL virou memória: {s!r}"
+    # fatos normais (sem disclosure de credencial) AINDA viram memória
+    for s in ("o usuário prefere respostas curtas",
+              "decidimos usar Postgres no projeto",
+              "esqueci a senha do wifi de novo"):      # menciona 'senha' mas NÃO revela valor → ok
+        assert prepare(s, source="test:user") is not None, f"fato normal foi barrado por engano: {s!r}"
+
+
 def test_run_shell_output_redacts_secrets():
     # BUG (defense-in-depth): a saída do run_shell síncrono ia VERBATIM p/ o contexto do LLM + transcript.
     # Um token impresso por um comando (gh auth, build log, etc.) vazava. O log de processo em background e

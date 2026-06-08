@@ -18,6 +18,13 @@ from okami.memory.base import MemoryItem
 # categorias canônicas
 FACT, PREFERENCE, DECISION, SKILL, ERROR, TEMP = "fact", "preference", "decision", "skill", "error", "temp"
 
+# DISCLOSURE de credencial em LINGUAGEM NATURAL ("minha senha é X", "password is Y", "PIN: 1234") — o
+# looks_secret só pega token estruturado (sk-/ghp_/AKIA/Bearer). Aqui o over-bar é barato (memória), então
+# basta keyword de credencial + atribuição (é/=/:/is) + valor ≥4. Menção SEM valor ("esqueci a senha") passa.
+_NL_CREDENTIAL = re.compile(
+    r"(?i)\b(?:senh[ao]|password|passwd|pass[\s-]?phrase|pin|credenci\w*|credential|secret[ao]?)\b"
+    r"[^\n]{0,24}?(?:\b(?:é|eh|is|s[ãa]o)\b|[:=])\s*\S{4,}")
+
 # kinds que NÃO são reclassificados (já são específicos / vêm de outra fonte de verdade)
 _SPECIFIC = {PREFERENCE, DECISION, SKILL, ERROR, TEMP,
              "summary", "turn", "procedural", "anti_pattern", "lesson"}
@@ -96,9 +103,9 @@ def prepare(text: str, source: str = "", kind: str | None = None, *, force: bool
     if not t:
         return None
     from okami.core.redact import looks_secret
-    if looks_secret(t):                              # P1: SEGREDO não vira memória de longo prazo —
-        from okami import log                        # recusa (nem com force) p/ não vazar p/ sqlite/Honcho/holo
-        log.warn("memory: recusei persistir conteúdo com cara de segredo (chave/token).")
+    if looks_secret(t) or _NL_CREDENTIAL.search(t):  # P1: SEGREDO não vira memória — token estruturado
+        from okami import log                        # (looks_secret) OU disclosure de senha em linguagem natural
+        log.warn("memory: recusei persistir conteúdo com cara de segredo (chave/token/senha).")
         return None
     if not force and do_not_capture(t):              # Do-NOT-capture: auto-escrita de falha-de-ambiente/
         from okami import log                        # claim-negativo NÃO vira memória (vira refusal depois)
