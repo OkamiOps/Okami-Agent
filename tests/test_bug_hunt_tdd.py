@@ -34,6 +34,26 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_archive_skill_refuses_path_traversal():
+    # BUG (path traversal): manage_skill(action=archive) roda ANTES da validação de nome, e _archive_skill
+    # fazia `src = root/name` + shutil.move SEM validar → `name='../victim'` movia/destruía um diretório
+    # IRMÃO do skills_dir (fora do jail). Tem que recusar qualquer name que não seja filho DIRETO de root.
+    from okami.learning.curator import _archive_skill
+    base = pathlib.Path(tempfile.mkdtemp())
+    root = base / "skills"
+    root.mkdir()
+    (root / "realskill").mkdir()
+    (root / "realskill" / "SKILL.md").write_text("x", encoding="utf-8")
+    victim = base / "victim"                       # IRMÃO do skills_dir → alcançável por ../victim
+    victim.mkdir()
+    (victim / "important.txt").write_text("não me mova", encoding="utf-8")
+    for evil in ("../victim", "../../" + victim.name, "..", "/etc"):
+        assert _archive_skill(root, evil) is False, f"traversal deveria ser recusado: {evil!r}"
+    assert victim.exists() and (victim / "important.txt").exists(), "o diretório-vítima foi movido/destruído!"
+    assert _archive_skill(root, "realskill") is True   # skill legítima (filho direto) ainda arquiva
+    assert not (root / "realskill").exists() and (root / ".archive" / "realskill").exists()
+
+
 def test_env_wrapper_does_not_hide_mutating_command():
     # BUG: `env` está na allowlist read-only, mas `env VAR=val CMD` EXECUTA CMD. Um comando que muta
     # (script, node, python) wrapado em env era classificado read-only → escapava do watchdog/batch.

@@ -114,11 +114,13 @@ def _restore_members(tar, root) -> None:
 
 # ---------------------------------------------------------------- archival determinístico (LRU)
 def _archive_skill(skills_dir, name: str) -> bool:
-    root = Path(skills_dir)
-    src = root / name
-    if not src.is_dir():
+    root = Path(skills_dir).resolve()
+    src = (root / name).resolve()
+    # anti-traversal (audit 2026-06-08): `name='../victim'` / '..' / '/etc' movia/destruía diretório FORA
+    # do skills_dir (manage_skill chama isto ANTES de validar o nome). src TEM que ser filho DIRETO de root.
+    if src.parent != root or not src.is_dir():
         return False
-    dst = root / ARCHIVE_DIR / name
+    dst = root / ARCHIVE_DIR / src.name          # segmento limpo (src.name), nunca o `name` cru
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         shutil.rmtree(dst)
