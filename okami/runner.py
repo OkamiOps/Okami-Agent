@@ -20,6 +20,49 @@ from okami.memory import make_embedder, open_memory
 from okami.skills.skill_security import scan_path
 
 
+def _should_review(ws, interval: int, clean: bool) -> bool:
+    """Incrementa o contador de turnos LIMPOS em .okami/learning.json e diz se é hora do review (a cada
+    `interval`). Só conclusão limpa conta (Hermes: final_response and not interrupted)."""
+    import json as _json
+    if interval <= 0 or not clean:
+        return False
+    p = Path(ws) / ".okami" / "learning.json"
+    try:
+        st = _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, ValueError):
+        st = {}
+    n = int(st.get("turns_since_review", 0)) + 1
+    fire = n >= interval
+    st["turns_since_review"] = 0 if fire else n
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_json.dumps(st), encoding="utf-8")
+    except OSError:
+        pass
+    return fire
+
+
+def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit) -> None:
+    """Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): a cada N turnos LIMPOS, forka um review isolado
+    que decide (via tools) o que vale salvar. Roda em background (não bloqueia o turno do usuário)."""
+    from okami.core import TaskState
+    lc = cfg.learning or {}
+    if not lc.get("review", True):
+        return
+    if not _should_review(ws, int(lc.get("review_interval", 6)), task.state == TaskState.COMPLETE):
+        return
+    from okami.learning.review import run_review, summarize_turn
+    ctx = summarize_turn(task)
+
+    def _bg():
+        run_review(cfg, ws, ctx, skills_dir=skills_dir, model=model, provider=provider, emit=lambda m: None)
+    if lc.get("review_sync"):              # síncrono (testes / CLI one-shot que sai rápido)
+        _bg()
+    else:                                 # background: roda DEPOIS de a pessoa já ter a resposta
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
+
+
 def run_task(
     cfg: OkamiConfig,
     workspace,
@@ -40,6 +83,8 @@ def run_task(
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
     prelearned_files: list[str] | None = None,  # arquivos já "conhecidos" (não exige read antes de sobrescrever)
     surface: str = "cli",                        # superfície (cli/telegram/group/paperclip/subagent) → tool policy
+    registry_filter: set[str] | None = None,     # allowlist de tools (None=todas) — review usa o conjunto seguro
+    learn: bool = True,                          # False → pula o review pós-turno (sem recursão no próprio review)
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)
@@ -141,6 +186,8 @@ def run_task(
         mcp_tools = filter_mcp_registry(mcp_tools, surface, config=getattr(cfg, "tools", None),
                                         sandbox=getattr(cfg, "sandbox", None), emit=emit)
         registry.update(mcp_tools)
+    if registry_filter is not None:                  # review: restringe ao conjunto seguro (memória/skill)
+        registry = {k: v for k, v in registry.items() if k in registry_filter}
 
     # Auto-compaction adaptativa à janela do modelo (§6.4): Qwen 32K comprime cedo, Claude 200K tarde.
     pc = cfg.provider(provider)
@@ -177,27 +224,32 @@ def run_task(
                       skills=skills_map, registry=registry, cancel=cancel,
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
                       images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
-                      sandbox=sandbox)
+                      sandbox=sandbox, skills_dir=skills_dir)
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
         t.stats["served_by"] = _acc["served"]             # quem realmente respondeu (§E5)
         hooks.fire("after_task", {"goal": goal, "state": t.state.value, "result": t.result or ""})
-        from okami.memory import save_turn                # P2: save_messages (default OFF) alimenta a memória
-        save_turn(mem, goal, source="user", cfg_memory=cfg.memory)           # com a conversa bruta (Honcho user-model)
-        save_turn(mem, t.result or "", source="agent", cfg_memory=cfg.memory)
-        try:
-            learning.apply(mem, t, model_name=model or "default")
-            if (cfg.memory or {}).get("auto_consolidate", True):   # §7: consolidação heurística pós-tarefa
-                mem.consolidate()                          # expira TTL + funde quase-duplicatas (sem LLM)
-            learning.record_run(ws, tune_key, t.stats)    # §7: acumula stats p/ auto-tune do modelo
-            if (cfg.learning or {}).get("auto_skill"):    # §7: destila skill da experiência (escaneada)
-                name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default",
-                                                  cfg=cfg)
-                if name:
-                    emit(f"🧠 skill nova destilada e escaneada: {name}")
-        except Exception:  # noqa: BLE001
-            pass
+        if learn:                                        # review (learn=False) não despeja seu prompt sintético
+            from okami.memory import save_turn            # P2: save_messages (default OFF) alimenta a memória
+            save_turn(mem, goal, source="user", cfg_memory=cfg.memory)       # conversa bruta (Honcho user-model)
+            save_turn(mem, t.result or "", source="agent", cfg_memory=cfg.memory)
+        if learn:
+            try:
+                learning.apply(mem, t, model_name=model or "default")   # anti-padrão GENERALIZADO só em falha real
+                if (cfg.memory or {}).get("auto_consolidate", True):    # consolidação heurística pós-tarefa
+                    mem.consolidate()                          # expira TTL + funde quase-duplicatas (sem LLM)
+                learning.record_run(ws, tune_key, t.stats)     # §7: acumula stats p/ auto-tune do modelo
+                # Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): o modelo decide o que salvar via tools,
+                # guiado pela lista "Do NOT capture", a cada N turnos e SÓ em conclusão limpa. Substitui a
+                # destilação MECÂNICA (que gerava lixo). auto_skill mecânico fica como legado opt-in.
+                _maybe_background_review(cfg, ws, t, skills_dir=skills_dir, model=model, provider=provider, emit=emit)
+                if (cfg.learning or {}).get("auto_skill"):     # legado (default off): destilação mecânica
+                    name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
+                    if name:
+                        emit(f"🧠 skill destilada (mecânico/legado): {name}")
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         mem.close()
         for c in mcp_clients:

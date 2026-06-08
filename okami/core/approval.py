@@ -62,6 +62,8 @@ def classify(tool: str, args: dict) -> Sensitive | None:
         for rx, cat, risk in _SHELL_RULES:
             if rx.search(cmd):
                 return Sensitive(f"{cat}: {cmd[:100]}", cat, risk)
+    if tool == "manage_skill":                           # cria/edita skill que ENTRA no prompt → sensível
+        return Sensitive(f"criar/editar skill: {args.get('name', '?')}", "skill_write", "medium")
     return None
 
 

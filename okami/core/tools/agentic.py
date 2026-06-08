@@ -21,6 +21,50 @@ class UseSkill(Tool):
         return ToolResult(True, f"SKILL '{args['name']}' (siga este procedimento):\n{body}")
 
 
+class ManageSkill(Tool):
+    name = "manage_skill"
+    description = ("Cria/edita uma SKILL reutilizável (procedimento de uma CLASSE de tarefa) — use no review "
+                   "de auto-aprimoramento. Nome no NÍVEL DE CLASSE (kebab-case, ≤3 palavras): NUNCA a frase do "
+                   "pedido, número de PR, string de erro ou codinome. action=create|edit. Corpo em markdown "
+                   "(## Quando usar / ## Como / ## Cuidados).")
+    args_schema = {"action": "create|edit", "name": "kebab-case curto (nível de classe)",
+                   "description": "1 linha (≤120 chars)", "body": "markdown do procedimento"}
+    required = ("action", "name", "body")
+
+    def run(self, args, ctx):
+        import re as _re
+        from pathlib import Path
+
+        import yaml as _yaml
+
+        from okami.skills.skill_security import Severity, scan_text
+        root = getattr(ctx, "skills_dir", None)
+        if not root:
+            return ToolResult(False, "manage_skill indisponível neste contexto (sem skills_dir).")
+        name = str(args.get("name", "")).strip().lower()
+        if not _re.match(r"^[a-z0-9][a-z0-9._-]{1,47}$", name) or name.count("-") > 3:
+            return ToolResult(False, "nome inválido: kebab-case curto (≤48 chars, ≤3 hífens), nível de CLASSE "
+                              "(não a frase do pedido / PR / erro / codinome).")
+        body = str(args.get("body", "")).strip()
+        if len(body) < 20:
+            return ToolResult(False, "corpo curto demais — descreva ## Quando usar / ## Como / ## Cuidados.")
+        if any(f.severity >= Severity.HIGH for f in scan_text(name, body)):
+            return ToolResult(False, "skill bloqueada pelo scan de segurança (HIGH) — reescreva sem o padrão de risco.")
+        d = Path(root) / name
+        f = d / "SKILL.md"
+        if args.get("action") == "create" and f.exists():
+            return ToolResult(False, f"skill '{name}' já existe — use action=edit p/ melhorar.")
+        meta = {"name": name, "description": (str(args.get("description", "")).strip() or name)[:120],
+                "origin": "agent"}      # provenance: o curator só mexe no que o agente criou
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            f.write_text("---\n" + _yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n"
+                         + body + "\n", encoding="utf-8", newline="\n")
+        except OSError as e:
+            return ToolResult(False, f"falha ao gravar skill: {e}")
+        return ToolResult(True, f"skill '{name}' {args.get('action')} (origin: agent)", effect=True)
+
+
 class Spawn(Tool):
     name = "spawn"
     description = ("Delega um SUBTASK a um subagente ISOLADO (contexto próprio) e recebe o resultado. "

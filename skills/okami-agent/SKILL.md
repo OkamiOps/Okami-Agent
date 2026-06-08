@@ -83,7 +83,8 @@ If you declare `task_complete` but the criterion fails → `complete_rejected`, 
   `process_wait{id}`, `process_log{id}`, `process_list`, `process_write{id,text}` (PTY stdin),
   `process_signal{id,signal}`, `process_kill{id}`.
 - **memory**: `remember{text,...}`, `recall_memory{query}`, `remember_user{text}`.
-- **skill**: `use_skill{name}` — load a catalog skill's procedure and follow it to the letter.
+- **skill**: `use_skill{name}` — load a catalog skill's procedure and follow it. `manage_skill{action,
+  name,body}` — create/edit a reusable class-level skill (used by the self-improvement review; sensitive).
 - **subagent**: `spawn{goal,agent?,model?}` — delegate a subtask to an isolated agent; it has a cost,
   don't overuse it.
 - **web**: `browse{url,action?,selector?,text?}` — open a URL and read; with Playwright also
@@ -165,10 +166,12 @@ own channel binding (§6).
   prompt-injection, secret-leak attempts, destructive commands, remote download-and-run, hidden unicode
   (Trojan Source) and packaged binaries. A `skills-lock.json` (sha256) detects tampering. The runtime
   drops any blocked skill, so a shipped skill must scan clean.
-- **Auto-skill** — with `learning.auto_skill`, the agent distills a skill **only from a genuinely
-  productive task** (completed, ≥4 tool steps, ≥2 distinct tools, ≥2 with durable effect — chat and
-  read-only exploration never qualify). It is marked `origin: auto-distilled` and still passes the
-  scan. Clean low-value auto-skills with `okami skills --prune` (`--dry-run` to preview).
+- **Self-improvement is MODEL-DRIVEN** (Hermes-aligned, `learning.review`): after a clean turn, every
+  `review_interval` turns, a background fork (tools restricted to memory/skill writes) decides what — if
+  anything — is worth saving via `remember`/`remember_user`/`manage_skill`, guided by a "Do NOT capture"
+  list. The harness only times the question; the model curates. The old mechanical distiller
+  (`learning.auto_skill`) is legacy/off. Auto-created skills are marked `origin: agent`; clean junk with
+  `okami skills --prune`.
 - **Contracts** (`okami.yaml → contracts.ui`) declare the design system: `library: shadcn`,
   `forbid_inline_hex`, `forbid_raw_css`, `require_component_source`.
 - **Verification gates** mechanically REJECT code that violates the contract (inline hex, raw CSS,

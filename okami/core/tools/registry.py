@@ -1,7 +1,7 @@
 """default_registry — monta o registro de tools do harness (#14)."""
 from __future__ import annotations
 
-from okami.core.tools.agentic import Browse, GenerateImage, Spawn, UseSkill
+from okami.core.tools.agentic import Browse, GenerateImage, ManageSkill, Spawn, UseSkill
 from okami.core.tools.base import Tool
 from okami.core.tools.control import NeedInput, Respond, TaskBlocked, TaskComplete
 from okami.core.tools.files import EditFile, FindFiles, ListDir, ReadFile, RunShell, WriteFile
@@ -16,6 +16,7 @@ def default_registry() -> dict[str, Tool]:
     tools = [Respond(), ReadFile(), WriteFile(), EditFile(), ListDir(), FindFiles(), RunShell(),
              ProcessStart(), ProcessPoll(), ProcessWait(), ProcessLog(), ProcessKill(), ProcessList(),
              ProcessWrite(), ProcessSignal(),
-             RememberFact(), RecallMemory(), RememberUser(), UseSkill(), Spawn(), Browse(), GenerateImage(),
+             RememberFact(), RecallMemory(), RememberUser(), UseSkill(), ManageSkill(), Spawn(),
+             Browse(), GenerateImage(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

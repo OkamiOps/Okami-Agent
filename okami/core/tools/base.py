@@ -77,6 +77,7 @@ class ToolContext:
     checkpoints: object | None = None  # snapshot antes de escrever → rollback (duck-typed: snapshot)
     spawn: object | None = None  # delega um subtask a um subagente isolado (Callable(goal, agent, model)->str)
     sandbox: object | None = None  # SandboxPolicy do run_shell (None → default_policy()); §P0 #2
+    skills_dir: object | None = None  # raiz das skills (p/ manage_skill criar/editar) — review/genesis
 
 
 @dataclass

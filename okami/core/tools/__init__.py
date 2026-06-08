@@ -5,7 +5,7 @@ Re-exporta tudo de base/files/memory/agentic/process/control/registry → quem f
 """
 from __future__ import annotations
 
-from okami.core.tools.agentic import Browse, GenerateImage, Spawn, UseSkill
+from okami.core.tools.agentic import Browse, GenerateImage, ManageSkill, Spawn, UseSkill
 from okami.core.tools.base import (
     Tool, ToolContext, ToolResult, _SENSITIVE_ENV, _SENSITIVE_PATH, _SHELL_MUTATES, _SHELL_READONLY,
     _safe_path, openai_tools, sanitized_env, shell_has_effect,
@@ -24,7 +24,7 @@ __all__ = [
     "_safe_path", "_SENSITIVE_PATH", "_SENSITIVE_ENV", "_SHELL_MUTATES", "_SHELL_READONLY", "_norm_name",
     "ReadFile", "WriteFile", "EditFile", "ListDir", "FindFiles", "RunShell",
     "RememberFact", "RecallMemory", "RememberUser", "FinishSetup",
-    "UseSkill", "Spawn", "Browse", "GenerateImage",
+    "UseSkill", "ManageSkill", "Spawn", "Browse", "GenerateImage",
     "ProcessStart", "ProcessWrite", "ProcessPoll", "ProcessWait", "ProcessLog", "ProcessList",
     "ProcessKill", "ProcessSignal",
     "Respond", "TaskComplete", "TaskBlocked", "NeedInput", "default_registry",
