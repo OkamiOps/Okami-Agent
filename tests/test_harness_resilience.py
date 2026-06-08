@@ -225,9 +225,10 @@ def test_prompt_has_hermes_action_and_verification_gates():
     # gate de ESCOPO: análise/teste = RELATÓRIO; não mutar/consertar/apagar sem pedido explícito
     assert "<escopo>" in low and "relatório" in low
     assert "não conserte" in low and ("faxina" in low or "__pycache__" in low)
-    # gate de ENTREGA: o conteúdo vai INTEIRO na resposta — não "relatório detalhado no chat" + resumo
+    # gate de ENTREGA: conteúdo INTEIRO + DETALHADO na resposta; formato (tabela/por-suíte); anti over-claim
     assert "<entrega>" in low and "over-claim" in low
-    assert "detalhado no chat" in low and "só na memória" in low
+    assert "detalhado no chat" in low and "entregue no chat anterior" in low   # over-claim ampliado
+    assert "tabela" in low and "por suíte" in low                              # comparação=tabela, testes detalhados
     # gates de AÇÃO (Hermes): persistência + uso obrigatório de ferramenta + anti-bail
     assert "<persistencia>" in low and "<use_ferramenta>" in low
     assert "menu" in low and "permiss" in low and "memória" in low
