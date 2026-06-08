@@ -556,8 +556,11 @@ class Harness:
             # watchdog / stall (§3.3). PROGRESSO ≠ só efeito colateral: uma leitura/busca que DEU CERTO é
             # progresso (o agente aprendeu algo) — senão TODA análise/exploração (read/list/find/grep, que
             # têm effect=False) era nagueada com "escreva algo", e o modelo thrashava chutando caminho.
-            _explored = res.ok and (action.tool in _BATCHABLE_READONLY
-                                    or (action.tool == "run_shell" and not res.effect))
+            # ...mas uma busca/listagem que NÃO ACHOU NADA ("(nada casou…", "(vazio") NÃO é progresso —
+            # senão o modelo find-spammava com queries diferentes (loop só pega args idênticos) sem o nag.
+            _empty = res.output.lstrip().startswith(("(nada", "(vazio"))
+            _explored = res.ok and not _empty and (action.tool in _BATCHABLE_READONLY
+                                                    or (action.tool == "run_shell" and not res.effect))
             self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
             if self._steps_without_effect >= self.budget.stall_limit:
                 self._emit("stall", steps=self._steps_without_effect)

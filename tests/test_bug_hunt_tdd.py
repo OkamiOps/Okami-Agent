@@ -91,6 +91,41 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def _harness_run(outputs, goal, ws, **kw):
+    import json as _json
+
+    from okami.core import Budget, Harness, Task
+
+    class _Script:
+        def __init__(self, outs):
+            self.outs = list(outs)
+
+        def __call__(self, messages, schema=None):
+            return self.outs.pop(0) if self.outs else '```json\n{"tool":"task_blocked","args":{"reason":"fim"}}\n```'
+
+    def J(tool, **a):
+        return "```json\n" + _json.dumps({"tool": tool, "args": a}) + "\n```"
+
+    events = []
+    Harness(_Script([J(t, **a) for t, a in outputs]), Task(goal=goal), ws,
+            budget=Budget(stall_limit=3), on_event=events.append).run()
+    return events
+
+
+def test_successful_reads_are_progress_empty_finds_are_not():
+    # Refina o anti-thrash: leitura/busca COM resultado = progresso (não nageia análise); busca SEM hit
+    # ("(nada casou") NÃO é progresso → o nag dispara (senão find-spam com queries diferentes não era pego).
+    ws = pathlib.Path(tempfile.mkdtemp())
+    for i in range(6):
+        (ws / f"f{i}.txt").write_text(f"conteudo do arquivo {i}", encoding="utf-8")
+    # 6 leituras bem-sucedidas de arquivos DIFERENTES → progresso → SEM stall
+    ev_reads = _harness_run([("read_file", {"path": f"f{i}.txt"}) for i in range(6)], "leia os arquivos", ws)
+    assert not any(e.get("kind") == "stall" for e in ev_reads), "leitura bem-sucedida disparou stall falso"
+    # 6 buscas que NÃO acham nada (queries diferentes → não é loop) → SEM progresso → stall dispara
+    ev_finds = _harness_run([("find_files", {"query": f"zzqq{i}"}) for i in range(6)], "ache o componente", ws)
+    assert any(e.get("kind") == "stall" for e in ev_finds), "find sem hit repetido não disparou stall"
+
+
 def test_read_file_errors_are_actionable_not_raw_oserror():
     # BUG (thrash): read_file num DIRETÓRIO devolvia '[Errno 21] Is a directory: /private/var/...' (cru,
     # com path de temp) e o agente RE-TENTAVA dezenas de vezes. read_file de inexistente não guiava. Erros
