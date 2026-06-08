@@ -154,8 +154,8 @@ if _HAS_TEXTUAL:
             self._exit_armed = 0.0
             self._busy_since: float | None = None
             self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
-            self._mouse_on = False                        # DEFAULT OFF: seleção nativa do terminal p/ copiar;
-            #                                               /mouse on religa (clique no autocomplete)
+            self._mouse_on = True                         # DEFAULT ON: mouse capturado (clique no autocomplete/
+            #   botões) E seleção do Textual funciona junto — arraste seleciona e SOLTA já copia (on_mouse_up)
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
 
         # ---- layout ----------------------------------------------------------
@@ -181,14 +181,6 @@ if _HAS_TEXTUAL:
             except Exception:  # noqa: BLE001 — se a API de tema mudar, segue no tema padrão
                 pass
             self.query_one("#approval").display = False
-            if not self._mouse_on:                         # solta o mouse no boot → seleção nativa do terminal
-                drv = getattr(self, "_driver", None)        # (copiar com arraste+Cmd/Ctrl+C). /mouse on religa.
-                fn = getattr(drv, "_disable_mouse_support", None)
-                if fn:
-                    try:
-                        fn()
-                    except Exception:  # noqa: BLE001 — driver de teste/headless pode não ter; segue
-                        pass
             if self._new:
                 self.ep.session(self._cid).history.clear()
                 self.ep.store.reset(self._cid)
@@ -310,6 +302,21 @@ if _HAS_TEXTUAL:
             self.transcript.append(("user", text))
             self.query_one("#log", RichLog).write(self._user_block(text))
             self._input_q.put(text)
+
+        def on_mouse_up(self, event) -> None:
+            # SELEÇÃO + CÓPIA com o mouse LIGADO: arrastou pra selecionar e SOLTOU → copia automático
+            # (sem Ctrl+C, sem precisar desligar o mouse). Clique simples (sem seleção) não copia.
+            try:
+                sel = (self.screen.get_selected_text() or "").strip()
+            except Exception:  # noqa: BLE001
+                sel = ""
+            if len(sel) >= 2:
+                try:
+                    self.copy_to_clipboard(sel)
+                    self.screen.clear_selection()        # limpa p/ não re-copiar no próximo clique
+                    self.sink_note(f"📋 copiado ({len(sel)} chars) — seleção")
+                except Exception:  # noqa: BLE001
+                    pass
 
         def on_button_pressed(self, event) -> None:
             if event.button.id == "approve":

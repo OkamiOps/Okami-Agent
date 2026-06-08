@@ -230,8 +230,29 @@ def test_cmd_copy_puts_last_reply_on_clipboard(tmp_path):
     assert "primeira" in out["all"] and "RELATÓRIO" in out["all"] and "você: oi" in out["all"]  # conversa inteira
 
 
-def test_mouse_off_by_default(tmp_path):
-    # default: mouse OFF → seleção nativa do terminal funciona (copiar resultados). /mouse on religa.
+def test_mouse_on_by_default(tmp_path):
+    # default: mouse ON (clica autocomplete/botões) E a seleção do Textual funciona junto (arraste+solta
+    # copia, via on_mouse_up). Nada de ficar trocando off/on.
     app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
                        run_task=_fake_runner, spawn=lambda fn: fn())
-    assert app._mouse_on is False
+    assert app._mouse_on is True
+    assert hasattr(app, "on_mouse_up")                        # auto-copia a seleção ao soltar o mouse
+
+
+def test_selection_release_auto_copies(tmp_path):
+    # arrastou+soltou com uma seleção → copia automático pro clipboard (sem Ctrl+C, sem desligar mouse).
+    import asyncio
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            copied = {}
+            app.copy_to_clipboard = lambda t: copied.setdefault("txt", t)
+            app.screen.get_selected_text = lambda: "TEXTO SELECIONADO ABC"   # simula a seleção do Textual
+            app.screen.clear_selection = lambda: None
+            app.on_mouse_up(None)                            # soltou o mouse após arrastar
+            return copied.get("txt")
+
+    assert "TEXTO SELECIONADO" in (asyncio.run(scenario()) or "")
