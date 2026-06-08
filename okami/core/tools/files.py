@@ -39,8 +39,12 @@ class WriteFile(Tool):
     required = ("path",)
 
     def run(self, args, ctx):
-        rel = args["path"]
+        rel = args.get("path")
+        if not isinstance(rel, str) or not rel:           # path None/tipo-errado → erro limpo (não TypeError)
+            return ToolResult(False, "write_file: 'path' precisa ser uma string não-vazia.")
         content = args.get("content", "")
+        if not isinstance(content, str):                  # None/bytes/num → coage p/ texto (não crasha o .encode)
+            content = "" if content is None else str(content)
         try:
             p = _safe_path(ctx, rel)
         except ValueError as e:
@@ -149,7 +153,8 @@ class FindFiles(Tool):
     _SKIP = {".git", "__pycache__", ".venv", "node_modules", ".okami", ".pytest_cache", "dist"}
 
     def run(self, args, ctx):
-        q = _norm_name(args.get("query", ""))
+        raw = args.get("query")
+        q = _norm_name(raw if isinstance(raw, str) else ("" if raw is None else str(raw)))
         if not q:
             return ToolResult(False, "find_files exige 'query' não-vazio.")
         hits = []
@@ -177,7 +182,9 @@ class RunShell(Tool):
     def run(self, args, ctx):
         import dataclasses
         from okami.core.sandbox import default_policy, run_sandboxed
-        cmd = args["cmd"]
+        cmd = args.get("cmd")
+        if not isinstance(cmd, str) or not cmd.strip():   # modelo fraco manda {"cmd": null/123/[…]} → erro LIMPO
+            return ToolResult(False, "run_shell: 'cmd' precisa ser uma string não-vazia.", effect=False)
         eff = shell_has_effect(cmd)   # read-only (ls/grep/cat…) → effect=False (não engana o watchdog)
         policy = ctx.sandbox or default_policy()
         # timeout POR-CHAMADA: comando sabidamente demorado (teste/build grande, transformar arquivo enorme)

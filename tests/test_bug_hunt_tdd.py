@@ -91,6 +91,32 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_tools_dont_crash_on_malformed_args():
+    # BUG (robustez): args None/tipo-errado (o modelo fraco emite {"cmd": null}) faziam a tool LEVANTAR
+    # (TypeError/AttributeError) em vez de devolver ToolResult(False, msg clara). O harness contém, mas a
+    # msg vira traceback feio e a falha repetida bate o circuit-breaker. Tool tem que validar e dar erro limpo.
+    from okami.core.sandbox import default_policy
+    from okami.core.tools.base import ToolContext
+    from okami.core.tools.files import EditFile, FindFiles, ListDir, ReadFile, RunShell, WriteFile
+    ws = pathlib.Path(tempfile.mkdtemp())
+    ctx = ToolContext(workspace=ws, sandbox=default_policy())
+    cases = [
+        (RunShell(), {"cmd": None}), (RunShell(), {"cmd": 123}), (RunShell(), {"cmd": ["echo", "x"]}),
+        (ReadFile(), {"path": None}), (ReadFile(), {"path": 123}),
+        (WriteFile(), {"path": None, "content": "x"}), (WriteFile(), {"path": "f.txt", "content": None}),
+        (WriteFile(), {"path": "f2.txt", "content": b"\x00\x01"}),
+        (EditFile(), {"path": "f.txt", "old": None, "new": "x"}),
+        (ListDir(), {"path": 123}), (FindFiles(), {"query": None}), (FindFiles(), {"query": 123}),
+    ]
+    from okami.core.tools.base import ToolResult
+    for tool, args in cases:
+        try:
+            r = tool.run(args, ctx)
+        except Exception as e:  # noqa: BLE001
+            raise AssertionError(f"{tool.name} levantou {type(e).__name__} com args={args!r}: {e}") from e
+        assert isinstance(r, ToolResult), f"{tool.name}({args}) não devolveu ToolResult"
+
+
 def test_memory_bars_natural_language_credentials():
     # BUG: looks_secret só casa token ESTRUTURADO (sk-/ghp_/AKIA/Bearer). Uma senha em LINGUAGEM NATURAL
     # ("minha senha é X") passava → virava memória durável (persistida + recall → re-injetada no provider).
