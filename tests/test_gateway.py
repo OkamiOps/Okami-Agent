@@ -732,3 +732,28 @@ def test_harden_command_sets_require_isolation(tmp_path, monkeypatch):
     CliRunner().invoke(app, ["harden", "--off"])
     local2 = _yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
     assert (local2.get("sandbox") or {}).get("profile") != "hardened-strict"
+
+
+def test_ctx_pct_real_tokens_and_trocas_total():
+    # BUG: ctx% dava ~0% (char-sum do histórico capado) e trocas travava em 8 (janela). Agora ctx% =
+    # tokens de ENTRADA ÷ janela do modelo, e trocas = node_count÷2 (total, não a janela).
+    import tempfile
+
+    from okami.config import build_config
+    from okami.gateway import AgentEndpoint
+    cfg = build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "tier": "local", "api_key": "x", "context_window": 100_000}}})
+
+    def runner(c, ws, goal, **kw):
+        t = _ok_task(goal)
+        t.stats = {"usage": {"input": 20_000, "output": 1_000}}   # 20K input numa janela de 100K → 20%
+        return t
+    ch = FakeChannel()
+    ep = AgentEndpoint("dev", cfg=cfg, ws=tempfile.mkdtemp(), channel=ch, run_task=runner, spawn=lambda fn: fn())
+    ep.handle("7", "faz um resumo")
+    footers = [t for _, t in ch.sent if t.startswith("· ")]
+    assert any("ctx 20%" in f for f in footers), footers          # ctx% REAL (input/janela), não ~0%
+    e = ep.store.entry("7")
+    assert e.get("ctx_pct") == 20 and int(e.get("node_count", 0)) // 2 == 1
+    ep.handle("7", "de novo")
+    assert int(ep.store.entry("7").get("node_count", 0)) // 2 == 2  # trocas CRESCE (não trava em 8)

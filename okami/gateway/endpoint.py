@@ -309,8 +309,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             q = f" · 🕓{len(s.queued)} fila" if s.queued else ""
             ttl = f" · 📝 {s.title}" if s.title else ""
             mute = " · 🔇" if s.voice_off else ""
+            _turns = int(self.store.entry(chat_id).get("node_count", 0)) // 2 or len(s.history) // 2
             self.channel.send(chat_id, f"agente {self.agent_id}{ttl} · "
-                              f"{'ocupado' if s.busy else 'livre'} · {len(s.history) // 2} trocas · "
+                              f"{'ocupado' if s.busy else 'livre'} · {_turns} trocas · "
                               f"yolo={'on' if s.yolo else 'off'}{mute}{bg}{q}")
             return
         if low == "/yolo":
@@ -547,16 +548,15 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Rodapé de custo por resposta: `· ctx N% · X tok (in↑ out↓) · Ys`. Sóbrio, 1 linha, dim."""
         from okami.llm.usage import CanonicalUsage, format_tokens
         parts: list[str] = []
-        try:                                              # ctx %: quão cheia está a janela do modelo
-            pc = self.cfg.provider() if self.cfg else None
-            if pc:
-                from okami.llm.providers import context_window_tokens
-                budget = max(1, int(context_window_tokens(pc) * (pc.chars_per_token or 4.0)))
-                used = sum(len(t) for _, t in s.history)
-                parts.append(f"ctx {min(100, round(100 * used / budget))}%")
+        u = CanonicalUsage.from_dict((stats or {}).get("usage") or {})
+        try:                                              # ctx %: quão cheia está a janela do modelo —
+            pc = self.cfg.provider() if self.cfg else None  # tokens de ENTRADA (prompt inteiro: sistema +
+            if pc and u.input_tokens:                       # memória + skills + histórico + saídas de tool)
+                from okami.llm.providers import context_window_tokens   # ÷ janela do modelo. NÃO o char-sum
+                win = max(1, context_window_tokens(pc))                 # do histórico (que dava ~0%).
+                parts.append(f"ctx {min(100, round(100 * u.input_tokens / win))}%")
         except Exception:  # noqa: BLE001 — footer é cosmético, nunca quebra o turno
             pass
-        u = CanonicalUsage.from_dict((stats or {}).get("usage") or {})
         if u.total_tokens:
             tok = f"{format_tokens(u.total_tokens)} tok ({format_tokens(u.input_tokens)}↑ {format_tokens(u.output_tokens)}↓)"
             if u.cache_read_tokens:
@@ -828,6 +828,14 @@ class AgentEndpoint(EndpointCommandsMixin):
             if stats.get("usage"):
                 try:
                     self.store.add_usage(chat_id, stats["usage"], served_by=stats.get("served_by", ""))
+                    from okami.llm.usage import CanonicalUsage
+                    _u = CanonicalUsage.from_dict(stats["usage"])
+                    _pc = self.cfg.provider() if self.cfg else None
+                    if _pc and _u.input_tokens:                # ctx% REAL = tokens de ENTRADA do último turno
+                        from okami.llm.providers import context_window_tokens   # (prompt inteiro) ÷ janela do
+                        _win = max(1, context_window_tokens(_pc))               # modelo — não o char-sum do
+                        self.store.update_entry(chat_id, last_input_tokens=int(_u.input_tokens),  # histórico
+                                                ctx_pct=min(100, round(100 * _u.input_tokens / _win)))
                 except Exception:  # noqa: BLE001 — contabilidade nunca quebra o turno
                     pass
             reply = task.result or task.reason or f"({task.state.value})"

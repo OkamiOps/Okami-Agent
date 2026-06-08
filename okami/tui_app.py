@@ -514,14 +514,22 @@ if _HAS_TEXTUAL:
 
 
         def _ctx_pct(self) -> int:
-            used = sum(len(x) for _, x in self.ep.session(self._cid).history)
-            return min(100, round(100 * used / self._ctx_budget))
+            try:                                          # ctx% REAL do último turno (tokens de entrada ÷ janela),
+                return int(self.ep.store.entry(self._cid).get("ctx_pct", 0))   # gravado pelo endpoint
+            except Exception:  # noqa: BLE001
+                return 0
+
+        def _turns(self) -> int:
+            try:                                          # TOTAL de trocas (node_count÷2), não a janela capada em 8
+                return int(self.ep.store.entry(self._cid).get("node_count", 0)) // 2
+            except Exception:  # noqa: BLE001
+                return len(self.ep.session(self._cid).history) // 2
 
         def _status_text(self):
             from rich.text import Text
             busy = self._busy()
             pending = self._cid in self.ep._pending
-            turns = len(self.ep.session(self._cid).history) // 2
+            turns = self._turns()
             pct = self._ctx_pct()
             gauge_n = max(0, min(10, round(10 * pct / 100)))
             gcolor = ("#00dfe8" if pct < 60 else "#ffb86c" if pct < 80 else
