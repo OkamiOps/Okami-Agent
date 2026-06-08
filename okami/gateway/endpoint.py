@@ -848,6 +848,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                       and not any(s.effect for s in task.steps))
             prefix = "" if chatty else {"COMPLETE": "✅ ", "BLOCKED": "⚠ ",
                                         "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
+            if task.state.name == "FAILED" and task.result:   # falhou MAS salvou entrega parcial → ⚠, não ❌ mudo
+                prefix = "⚠ "
             self.channel.send(chat_id, prefix + reply)
             footer = self._turn_footer(s, stats, _elapsed)   # linha de custo: ctx · tokens · tempo
             if footer:

@@ -373,3 +373,46 @@ def test_process_wait_budget_is_bounded(tmp_path, monkeypatch):
 def test_non_poll_action_resets_wait_budget(tmp_path):
     from okami.core.harness.loop import _POLL_TOOLS
     assert "process_wait" in _POLL_TOOLS and "process_poll" in _POLL_TOOLS and "process_log" in _POLL_TOOLS
+
+
+def test_failure_after_work_salvages_a_deliverable(tmp_path):
+    # REDE GERAL: agente faz TRABALHO (vários passos) e depois entra em loop → ANTES morria MUDO (FAILED,
+    # nada entregue). Agora o harness faz 1 chamada final pedindo a entrega PARCIAL → o usuário recebe algo.
+    for i in range(6):
+        (tmp_path / f"f{i}.py").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        # detecta o pedido de SALVAGE pelo conteúdo da última msg
+        if messages and "ENTREGA final" in str(messages[-1].get("content", "")):
+            return '{"tool": "respond", "args": {"message": "RELATORIO PARCIAL: achei bug X em f1.py; faltou rodar testes."}}'
+        if calls["n"] <= 5:                               # 5 passos de trabalho real (read)
+            return f'{{"tool": "read_file", "args": {{"path": "f{calls["n"]-1}.py"}}}}'
+        return '{"tool": "spawn", "args": {"goal": "loop"}}'   # ação repetida → vira loop persistente
+
+    h = Harness(generate=gen, task=Task(goal="analisa e ache bugs"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "FAILED"                     # honesto: não concluiu 100%
+    assert "RELATORIO PARCIAL" in (res.result or "")      # MAS entregou o parcial (não morreu mudo)
+    assert res.reason                                     # guarda o motivo do corte
+
+
+def test_no_salvage_when_almost_no_work(tmp_path):
+    # falha LOGO no começo (sem trabalho) → não há o que salvar; falha honesta e muda, sem chamada extra.
+    def gen(messages, schema):
+        return "sem json nenhum"                          # violação atrás de violação → FAILED cedo
+
+    h = Harness(generate=gen, task=Task(goal="crie o arquivo x"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "FAILED" and not (res.result or "")   # nada de trabalho → nada salvo
+
+
+def test_salvage_skipped_on_provider_failure(tmp_path):
+    # provider morto → chamar de novo é inútil; salvage é pulado (não pendura).
+    from okami.core.harness.loop import Harness as H
+    h = H(generate=lambda m, s: '{"tool":"respond","args":{"message":"oi"}}',
+          task=Task(goal="oi"), workspace=tmp_path)
+    h.task.steps = [type("S", (), {"tool": "read_file", "effect": False})() for _ in range(5)]
+    out = h._salvage(h.task, "provider falhou: timeout")
+    assert out == ""                                      # pulou (reason começa com 'provider')

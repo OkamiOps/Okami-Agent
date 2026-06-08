@@ -431,6 +431,8 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
     if k == "complete_rejected":
         miss = escape(", ".join(str(m) for m in e.get("missing", [])))
         return Text.from_markup(f"  🚧 [{ORANGE}]ainda falta:[/] [{SOFT}]{miss}[/]")
+    if k == "salvaged":                                  # turno ia falhar → ENTREGOU o parcial em vez de morrer
+        return Text.from_markup(f"  🛟 [{ORANGE}]entrega parcial[/] [{MUTE}]({escape(str(e.get('reason', '')))})[/]")
     return None
 
 

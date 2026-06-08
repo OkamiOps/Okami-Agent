@@ -128,6 +128,7 @@ class Harness:
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
+        self._salvaged = False                         # já tentou a entrega-parcial antes de falhar? (1x)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
 
@@ -588,7 +589,40 @@ class Harness:
         _mfiles.append_fact(self.ctx.workspace, f"{t.goal} → {t.result}")
 
     def _fail(self, t: Task, reason: str) -> Task:
+        # REDE DE SEGURANÇA GERAL (não-específica da tarefa): qualquer que seja o motivo do corte
+        # (loop, violações, passos, falha repetida), se já houve TRABALHO substancial, NÃO descarta tudo —
+        # faz UMA última chamada p/ o modelo ENTREGAR o que levantou + o que faltou. Era o padrão que se
+        # repetia: agente trabalha, algo trava no fim, e o turno morria MUDO. (Hermes _handle_max_iterations.)
         t.state = TaskState.FAILED
         t.reason = reason
+        salvage = self._salvage(t, reason)
+        if salvage:
+            t.result = salvage                       # entrega parcial → o gateway mostra com ⚠ (não ❌ mudo)
+            self._emit("salvaged", reason=reason, chars=len(salvage))
         self._emit("failed", reason=reason)
         return t
+
+    def _salvage(self, t: Task, reason: str) -> str:
+        """Última tentativa de ENTREGAR antes de falhar: pede o relatório do que já foi feito. '' se não há
+        trabalho a salvar, se o provider é que falhou (chamá-lo de novo é inútil), ou se já tentou."""
+        if self._salvaged or reason.startswith("provider"):
+            return ""
+        self._salvaged = True
+        if len([s for s in t.steps if s.tool not in _REPORT_META]) < 3:   # quase nada feito → falha honesta
+            return ""
+        try:
+            self.messages.append({"role": "user", "content":
+                f"O turno vai ENCERRAR sem concluir 100% (motivo: {reason}). NÃO termine calado: com base "
+                "em TUDO que você já fez e levantou nesta sessão, escreva AGORA, nesta resposta, o "
+                "relatório/resposta mais COMPLETO possível pra pessoa — os resultados PARCIAIS, o que "
+                "descobriu, e o que ficou faltando (e por quê). Esta é a ENTREGA final; não peça permissão."})
+            comp = as_completion(self.generate(self.messages, self._action_schema))
+            txt = comp.text or ""
+            cands = [prose_outside_action(txt), txt]
+            act = _action_from_tool_calls(comp.tool_calls) or parse_action(txt)
+            if act and act.tool in ("respond", "task_complete"):   # modelo embrulhou o relatório num respond
+                cands.insert(0, str(act.args.get("message") or act.args.get("summary") or ""))
+            best = max((c.strip() for c in cands), key=len, default="")
+            return best if len(best) >= 40 else ""
+        except Exception:  # noqa: BLE001 — salvage é best-effort; se falhar, cai no FAILED mudo normal
+            return ""
