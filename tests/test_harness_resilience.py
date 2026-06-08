@@ -225,10 +225,10 @@ def test_prompt_has_hermes_action_and_verification_gates():
     # gate de ESCOPO: análise/teste = RELATÓRIO; não mutar/consertar/apagar sem pedido explícito
     assert "<escopo>" in low and "relatório" in low
     assert "não conserte" in low and ("faxina" in low or "__pycache__" in low)
-    # gate de ENTREGA: conteúdo INTEIRO + DETALHADO na resposta; formato (tabela/por-suíte); anti over-claim
+    # gate de ENTREGA: markdown ESTRUTURADO (esqueleto: ## seções + tabelas), anti over-claim, anti-paredão
     assert "<entrega>" in low and "over-claim" in low
-    assert "detalhado no chat" in low and "entregue no chat anterior" in low   # over-claim ampliado
-    assert "tabela" in low and "por suíte" in low                              # comparação=tabela, testes detalhados
+    assert "esqueleto" in low and "| suíte | passou | falhou |" in low         # template markdown com tabela
+    assert "tabela" in low and "parágrafo corrido" in low                      # proíbe paredão de texto
     # gates de AÇÃO (Hermes): persistência + uso obrigatório de ferramenta + anti-bail
     assert "<persistencia>" in low and "<use_ferramenta>" in low
     assert "menu" in low and "permiss" in low and "memória" in low
@@ -528,3 +528,20 @@ def test_destructive_shell_never_batches():
     assert _is_batchable(Action("run_shell", {"cmd": "rm -rf x"})) is False       # rm = muta
     assert _is_batchable(Action("write_file", {})) is False
     assert _is_batchable(Action("read_file", {})) is True
+
+
+def test_flat_wall_of_text_is_detected_as_thin():
+    # O CASO DO PRINT: relatório LONGO mas em parágrafo corrido (sem ## nem tabela) → detectado como raso
+    from okami.core.harness.loop import _deliverable_too_thin as thin
+    wall = "achei P0 em base.py linha 55, " * 60                # >1200 chars, sem markdown
+    assert thin("analisa e ache bugs", wall, real_steps=10)
+    estruturado = "## Relatorio\n### Achados\n| a | b |\n|--|--|\n| x | y |\n" + "detalhe " * 200
+    assert not thin("analisa e ache bugs", estruturado, real_steps=10)   # tem ## e tabela → ok
+
+
+def test_entrega_skeleton_in_prompt():
+    from okami.core.harness.prompt import build_system_prompt
+    low = build_system_prompt(Task(goal="faz X"), {}).lower()
+    assert "## <título" in low or "## <titulo" in low            # esqueleto markdown presente
+    assert "| suíte | passou | falhou |" in low                  # tabela de testes no esqueleto
+    assert "parágrafo corrido" in low                            # proíbe paredão

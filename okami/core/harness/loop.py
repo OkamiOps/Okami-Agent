@@ -116,14 +116,18 @@ def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
     g, m = (goal or "").lower(), msg or ""
     if any(k in g for k in ("compar", "comparativo", " vs ", "versus")) and real_steps >= 6 and m.count("|") < 4:
         return True                                   # comparação pedida + trabalho feito, mas SEM tabela
+    if real_steps >= 8 and len(m) > 1200 and "##" not in m and m.count("|") < 4:
+        return True                                   # PAREDÃO: relatório longo sem seção (##) nem tabela
     return real_steps >= 12 and len(m) < 1000         # trabalho grande, entrega curta
 
 
 _THIN_NUDGE = (
-    "Você fez bastante trabalho ({n} passos) mas a entrega ficou CURTA/rasa pro que foi pedido. Escreva "
-    "AGORA, NESTA resposta, o relatório COMPLETO usando TUDO que levantou: a COMPARAÇÃO como TABELA "
-    "markdown (uma linha por aspecto, uma coluna por item comparado), os TESTES com a LISTA das falhas "
-    "(não só 'X/Y passou'), e os bugs com arquivo:linha + o trecho. NÃO resuma num parágrafo — DETALHE.")
+    "Você fez bastante trabalho ({n} passos) mas a entrega ficou CURTA/rasa e/ou em parágrafo corrido. "
+    "REESCREVA AGORA em MARKDOWN ESTRUTURADO (a TUI renderiza tabela/seção/cor), preenchendo este esqueleto "
+    "com o REAL:\n\n## <título>\n### Resumo\n<2-3 linhas>\n### Testes rodados\n| suíte | passou | falhou |\n"
+    "|---|---|---|\n### Comparação\n| aspecto | Okami | Hermes | OpenClaw |\n|---|---|---|---|\n"
+    "### Achados (arquivo:linha)\n- **<achado>** (`arquivo:linha`) — <porquê>\n\nUse TUDO que levantou; "
+    "liste as falhas reais (não só 'X/Y'). PROIBIDO parágrafo corrido sem seções/tabela.")
 
 
 class Harness:
