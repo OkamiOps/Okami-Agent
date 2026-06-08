@@ -98,6 +98,10 @@ class SqliteFTS5Memory(Memory):
         self.conn = sqlite3.connect(str(self.path))
         self.conn.execute("PRAGMA journal_mode=WAL")     # leitura rápida concorrente (como o Hermes)
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        # o review de auto-aprimoramento roda numa THREAD paralela (conexão própria) e pode escrever ao
+        # mesmo tempo que o próximo turno → sem busy_timeout, o 2º writer levava "database is locked" na
+        # hora. Com 5s, ele ESPERA o lock liberar em vez de falhar.
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.fts = self._init_schema()
         # cache da matriz de embeddings (cosine vetorizado, sem loop Python por linha)
         self._mat = None

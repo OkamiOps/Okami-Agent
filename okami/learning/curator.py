@@ -106,7 +106,10 @@ def _restore_members(tar, root) -> None:
     for m in tar.getmembers():
         dest = (rootp / m.name).resolve()
         if dest == rootp or str(dest).startswith(str(rootp) + os.sep):
-            tar.extract(m, root)                    # membro dentro da raiz → ok
+            try:
+                tar.extract(m, root, filter="data")  # 3.12+: filtro nativo (silencia o aviso do 3.14)
+            except TypeError:
+                tar.extract(m, root)                # 3.11 antigo — já validamos o membro acima
 
 
 # ---------------------------------------------------------------- archival determinístico (LRU)

@@ -57,12 +57,16 @@ def is_reflection_noise(item) -> bool:
 
 
 def apply(memory, task: Task, model_name: str = "?") -> list[MemoryItem]:
-    """Reflete e GRAVA as lições na memória (defensivo: nunca derruba o fluxo)."""
+    """Reflete e GRAVA as lições na memória (defensivo: nunca derruba o fluxo). Passa pelo policy.prepare
+    (gate Do-NOT-capture + classificação) — defesa em profundidade: nem a reflexão escapa do filtro."""
+    from okami.memory.policy import prepare
     lessons = reflect(task, model_name)
     if memory is not None:
         for lesson in lessons:
             try:
-                memory.write(lesson)
+                item = prepare(lesson.text, source=lesson.source or "reflection", kind=lesson.kind)
+                if item is not None:
+                    memory.write(item)
             except Exception:  # noqa: BLE001
                 pass
     return lessons
