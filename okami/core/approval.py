@@ -33,14 +33,49 @@ _FILE_RULES = [
     (re.compile(r"secret|credential|password|/\.okami/credentials|\.codex/auth|\.claude/\.credentials", re.I), "secret_file", "high"),
     (re.compile(r"\.(key|pem|p12|pfx)$", re.I), "secret_file", "high"),
 ]
+# Posição de COMANDO (Hermes tools/approval.py _CMDPOS): início da string, ou depois de um separador
+# (; && || | newline ` $( ), opcionalmente consumindo wrappers (sudo/env/exec/nohup/setsid/time). Ancorar
+# o nome do comando perigoso AQUI evita o falso-positivo de auditoria: `grep 'mkfs' arquivo` / `echo rm -rf`
+# NÃO disparam — a palavra perigosa só conta quando é o COMANDO sendo executado, não um argumento/padrão.
+_CMDPOS = (
+    r"(?:^|[;&|\n`]|\$\()\s*"
+    r"(?:sudo\s+(?:-[^\s]+\s+)*)?"
+    r"(?:env\s+(?:\w+=\S*\s+)*)?"
+    r"(?:xargs\s+(?:-[^\s]+\s+)*)?"               # `find … | xargs rm -rf` → rm fica em posição de comando
+    r"(?:(?:exec|nohup|setsid|time)\s+)*\s*"
+)
+_CMDSTART = r"(?:^|[;&|\n`]|\$\()\s*(?:env\s+(?:\w+=\S*\s+)*)?"
 _SHELL_RULES = [
-    (re.compile(r"\brm\s+-[rf]|\bmkfs\b|dd\s+if=\S+\s+of=/dev/", re.I), "destructive_shell", "critical"),
-    (re.compile(r"\bsudo\b", re.I), "sudo", "high"),
-    (re.compile(r"\bgit\s+push\b", re.I), "git_push", "medium"),
-    (re.compile(r"\b(npm|pip|cargo)\s+publish\b", re.I), "publish", "high"),
+    # DESTRUTIVO de verdade — ancorado em posição de comando (não dispara em padrão de grep/argumento):
+    (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*-[a-z]*[rf]", re.I), "destructive_shell", "critical"),
+    (re.compile(_CMDPOS + r"mkfs(\.[a-z0-9]+)?\b", re.I), "destructive_shell", "critical"),
+    (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)", re.I), "destructive_shell", "critical"),
+    (re.compile(r">\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b", re.I), "destructive_shell", "critical"),
+    (re.compile(_CMDPOS + r"(shutdown|reboot|halt|poweroff)\b", re.I), "destructive_shell", "critical"),
+    (re.compile(_CMDPOS + r"kill\s+(-[^\s]+\s+)*-1\b", re.I), "destructive_shell", "critical"),
+    (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", re.I), "destructive_shell", "critical"),  # fork bomb
+    (re.compile(_CMDSTART + r"sudo\b", re.I), "sudo", "high"),
+    (re.compile(_CMDSTART + r"git\s+push\b", re.I), "git_push", "medium"),
+    (re.compile(_CMDSTART + r"(npm|pip|cargo)\s+publish\b", re.I), "publish", "high"),
     (re.compile(r"\bcurl\b[^\n]*-X\s*(POST|PUT|DELETE)|\bwget\b[^\n]*--post", re.I), "network_write", "medium"),
-    (re.compile(r"\bchmod\b|\bdocker\s+(rm|rmi|system\s+prune)", re.I), "system_change", "medium"),
+    (re.compile(_CMDSTART + r"chmod\b|" + _CMDSTART + r"docker\s+(rm|rmi|system\s+prune)", re.I),
+     "system_change", "medium"),
 ]
+
+# Quando o comando RE-EXECUTA o conteúdo entre aspas (sh -c '…', bash -c, eval), as aspas NÃO escondem
+# um argumento — escondem um COMANDO. Aí não dá pra ignorar as aspas; checa o cru contra os críticos.
+_RUNS_QUOTED = re.compile(r"\b(?:ba|z|da)?sh\s+-[a-z]*c\b|\beval\b", re.I)
+_EVAL_DANGER = re.compile(
+    r"\brm\s+(-[^\s]*\s+)*-[a-z]*[rf]|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*of=/dev/(sd|nvme|hd|mmcblk|vd|xvd)"
+    r"|:\(\)\s*\{\s*:|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b", re.I)
+
+
+def _strip_quoted(cmd: str) -> str:
+    """Remove o CONTEÚDO entre aspas (padrão de grep, mensagem de echo) antes de checar perigo:
+    `grep 'mkfs\\|kill -1' f` → `grep '' f`. Comando destrutivo REAL é invocado SEM aspas, então isto
+    só apaga argumento/padrão — nunca a invocação. Era o falso-positivo de auditoria (grep de padrões
+    perigosos pedia aprovação a cada linha)."""
+    return re.sub(r"\"[^\"]*\"|'[^']*'", "''", cmd)
 
 
 @dataclass
@@ -58,10 +93,16 @@ def classify(tool: str, args: dict) -> Sensitive | None:
             if rx.search(path):
                 return Sensitive(f"escrever em {cat}: {path}", cat, risk)
     if tool in ("run_shell", "process_start"):           # process_start = shell em background → mesma trava
-        cmd = str(args.get("cmd", ""))
+        cmd_raw = str(args.get("cmd", ""))
+        if _RUNS_QUOTED.search(cmd_raw):                 # sh -c '…' / eval: aspas escondem COMANDO → checa cru
+            if _EVAL_DANGER.search(cmd_raw):
+                return Sensitive(f"destructive_shell: {cmd_raw[:100]}", "destructive_shell", "critical")
+            cmd = cmd_raw
+        else:                                            # senão: aspas escondem ARGUMENTO/padrão → ignora
+            cmd = _strip_quoted(cmd_raw)
         for rx, cat, risk in _SHELL_RULES:
             if rx.search(cmd):
-                return Sensitive(f"{cat}: {cmd[:100]}", cat, risk)
+                return Sensitive(f"{cat}: {cmd_raw[:100]}", cat, risk)
     if tool == "manage_skill":                           # cria/edita skill que ENTRA no prompt → sensível
         return Sensitive(f"criar/editar skill: {args.get('name', '?')}", "skill_write", "medium")
     return None
