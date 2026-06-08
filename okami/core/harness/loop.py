@@ -42,6 +42,26 @@ def _looks_like_punt(text: str) -> bool:
     return bool(_PUNT_RE.search(text or ""))
 
 
+_REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
+
+
+def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
+    """A entrega ficou RASA pro que foi pedido? (1) pediu COMPARAÇÃO e não veio TABELA; (2) muito trabalho
+    (≥12 passos) e resposta curta (<1000 chars). O harness re-pede o relatório COMPLETO — modelo fraco
+    tende a fazer o trabalho e resumir num parágrafo. NÃO confunde papo curto: exige trabalho substancial."""
+    g, m = (goal or "").lower(), msg or ""
+    if any(k in g for k in ("compar", "comparativo", " vs ", "versus")) and real_steps >= 6 and m.count("|") < 4:
+        return True                                   # comparação pedida + trabalho feito, mas SEM tabela
+    return real_steps >= 12 and len(m) < 1000         # trabalho grande, entrega curta
+
+
+_THIN_NUDGE = (
+    "Você fez bastante trabalho ({n} passos) mas a entrega ficou CURTA/rasa pro que foi pedido. Escreva "
+    "AGORA, NESTA resposta, o relatório COMPLETO usando TUDO que levantou: a COMPARAÇÃO como TABELA "
+    "markdown (uma linha por aspecto, uma coluna por item comparado), os TESTES com a LISTA das falhas "
+    "(não só 'X/Y passou'), e os bugs com arquivo:linha + o trecho. NÃO resuma num parágrafo — DETALHE.")
+
+
 class Harness:
     def __init__(
         self,
@@ -105,6 +125,7 @@ class Harness:
         self._nudged_action = False
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
+        self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
 
@@ -469,6 +490,15 @@ class Harness:
                     "passando pela aprovação normal (chame a ferramenta, NÃO force). Se falta um dado que "
                     "SÓ a pessoa tem, use need_input com UMA pergunta específica."})
                 return None
+            # backstop anti-RASO (modelo fraco faz o trabalho e RESUME): fez muito passo mas a entrega
+            # ficou curta / sem tabela na comparação → re-pede o relatório COMPLETO 1x (estrutural, força).
+            _real = len([s for s in t.steps if s.tool not in _REPORT_META])
+            if (self._action_expected and not self._thin_nudged
+                    and _deliverable_too_thin(t.goal, msg, _real)):
+                self._thin_nudged = True
+                self._emit("violation", n=0, text="entrega rasa vs trabalho feito")
+                self.messages.append({"role": "user", "content": _THIN_NUDGE.format(n=_real)})
+                return None
             t.state = TaskState.COMPLETE
             t.result = msg or "(sem resposta)"
             self._emit("complete", summary=t.result)     # sem _extract: conversa não polui a memória
@@ -486,8 +516,16 @@ class Harness:
         if action.tool == "task_complete":
             ok, missing = check_exit(t.exit_criteria, self.ctx)
             if ok:
+                _summary = str(action.args.get("summary", "")).strip()
+                _real = len([s for s in t.steps if s.tool not in _REPORT_META])
+                if (self._action_expected and not self._thin_nudged
+                        and _deliverable_too_thin(t.goal, _summary, _real)):   # entrega rasa → re-pede 1x
+                    self._thin_nudged = True
+                    self._emit("complete_rejected", missing=["entrega rasa vs trabalho feito"])
+                    self.messages.append({"role": "user", "content": _THIN_NUDGE.format(n=_real)})
+                    return None
                 t.state = TaskState.COMPLETE
-                t.result = action.args.get("summary", "(sem resumo)")
+                t.result = _summary or "(sem resumo)"
                 self._extract_on_complete(t)
                 self._emit("complete", summary=t.result)
                 return t

@@ -276,3 +276,56 @@ def test_length_continuation_has_a_cap(tmp_path):
     res = h.run()
     assert calls["n"] <= 40                           # bounded — não loopa pra sempre
     assert res.state.name in ("COMPLETE", "BLOCKED", "FAILED")
+
+
+def test_thin_deliverable_helper():
+    from okami.core.harness.loop import _deliverable_too_thin as thin
+    # comparação pedida + trabalho feito mas SEM tabela → raso
+    assert thin("compara okami com hermes", "Okami é melhor em X, Hermes em Y.", real_steps=10)
+    # comparação COM tabela markdown → ok
+    assert not thin("compara okami com hermes", "| aspecto | okami | hermes |\n|--|--|--|\n| x | a | b |", 10)
+    # muito trabalho + entrega curta → raso
+    assert thin("analisa e acha bugs", "achei 1 bug", real_steps=15)
+    # trabalho pequeno (papo) → NÃO é raso (não confunde resposta curta legítima)
+    assert not thin("oi", "oi, tudo bem?", real_steps=0)
+    # comparação mas SEM trabalho (só 2 passos) → não cobra tabela ainda
+    assert not thin("compara x e y", "resumo", real_steps=2)
+
+
+def test_thin_report_is_reprompted_for_full_version(tmp_path):
+    # ESTRUTURAL: fez muito trabalho de comparação e entregou um parágrafo sem tabela → harness re-pede
+    # o relatório COMPLETO 1x; aí o modelo manda a tabela e conclui.
+    for i in range(8):
+        (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] <= 8:                          # 8 passos de "trabalho" (read)
+            return f'{{"tool": "read_file", "args": {{"path": "f{calls["n"]-1}.txt"}}}}'
+        if calls["n"] == 9:                          # entrega RASA: parágrafo, sem tabela
+            return '{"tool": "respond", "args": {"message": "Okami ganha do Hermes em X e Y."}}'
+        return ('{"tool": "respond", "args": {"message": '
+                '"| aspecto | Okami | Hermes |\\n|--|--|--|\\n| sandbox | sim | sim |"}}')   # agora com tabela
+
+    h = Harness(generate=gen, task=Task(goal="compara o okami com o hermes e acha bugs"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] == 10                           # foi re-pedido 1x
+    assert res.state.name == "COMPLETE" and "|" in (res.result or "")   # entrega final tem TABELA
+
+
+def test_thin_nudge_fires_only_once(tmp_path):
+    # se insistir no raso, não loopa: nudga 1x e aceita.
+    for i in range(13):
+        (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] <= 13:
+            return f'{{"tool": "read_file", "args": {{"path": "f{calls["n"]-1}.txt"}}}}'
+        return '{"tool": "respond", "args": {"message": "curto"}}'   # sempre raso
+
+    h = Harness(generate=gen, task=Task(goal="analisa tudo e acha bugs"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE" and calls["n"] <= 16   # nudga 1x, aceita o 2º (sem loop)
