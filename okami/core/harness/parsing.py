@@ -63,8 +63,10 @@ class Action:
     args: dict
 
 
-def _action_from_tool_calls(tool_calls) -> Action | None:
-    """Primeira tool-call NATIVA (function-calling) → Action. None se vazio. Convive com o protocolo JSON."""
+def _actions_from_tool_calls(tool_calls) -> list[Action]:
+    """TODAS as tool-calls NATIVAS (function-calling) → [Action] na ordem. Vazio se nenhuma. Hermes roda
+    todas as tool_calls de um turno; aqui devolvemos todas e o loop decide o que dá pra rodar em lote."""
+    out: list[Action] = []
     for tc in (tool_calls or []):
         name = tc.get("name") if isinstance(tc, dict) else None
         if not name:
@@ -74,26 +76,47 @@ def _action_from_tool_calls(tool_calls) -> Action | None:
             args = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except json.JSONDecodeError:
             args = {}
-        return Action(name, args if isinstance(args, dict) else {})
-    return None
+        out.append(Action(name, args if isinstance(args, dict) else {}))
+    return out
+
+
+def _action_from_tool_calls(tool_calls) -> Action | None:
+    """Primeira tool-call NATIVA → Action (back-compat). None se vazio."""
+    acts = _actions_from_tool_calls(tool_calls)
+    return acts[0] if acts else None
 
 
 def parse_action(text: str) -> Action | None:
     """Extrai a ÚLTIMA ação JSON. Prioriza bloco fenced ```json```; senão varre o texto com parser
     BALANCEADO (robusto a {} dentro de write_file/markdown). None se não houver ação válida."""
+    acts = parse_actions(text)
+    return acts[-1] if acts else None
+
+
+def parse_actions(text: str) -> list[Action]:
+    """TODAS as ações na ORDEM (batch — Hermes roda várias por turno). Suporta: vários blocos
+    {"tool","args"} no texto, OU um envelope {"actions":[{...},{...}]}, OU um array top-level [{...}].
+    Vazio se não houver ação válida."""
     candidates: list[str] = []
     for blk in _FENCE.findall(text):                 # 1) blocos fenced (o agente é instruído a usar)
         candidates += _balanced_json_objects(blk)
     if not candidates:
         candidates = _balanced_json_objects(text)    # 2) fallback: texto inteiro, balanceado
-    for raw in reversed(candidates):
+    out: list[Action] = []
+    for raw in candidates:                           # ordem do documento (batch executa nessa ordem)
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("tool"), str):
-            return Action(obj["tool"], obj.get("args") or {})
-    return None
+        for d in (obj if isinstance(obj, list) else [obj]):
+            if not isinstance(d, dict):
+                continue
+            if isinstance(d.get("actions"), list):   # envelope batch {"actions":[...]}
+                out += [Action(a["tool"], a.get("args") or {}) for a in d["actions"]
+                        if isinstance(a, dict) and isinstance(a.get("tool"), str)]
+            elif isinstance(d.get("tool"), str):
+                out.append(Action(d["tool"], d.get("args") or {}))
+    return out
 
 
 def prose_outside_action(text: str) -> str:
@@ -112,12 +135,22 @@ def prose_outside_action(text: str) -> str:
 
 
 def action_schema(registry: dict[str, Tool]) -> dict:
-    """JSON schema da ação — usado no constrained decoding (§3.5)."""
-    return {
+    """JSON schema da ação — constrained decoding (§3.5). Aceita UMA ação {tool,args} OU um LOTE
+    {"actions":[{tool,args}, …]} (batch de passos de LEITURA independentes — Hermes roda vários por turno).
+    `strict:False` no provider → o schema é guia, não trava (modelo emite uma ou várias)."""
+    one = {
         "type": "object",
         "properties": {
             "tool": {"type": "string", "enum": list(registry.keys())},
             "args": {"type": "object"},
         },
         "required": ["tool", "args"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string", "enum": list(registry.keys())},
+            "args": {"type": "object"},
+            "actions": {"type": "array", "items": one},   # lote opcional (passos de leitura independentes)
+        },
     }

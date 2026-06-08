@@ -14,8 +14,8 @@ from typing import Callable
 from okami.core import approval
 from okami.core.harness.models import Budget, Generate, Step, Task, TaskState
 from okami.core.harness.parsing import (
-    FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, action_schema, parse_action,
-    prose_outside_action,
+    FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, _actions_from_tool_calls, action_schema,
+    parse_action, parse_actions, prose_outside_action,
 )
 from okami.core.harness.prompt import (
     _TOOL_RESULT_BUDGET, _user_start, build_system_prompt, check_exit, format_observation,
@@ -44,6 +44,35 @@ def _looks_like_punt(text: str) -> bool:
 
 _REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
 _POLL_TOOLS = {"process_wait", "process_poll", "process_log"}   # ESPERAR processo ≠ loop inútil (é I/O)
+_BATCHABLE_READONLY = {"read_file", "list_dir", "find_files"}   # leitura pura → seguro rodar em LOTE
+
+
+def _is_batchable(action: Action) -> bool:
+    """Ação SEGURA de rodar em lote: leitura pura (sem efeito, sem aprovação, não-terminal). run_shell só
+    se for read-only (grep/cat/ls — shell_has_effect False). Tudo que muta/encerra/pede aprovação fica fora."""
+    if action.tool in _BATCHABLE_READONLY:
+        return True
+    if action.tool == "run_shell":
+        from okami.core.tools.base import shell_has_effect
+        return not shell_has_effect(str(action.args.get("cmd", "")))
+    return False
+
+
+def _lead_readonly(actions: list[Action], first: Action | None) -> list[Action]:
+    """A sequência LÍDER de leituras seguras (batchable), deduplicada (inclusive vs a 1ª ação). PARA na
+    primeira ação que mute/encerre/peça aprovação — essa e as seguintes re-geram normalmente (1-por-turno)."""
+    def _fp(a: Action) -> str:
+        return f"{a.tool}:{json.dumps(a.args, sort_keys=True, ensure_ascii=False)}"
+    seen = {_fp(first)} if first is not None else set()
+    out: list[Action] = []
+    for a in actions:
+        if not _is_batchable(a):
+            break
+        if _fp(a) in seen:
+            continue
+        seen.add(_fp(a))
+        out.append(a)
+    return out
 
 # Aliases comuns de nome de tool ALUCINADO (modelo fraco erra o nome) → nome real. Hermes _repair_tool_call.
 _TOOL_ALIASES = {
@@ -163,6 +192,7 @@ class Harness:
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
         self._salvaged = False                         # já tentou a entrega-parcial antes de falhar? (1x)
+        self._batch: list[Action] = []                 # leituras restantes da MESMA geração (batch — Hermes)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
 
@@ -268,54 +298,61 @@ class Harness:
             if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
                 self.messages, promoted = _compaction.compact(self.messages, self.memory)
                 self._emit("compact", promoted=promoted)
-            try:
-                out = self.generate(self.messages, self._action_schema)
-            except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
-                from okami.core.errors import Action as _Act
-                from okami.core.errors import classify_provider
-                fail = classify_provider(e)
-                self.events.emit("failure", scope="generate", kind=fail.kind.value,
-                                 action=fail.action.value, reason=fail.reason, status=fail.status)
-                # RECUPERAÇÃO 1ª (a que faltava): timeout/lento ≈ CONTEXTO GRANDE. ENCOLHE forte (keep_tail=3)
-                # e re-gera 1x — chamada menor = mais rápida, e cabe até no fallback local. Antes só escalava
-                # p/ um modelo mais forte com o MESMO contexto gigante → pendurava de novo e morria.
-                if fail.action in (_Act.RETRY, _Act.ESCALATE) and not self._shrunk_retry:
-                    self._shrunk_retry = True
-                    before = _compaction.estimate_chars(self.messages)
-                    self.messages, promoted = _compaction.compact(self.messages, self.memory, keep_tail=3)
-                    if _compaction.estimate_chars(self.messages) < before:
-                        self._emit("compact", promoted=promoted)
-                        continue                  # re-gera com contexto MENOR (mais rápido, sem trocar modelo)
-                # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
-                if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
-                    continue
-                return self._fail(t, f"provider falhou: {fail.reason}")
-            comp = as_completion(out)              # tolera str (JSON-em-texto) E Completion (nativo)
-            self._shrunk_retry = False             # gerou com sucesso → libera novo encolhimento p/ falha futura
-            _u = comp.usage                         # usage POR CHAMADA no trajeto (P2 observabilidade)
-            self.events.emit("llm_call", provider=comp.provider, model=comp.model,
-                             finish_reason=getattr(comp, "finish_reason", ""),
-                             tokens_in=getattr(_u, "input_tokens", 0),
-                             tokens_out=getattr(_u, "output_tokens", 0),
-                             cache=getattr(_u, "cache_read_tokens", 0),
-                             tool_call=bool(comp.tool_calls))
-            self.messages.append({"role": "assistant", "content": comp.text})
+            # LOTE (batch — Hermes roda VÁRIAS por turno): se sobraram LEITURAS da mesma geração, roda a
+            # próxima SEM nova chamada ao modelo — corta os round-trips (o gargalo de velocidade vs Hermes).
+            # Só leitura entra no lote; ação que muta/encerra/pede aprovação segue 1-por-turno.
+            if self._batch:
+                action = self._batch.pop(0)
+                text = ""
+            else:
+                try:
+                    out = self.generate(self.messages, self._action_schema)
+                except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
+                    from okami.core.errors import Action as _Act
+                    from okami.core.errors import classify_provider
+                    fail = classify_provider(e)
+                    self.events.emit("failure", scope="generate", kind=fail.kind.value,
+                                     action=fail.action.value, reason=fail.reason, status=fail.status)
+                    # RECUPERAÇÃO 1ª: timeout/lento ≈ CONTEXTO GRANDE. ENCOLHE forte (keep_tail=3) e re-gera 1x —
+                    # chamada menor = mais rápida, cabe até no fallback local. Antes só escalava p/ modelo mais
+                    # forte com o MESMO contexto gigante → pendurava de novo e morria.
+                    if fail.action in (_Act.RETRY, _Act.ESCALATE) and not self._shrunk_retry:
+                        self._shrunk_retry = True
+                        before = _compaction.estimate_chars(self.messages)
+                        self.messages, promoted = _compaction.compact(self.messages, self.memory, keep_tail=3)
+                        if _compaction.estimate_chars(self.messages) < before:
+                            self._emit("compact", promoted=promoted)
+                            continue              # re-gera com contexto MENOR (mais rápido, sem trocar modelo)
+                    # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
+                    if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
+                        continue
+                    return self._fail(t, f"provider falhou: {fail.reason}")
+                comp = as_completion(out)          # tolera str (JSON-em-texto) E Completion (nativo)
+                self._shrunk_retry = False         # gerou com sucesso → libera novo encolhimento p/ falha futura
+                _u = comp.usage                     # usage POR CHAMADA no trajeto (P2 observabilidade)
+                self.events.emit("llm_call", provider=comp.provider, model=comp.model,
+                                 finish_reason=getattr(comp, "finish_reason", ""),
+                                 tokens_in=getattr(_u, "input_tokens", 0),
+                                 tokens_out=getattr(_u, "output_tokens", 0),
+                                 cache=getattr(_u, "cache_read_tokens", 0),
+                                 tool_call=bool(comp.tool_calls))
+                self.messages.append({"role": "assistant", "content": comp.text})
 
-            # LENGTH-CONTINUATION (Hermes conversation_loop.py): resposta CORTADA pelo limite de saída
-            # (finish_reason='length') → continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar
-            # a entrega pela metade (era o "relatório resumido" — modelo cortou e não retomou). Acumula as
-            # partes e só parseia a ação no texto COMPLETO. Cap p/ não virar loop.
-            if getattr(comp, "finish_reason", "") == "length" and len(self._truncated_parts) < self._MAX_LENGTH_CONT:
-                self._truncated_parts.append(comp.text)
-                self._emit("length_continue", part=len(self._truncated_parts))
-                self.messages.append({"role": "user", "content":
-                    "[Sua resposta foi CORTADA pelo limite de tamanho. Continue EXATAMENTE de onde parou, "
-                    "SEM repetir o que já escreveu, e TERMINE a entrega. Se estava no meio do bloco json de "
-                    "ação, complete-o.]"})
-                continue
-            text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
-            self._truncated_parts = []                 # episódio de truncamento fechado → texto completo
-            action = _action_from_tool_calls(comp.tool_calls) or parse_action(text)
+                # LENGTH-CONTINUATION (Hermes): resposta CORTADA pelo limite (finish_reason='length') →
+                # continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar a entrega pela metade.
+                if getattr(comp, "finish_reason", "") == "length" and len(self._truncated_parts) < self._MAX_LENGTH_CONT:
+                    self._truncated_parts.append(comp.text)
+                    self._emit("length_continue", part=len(self._truncated_parts))
+                    self.messages.append({"role": "user", "content":
+                        "[Sua resposta foi CORTADA pelo limite de tamanho. Continue EXATAMENTE de onde parou, "
+                        "SEM repetir o que já escreveu, e TERMINE a entrega. Se estava no meio do bloco json de "
+                        "ação, complete-o.]"})
+                    continue
+                text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
+                self._truncated_parts = []             # episódio de truncamento fechado → texto completo
+                _acts = _actions_from_tool_calls(comp.tool_calls) or parse_actions(text)
+                action = _acts[0] if _acts else None
+                self._batch = _lead_readonly(_acts[1:], action)   # resto = leituras seguras → rodam sem nova call
 
             # --- Reparo de nome de tool ALUCINADO (Hermes): 'read'→'read_file' etc. antes de violar ---
             if action is not None and action.tool not in self.registry:
@@ -362,6 +399,7 @@ class Harness:
                      and self._fingerprints[-1] == self._fingerprints[-3]
                      and self._fingerprints[-2] == self._fingerprints[-4])
             if repeats >= self.budget.max_repeat - 1 or cycle:
+                self._batch = []                          # repetiu → descarta o resto do lote, re-planeja limpo
                 self._emit("loop", fingerprint=fp, repeats=repeats + 1, cycle=cycle)
                 # ESPERAR um processo em background (build/teste lento, server) NÃO é loop inútil — é I/O.
                 # process_wait/poll/log com os mesmos args batem o mesmo fingerprint e matavam o turno

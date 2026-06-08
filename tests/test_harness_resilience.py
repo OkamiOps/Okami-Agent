@@ -480,3 +480,51 @@ def test_salvage_prompt_forbids_fabrication(tmp_path):
     h = Harness(generate=gen2, task=Task(goal="analisa e ache bugs"), workspace=tmp_path)
     h.run()
     assert "NUNCA fabrique" in seen["content"] and "bloqueio" in seen["content"]
+
+
+def test_batch_reads_run_in_one_generation(tmp_path):
+    # BATCH (Hermes): modelo emite 2 leituras num turno → AMBAS rodam SEM nova chamada (corta round-trips).
+    (tmp_path / "a.txt").write_text("AAA", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("BBB", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ('{"actions":[{"tool":"read_file","args":{"path":"a.txt"}},'
+                    '{"tool":"read_file","args":{"path":"b.txt"}}]}')
+        return '{"tool":"respond","args":{"message":"li AAA e BBB"}}'
+
+    h = Harness(generate=gen, task=Task(goal="leia a e b"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE"
+    assert [s.tool for s in res.steps].count("read_file") == 2     # as DUAS leituras rodaram
+    assert calls["n"] == 2                                         # em 2 gerações (não 3) — batch economizou 1
+
+
+def test_batch_stops_at_mutating_action(tmp_path):
+    # SEGURANÇA do batch: leitura entra no lote, mas ação que MUTA (write) NÃO — re-gera (1-por-turno).
+    (tmp_path / "a.txt").write_text("A", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ('{"actions":[{"tool":"read_file","args":{"path":"a.txt"}},'
+                    '{"tool":"write_file","args":{"path":"b.txt","content":"B"}}]}')
+        return '{"tool":"task_complete","args":{"summary":"ok"}}'
+
+    h = Harness(generate=gen, task=Task(goal="leia o a.txt"), workspace=tmp_path, approve=lambda r: True)
+    res = h.run()
+    tools = [s.tool for s in res.steps]
+    assert "read_file" in tools and "write_file" not in tools      # write do lote descartado (não é batchable)
+    assert calls["n"] == 2
+
+
+def test_destructive_shell_never_batches():
+    from okami.core.harness.loop import _is_batchable
+    from okami.core.harness.parsing import Action
+    assert _is_batchable(Action("run_shell", {"cmd": "grep x f"})) is True       # grep = leitura
+    assert _is_batchable(Action("run_shell", {"cmd": "rm -rf x"})) is False       # rm = muta
+    assert _is_batchable(Action("write_file", {})) is False
+    assert _is_batchable(Action("read_file", {})) is True
