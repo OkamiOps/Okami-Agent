@@ -186,13 +186,16 @@ def chat(
     model: str = typer.Option(None, "-m", "--model"),
     new: bool = typer.Option(False, "--new", help="Começa do zero (arquiva a conversa anterior do terminal)."),
     yolo: bool = typer.Option(False, "-y", "--yolo", help="Auto-aprova ações sensíveis nesta sessão."),
-    use_tui: bool = typer.Option(True, "--tui/--no-tui",
-                                 help="TUI de tela cheia (default). --no-tui usa o REPL de linha."),
+    use_tui: bool = typer.Option(False, "--tui/--no-tui",
+                                 help="REPL de linha (default — seleção nativa do terminal, igual Hermes). "
+                                      "--tui usa a TUI Textual de tela cheia (rouba o mouse: sem seleção nativa)."),
 ) -> None:
     """Conversa com o agente NO TERMINAL — sem Telegram. Sessão persiste (retoma ao reabrir).
 
-    Por padrão abre a TUI de tela cheia (regiões fixas, mouse, scroll, status pinado, aprovação por
-    botão). Use --no-tui pro REPL de linha. Slash commands (iguais ao Telegram — `/commands` lista tudo):
+    Por padrão usa o REPL de linha (prompt_toolkit, estilo Hermes/Claude-Code): o output imprime normal,
+    então a SELEÇÃO e cópia NATIVA do terminal funcionam (arrasta + Cmd/Ctrl+C), com autocomplete na linha
+    e status embaixo. --tui abre a TUI Textual de tela cheia (bonita, mas captura o mouse → sem seleção
+    nativa). Slash commands (iguais ao Telegram — `/commands` lista tudo):
     /new /status /stop /background /title /model /think /usage /tools /sessions /resume /compact /persona
     /feedback /yolo /help. Saia com /exit ou Ctrl-D."""
     from okami.gateway import AgentEndpoint

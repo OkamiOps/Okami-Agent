@@ -289,8 +289,8 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     if resumed:
         tips.append(f"\n↻ retomando conversa ({resumed} trocas anteriores)", style=MUTE)
     tips.append("\n✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.", style=MUTE)
-    tips.append("\n🖱 arraste pra selecionar (fica marcado) → ^C copia a seleção · /copy copia a última "
-                "resposta inteira.", style=MUTE)
+    tips.append("\n🖱 arraste pra selecionar e copie NORMAL (Cmd/Ctrl+C — seleção nativa do terminal) · "
+                "/copy copia a última resposta inteira.", style=MUTE)
     return Group(header, Text(""), panel, tips)
 
 
