@@ -12,6 +12,20 @@ from okami.cli._shared import (
 )
 
 
+def _make_redacting_history(path: str):
+    """FileHistory que REDIGE segredo antes de gravar (M1): o usuário pode colar API_KEY=sk-… num prompt,
+    e isso ia VERBATIM p/ ~/.okami/chat_history (plaintext). Agora passa pelo redact() (sk-/ghp_/Bearer/AKIA…)."""
+    from prompt_toolkit.history import FileHistory
+
+    from okami.core.redact import redact
+
+    class _RedactingFileHistory(FileHistory):
+        def store_string(self, string: str) -> None:
+            super().store_string(redact(string))
+
+    return _RedactingFileHistory(path)
+
+
 def _wait_for_turn(ep, cid: str, poll: float = 0.05) -> None:
     """Bloqueia o REPL até a tarefa terminar — ou até o agente PEDIR aprovação (vira o próximo input)."""
     import time as _t
@@ -38,7 +52,6 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         from prompt_toolkit.completion import WordCompleter
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.formatted_text import ANSI
-        from prompt_toolkit.history import FileHistory
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.patch_stdout import patch_stdout
     except Exception:  # noqa: BLE001 — sem prompt_toolkit: REPL simples garante o essencial
@@ -73,7 +86,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     for _k, _c in (("y", "/yes"), ("Y", "/yes"), ("a", "/always"), ("s", "/always"), ("n", "/no"), ("N", "/no")):
         _bind_key(_k, _c)
 
-    session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
+    session = PromptSession(history=_make_redacting_history(str(hist_dir / "chat_history")),
                             completer=WordCompleter(cmds, sentence=True, ignore_case=True),
                             key_bindings=_kb, erase_when_done=True)   # apaga o eco cru → a fala vira moldura
     import shutil as _sh

@@ -256,3 +256,17 @@ def test_env_wrapper_does_not_hide_mutating_command():
     assert shell_has_effect("env") is False
     assert shell_has_effect("printenv") is False
     assert shell_has_effect("env | grep PATH") is False
+
+
+def test_repl_history_redacts_secrets_before_persisting():
+    # M1 (achado do agente): o usuário pode colar 'API_KEY=sk-…' num prompt e isso ia VERBATIM p/
+    # ~/.okami/chat_history (plaintext). O histórico do REPL agora redige antes de gravar.
+    from okami.cli.commands.chat import _make_redacting_history
+    d = pathlib.Path(tempfile.mkdtemp())
+    hist = d / "chat_history"
+    h = _make_redacting_history(str(hist))
+    sk = "sk-" + "abcdef0123456789ABCDEF"
+    h.store_string(f"export API_KEY={sk}")
+    body = hist.read_text(encoding="utf-8")
+    assert sk not in body, "segredo persistido em plaintext no histórico do REPL"
+    assert "API_KEY" in body, "estrutura da linha deveria ser preservada (só o segredo mascarado)"
