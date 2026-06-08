@@ -75,7 +75,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
                             completer=WordCompleter(cmds, sentence=True, ignore_case=True),
-                            key_bindings=_kb)
+                            key_bindings=_kb, erase_when_done=True)   # apaga o eco cru → a fala vira moldura
     import shutil as _sh
     _ORANGE, _DIM, _RST = "\x1b[1;38;2;255;117;39m", "\x1b[38;2;61;62;80m", "\x1b[0m"
 
@@ -116,9 +116,18 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
                     "    Ctrl-C cancela · Ctrl-D sai ")
 
+    def _user_panel(msg: str):                        # fala do usuário em MOLDURA CIANO (simetria c/ o agente laranja)
+        from datetime import datetime
+        from rich.box import ROUNDED
+        from rich.panel import Panel
+        from rich.text import Text
+        return Panel(Text(msg, style="#f4f4f8"), title="[bold #00dfe8]● você[/]", title_align="left",
+                     subtitle=f"[dim]{datetime.now().strftime('%H:%M')}[/]", subtitle_align="right",
+                     border_style="#00dfe8", box=ROUNDED, padding=(0, 1), expand=True)
+
     while True:
         try:
-            with patch_stdout(raw=True):
+            with patch_stdout(raw=True):                # erase_when_done (no PromptSession) apaga o eco cru
                 line = session.prompt(_prompt_msg, bottom_toolbar=_toolbar, placeholder=_placeholder,
                                       refresh_interval=0.5)
         except EOFError:                                # Ctrl-D → sai
@@ -134,6 +143,10 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             continue
         if not (line and line.strip()):
             continue
+        if line.strip().startswith("/"):                # comando: eco curto (não vira moldura de fala)
+            console.print(f"[#00dfe8]❯[/] [dim]{line.strip()}[/]")
+        else:                                           # fala do usuário → moldura ciano
+            console.print(_user_panel(line.strip()))
         decision = _route_repl_line(line, busy=_busy(), pending_approval=cid in ep._pending)
         if decision == "exit":
             break
