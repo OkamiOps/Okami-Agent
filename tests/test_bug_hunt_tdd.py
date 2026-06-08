@@ -13,9 +13,11 @@ from okami.core.tools.files import ReadFile, RunShell
 
 
 def _ws_with_secrets():
+    # conteúdo INÓCUO de propósito: o bloqueio é pelo NOME/path (.env, id_rsa) — não pelo conteúdo. Evita
+    # acionar o secret-scan do repo com segredo-fixture realista.
     ws = pathlib.Path(tempfile.mkdtemp())
-    (ws / ".env").write_text("MINIMAX_API_KEY=sk-secret-123\n", encoding="utf-8")
-    (ws / "id_rsa").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n", encoding="utf-8")
+    (ws / ".env").write_text("EXEMPLO_VAR=valor-de-teste-nao-secreto\n", encoding="utf-8")
+    (ws / "id_rsa").write_text("conteudo-fake-de-chave-so-pra-teste\n", encoding="utf-8")
     (ws / "normal.txt").write_text("texto comum\n", encoding="utf-8")
     return ws
 
