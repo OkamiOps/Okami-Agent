@@ -23,6 +23,11 @@ class ProcessStart(Tool):
         cmd = args["cmd"]
         policy = ctx.sandbox or default_policy()                 # #5: MESMA política do run_shell
         mode = getattr(policy, "mode", "")
+        from okami.core import approval as _ap
+        _hl = _ap.detect_hardline(cmd)
+        if _hl:                                                  # HARDLINE (Hermes): incondicional, nem /yolo passa
+            return ToolResult(False, f"🛑 BLOQUEADO (hardline): {_hl}. Catastrófico sem uso legítimo — "
+                              f"recusado em QUALQUER modo. ({cmd[:80]})", effect=False)
         if mode == "read-only":                                  # processo longo é sempre efetivo → bloqueia
             return ToolResult(False, "sandbox read-only: process_start (comando longo) bloqueado.", effect=False)
         if mode != "yolo" and _SENSITIVE_PATH.search(cmd):       # P0.1: não exfiltra segredo nem em background

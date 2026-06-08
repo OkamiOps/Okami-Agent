@@ -86,9 +86,13 @@ class EditFile(Tool):
         if rel not in ctx.read_files:
             return ToolResult(False, f"'{rel}' existe mas você não o leu — use read_file antes de "
                                      "editar (grounding; edição cega por trecho adivinhado é recusada).")
-        from okami.core.file_safety import read_text_capped, write_text_atomic
+        from okami.core.file_safety import MAX_WRITE_BYTES, read_text_capped, write_text_atomic
         try:
-            text = read_text_capped(p)
+            # P1 do audit 2026-06-07: EditFile usava MAX_READ_BYTES (5MB) e quebrava com
+            # mensagem confusa ("use run_shell p/ fatiar") mesmo quando o `old` cabia nos
+            # primeiros MB. Agora usa o mesmo teto da escrita (10MB) — o `old` que cabe em
+            # 10MB é editável; o que não cabe, retorna erro claro com o limite.
+            text = read_text_capped(p, limit=MAX_WRITE_BYTES)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao ler {rel}: {e}")
         count = text.count(old)
@@ -180,6 +184,11 @@ class RunShell(Tool):
             except (TypeError, ValueError):
                 pass                                              # timeout inválido → ignora, usa o da policy
         mode = getattr(policy, "mode", "")
+        from okami.core import approval as _ap
+        _hl = _ap.detect_hardline(cmd)
+        if _hl:                                                  # HARDLINE (Hermes): bloqueio INCONDICIONAL —
+            return ToolResult(False, f"🛑 BLOQUEADO (hardline): {_hl}. Comando catastrófico sem uso "  # nem /yolo passa
+                              f"legítimo — recusado em QUALQUER modo. ({cmd[:80]})", effect=False)
         if mode == "read-only" and eff:                          # defesa em profundidade (perfil)
             return ToolResult(False, f"sandbox read-only: comando que altera estado bloqueado ({cmd[:80]})",
                               effect=False)

@@ -29,12 +29,20 @@ def sanitized_env() -> dict[str, str]:
 
 # #2 do self-review do Okami: shell read-only NÃO conta como progresso (não engana o watchdog §3.3).
 _SHELL_MUTATES = re.compile(
+    # find listado como MUTANTE — `find -delete` e `find -exec rm` apagam arquivos (Hermes
+    # tools/approval.py:409-410 tem exatamente este pattern; Okami não tinha — P0 do audit
+    # 2026-06-07). O tratamento granular de `-delete` / `-exec ... rm` vem na 2ª alternativa
+    # do regex (lê qualquer flag antes/depois do find).
     r"\b(rm|rmdir|mv|cp|mkdir|touch|ln|dd|chmod|chown|tee|truncate|install|make|cmake|npm|pnpm|yarn|"
-    r"pip|pip3|uv|cargo|go|gradle|mvn|docker|kubectl|terraform|apt|brew|systemctl|kill|pkill)\b"
-    r"|>>?|sed\s+-i|git\s+(commit|push|add|merge|rebase|reset|checkout|clean|stash|tag|init|rm|mv|apply)",
+    r"pip|pip3|uv|cargo|go|gradle|mvn|docker|kubectl|terraform|apt|brew|systemctl|kill|pkill|find)\b"
+    r"|>>?|sed\s+-i|git\s+(commit|push|add|merge|rebase|reset|checkout|clean|stash|tag|init|rm|mv|apply)"
+    r"|\bfind\b[^|&;]*?\s-(delete|exec(?:dir)?\s+[^|&;]*?rm)\b",
     re.IGNORECASE,
 )
-_SHELL_READONLY = {"ls", "find", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "which", "wc",
+# find saiu da allowlist de read-only — agora é MUTANTE (sempre). Comandos find SEM flag destrutiva
+# (`find -name x`) caem no fallback "desconhecido → assume efeito" do `shell_has_effect`
+# (conservador, §3.3) — efeito real disso é 1 classificação a mais no watchdog, NÃO execução.
+_SHELL_READONLY = {"ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "which", "wc",
                    "file", "stat", "tree", "awk", "du", "df", "ps", "env", "printenv", "date",
                    "whoami", "uname", "hostname", "sort", "uniq", "cut", "diff", "sed"}
 
@@ -45,7 +53,14 @@ _SHELL_READONLY = {"ls", "find", "grep", "rg", "cat", "head", "tail", "pwd", "ec
 _SENSITIVE_PATH = re.compile(
     r"\.env\b|\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
     r"\.pem\b|\.key\b|/etc/(passwd|shadow)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
-    r"secrets?\.(env|json|ya?ml)",
+    r"secrets?\.(env|json|ya?ml)"
+    # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s). NÃO o nome
+    # solto: 'config.json'/'settings.json'/'auth.json' são arquivos comuníssimos e bloqueá-los por engano
+    # quebrava `cat config.json`/`.vscode/settings.json` (falso-positivo do audit anterior — narrowed).
+    r"|\.docker/config\.json|\.git-credentials|\.config/gh/hosts|\.kube/config|gh/hosts"
+    # audit 2026-06-08: locais REAIS de segredo que passavam — histórico de shell (senha colada), gitconfig
+    # (token), secret mounts (docker /run/secrets, k8s service-account token).
+    r"|\.(bash|zsh|python|node_repl)_history\b|[/~.]gitconfig\b|/run/secrets\b|secrets/kubernetes\.io",
     re.IGNORECASE,
 )
 

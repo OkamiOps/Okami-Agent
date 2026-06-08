@@ -78,6 +78,37 @@ def _strip_quoted(cmd: str) -> str:
     return re.sub(r"\"[^\"]*\"|'[^']*'", "''", cmd)
 
 
+# HARDLINE (Hermes tools/approval.py HARDLINE_PATTERNS): catástrofes SEM uso legítimo pelo agente. Estas
+# são BLOQUEADAS de forma INCONDICIONAL — nem /yolo nem /always passam (≠ destructive_shell, que é só gate
+# de aprovação). É a rede que o go/no-go não cobre: um yolo distraído não pode formatar o disco.
+_HARDLINE = [
+    (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|"
+                r"/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*)?)(\s|$)", re.I),
+     "rm recursivo de / ou diretório de sistema"),
+    (re.compile(r"\bmkfs(\.[a-z0-9]+)?\b", re.I), "formatar filesystem (mkfs)"),
+    (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*", re.I), "dd p/ dispositivo cru"),
+    (re.compile(r">\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b", re.I), "redirect p/ dispositivo cru"),
+    (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", re.I), "fork bomb"),
+    (re.compile(_CMDPOS + r"kill\s+(-[^\s]+\s+)*-1\b", re.I), "kill -1 (todos os processos)"),
+    (re.compile(_CMDPOS + r"(shutdown|reboot|halt|poweroff)\b", re.I), "shutdown/reboot/halt/poweroff"),
+    (re.compile(_CMDPOS + r"init\s+[06]\b", re.I), "init 0/6 (shutdown/reboot)"),
+    (re.compile(_CMDPOS + r"systemctl\s+(poweroff|reboot|halt|kexec)\b", re.I), "systemctl poweroff/reboot"),
+    (re.compile(_CMDPOS + r"telinit\s+[06]\b", re.I), "telinit 0/6"),
+]
+
+
+def detect_hardline(cmd: str) -> str | None:
+    """Comando CATASTRÓFICO (rm -rf /, mkfs, fork bomb, shutdown…) → razão do BLOQUEIO INCONDICIONAL (nem
+    yolo passa). None se ok. Usa o mesmo strip de aspas do classify (não dispara em `grep 'mkfs'`)."""
+    if not cmd:
+        return None
+    c = cmd if _RUNS_QUOTED.search(cmd) else _strip_quoted(cmd)
+    for rx, desc in _HARDLINE:
+        if rx.search(c):
+            return desc
+    return None
+
+
 @dataclass
 class Sensitive:
     reason: str
