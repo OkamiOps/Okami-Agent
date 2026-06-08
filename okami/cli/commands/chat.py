@@ -34,9 +34,12 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         return
     try:
         from prompt_toolkit import PromptSession
+        from prompt_toolkit.application import get_app
         from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.filters import Condition
         from prompt_toolkit.formatted_text import ANSI
         from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.patch_stdout import patch_stdout
     except Exception:  # noqa: BLE001 — sem prompt_toolkit: REPL simples garante o essencial
         _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
@@ -51,8 +54,28 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     hist_dir.mkdir(parents=True, exist_ok=True)
     from okami import commands as _cmds              # autocomplete vem do REGISTRO declarativo
     cmds = _cmds.all_slash_names(scope="chat")
+
+    # APROVAÇÃO por 1 TECLA (sem digitar /yes): quando há aprovação pendente E a linha está vazia,
+    # y=sim · a/s=sempre · n=não resolvem na hora. Se já digitou algo, a tecla é normal (não atrapalha).
+    _kb = KeyBindings()
+
+    def _can_quickapprove() -> bool:
+        try:
+            return cid in ep._pending and not get_app().current_buffer.text.strip()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _bind_key(key: str, cmd: str) -> None:
+        @_kb.add(key, filter=Condition(_can_quickapprove))
+        def _(event, _c=cmd):  # noqa: ANN001
+            event.app.exit(result=_c)
+
+    for _k, _c in (("y", "/yes"), ("Y", "/yes"), ("a", "/always"), ("s", "/always"), ("n", "/no"), ("N", "/no")):
+        _bind_key(_k, _c)
+
     session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
-                            completer=WordCompleter(cmds, sentence=True, ignore_case=True))
+                            completer=WordCompleter(cmds, sentence=True, ignore_case=True),
+                            key_bindings=_kb)
     import shutil as _sh
     _ORANGE, _DIM, _RST = "\x1b[1;38;2;255;117;39m", "\x1b[38;2;61;62;80m", "\x1b[0m"
 
@@ -82,8 +105,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     def _toolbar():
         if cid in ep._pending:                    # APROVAÇÃO pendente → barra BERRANTE (preto sobre amarelo)
-            return ANSI("\x1b[1;30;43m ⚠ APROVAÇÃO PENDENTE — digite  /yes  ·  /always (não pergunta mais)  "
-                        "·  /no                                                        \x1b[0m")
+            return ANSI("\x1b[1;30;43m ⚠ APROVAÇÃO PENDENTE — tecle  [y] sim  ·  [a] sempre (não pergunta "
+                        "mais)  ·  [n] não                                            \x1b[0m")
         try:
             pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
         except Exception:  # noqa: BLE001

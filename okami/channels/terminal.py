@@ -84,9 +84,13 @@ class TerminalChannel(Channel):
         except Exception:  # noqa: BLE001
             pass
         from rich.box import HEAVY
+        from rich.console import Group
         from rich.panel import Panel
         from rich.text import Text
-        self._console.print(Panel(Text(text, style="bold"), title="[bold black on yellow] ⚠ APROVAÇÃO PENDENTE — responda abaixo [/]",
+        body = Group(Text(text, style="bold"),
+                     Text("→ tecle  y (sim)  ·  a (sempre, não pergunta mais)  ·  n (não)",
+                          style="bold green"))
+        self._console.print(Panel(body, title="[bold black on yellow] ⚠ APROVAÇÃO PENDENTE [/]",
                                   title_align="left", border_style="bold yellow", box=HEAVY, padding=(0, 1)))
 
     def send_audio(self, chat_id, audio_path) -> None:
