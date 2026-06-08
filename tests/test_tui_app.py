@@ -194,3 +194,37 @@ def test_tui_send_approval_opens_panel_with_action(tmp_path):
 def test_tui_channel_has_send_approval():
     from okami.tui_app import TuiChannel
     assert hasattr(TuiChannel, "send_approval")     # o canal expõe o caminho de painel (não cai no texto)
+
+
+def test_copy_command_routes():
+    from okami import tui
+    assert tui._route_repl_line("/copy", busy=False, pending_approval=False) == "copy"
+    assert tui._route_repl_line("/copy all", busy=False, pending_approval=False) == "copy"
+    # /copy é comando de chat (autocomplete) e tem alias /yank
+    from okami import commands as _cmds
+    assert _cmds.resolve("/copy") is not None and _cmds.resolve("/yank").name == "copy"
+
+
+def test_cmd_copy_puts_last_reply_on_clipboard(tmp_path):
+    # /copy copia a ÚLTIMA resposta da agente (sem precisar selecionar) — resolve o "não consigo copiar".
+    out = {}
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            copied = {}
+            app.copy_to_clipboard = lambda txt: copied.setdefault("txt", txt)
+            app.transcript.extend([("user", "oi"), ("agent", "primeira"), ("user", "e ai"),
+                                   ("agent", "RELATÓRIO: bug X em base.py:31")])
+            app._cmd_copy("/copy")
+            out["last"] = copied.get("txt")
+            copied.clear()
+            app._cmd_copy("/copy all")
+            out["all"] = copied.get("txt")
+            out["notes"] = [v for k, v in app.transcript if k == "note"]
+
+    asyncio.run(scenario())
+    assert out["last"] == "RELATÓRIO: bug X em base.py:31"            # só a última resposta
+    assert "primeira" in out["all"] and "RELATÓRIO" in out["all"] and "você: oi" in out["all"]  # conversa inteira

@@ -61,6 +61,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("status", "session state (turns, model, yolo)", "info", tier="essential"),
     CommandDef("usage", "tokens + accumulated cost for the session", "info"),
     CommandDef("tools", "list the tools the agent has", "info"),
+    CommandDef("copy", "copy the last reply to the clipboard (/copy all = whole chat)", "info",
+               ("yank",), args="[all]", scope="chat", tier="essential"),
     CommandDef("details", "tool-call verbosity: hidden | collapsed | expanded", "info",
                args="[level]", scope="chat", tier="power"),
     CommandDef("agents", "activity panel: current turn, /background and queue", "info", ("tasks",),

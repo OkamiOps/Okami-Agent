@@ -183,7 +183,7 @@ def _skill_category(s) -> str:
 def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
     """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
 
-    Retorna: exit · help · details · agents · skin · mouse · approval · stop · queue · handle.
+    Retorna: exit · help · details · agents · skin · mouse · copy · approval · stop · queue · handle.
     - comandos de DISPLAY (help/details/agents) são CLIENTE — não vão pro endpoint;
     - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
     - /stop sempre passa direto (cancela mesmo ocupado);
@@ -202,6 +202,8 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
         return "skin"
     if head == "/mouse":                                # mouse on/off (cliente)
         return "mouse"
+    if head == "/copy":                                 # copia a última resposta p/ o clipboard (cliente)
+        return "copy"
     if pending_approval:
         return "approval"
     if low in ("/stop", "/cancel", "/parar"):

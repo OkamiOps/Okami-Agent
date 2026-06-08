@@ -125,6 +125,10 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
             console.print(f"[dim]🎨 {decision} só vale na TUI de tela cheia (rode `okami chat` sem --no-tui).[/dim]")
             continue
+        if decision == "copy":                          # no REPL o terminal NÃO captura o mouse → seleção nativa
+            console.print("[dim]📋 no modo --no-tui você seleciona com o mouse e copia normal "
+                          "(Cmd/Ctrl+C). O /copy é da TUI de tela cheia.[/dim]")
+            continue
         if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
             inflight.append(line)
             if decision == "queue":

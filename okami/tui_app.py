@@ -343,6 +343,8 @@ if _HAS_TEXTUAL:
                         self.call_from_thread(self._cmd_skin, line)
                     elif d == "mouse":
                         self.call_from_thread(self._cmd_mouse, line)
+                    elif d == "copy":
+                        self.call_from_thread(self._cmd_copy, line)
                     elif d in ("approval", "stop"):
                         self._safe_handle(line)
                     else:                                  # handle | queue → fila (1 só produtor)
@@ -358,6 +360,29 @@ if _HAS_TEXTUAL:
                 self.ep.handle(self._cid, line)
             except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a TUI
                 self.call_from_thread(self.sink_note, f"erro: {e}")
+
+        def _cmd_copy(self, line: str) -> None:
+            """Copia a ÚLTIMA resposta da agente pro clipboard (sem precisar selecionar). `/copy all` =
+            conversa inteira. Resolve "não consigo selecionar no TUI" — é só digitar /copy e colar."""
+            from rich.text import Text
+            log = self.query_one("#log", RichLog)
+            arg = line.split(maxsplit=1)[1].strip().lower() if " " in line else ""
+            if arg in ("all", "tudo", "conversa", "chat"):
+                text = "\n\n".join(f"{'você' if k == 'user' else 'okami'}: {t}"
+                                   for k, t in self.transcript if k in ("user", "agent"))
+                label = "conversa inteira"
+            else:
+                agents = [t for k, t in self.transcript if k == "agent"]
+                text, label = (agents[-1] if agents else ""), "última resposta"
+            if not text.strip():
+                log.write(Text("  📋 nada pra copiar ainda.", style="dim"))
+                return
+            try:
+                self.copy_to_clipboard(text)
+                log.write(Text(f"  📋 copiado: {label} ({len(text)} chars) — cole onde quiser. "
+                               "(/copy all = conversa inteira)", style="dim"))
+            except Exception as e:  # noqa: BLE001
+                log.write(Text(f"  📋 não consegui copiar: {e}", style="dim"))
 
         def _cmd_details(self, line: str) -> None:
             from rich.text import Text

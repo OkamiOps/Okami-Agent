@@ -45,6 +45,7 @@ MESSAGES: dict[str, str] = {
     "cmd.status": "estado da sessão (trocas, modelo, yolo)",
     "cmd.usage": "tokens + custo acumulados da sessão",
     "cmd.tools": "lista as ferramentas que o agente tem",
+    "cmd.copy": "copia a última resposta pro clipboard (/copy all = conversa inteira)",
     "cmd.details": "verbosidade dos tool-calls: hidden | collapsed | expanded",
     "cmd.agents": "painel de atividade: turno, /background e fila",
     "cmd.skin": "troca o tema da TUI (okami | nord | dracula | …)",
