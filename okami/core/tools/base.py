@@ -58,15 +58,36 @@ _SENSITIVE_PATH = re.compile(
     r"\.env\b|\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
     r"\.pem\b|\.key\b|/etc/(passwd|shadow)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
     r"secrets?\.(env|json|ya?ml)"
-    # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s). NÃO o nome
-    # solto: 'config.json'/'settings.json'/'auth.json' são arquivos comuníssimos e bloqueá-los por engano
-    # quebrava `cat config.json`/`.vscode/settings.json` (falso-positivo do audit anterior — narrowed).
+    # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s); NAO o nome solto
+    # ('config.json'/'settings.json' sao comuns -> narrowed, falso-positivo do audit anterior).
     r"|\.docker/config\.json|\.git-credentials|\.config/gh/hosts|\.kube/config|gh/hosts"
-    # audit 2026-06-08: locais REAIS de segredo que passavam — histórico de shell (senha colada), gitconfig
-    # (token), secret mounts (docker /run/secrets, k8s service-account token).
-    r"|\.(bash|zsh|python|node_repl)_history\b|[/~.]gitconfig\b|/run/secrets\b|secrets/kubernetes\.io",
+    # audit 2026-06-08: historico de shell (senha colada), gitconfig (token), secret mounts (docker/k8s).
+    r"|\.(bash|zsh|python|node_repl)_history\b|[/~.]gitconfig\b|/run/secrets\b|secrets/kubernetes\.io"
+    # audit 2026-06-08 P3 residual: DB client (pgpass/my.cnf), cloud SDK legacy (boto/azure), env-leak via
+    # /proc + printenv/echo $VAR + env|grep. Ancorados (?![.\w]) pra nao casar em arquivo comum.
+    r"|[/~.](?:pgpass|my\.cnf|my\.login\.cnf)(?![.\w])|(?:^|[/~])\.boto(?![.\w])|[/~.]azure/"
+    r"|/proc/(self|1)/environ\b|\benv\s*\|\s*grep\b|\bprintenv\s+[A-Z_]|\becho\s+\$[A-Z_]",
     re.IGNORECASE,
 )
+
+
+def _unwrap_env(tok: list[str]) -> list[str]:
+    """`env [flags] [NAME=VALUE]... [CMD...]` → tokens do CMD REAL. `env` não muta nada, mas o comando que
+    ele INVOCA pode — sem isto, `env X=1 ./deploy.sh` era lido como read-only (env está na allowlist)."""
+    if not tok or tok[0].lstrip("(").lower() != "env":
+        return tok
+    i = 1
+    while i < len(tok):
+        t = tok[i]
+        if t in ("-u", "-C", "--unset", "--chdir"):    # flag que CONSOME um argumento
+            i += 2
+        elif t.startswith("-"):                        # flag simples (-i, -0, -v, -S, --null, …)
+            i += 1
+        elif "=" in t and not t.startswith(("/", ".")):  # NAME=VALUE
+            i += 1
+        else:
+            break
+    return tok[i:]
 
 
 def shell_has_effect(cmd: str) -> bool:
@@ -74,7 +95,7 @@ def shell_has_effect(cmd: str) -> bool:
     if _SHELL_MUTATES.search(cmd):
         return True
     for part in re.split(r"[|&;]+", cmd):              # cada subcomando (pipe/and/seq)
-        tok = part.strip().split()
+        tok = _unwrap_env(part.strip().split())        # env VAR=val CMD → o efeito é do CMD, não do env
         if not tok:
             continue
         head = tok[0].lstrip("(").lower()

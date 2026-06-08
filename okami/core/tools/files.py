@@ -15,6 +15,11 @@ class ReadFile(Tool):
 
     def run(self, args, ctx):
         rel = args["path"]
+        mode = getattr(ctx.sandbox, "mode", "")          # simetria com run_shell: read_file NÃO pode ser a
+        if mode != "yolo" and _SENSITIVE_PATH.search(str(rel)):  # porta dos fundos p/ exfiltrar segredo
+            return ToolResult(False, "sandbox: arquivo sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
+                              f"bloqueado p/ não vazar segredo. Use o perfil yolo se for de propósito. ({rel})",
+                              effect=False)
         from okami.core.file_safety import read_text_capped
         try:
             p = _safe_path(ctx, rel)

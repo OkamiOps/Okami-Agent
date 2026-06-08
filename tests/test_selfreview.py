@@ -68,6 +68,14 @@ def test_sensitive_path_coverage():
     ]
     for cmd in should_match:
         assert _SENSITIVE_PATH.search(cmd), f"deveria detectar: {cmd}"
+    p3_should_match = [
+        "cat ~/.pgpass", "cat ~/.my.cnf", "cat ~/.my.login.cnf",
+        "cat ~/.boto", "cat ~/.azure/accessTokens.json",
+        "cat /proc/self/environ", "cat /proc/1/environ",
+        "env | grep -i AWS", "printenv API_KEY", "echo $AWS_SECRET_ACCESS_KEY",
+    ]
+    for cmd in p3_should_match:
+        assert _SENSITIVE_PATH.search(cmd), f"P3 deveria detectar: {cmd}"
     should_not_match = [                                 # arquivo COMUM — não pode bloquear por engano
         "cat config.json", "cat settings.json", "cat .vscode/settings.json", "cat auth.json",
         "cat package.json", "cat tsconfig.json", "cat README.md", "cat ~/.bashrc",
@@ -75,6 +83,12 @@ def test_sensitive_path_coverage():
     ]
     for cmd in should_not_match:
         assert not _SENSITIVE_PATH.search(cmd), f"NAO deveria detectar: {cmd}"
+    p3_should_not_match = [
+        "cat test.boto", "cat notes.cnf", "cat config.my.cnf.example",
+        "echo hello world", "echo done", "env --help", "printenv.txt",
+    ]
+    for cmd in p3_should_not_match:
+        assert not _SENSITIVE_PATH.search(cmd), f"P3 NAO deveria detectar: {cmd}"
 
 
 def test_hardline_blocks_catastrophes_unconditionally():
