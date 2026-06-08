@@ -103,6 +103,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     threading.Thread(target=_drain, daemon=True).start()
 
+    _busy_since = [None]                          # quando o agente começou a pensar (p/ o elapsed ao vivo)
+
     def _toolbar():
         if cid in ep._pending:                    # APROVAÇÃO pendente → barra BERRANTE (preto sobre amarelo)
             return ANSI("\x1b[1;30;43m ⚠ APROVAÇÃO PENDENTE — tecle  [y] sim  ·  [a] sempre (não pergunta "
@@ -111,7 +113,13 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
         except Exception:  # noqa: BLE001
             pct, turns = 0, 0
-        state = "🧠 pensando" if _busy() else "● pronto"
+        if _busy():                               # contador AO VIVO de quanto o agente está pensando (volta o elapsed)
+            if _busy_since[0] is None:
+                _busy_since[0] = _t.monotonic()
+            state = f"🧠 pensando  {int(_t.monotonic() - _busy_since[0])}s"
+        else:
+            _busy_since[0] = None
+            state = "● pronto"
         q = f"  ·  {len(inflight)} na fila" if inflight else ""
         return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
                     "    Ctrl-C cancela · Ctrl-D sai ")
