@@ -34,6 +34,14 @@ def _cron_execute(job: dict, workspace: str):
         cfg, ws = (effective_config(graw, spec), spec.dir) if spec else (_load(), Path(workspace))
     else:
         cfg, ws = _load(), Path(workspace)
+    if job.get("action") == "curator":               # ação INTERNA: roda o curator (não um prompt do harness)
+        from okami.home import skills_dir
+        from okami.learning import curator as cur
+        root = skills_dir()
+        cur.snapshot(root)                           # reversível: snapshot antes de arquivar/consolidar
+        archived = cur.archive_unused(root)
+        cur.run_consolidation(cfg, str(ws), root, emit=lambda m: None)
+        return f"curator: arquivadas {len(archived)} skills sem uso + consolidação rodada"
     t = run_task(cfg, ws, job["prompt"], emit=lambda m: None)
     return t.result or t.reason or t.state.value
 

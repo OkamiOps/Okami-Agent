@@ -57,6 +57,27 @@ def curator_main(
     console.print("[green]✓ curator concluído.[/green]")
 
 
+@curator_app.command("schedule")
+def curator_schedule(
+    schedule: str = typer.Option("0 4 * * 0", "--schedule",
+                                 help="cron 5-campos (default: domingo 04:00 = SEMANAL, como o Hermes)."),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+    remove: bool = typer.Option(False, "--remove", help="Remove o agendamento do curator."),
+) -> None:
+    """Agenda o curator pra rodar SOZINHO (semanal). O gateway acorda e executa (ou `okami cron tick`)."""
+    from okami.automation.scheduler import Scheduler
+    sch = Scheduler(workspace)
+    for j in sch.load():                             # idempotente: tira o agendamento anterior do curator
+        if j.get("action") == "curator":
+            sch.remove(j["id"])
+    if remove:
+        console.print("[green]✓ agendamento do curator removido.[/green]")
+        return
+    job = sch.add(schedule, "curator: consolida/arquiva skills auto-criadas", action="curator")
+    console.print(f"[green]✓ curator agendado[/green] [bold]{job['id']}[/bold] · {schedule} "
+                  "[dim](semanal). Roda pelo gateway, ou force com: okami cron tick.[/dim]")
+
+
 @curator_app.command("rollback")
 def curator_rollback() -> None:
     """Desfaz a última passada do curator (restaura o snapshot mais recente)."""

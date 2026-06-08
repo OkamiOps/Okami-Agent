@@ -133,3 +133,32 @@ def test_curator_cli_pin(tmp_path, monkeypatch):
     res = runner.invoke(app, ["curator", "--no-llm", "--yes"])
     assert res.exit_code == 0
     assert "agent-old" in {s.name for s in load_skills(tmp_path)}    # pinada sobreviveu
+
+
+# ----------------------------------------------------------------- cron (rodar sozinho, semanal)
+def test_curator_schedule_registers_and_is_idempotent(tmp_path):
+    res = runner.invoke(app, ["curator", "schedule", "-w", str(tmp_path)])
+    assert res.exit_code == 0 and "agendado" in res.output
+    from okami.automation.scheduler import Scheduler
+    jobs = [j for j in Scheduler(str(tmp_path)).load() if j.get("action") == "curator"]
+    assert len(jobs) == 1 and jobs[0]["schedule"] == "0 4 * * 0" and jobs[0]["kind"] == "cron"
+    # rodar de novo NÃO duplica (idempotente)
+    runner.invoke(app, ["curator", "schedule", "-w", str(tmp_path)])
+    assert len([j for j in Scheduler(str(tmp_path)).load() if j.get("action") == "curator"]) == 1
+    # --remove tira
+    runner.invoke(app, ["curator", "schedule", "-w", str(tmp_path), "--remove"])
+    assert [j for j in Scheduler(str(tmp_path)).load() if j.get("action") == "curator"] == []
+
+
+def test_cron_execute_routes_curator_action(tmp_path, monkeypatch):
+    # _cron_execute com action=curator roda o curator (snapshot+archive+consolidação), NÃO um prompt.
+    import okami.cli.commands.cron as cronmod
+    from okami.learning import curator as cur
+    calls = {}
+    monkeypatch.setattr("okami.home.skills_dir", lambda: tmp_path)
+    monkeypatch.setattr(cur, "snapshot", lambda root, **k: calls.setdefault("snap", True))
+    monkeypatch.setattr(cur, "archive_unused", lambda root, **k: ["a", "b"])
+    monkeypatch.setattr(cur, "run_consolidation", lambda *a, **k: calls.setdefault("consol", True))
+    monkeypatch.setattr(cronmod, "_load", lambda: object())
+    out = cronmod._cron_execute({"action": "curator", "prompt": "x"}, str(tmp_path))
+    assert calls.get("snap") and calls.get("consol") and "arquivadas 2" in out

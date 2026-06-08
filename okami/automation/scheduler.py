@@ -151,7 +151,8 @@ class Scheduler:
         tmp.write_text(json.dumps(jobs, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
         os.replace(tmp, self.path)
 
-    def add(self, schedule: str, prompt: str, agent: str | None = None, target: str | None = None) -> dict:
+    def add(self, schedule: str, prompt: str, agent: str | None = None, target: str | None = None,
+            action: str | None = None) -> dict:
         jobs = self.load()
         base = _slug(prompt)
         jid, i = base, 2
@@ -160,6 +161,8 @@ class Scheduler:
             jid, i = f"{base}-{i}", i + 1
         job = {"id": jid, "schedule": schedule, "kind": parse_schedule(schedule)["kind"],
                "prompt": prompt, "agent": agent, "target": target, "enabled": True, "last_run": None}
+        if action:                                   # ação INTERNA (ex.: 'curator') em vez de prompt p/ o harness
+            job["action"] = action
         jobs.append(job)
         self.save(jobs)
         return job
