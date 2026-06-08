@@ -303,21 +303,6 @@ if _HAS_TEXTUAL:
             self.query_one("#log", RichLog).write(self._user_block(text))
             self._input_q.put(text)
 
-        def on_mouse_up(self, event) -> None:
-            # SELEÇÃO + CÓPIA com o mouse LIGADO: arrastou pra selecionar e SOLTOU → copia automático
-            # (sem Ctrl+C, sem precisar desligar o mouse). Clique simples (sem seleção) não copia.
-            try:
-                sel = (self.screen.get_selected_text() or "").strip()
-            except Exception:  # noqa: BLE001
-                sel = ""
-            if len(sel) >= 2:
-                try:
-                    self.copy_to_clipboard(sel)
-                    self.screen.clear_selection()        # limpa p/ não re-copiar no próximo clique
-                    self.sink_note(f"📋 copiado ({len(sel)} chars) — seleção")
-                except Exception:  # noqa: BLE001
-                    pass
-
         def on_button_pressed(self, event) -> None:
             if event.button.id == "approve":
                 self._input_q.put("/yes")

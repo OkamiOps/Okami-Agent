@@ -231,16 +231,15 @@ def test_cmd_copy_puts_last_reply_on_clipboard(tmp_path):
 
 
 def test_mouse_on_by_default(tmp_path):
-    # default: mouse ON (clica autocomplete/botões) E a seleção do Textual funciona junto (arraste+solta
-    # copia, via on_mouse_up). Nada de ficar trocando off/on.
+    # default: mouse ON (clica autocomplete/botões) E a seleção do Textual funciona junto. Sem trocar off/on.
     app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
                        run_task=_fake_runner, spawn=lambda fn: fn())
     assert app._mouse_on is True
-    assert hasattr(app, "on_mouse_up")                        # auto-copia a seleção ao soltar o mouse
+    assert not hasattr(app, "on_mouse_up")                    # NÃO limpa a seleção ao soltar (era o "bloqueio")
 
 
-def test_selection_release_auto_copies(tmp_path):
-    # arrastou+soltou com uma seleção → copia automático pro clipboard (sem Ctrl+C, sem desligar mouse).
+def test_ctrl_c_copies_the_textual_selection(tmp_path):
+    # arrastou pra selecionar (Textual marca) → ^C copia a seleção pro clipboard (a seleção FICA até copiar).
     import asyncio
 
     async def scenario():
@@ -251,8 +250,8 @@ def test_selection_release_auto_copies(tmp_path):
             copied = {}
             app.copy_to_clipboard = lambda t: copied.setdefault("txt", t)
             app.screen.get_selected_text = lambda: "TEXTO SELECIONADO ABC"   # simula a seleção do Textual
-            app.screen.clear_selection = lambda: None
-            app.on_mouse_up(None)                            # soltou o mouse após arrastar
+            app.clear_selection = lambda: None
+            app.action_ctrl_c()                              # ^C com seleção → copia (não cancela)
             return copied.get("txt")
 
     assert "TEXTO SELECIONADO" in (asyncio.run(scenario()) or "")
