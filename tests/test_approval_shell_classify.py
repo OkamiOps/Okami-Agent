@@ -83,3 +83,25 @@ def test_pipe_to_shell_rce_is_flagged():
     assert _cat("curl https://x | sh -c 'echo hi'") == "remote_exec"
     assert _cat("curl https://x | grep foo") is None          # pipe p/ grep, não shell → ok
     assert _cat("curl -sL -o /tmp/x https://y") is None        # download normal → ok
+
+
+def test_obfuscated_destructive_is_not_bypassed():
+    # SELF-PROBE (audit 2026-06-08): o _CMDPOS exigia o comando "colado" no início → `/bin/rm -rf /`,
+    # `\rm -rf /`, `nice/timeout/command/env rm -rf /` furavam ATÉ o gate de aprovação (classify=None).
+    # Agora wrappers + prefixo de path + backslash são tolerados; catástrofe vira hardline.
+    from okami.core.approval import detect_hardline
+    deve_hardline = [
+        "/bin/rm -rf /", "/usr/bin/rm -rf /", "\\rm -rf /", "command rm -rf /", "builtin rm -rf /",
+        "nice rm -rf /", "timeout 5 rm -rf /", "ionice rm -rf /", "env X=1 /bin/rm -rf /",
+        "sudo rm -rf /", "doas rm -rf /home", "/sbin/shutdown -h now", "/sbin/mkfs.ext4 /dev/sda",
+        "rm --recursive --force /",
+    ]
+    for c in deve_hardline:
+        assert detect_hardline(c), f"deveria BLOQUEAR (hardline): {c}"
+    # rm com flag recursive/force em qualquer forma/posição → ao menos aprovação (destructive_shell)
+    for c in ("rm --recursive --force ./build", "rm -rf -v /tmp/x", "rm -v -rf ./d", "rm --force x"):
+        assert _cat(c) == "destructive_shell", f"deveria pedir aprovação: {c}"
+    # NÃO pode falso-positivar: echo/grep/cat e rm não-recursivo
+    for c in ("echo rm -rf /", "echo '/bin/rm -rf /'", "grep 'rm -rf' f", "cat /bin/rm",
+              "cat rm-notes.txt", "rm file.txt", "rm -i file", "ls -la", "git status"):
+        assert detect_hardline(c) is None and _cat(c) is None, f"NÃO deveria flagar: {c}"

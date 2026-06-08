@@ -34,20 +34,21 @@ _FILE_RULES = [
     (re.compile(r"\.(key|pem|p12|pfx)$", re.I), "secret_file", "high"),
 ]
 # Posição de COMANDO (Hermes tools/approval.py _CMDPOS): início da string, ou depois de um separador
-# (; && || | newline ` $( ), opcionalmente consumindo wrappers (sudo/env/exec/nohup/setsid/time). Ancorar
-# o nome do comando perigoso AQUI evita o falso-positivo de auditoria: `grep 'mkfs' arquivo` / `echo rm -rf`
-# NÃO disparam — a palavra perigosa só conta quando é o COMANDO sendo executado, não um argumento/padrão.
-_CMDPOS = (
-    r"(?:^|[;&|\n`]|\$\()\s*"
-    r"(?:sudo\s+(?:-[^\s]+\s+)*)?"
-    r"(?:env\s+(?:\w+=\S*\s+)*)?"
-    r"(?:xargs\s+(?:-[^\s]+\s+)*)?"               # `find … | xargs rm -rf` → rm fica em posição de comando
-    r"(?:(?:exec|nohup|setsid|time)\s+)*\s*"
-)
-_CMDSTART = r"(?:^|[;&|\n`]|\$\()\s*(?:env\s+(?:\w+=\S*\s+)*)?"
+# (; && || | newline ` $( ). Ancorar o nome do comando perigoso AQUI evita o falso-positivo de auditoria
+# (`grep 'mkfs'` / `echo rm -rf` NÃO disparam). MAS o anchor tem que tolerar como o comando REAL é invocado
+# (audit 2026-06-08 self-probe): wrappers (nice/timeout/command/…), prefixo de PATH (/bin/rm) e backslash
+# (\rm) — senão `/bin/rm -rf /`, `nice rm -rf /`, `\rm -rf /` furavam ATÉ o gate de aprovação.
+_WRAP = (r"(?:(?:command|builtin|exec|nohup|setsid|time|nice|ionice|timeout|stdbuf|xargs|sudo|doas|env)"
+         r"\s+(?:-[^\s]+\s+|\d+\s+|\w+=\S*\s+)*)*")   # wrappers que precedem o comando (com flags/num/VAR=val)
+_BINPREFIX = r"\\?(?:[\w.\-]*/)*"                       # backslash + path do binário: \rm · /bin/rm · /usr/bin/rm
+_CMDPOS = r"(?:^|[;&|\n`]|\$\()\s*" + _WRAP + r"\s*" + _BINPREFIX
+_CMDSTART = r"(?:^|[;&|\n`]|\$\()\s*" + _WRAP + r"\s*" + _BINPREFIX
 _SHELL_RULES = [
-    # DESTRUTIVO de verdade — ancorado em posição de comando (não dispara em padrão de grep/argumento):
-    (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*-[a-z]*[rf]", re.I), "destructive_shell", "critical"),
+    # DESTRUTIVO de verdade — ancorado em posição de comando (não dispara em padrão de grep/argumento).
+    # rm com flag recursive/force em QUALQUER posição/forma (-rf, -fr, -r -f, --recursive, --force) —
+    # antes exigia o -rf como ÚLTIMO token → `rm --recursive --force x` e `rm -rf -v x` furavam (self-probe).
+    (re.compile(_CMDPOS + r"rm\b(?=[^|&;\n`]*\s-(?:[a-z]*[rf]|-(?:recursive|force|no-preserve-root)))", re.I),
+     "destructive_shell", "critical"),
     (re.compile(_CMDPOS + r"mkfs(\.[a-z0-9]+)?\b", re.I), "destructive_shell", "critical"),
     (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)", re.I), "destructive_shell", "critical"),
     (re.compile(r">\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b", re.I), "destructive_shell", "critical"),
@@ -71,7 +72,8 @@ _RUNS_QUOTED = re.compile(r"\b(?:ba|z|da)?sh\s+-[a-z]*c\b|\beval\b", re.I)
 # bash -c '…' / eval: gate de APROVAÇÃO (destructive_shell). Amplo — qualquer rm -rf, etc. + desligamentos
 # (init 0/6, systemctl poweroff/reboot/halt/kexec, telinit 0/6 — audit 2026-06-08).
 _EVAL_DANGER = re.compile(
-    r"\brm\s+(-[^\s]*\s+)*-[a-z]*[rf]|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*of=/dev/(sd|nvme|hd|mmcblk|vd|xvd)"
+    r"\brm\b(?=[^|&;\n`]*\s-(?:[a-z]*[rf]|-(?:recursive|force|no-preserve-root)))"
+    r"|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*of=/dev/(sd|nvme|hd|mmcblk|vd|xvd)"
     r"|:\(\)\s*\{\s*:|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b"
     r"|\binit\s+[06]\b|\bsystemctl\s+(poweroff|reboot|halt|kexec)\b|\btelinit\s+[06]\b", re.I)
 # bash -c '…' / eval: bloqueio HARDLINE incondicional. Catástrofes SEM uso legítimo (rm de SISTEMA, não
