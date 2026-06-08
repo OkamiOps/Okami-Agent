@@ -116,6 +116,7 @@ if _HAS_TEXTUAL:
         #status { height: 1; padding: 0 1; color: $text-muted; background: $surface; }
         Button { min-width: 12; margin: 0 1; }
         Button#approve { background: $success; }
+        Button#always { background: $warning; }
         Button#deny { background: $error; }
         """
 
@@ -165,6 +166,7 @@ if _HAS_TEXTUAL:
             with Horizontal(id="approval"):
                 yield Static("⚠ aprovar a ação pendente?", id="approval-label")
                 yield Button("Aprovar", id="approve", variant="success")
+                yield Button("Sempre", id="always", variant="warning")     # libera a categoria a sessão toda
                 yield Button("Negar", id="deny", variant="error")
             yield OptionList(id="cmdmenu")             # autocomplete navegável (↑↓ Enter) + clicável (mouse)
             from okami import commands as _cmds
@@ -312,6 +314,8 @@ if _HAS_TEXTUAL:
         def on_button_pressed(self, event) -> None:
             if event.button.id == "approve":
                 self._input_q.put("/yes")
+            elif event.button.id == "always":
+                self._input_q.put("/always")
             elif event.button.id == "deny":
                 self._input_q.put("/no")
 

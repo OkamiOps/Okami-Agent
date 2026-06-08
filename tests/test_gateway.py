@@ -437,6 +437,50 @@ def test_approval_over_chat_no():
     assert out["ok"] is False
 
 
+def test_approval_always_releases_category_for_session():
+    # Hermes: /always libera a CATEGORIA pra sessão toda — não pergunta de novo (resolve o "aprovo demais").
+    ep = _ep(mode="manual")
+    s = ep.session("7")
+    out = {}
+
+    def w():
+        out["ok"] = ep._approve("7", s)({"reason": "rm -rf x", "risk": "critical",
+                                         "category": "destructive_shell", "tool": "run_shell"})
+    th = threading.Thread(target=w)
+    th.start()
+    for _ in range(200):
+        if "7" in ep._pending:
+            break
+        time.sleep(0.01)
+    ep.handle("7", "/always")
+    th.join(timeout=3)
+    assert out["ok"] is True
+    assert "destructive_shell" in s.approved_cats                  # categoria liberada pra sessão
+    # 2ª ação da MESMA categoria → auto-aprova SEM perguntar (sem pendência)
+    assert ep._approve("7", s)({"reason": "rm -rf y", "risk": "critical",
+                                "category": "destructive_shell"}) is True
+    assert "7" not in ep._pending                                  # não abriu pendência de novo
+    # categoria DIFERENTE ainda pergunta (não é yolo geral)
+    assert "sudo" not in s.approved_cats
+
+
+def test_normal_revokes_session_approvals():
+    ep = _ep(mode="manual")
+    s = ep.session("7")
+    s.approved_cats.add("destructive_shell")
+    ep.handle("7", "/normal")
+    assert not s.approved_cats                                     # /normal limpa as aprovações de sessão
+
+
+def test_session_approvals_persist_across_reload():
+    ep = _ep(mode="manual")
+    s = ep.session("7")
+    s.approved_cats.add("destructive_shell")
+    ep._save_meta("7", s)
+    del ep.sessions["7"]                                           # força recarregar do store
+    assert "destructive_shell" in ep.session("7").approved_cats    # sobreviveu (persistido)
+
+
 def test_build_endpoints_only_agents_with_token():
     specs = {
         "a": AgentSpec("a", Path("."), {"channels": {"telegram": {"token": "X"}}}),

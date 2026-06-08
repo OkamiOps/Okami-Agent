@@ -35,6 +35,8 @@ class Session:
         self.voice_off = False           # /voice off → não responde em áudio (TTS) nesta sessão
         self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
         self.queued: list = []           # mensagens em fila (runtime; não persiste)
+        self.approved_cats: set[str] = set()  # categorias aprovadas PRA SESSÃO (Hermes): não pergunta de
+        #                                       novo (ex.: aprovou 'destructive_shell' uma vez → libera o resto)
 
     def interrupted(self) -> bool:
         """Tarefa interrompida = histórico termina numa fala do USER sem resposta do AGENTE."""
@@ -95,6 +97,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.title = e.get("title", "")
             s.voice_off = bool(e.get("voice_off", False))
             s.busy_mode = e.get("busy_mode", "queue")
+            s.approved_cats = set(e.get("approved_cats", []) or [])   # aprovações de sessão (sobrevivem a restart)
             self.sessions[cid] = s
         return self.sessions[cid]
 
@@ -108,7 +111,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
                                 resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
-                                title=s.title, voice_off=s.voice_off, busy_mode=s.busy_mode)
+                                title=s.title, voice_off=s.voice_off, busy_mode=s.busy_mode,
+                                approved_cats=sorted(s.approved_cats))
 
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
@@ -216,6 +220,9 @@ class AgentEndpoint(EndpointCommandsMixin):
                 return True
             if self.approval_mode == "smart" and req.get("risk") == "low":
                 return True
+            _cat = req.get("category", "")
+            if _cat and _cat in s.approved_cats:           # JÁ aprovado PRA SESSÃO (Hermes) → não pergunta de novo
+                return True
             if self.approval_mode == "off":                # "off" = não pergunta → NEGA sensível (fail-closed)
                 return False
             import secrets
@@ -234,7 +241,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                 if isinstance(_v, str) and _v:
                     brief = f" · {_k}={_v[:80]}"
                     break
-            ask = f"⚠ Aprovar [{req.get('tool', '?')}]{brief}\n{req['reason']} (risco={req.get('risk', '?')})"
+            ask = (f"⚠ Aprovar [{req.get('tool', '?')}]{brief}\n{req['reason']} (risco={req.get('risk', '?')})"
+                   f"\n/yes (1x) · /always (libera '{_cat}' a sessão toda) · /no")
             _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
             if _sa:
                 try:
@@ -242,7 +250,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 except TypeError:                        # canal sem suporte a nonce → compat
                     _sa(chat_id, ask)
             else:
-                self.channel.send(chat_id, ask + " (/yes ou /no)")
+                self.channel.send(chat_id, ask)
             try:
                 ans = q.get(timeout=self.approval_timeout)
             except queue.Empty:
@@ -250,8 +258,15 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.approvals.expire_if_pending(nonce)  # sem resposta → marca expirado no registro
             finally:
                 self._pending.pop(str(chat_id), None)
-            ok = ans.strip().lower() in ("/yes", "yes", "sim", "y", "ok")
-            self.channel.send(chat_id, "✅ aprovado" if ok else "❌ negado")
+            verb = ans.strip().lower()
+            always = verb in ("/always", "/sempre", "/sessao", "/sessão", "always", "sempre")
+            ok = always or verb in ("/yes", "yes", "sim", "y", "ok")
+            if always and _cat:                          # aprova a CATEGORIA pra sessão toda (não pergunta mais)
+                s.approved_cats.add(_cat)
+                self._save_meta(chat_id, s)
+                self.channel.send(chat_id, f"✅ aprovado · '{_cat}' liberado pra esta sessão (não pergunto mais)")
+            else:
+                self.channel.send(chat_id, "✅ aprovado" if ok else "❌ negado")
             return ok
         return approve
 
@@ -271,14 +286,15 @@ class AgentEndpoint(EndpointCommandsMixin):
                 return
             store = getattr(self, "approvals", None)   # ausente em endpoint bare (alguns testes/compat)
             if want and store is not None:             # #7: consome o registro durável (single-use + expiração)
-                decision = "approved" if verb.strip().lower() in ("/yes", "yes", "sim", "y", "ok") else "denied"
+                _ap = ("/yes", "yes", "sim", "y", "ok", "/always", "/sempre", "/sessao", "/sessão", "always", "sempre")
+                decision = "approved" if verb.strip().lower() in _ap else "denied"
                 res = store.consume(want, decision)
                 if not res.ok and res.reason != "desconhecido":   # já usado / expirado → recusa (não re-executa)
                     self.channel.send(chat_id, f"⌛ aprovação inválida ({res.reason}). Use /yes ou /no de novo.")
                     return
             q.put(verb)
             return
-        if text.partition(":")[0].lower() in ("/yes", "/no"):   # aprovação sem nada pendente (clique dup/stale)
+        if text.partition(":")[0].lower() in ("/yes", "/no", "/always", "/sempre"):   # aprovação sem nada pendente
             self.channel.send(chat_id, "nada pendente pra aprovar agora.")
             return
         s = self.session(chat_id)
@@ -301,6 +317,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if low in ("/new", "/reset"):
             s.history.clear()
+            s.approved_cats.clear()                    # sessão nova → zera as aprovações de /always
             self.store.reset(chat_id)                  # arquiva o transcript e zera a contagem
             self.channel.send(chat_id, "🧹 conversa reiniciada.")
             return
@@ -321,8 +338,11 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if low == "/normal":
             s.yolo = False
+            _had = len(s.approved_cats)
+            s.approved_cats.clear()                      # revoga as aprovações de sessão (/always) também
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, "🔒 aprovação normal.")
+            extra = f" ({_had} aprovação(ões) de sessão revogada(s))" if _had else ""
+            self.channel.send(chat_id, f"🔒 aprovação normal.{extra}")
             return
         if low.startswith("/voice"):
             arg = text[len("/voice"):].strip().lower()
