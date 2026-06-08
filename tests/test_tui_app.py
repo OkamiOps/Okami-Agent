@@ -228,3 +228,10 @@ def test_cmd_copy_puts_last_reply_on_clipboard(tmp_path):
     asyncio.run(scenario())
     assert out["last"] == "RELATÓRIO: bug X em base.py:31"            # só a última resposta
     assert "primeira" in out["all"] and "RELATÓRIO" in out["all"] and "você: oi" in out["all"]  # conversa inteira
+
+
+def test_mouse_off_by_default(tmp_path):
+    # default: mouse OFF → seleção nativa do terminal funciona (copiar resultados). /mouse on religa.
+    app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                       run_task=_fake_runner, spawn=lambda fn: fn())
+    assert app._mouse_on is False

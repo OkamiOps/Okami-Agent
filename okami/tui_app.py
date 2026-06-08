@@ -153,7 +153,8 @@ if _HAS_TEXTUAL:
             self._exit_armed = 0.0
             self._busy_since: float | None = None
             self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
-            self._mouse_on = True                         # /mouse off → solta o mouse p/ seleção nativa
+            self._mouse_on = False                        # DEFAULT OFF: seleção nativa do terminal p/ copiar;
+            #                                               /mouse on religa (clique no autocomplete)
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
 
         # ---- layout ----------------------------------------------------------
@@ -178,6 +179,14 @@ if _HAS_TEXTUAL:
             except Exception:  # noqa: BLE001 — se a API de tema mudar, segue no tema padrão
                 pass
             self.query_one("#approval").display = False
+            if not self._mouse_on:                         # solta o mouse no boot → seleção nativa do terminal
+                drv = getattr(self, "_driver", None)        # (copiar com arraste+Cmd/Ctrl+C). /mouse on religa.
+                fn = getattr(drv, "_disable_mouse_support", None)
+                if fn:
+                    try:
+                        fn()
+                    except Exception:  # noqa: BLE001 — driver de teste/headless pode não ter; segue
+                        pass
             if self._new:
                 self.ep.session(self._cid).history.clear()
                 self.ep.store.reset(self._cid)
