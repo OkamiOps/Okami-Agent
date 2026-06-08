@@ -53,7 +53,14 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     cmds = _cmds.all_slash_names(scope="chat")
     session = PromptSession(history=FileHistory(str(hist_dir / "chat_history")),
                             completer=WordCompleter(cmds, sentence=True, ignore_case=True))
-    prompt_fmt = ANSI("\x1b[1;38;2;255;117;39m›\x1b[0m ")
+    import shutil as _sh
+    _ORANGE, _DIM, _RST = "\x1b[1;38;2;255;117;39m", "\x1b[38;2;61;62;80m", "\x1b[0m"
+
+    def _prompt_msg():                            # barra de digitação FIXA embaixo (régua + ❯), estilo TUI/Hermes
+        cols = _sh.get_terminal_size((80, 24)).columns
+        return ANSI(f"{_DIM}{'─' * max(8, cols)}{_RST}\n{_ORANGE}❯{_RST} ")
+
+    _placeholder = ANSI(f"{_DIM}fala comigo…   / p/ comandos · ^C cancela · ^D sai{_RST}")
     inflight: "collections.deque[str]" = collections.deque()   # digitado enquanto ocupado (FIFO)
     stop = threading.Event()
 
@@ -87,7 +94,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     while True:
         try:
             with patch_stdout(raw=True):
-                line = session.prompt(prompt_fmt, bottom_toolbar=_toolbar, refresh_interval=0.5)
+                line = session.prompt(_prompt_msg, bottom_toolbar=_toolbar, placeholder=_placeholder,
+                                      refresh_interval=0.5)
         except EOFError:                                # Ctrl-D → sai
             break
         except KeyboardInterrupt:                       # Ctrl-C → cancela o turno, não sai
