@@ -6,10 +6,63 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 import tempfile
+import threading
+import time
 
 from okami.core.sandbox import default_policy
 from okami.core.tools.base import ToolContext, shell_has_effect
 from okami.core.tools.files import ReadFile, RunShell
+
+
+def test_session_never_runs_two_tasks_concurrently():
+    # BUG (race): o dispatch faz check-then-set de s.busy SEM lock, e o finally do _run faz
+    # `busy=False` → `if s.queued` (drena) também sem lock. Entre as duas threads (a do canal que chama
+    # handle e a do _run que drena), dá pra DOIS _run rodarem na MESMA sessão → corrompe o transcript.
+    # Reproduzido deterministicamente: pausa o _run no `if s.queued` e injeta um handle nova nesse instante.
+    from okami.core import Task, TaskState
+    from okami.channels.terminal import TerminalChannel
+    from okami.gateway import AgentEndpoint
+
+    active = {"n": 0, "max": 0}
+    obs = threading.Lock()
+
+    def run_task(cfg, ws, goal, **kw):
+        with obs:
+            active["n"] += 1
+            active["max"] = max(active["max"], active["n"])
+        time.sleep(0.1)
+        with obs:
+            active["n"] -= 1
+        t = Task(goal=goal)
+        t.state, t.result = TaskState.COMPLETE, "ok"
+        return t
+
+    entered, release = threading.Event(), threading.Event()
+
+    class BarrierList(list):
+        _tripped = False
+
+        def __bool__(self):
+            if not self._tripped:                       # pausa o finally EXATAMENTE no `if s.queued`
+                self._tripped = True
+                entered.set()
+                release.wait(3)
+            return len(self) > 0
+
+    ch = TerminalChannel("okami")                       # console=None → silencioso
+    ep = AgentEndpoint("okami", None, tempfile.mkdtemp(), ch, run_task=run_task,
+                       spawn=lambda fn: threading.Thread(target=fn, daemon=True).start())
+    s = ep.session("c1")
+    s.queued = BarrierList([("msg2", None)])
+    s.busy = True                                       # simula: tarefa rodando + 1 na fila
+
+    threading.Thread(target=lambda: ep._run("c1", "msg1", s), daemon=True).start()
+    assert entered.wait(3), "o _run não chegou no drain"
+    threading.Thread(target=lambda: ep.handle("c1", "msg3"), daemon=True).start()
+    time.sleep(0.05)                                    # deixa o handle(msg3) decidir
+    release.set()                                       # libera o finally → drena msg2
+    time.sleep(0.4)
+    assert active["max"] == 1, f"RACE: {active['max']} tarefas concorrentes na MESMA sessão"
 
 
 def _ws_with_secrets():

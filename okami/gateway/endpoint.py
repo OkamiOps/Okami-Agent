@@ -70,6 +70,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         from okami.gateway.approvals import ApprovalStore
         self.approvals = ApprovalStore(ws)   # aprovação como objeto persistente single-use (#7)
         self.sessions: dict[str, Session] = {}
+        self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
+        #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
         self._pending: dict[str, queue.Queue] = {}
         self._img: dict[str, str] = {}       # imagem pendente por chat (vision §6)
         from collections import OrderedDict
@@ -540,17 +542,20 @@ class AgentEndpoint(EndpointCommandsMixin):
             job = Scheduler(".").add(schedule, prompt, agent=self.agent_id, target=str(chat_id))
             self.channel.send(chat_id, f"⏰ agendei [{job['schedule']}]: {prompt}")
             return
-        if s.busy:                                      # ocupado: enfileira (e corta a atual se modo interrupt)
-            s.queued.append((text, self._img.pop(cid, None)))
-            if s.busy_mode == "interrupt":
-                s.cancel = True
-                self.channel.send(chat_id, "⏹ interrompendo a atual — já começo a sua nova mensagem.")
+        with self._sess_lock:                           # check-then-set ATÔMICO vs. o drain do finally (race)
+            if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
+                s.queued.append((text, self._img.pop(cid, None)))
+                decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
+                if decision == "interrupt":
+                    s.cancel = True
             else:
-                self.channel.send(chat_id, f"⏳ guardei na fila (#{len(s.queued)}) — começo quando a atual terminar.")
-            return
-        s.busy = True
-        s.cancel = False
-        self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
+                s.busy, s.cancel, decision = True, False, "start"
+        if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
+            self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
+        elif decision == "interrupt":
+            self.channel.send(chat_id, "⏹ interrompendo a atual — já começo a sua nova mensagem.")
+        else:
+            self.channel.send(chat_id, f"⏳ guardei na fila (#{qn}) — começo quando a atual terminar.")
 
     def _react(self, chat_id, emoji: str) -> None:
         """Reage à última mensagem do usuário (Telegram). Best-effort, opt-in (self.reactions)."""
@@ -885,11 +890,14 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, f"❌ erro: {e}")
             self._react(chat_id, "👎")
         finally:
-            s.busy = False
-            s.cancel = False
-            if s.queued:                                 # drena a fila: roda a próxima mensagem guardada
-                nxt_text, nxt_img = s.queued.pop(0)
-                s.busy = True
+            with self._sess_lock:                        # reset+drain ATÔMICO vs. o check-then-set do dispatch
+                s.busy = False
+                s.cancel = False
+                nxt = s.queued.pop(0) if s.queued else None
+                if nxt is not None:                      # vai rodar a próxima da fila → segura o busy ligado
+                    s.busy = True
+            if nxt is not None:                          # spawn FORA do lock (não segura a trava no trabalho)
+                nxt_text, nxt_img = nxt
                 self._spawn(lambda t=nxt_text, im=nxt_img: self._run(chat_id, t, s, images=im))
 
     def _maybe_voice(self, chat_id, text: str) -> None:
