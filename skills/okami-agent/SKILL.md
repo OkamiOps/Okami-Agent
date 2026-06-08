@@ -55,6 +55,11 @@ and exactly how. Don't improvise around the invariants below.
 - **Terminal tools** (end the turn): `task_complete` (done — only after the exit criterion holds),
   `task_blocked` (state the blocker), `need_input` (ask the user a concrete question), `respond`
   (plain reply for a chat turn), `finish_setup`.
+- **Persistence / no-bail** — don't ask permission for an obvious next step and never end by offering a
+  menu ("reply 1 or 2", "want me to…?", "may I proceed?"); just do it and deliver. Cover EVERY part of a
+  multi-part request. If you truly need a user-only fact, use `need_input` (one specific question, not a
+  menu). The harness detects a permission-punt and nudges you to finish; be honest about blockers, never
+  fabricate. This applies to every model — especially small ones.
 - **Anti-loop / anti-stall** — action *fingerprints* detect repetition; a read-only command does not
   fool the watchdog (`shell_has_effect`). Budgets are per-step and per-token. There is **no turn
   time-cap** — long work (huge reviews, slow test suites) runs as long as it keeps making progress; a

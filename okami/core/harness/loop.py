@@ -6,6 +6,7 @@ verificados, watchdog/orçamentos, anti-loop (fingerprint+ciclo+breaker), anti-a
 from __future__ import annotations
 
 import json
+import re as _re
 from collections import deque
 from pathlib import Path
 from typing import Callable
@@ -23,6 +24,22 @@ from okami.core.harness.prompt import (
 from okami.core.tools import Tool, ToolContext, ToolResult, default_registry
 from okami.llm.usage import as_completion
 from okami.memory import compaction as _compaction
+
+
+# BAIL: encerrar pedindo permissão / oferecendo um menu de próximos passos em vez de CONCLUIR. É o modo
+# de falha clássico do modelo fraco ("Responde com 1 ou 2 que eu sigo", "quer que eu já aplique…?",
+# "Posso seguir?"). Pego só os padrões DISTINTIVOS — não casa um relatório que de fato entregou.
+_PUNT_RE = _re.compile(
+    r"(respond[ae]\s+com\s+\d|manda\s+\d|\b\d\s*,?\s*(\d\s*,?\s*)*ou\s+\d\b|\bop[cç][ãa]o\s+\d\b|"
+    r"\bposso\s+(seguir|continuar|prosseguir|ir|avan[çc]ar)\b|\bquer\s+que\s+eu\b|"
+    r"\bprefere\b[^.\n]{0,40}\b(que\s+eu|avaliar|primeiro)\b|me\s+(diga|avisa|fala)\s+(se|qual|por\s+onde)|"
+    r"por\s+onde\s+(voc[êe]\s+)?(quer|prefere)|\b(should|shall)\s+i\b|\bwant\s+me\s+to\b|"
+    r"do\s+you\s+want\s+me\s+to|\blet\s+me\s+know\s+(if|whether|which)\b)", _re.I)
+
+
+def _looks_like_punt(text: str) -> bool:
+    """O texto final ENCERRA pedindo permissão / oferecendo menu de próximos passos (bail do modelo fraco)?"""
+    return bool(_PUNT_RE.search(text or ""))
 
 
 class Harness:
@@ -87,6 +104,7 @@ class Harness:
         self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
         self._nudged_action = False
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
+        self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -402,15 +420,17 @@ class Harness:
 
     def _handle_terminal(self, t: Task, action: Action) -> Task | None:
         if action.tool == "respond":                     # FALA com o usuário (ReAct: ramo "texto")
-            # backstop: pediram AÇÃO mas ele só falou sem executar NADA com efeito → re-prompt 1x.
-            if (self._action_expected and not self._nudged_action
-                    and not any(s.effect for s in t.steps)):
+            # backstop: pediram AÇÃO mas ele FALOU sem rodar NENHUMA ferramenta (puro papo de memória) →
+            # re-prompt 1x. Conta passo read-only (list/read) como "olhou": tarefa de análise não exige
+            # EFEITO, exige ter LIDO o que precisa antes de responder (senão era 'not any(effect)' barrando
+            # todo relatório de análise — falso-positivo).
+            if self._action_expected and not self._nudged_action and not t.steps:
                 self._nudged_action = True
-                self._emit("violation", n=0, text="respondeu sem executar a ação pedida")
+                self._emit("violation", n=0, text="respondeu sem rodar nenhuma ferramenta")
                 self.messages.append({"role": "user", "content":
-                    "Você respondeu SEM executar nada. O pedido exige uma ferramenta de verdade "
-                    "(ex.: write_file p/ criar arquivo, run_shell p/ rodar). Faça a AÇÃO agora "
-                    "(um bloco json com a ferramenta certa) — depois confirme com respond."})
+                    "Você respondeu SEM usar nenhuma ferramenta. O pedido exige agir de verdade: leia/liste/"
+                    "rode o que for preciso (read_file, list_dir, find_files, run_shell) e ENTREGUE o "
+                    "resultado real — não responda de memória."})
                 return None
             msg = (action.args.get("message") or action.args.get("summary") or "").strip()
             if not msg and not self._empty_nudged:       # respondeu VAZIO (nem prosa) → pede a resposta 1x
@@ -419,6 +439,17 @@ class Harness:
                 self.messages.append({"role": "user", "content":
                     'Sua resposta veio VAZIA. Responda o usuário de verdade no campo message: '
                     '{"tool": "respond", "args": {"message": "<sua resposta aqui>"}}.'})
+                return None
+            # backstop anti-BAIL (modelo fraco): pediram AÇÃO e ele ENCERROU pedindo permissão / oferecendo
+            # menu ("responde 1 ou 2", "quer que eu…?", "posso seguir?") em vez de concluir → empurra 1x.
+            if self._action_expected and not self._punt_nudged and _looks_like_punt(msg):
+                self._punt_nudged = True
+                self._emit("violation", n=0, text="bail: pediu permissão/menu em vez de concluir")
+                self.messages.append({"role": "user", "content":
+                    "Você ENCERROU pedindo permissão ou oferecendo um menu ('1 ou 2', 'quer que eu…?', "
+                    "'posso seguir?') em vez de CONCLUIR. Não peça permissão pra próximo passo óbvio — "
+                    "faça agora e entregue o resultado COMPLETO de TODAS as partes do pedido. Se falta um "
+                    "dado que SÓ a pessoa tem, use need_input com UMA pergunta específica (não um menu)."})
                 return None
             t.state = TaskState.COMPLETE
             t.result = msg or "(sem resposta)"

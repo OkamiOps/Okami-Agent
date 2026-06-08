@@ -50,9 +50,10 @@ _ACTION_RE = re.compile(
     r"\b(cri[ae]|cri[ae]r|faç[ao]|faz|edit|alter|mud[ae]|atualiz|rod[ae]|execut|implement|"
     r"refator|consert|corrij|arrum|ger[ae]|ger[ae]r|escrev|escrev[ae]|instal|configur|delet|"
     r"apag|remov|adicion|comit|build|create|fix|run|write|generate|install|add|delete|deploy|"
-    # inspeção também EXIGE agir (self-review #10: "analisa a pasta" → liste/leia, não "vou analisar"):
+    # inspeção/avaliação também EXIGE agir (self-review #10: "analisa a pasta" → liste/leia, não "vou…"):
     r"analis|examin|inspecion|verific|procur|encontr|mostr|busc|lista|listar|leia|ler|"
-    r"search|find|show|check|analyze|inspect|look)",
+    r"test[ae]|teste|testar|compar|avali|revis|ach[ae]|achar|audita|"
+    r"search|find|show|check|analyze|inspect|look|review|evaluate|compare)",
     re.IGNORECASE)
 
 

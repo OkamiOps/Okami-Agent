@@ -146,3 +146,80 @@ def test_stall_guard_disabled_when_zero(tmp_path, monkeypatch):
                 budget=Budget(max_stall_seconds=0))
     res = h.run()
     assert res.state.name == "COMPLETE"               # não bloqueou por tempo
+
+
+def test_bail_punt_after_exploration_is_nudged_then_completes(tmp_path):
+    # O CASO REAL: agente EXPLORA (read-only) e aí ENCERRA pedindo "responde 1 ou 2 que eu sigo" em vez de
+    # concluir. Como já houve passo, o nudge de "sem ferramenta" não pega → o detector de BAIL pega (1x).
+    (tmp_path / "x.py").write_text("print(1)", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "read_file", "args": {"path": "x.py"}}'              # explorou (read-only)
+        if calls["n"] == 2:                          # BAIL: pede permissão/menu em vez de entregar
+            return '{"tool": "respond", "args": {"message": "Achei um bug. Responde com 1 ou 2 que eu sigo."}}'
+        return '{"tool": "respond", "args": {"message": "Achei e corrigi o bug; rodei os testes, passam."}}'
+
+    h = Harness(generate=gen, task=Task(goal="testa o projeto e acha bugs"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] == 3                            # read → bail (nudge) → entrega
+    assert res.state.name == "COMPLETE" and "corrigi" in (res.result or "")
+    assert "1 ou 2" not in (res.result or "")         # a resposta final NÃO é o bail
+
+
+def test_bail_nudge_only_once_then_accepts(tmp_path):
+    # se INSISTIR no bail, NÃO entra em loop infinito — nudga 1x e aceita o 2º.
+    (tmp_path / "x.py").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "read_file", "args": {"path": "x.py"}}'
+        return '{"tool": "respond", "args": {"message": "Posso seguir?"}}'      # insiste no bail
+
+    h = Harness(generate=gen, task=Task(goal="conserta o bug X"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE"               # aceitou após 1 nudge (sem travar)
+    assert calls["n"] <= 4
+
+
+def test_real_delivery_after_inspection_is_not_nudged(tmp_path):
+    # ENTREGA de verdade depois de olhar o código (read_file) NÃO é empurrada — completa.
+    (tmp_path / "x.py").write_text("print(1)", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "read_file", "args": {"path": "x.py"}}'
+        return '{"tool": "respond", "args": {"message": "Analisei x.py: 3 bugs (P0 find --delete). Corrigi e testei."}}'
+
+    h = Harness(generate=gen, task=Task(goal="analisa e acha bugs"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] == 2 and res.state.name == "COMPLETE"   # read + entrega, sem nudge extra
+
+
+def test_pure_talk_on_action_goal_is_nudged(tmp_path):
+    # pediu AÇÃO e o agente respondeu de MEMÓRIA (zero ferramenta) → re-prompt 1x.
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "respond", "args": {"message": "acho que tem uns bugs aí"}}'   # papo, sem olhar
+        return '{"tool": "read_file", "args": {"path": "x.py"}}'
+
+    (tmp_path / "x.py").write_text("x", encoding="utf-8")
+    h = Harness(generate=gen, task=Task(goal="analisa o código e acha bugs"), workspace=tmp_path)
+    h.run()
+    assert calls["n"] >= 2                             # foi empurrado a usar ferramenta
+
+
+def test_prompt_has_persistence_anti_bail_guidance():
+    from okami.core.harness.prompt import build_system_prompt
+    p = build_system_prompt(Task(goal="faz X"), {})
+    assert "PERSISTÊNCIA" in p and "need_input" in p
+    assert "menu" in p.lower() and "permiss" in p.lower()   # proíbe pedir permissão / oferecer menu
