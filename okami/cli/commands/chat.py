@@ -273,6 +273,8 @@ def chat(
         return min(100, round(100 * used / ctx_budget))
 
     s = ep.session(cid)
+    if sys.stdin.isatty() and sys.stdout.isatty():   # abre LIMPO (igual Hermes): limpa a tela ANTES do banner,
+        console.clear()                              # sem poluir com o comando digitado/scrollback anterior.
     try:                                          # console Windows legacy (cp1252) não aguenta █ → fallback
         console.print(tui.welcome(version=__version__, model=model_label,
                                   provider=f"{cfg.default_provider} · {pc.tier}", cwd=Path.cwd(),
