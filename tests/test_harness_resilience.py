@@ -218,12 +218,16 @@ def test_pure_talk_on_action_goal_is_nudged(tmp_path):
     assert calls["n"] >= 2                             # foi empurrado a usar ferramenta
 
 
-def test_prompt_has_persistence_anti_bail_guidance():
+def test_prompt_has_hermes_action_and_verification_gates():
     from okami.core.harness.prompt import build_system_prompt
     p = build_system_prompt(Task(goal="faz X"), {})
-    assert "PERSISTÊNCIA" in p and "need_input" in p
-    assert "menu" in p.lower() and "permiss" in p.lower()   # proíbe pedir permissão / oferecer menu
-    # SEGURANÇA: a guidance NÃO pode mandar forçar destrutivo — tem que deferir à aprovação go/no-go
     low = p.lower()
-    assert "destrutiv" in low and ("go/no-go" in low or "aprovaç" in low)
-    assert "segurança vem antes" in low or "seguro" in low
+    # gates de AÇÃO (Hermes): persistência + uso obrigatório de ferramenta + anti-bail
+    assert "<persistencia>" in low and "<use_ferramenta>" in low
+    assert "menu" in low and "permiss" in low and "memória" in low
+    # gate de VERIFICAÇÃO (Hermes): correção (cada parte) + grounding (não inventar) + ESCOPO/segurança
+    assert "<verificacao>" in low and "correção" in low and "grounding" in low
+    assert "<contexto_faltando>" in low and "need_input" in low
+    # SEGURANÇA preservada: destrutivo defere à aprovação go/no-go, nunca é forçado
+    assert "destrutiva nunca é forçada" in low and ("go/no-go" in low or "aprovaç" in low)
+    assert "segurança antes de autonomia" in low

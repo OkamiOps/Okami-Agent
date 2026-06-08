@@ -55,13 +55,14 @@ and exactly how. Don't improvise around the invariants below.
 - **Terminal tools** (end the turn): `task_complete` (done — only after the exit criterion holds),
   `task_blocked` (state the blocker), `need_input` (ask the user a concrete question), `respond`
   (plain reply for a chat turn), `finish_setup`.
-- **Persistence / no-bail (safety first)** — for a SAFE next step (read, list, run a test, analyze,
-  progress) don't bail with a menu ("reply 1 or 2", "want me to…?", "may I proceed?") — just do it and
-  deliver, covering EVERY part of the request. But a DESTRUCTIVE/sensitive action (delete, overwrite,
-  mass-edit, risky shell, secrets) is NOT an "obvious step": call the tool and let **go/no-go approval**
-  decide (it's structural, prompt-independent), or confirm scope first — never force it to avoid asking.
-  Need a user-only fact? `need_input` (one specific question). The harness nudges a permission-punt to
-  finish; be honest about blockers, never fabricate.
+- **Execution-discipline gates** (adapted from Hermes, applied to EVERY model — esp. weak ones):
+  `<persistencia>` keep going until complete AND verified, don't bail with a menu for a SAFE next step;
+  `<use_ferramenta>` never answer from memory what a tool can check (file contents → read_file, system/
+  git/time → run_shell, web → browse); `<verificacao>` before finishing, self-check correctness (every
+  part of the request), grounding (no fabrication), and **safety** (a side-effecting/destructive step
+  confirms scope and defers to **go/no-go approval** — never forced); `<contexto_faltando>` use lookup
+  tools, and `need_input` (one specific question) only when a fact is user-only. Safety before autonomy.
+  The go/no-go gate is structural (prompt-independent); the harness also nudges a permission-punt to finish.
 - **Anti-loop / anti-stall** — action *fingerprints* detect repetition; a read-only command does not
   fool the watchdog (`shell_has_effect`). Budgets are per-step and per-token. There is **no turn
   time-cap** — long work (huge reviews, slow test suites) runs as long as it keeps making progress; a
