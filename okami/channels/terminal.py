@@ -70,6 +70,25 @@ class TerminalChannel(Channel):
         self.sent.append((str(chat_id), text))
         self._print(text)
 
+    def send_approval(self, chat_id, text: str, nonce: str = "") -> None:
+        """APROVAÇÃO no REPL: toca o SINO (bell) + caixa BERRANTE — pra você NÃO perder o run sem ver.
+        O `text` já traz a ação + as opções (/yes · /always · /no)."""
+        self.sent.append((str(chat_id), text))
+        if self._console is None:  # pragma: no cover
+            print("\a⚠ APROVAÇÃO PENDENTE — /yes /always /no\n" + text)
+            return
+        import sys
+        try:
+            sys.stdout.write("\a")               # BELL: alerta sonoro do terminal (mata o "não percebi")
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        from rich.box import HEAVY
+        from rich.panel import Panel
+        from rich.text import Text
+        self._console.print(Panel(Text(text, style="bold"), title="[bold black on yellow] ⚠ APROVAÇÃO PENDENTE — responda abaixo [/]",
+                                  title_align="left", border_style="bold yellow", box=HEAVY, padding=(0, 1)))
+
     def send_audio(self, chat_id, audio_path) -> None:
         self._print(f"[dim]🔊 áudio: {audio_path}[/dim]")
 

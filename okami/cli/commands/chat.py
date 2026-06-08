@@ -81,12 +81,14 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     threading.Thread(target=_drain, daemon=True).start()
 
     def _toolbar():
+        if cid in ep._pending:                    # APROVAÇÃO pendente → barra BERRANTE (preto sobre amarelo)
+            return ANSI("\x1b[1;30;43m ⚠ APROVAÇÃO PENDENTE — digite  /yes  ·  /always (não pergunta mais)  "
+                        "·  /no                                                        \x1b[0m")
         try:
             pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
         except Exception:  # noqa: BLE001
             pct, turns = 0, 0
-        state = ("🧠 pensando" if _busy()
-                 else "✍ responda a aprovação" if cid in ep._pending else "● pronto")
+        state = "🧠 pensando" if _busy() else "● pronto"
         q = f"  ·  {len(inflight)} na fila" if inflight else ""
         return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
                     "    Ctrl-C cancela · Ctrl-D sai ")
