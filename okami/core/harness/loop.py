@@ -45,6 +45,40 @@ def _looks_like_punt(text: str) -> bool:
 _REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
 _POLL_TOOLS = {"process_wait", "process_poll", "process_log"}   # ESPERAR processo ≠ loop inútil (é I/O)
 
+# Aliases comuns de nome de tool ALUCINADO (modelo fraco erra o nome) → nome real. Hermes _repair_tool_call.
+_TOOL_ALIASES = {
+    "read": "read_file", "readfile": "read_file", "cat": "read_file", "open": "read_file", "view": "read_file",
+    "write": "write_file", "writefile": "write_file", "save": "write_file", "create_file": "write_file",
+    "edit": "edit_file", "editfile": "edit_file", "patch": "edit_file", "replace": "edit_file",
+    "ls": "list_dir", "listdir": "list_dir", "list": "list_dir", "dir": "list_dir",
+    "find": "find_files", "search": "find_files", "grep": "find_files", "glob": "find_files",
+    "search_files": "find_files", "find_file": "find_files",
+    "shell": "run_shell", "bash": "run_shell", "sh": "run_shell", "exec": "run_shell", "terminal": "run_shell",
+    "run": "run_shell", "command": "run_shell", "execute": "run_shell",
+    "complete": "task_complete", "done": "task_complete", "finish": "task_complete", "answer": "respond",
+    "reply": "respond", "message": "respond", "say": "respond", "blocked": "task_blocked",
+    "ask": "need_input", "question": "need_input", "memory": "remember", "recall": "recall_memory",
+}
+
+
+def _repair_tool_name(name: str, registry: dict) -> str | None:
+    """Nome de tool ALUCINADO (modelo fraco erra) → nome REAL, se houver correspondência confiável.
+    Hermes repara antes de tratar como erro. Ordem: alias conhecido → match por prefixo/substring → fuzzy."""
+    if not name:
+        return None
+    low = name.strip().lower()
+    if low in registry:
+        return low
+    if _TOOL_ALIASES.get(low) in registry:
+        return _TOOL_ALIASES[low]
+    keys = list(registry)
+    for k in keys:                                      # 'read'→'read_file', 'process'→? (só se único)
+        if k.startswith(low) or low.startswith(k):
+            return k
+    import difflib
+    hit = difflib.get_close_matches(low, keys, n=1, cutoff=0.82)   # typo: 'raed_file'→'read_file'
+    return hit[0] if hit else None
+
 
 def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
     """A entrega ficou RASA pro que foi pedido? (1) pediu COMPARAÇÃO e não veio TABELA; (2) muito trabalho
@@ -283,6 +317,13 @@ class Harness:
             self._truncated_parts = []                 # episódio de truncamento fechado → texto completo
             action = _action_from_tool_calls(comp.tool_calls) or parse_action(text)
 
+            # --- Reparo de nome de tool ALUCINADO (Hermes): 'read'→'read_file' etc. antes de violar ---
+            if action is not None and action.tool not in self.registry:
+                _fix = _repair_tool_name(action.tool, self.registry)
+                if _fix:
+                    self._emit("tool_repaired", **{"from": action.tool, "to": _fix})
+                    action = Action(_fix, action.args)
+
             # --- Action-or-Terminate (§3.2) ---
             if action is None or action.tool not in self.registry:
                 # CONVERSA: o modelo só FALOU (prosa, sem envelope JSON) e não havia nada a executar
@@ -300,6 +341,9 @@ class Harness:
                 hint = ""
                 if action is None and FUTURE_INTENT.search(text):
                     hint = " Você descreveu intenção em vez de agir."
+                elif action is not None:                   # nome de tool ALUCINADO e sem reparo → diz quais existem
+                    hint = (f" '{action.tool}' não existe. Ferramentas REAIS: "
+                            f"{', '.join(sorted(self.registry))}.")
                 self._emit("violation", n=self._consecutive_violations, text=text[:200])
                 if self._consecutive_violations >= self.budget.max_consecutive_violations:
                     if self._try_escalate("violações de Action-or-Terminate"):
@@ -611,11 +655,15 @@ class Harness:
         if len([s for s in t.steps if s.tool not in _REPORT_META]) < 3:   # quase nada feito → falha honesta
             return ""
         try:
+            # Anti-alucinação (Hermes): entregar ≠ inventar. Pede o relatório HONESTO do que REALMENTE
+            # aconteceu + o bloqueio — proíbe fabricar resultado que não foi produzido de verdade.
             self.messages.append({"role": "user", "content":
-                f"O turno vai ENCERRAR sem concluir 100% (motivo: {reason}). NÃO termine calado: com base "
-                "em TUDO que você já fez e levantou nesta sessão, escreva AGORA, nesta resposta, o "
-                "relatório/resposta mais COMPLETO possível pra pessoa — os resultados PARCIAIS, o que "
-                "descobriu, e o que ficou faltando (e por quê). Esta é a ENTREGA final; não peça permissão."})
+                f"O turno vai ENCERRAR sem concluir 100% (motivo: {reason}). NÃO termine calado, mas também "
+                "NÃO invente nada. Escreva AGORA um relatório HONESTO: só o que você de FATO fez e o que as "
+                "ferramentas REALMENTE retornaram (resultados parciais reais), e diga CLARAMENTE o que ficou "
+                "faltando e por quê (o bloqueio). NUNCA fabrique dado, conteúdo de arquivo, número ou "
+                "resultado de teste que você não produziu — reportar o bloqueio honestamente é melhor que "
+                "inventar. Texto puro, sem json de ação. Esta é a ENTREGA final."})
             comp = as_completion(self.generate(self.messages, self._action_schema))
             txt = comp.text or ""
             cands = [prose_outside_action(txt), txt]

@@ -416,3 +416,67 @@ def test_salvage_skipped_on_provider_failure(tmp_path):
     h.task.steps = [type("S", (), {"tool": "read_file", "effect": False})() for _ in range(5)]
     out = h._salvage(h.task, "provider falhou: timeout")
     assert out == ""                                      # pulou (reason começa com 'provider')
+
+
+def test_tool_name_repair_fixes_hallucinated_names(tmp_path):
+    # ALUCINAÇÃO de nome de tool (Hermes _repair_tool_call): modelo fraco chama 'read'/'search'/'bash'
+    # em vez de 'read_file'/'find_files'/'run_shell' → repara em vez de virar violação.
+    from okami.core.harness.loop import _repair_tool_name
+    from okami.core.tools import default_registry
+    reg = default_registry()
+    assert _repair_tool_name("read", reg) == "read_file"
+    assert _repair_tool_name("search", reg) == "find_files"
+    assert _repair_tool_name("bash", reg) == "run_shell"
+    assert _repair_tool_name("raed_file", reg) == "read_file"      # typo (fuzzy)
+    assert _repair_tool_name("done", reg) == "task_complete"
+    assert _repair_tool_name("totalmente_inexistente_xyz", reg) is None
+
+
+def test_hallucinated_tool_is_repaired_and_runs(tmp_path):
+    (tmp_path / "a.txt").write_text("conteudo", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"tool": "read", "args": {"path": "a.txt"}}'   # 'read' não existe → repara p/ read_file
+        return '{"tool": "respond", "args": {"message": "li: conteudo"}}'
+
+    h = Harness(generate=gen, task=Task(goal="leia a.txt"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE"
+    assert any(s.tool == "read_file" for s in res.steps)           # rodou a tool REAL (reparada)
+
+
+def test_prompt_has_blocker_honesty_anti_fabrication():
+    from okami.core.harness.prompt import build_system_prompt
+    low = build_system_prompt(Task(goal="faz X"), {}).lower()
+    assert "<bloqueio_honesto>" in low
+    assert "fabricad" in low and "honestamente é" in low           # nunca fabricar; reportar bloqueio
+
+
+def test_salvage_prompt_forbids_fabrication(tmp_path):
+    # o salvage (entrega-parcial) tem que PROIBIR inventar — senão vira a alucinação que o Hermes evita.
+    seen = {"content": ""}
+
+    def gen(messages, schema):
+        if messages and "ENTREGA final" in str(messages[-1].get("content", "")):
+            seen["content"] = str(messages[-1]["content"])
+            return '{"tool": "respond", "args": {"message": "parcial honesto"}}'
+        return '{"tool": "spawn", "args": {"goal": "loop"}}'        # vira loop → dispara salvage
+
+    for i in range(4):
+        (tmp_path / f"f{i}.py").write_text("x", encoding="utf-8")
+
+    def gen2(messages, schema):
+        gen2.n = getattr(gen2, "n", 0) + 1
+        if messages and "ENTREGA final" in str(messages[-1].get("content", "")):
+            seen["content"] = str(messages[-1]["content"])
+            return '{"tool": "respond", "args": {"message": "parcial honesto"}}'
+        if gen2.n <= 4:
+            return f'{{"tool": "read_file", "args": {{"path": "f{gen2.n-1}.py"}}}}'
+        return '{"tool": "spawn", "args": {"goal": "loop"}}'
+
+    h = Harness(generate=gen2, task=Task(goal="analisa e ache bugs"), workspace=tmp_path)
+    h.run()
+    assert "NUNCA fabrique" in seen["content"] and "bloqueio" in seen["content"]
