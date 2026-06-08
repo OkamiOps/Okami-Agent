@@ -329,3 +329,47 @@ def test_thin_nudge_fires_only_once(tmp_path):
     h = Harness(generate=gen, task=Task(goal="analisa tudo e acha bugs"), workspace=tmp_path)
     res = h.run()
     assert res.state.name == "COMPLETE" and calls["n"] <= 16   # nudga 1x, aceita o 2º (sem loop)
+
+
+def _patch_running_process(monkeypatch):
+    from okami.core.processes import ProcessManager       # processo bg SEMPRE 'running' (ok=True, não é falha)
+    monkeypatch.setattr(ProcessManager, "poll", lambda self, pid: {"status": "running"})
+    monkeypatch.setattr(ProcessManager, "log", lambda self, pid, tail=0, **k: "...rodando...")
+
+
+def test_process_wait_loop_does_not_kill_turn(tmp_path, monkeypatch):
+    # O CASO REAL: agente espera um processo lento (vitest do openclaw pendurou 24min). process_poll com
+    # os mesmos args bate o mesmo fingerprint — ANTES isso virava "loop persistente" e MATAVA o turno sem
+    # entregar. Agora ganha budget próprio + nudge p/ entregar; não FALHA.
+    _patch_running_process(monkeypatch)
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] <= 6:                               # espera o processo VÁRIAS vezes (mesma ação)
+            return '{"tool": "process_poll", "args": {"id": "p1"}}'
+        return ('{"tool": "respond", "args": {"message": "| item | Okami | Hermes | OpenClaw |\\n|--|--|--|--|\\n'
+                '| testes | ok | ok | nao concluiu no tempo |"}}')
+
+    h = Harness(generate=gen, task=Task(goal="rode os testes e compare"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE", f"esperar processo matou o turno: {res.reason!r}"
+    assert "nao concluiu" in (res.result or "")           # entregou (não morreu em 'loop persistente')
+
+
+def test_process_wait_budget_is_bounded(tmp_path, monkeypatch):
+    # se NUNCA parar de esperar (modelo ignora o nudge), o budget de espera é finito → depois disso volta
+    # a contar como loop normal e o turno encerra (não fica esperando pra sempre).
+    _patch_running_process(monkeypatch)
+
+    def gen(messages, schema):
+        return '{"tool": "process_poll", "args": {"id": "p1"}}'   # só espera, pra sempre
+
+    h = Harness(generate=gen, task=Task(goal="rode e espere"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name in ("FAILED", "BLOCKED")        # encerra (bounded), não loopa infinito
+
+
+def test_non_poll_action_resets_wait_budget(tmp_path):
+    from okami.core.harness.loop import _POLL_TOOLS
+    assert "process_wait" in _POLL_TOOLS and "process_poll" in _POLL_TOOLS and "process_log" in _POLL_TOOLS

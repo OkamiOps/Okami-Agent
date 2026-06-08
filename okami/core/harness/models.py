@@ -44,6 +44,8 @@ class Budget:
     max_repeat: int = 3          # mesma ação N vezes → loop
     stall_limit: int = 4         # passos sem efeito observável → quebra
     max_loop_breaks: int = 3     # quebras de loop antes de FAILED
+    max_poll_waits: int = 8      # ESPERAS repetidas num processo em background (process_wait/poll/log) antes de
+    #                              cobrar como loop — esperar um build/teste lento NÃO é loop inútil, é I/O
     max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos
     max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
     # NÃO é teto de relógio do turno (isso matava trabalho longo legítimo — review de 1M linhas, pytest de 10min).

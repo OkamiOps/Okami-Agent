@@ -43,6 +43,7 @@ def _looks_like_punt(text: str) -> bool:
 
 
 _REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
+_POLL_TOOLS = {"process_wait", "process_poll", "process_log"}   # ESPERAR processo ≠ loop inútil (é I/O)
 
 
 def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
@@ -126,6 +127,7 @@ class Harness:
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
+        self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
 
@@ -315,9 +317,21 @@ class Harness:
                      and self._fingerprints[-1] == self._fingerprints[-3]
                      and self._fingerprints[-2] == self._fingerprints[-4])
             if repeats >= self.budget.max_repeat - 1 or cycle:
+                self._emit("loop", fingerprint=fp, repeats=repeats + 1, cycle=cycle)
+                # ESPERAR um processo em background (build/teste lento, server) NÃO é loop inútil — é I/O.
+                # process_wait/poll/log com os mesmos args batem o mesmo fingerprint e matavam o turno
+                # INTEIRO sem entregar nada (o caso do vitest do openclaw que pendurou 24min). Aqui ganham
+                # um budget PRÓPRIO e um nudge p/ ENTREGAR/seguir — só viram loop-de-verdade depois disso.
+                if action.tool in _POLL_TOOLS and self._poll_waits < self.budget.max_poll_waits:
+                    self._poll_waits += 1
+                    self.messages.append({"role": "user", "content":
+                        "Esse processo está DEMORANDO. NÃO fique só esperando (process_wait/poll): ou mate "
+                        "com process_kill e SIGA, ou ENTREGUE o relatório com o que já tem (marque esse "
+                        "processo como 'não concluiu no tempo'). Os outros resultados já valem a entrega."})
+                    self._fingerprints.append(fp)
+                    continue
                 self._loop_breaks += 1
                 self._stats["loops"] += 1
-                self._emit("loop", fingerprint=fp, repeats=repeats + 1, cycle=cycle)
                 if self._loop_breaks >= self.budget.max_loop_breaks:
                     if self._try_escalate("loop persistente"):
                         continue
@@ -415,6 +429,8 @@ class Harness:
             _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
             t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
             self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect)
+            if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
+                self._poll_waits = 0
             self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
                         ok=res.ok, effect=res.effect, out_chars=len(res.output))
             if self.hooks is not None:
