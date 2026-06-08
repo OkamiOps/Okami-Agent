@@ -15,7 +15,7 @@ or wherever you want.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-880%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-955%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -73,7 +73,7 @@ LMStudio).
 | 🧠 **Reliable harness** | *Action-or-Terminate*, anti-loop, anti-hallucination, mechanically verified *exit criteria*. JSON protocol **+** native tool-calling (dual-mode). |
 | 🔀 **Multi-model parity** | LMStudio (local), **Codex/GPT-5**, **Claude**, MiniMax, MiMo — with **automatic fallback** between them. **Subscription-only** (OAuth/CLI), never pay-as-you-go. |
 | 🎨 **Design-system adherence** | *Contracts* (ShadCN/HeroUI) + *verification gates* that **reject** inline hex, raw CSS, and imports outside `@/components/ui`. |
-| 🧬 **Self-improvement** | An evolving persona (SOUL/VOICE/PERSONA, with go/no-go), a **taste model** (likes/rejects design), and a *closed learning loop* that distills skills. |
+| 🧬 **Self-improvement** | A **model-driven learning loop** (Hermes-style): after clean turns, a background fork decides — via tools, behind a *"Do NOT capture"* gate — what's worth saving to memory/skills; a **curator** consolidates and archives (reversible). Plus an evolving persona (SOUL/VOICE/PERSONA, go/no-go) and a **taste model**. |
 | 🗄️ **Pluggable memory** | `sqlite-fts5` (default), holographic, Honcho, or layered — with embeddings, **auto-compaction** and source citation. |
 | 🛡️ **Fail-closed security** | Real sandbox (Docker), persistent go/no-go approval, anti-SSRF guard, central secret redactor, MCP *trust store*, checkpoint journal with HMAC. |
 | 📜 **Authored conformance** | Versioned `okami.policy.yaml` + `okami policy check` (CI gate) + `--strict` (production/GA posture). |
@@ -194,6 +194,29 @@ gets tired":
 
 ---
 
+## Self-improvement that doesn't learn garbage (model-driven, Hermes-aligned)
+
+The agent learns from experience **without polluting itself** — the harness only *times the question*;
+the **model decides** what's worth keeping, behind hard filters:
+
+- **Model-driven review** — after a clean turn, every few turns, a **background fork** (tools restricted
+  to memory/skill writes, runs *after* you have your answer) decides what — if anything — to save via
+  `remember`/`remember_user`/`manage_skill`. "Nothing to save" is a valid outcome. No mechanical
+  per-task distiller anchored on your phrasing (that was the garbage factory).
+- **"Do NOT capture" gate** — a **deterministic** filter (not just a prompt) blocks the classic noise even
+  if a weak model slips: environment/setup failures, *negative tool claims* ("X is broken" → hardens into
+  self-citing refusals), transient errors, one-off task narratives. It captures the **fix**, never
+  "this doesn't work".
+- **Provenance** — auto-created skills are marked `origin: agent`; user-authored/installed ones are
+  untouchable by automation.
+- **Curator** (`okami curator`) — the slow tier: archives auto-skills unused past N days (LRU) and folds
+  narrow/duplicate ones into class-level umbrellas. **Never deletes** (moves to `.archive/` after a
+  tar.gz snapshot); `okami curator rollback` undoes a pass, `--dry-run` previews, `pin` exempts. Schedule
+  it weekly with `okami curator schedule`.
+- **Clean up legacy noise** anytime: `okami skills --prune` · `okami memory prune`.
+
+---
+
 ## Providers & multi-model parity
 
 A router via **LiteLLM** + custom transports. **Hard policy: Claude and Codex are ALWAYS by
@@ -221,8 +244,9 @@ subscription (OAuth/CLI), NEVER pay-as-you-go.**
 
 - **Backends**: `sqlite-fts5` (default, BM25), **holographic** (`dim=1024` vectors), **Honcho** (SaaS),
   or **layered**. **Hybrid** search (lexical + embeddings when available; degrades to BM25 offline).
-- **Write policy** — classifies each fact (fact/preference/decision/skill/error) and **blocks the
-  ephemeral/trivial** before persisting.
+- **Write policy** — classifies each fact (fact/preference/decision/skill/error), **blocks the
+  ephemeral/trivial**, and applies the **"Do NOT capture"** gate so auto-learning never persists
+  environment failures or "tool is broken" claims (see *Self-improvement* above).
 - **Source citation** — every injected memory comes with `[category · source · confidence]`.
 - **Auto-compaction** — when the context fills up, old turns become *summary* nodes without losing the thread.
 - **Scope + global memory** — `scope` (global/workspace/…) per item; with `memory.global`,
