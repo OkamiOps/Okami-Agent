@@ -48,4 +48,9 @@ def compact(messages: list[dict], memory: Memory | None, *,
     else:
         note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas saíram do contexto "
                 "(sem backend de memória ativo; histórico segue na sessão). Continue.")
+    # A nota é 'user'. Se tail[0] também for 'user', sairiam DUAS 'user' seguidas — OpenAI tolera, mas
+    # Anthropic/Claude EXIGE alternância (erro de API). Funde a nota no 1º do tail nesse caso.
+    if tail and tail[0].get("role") == "user":
+        merged = {**tail[0], "content": note + "\n\n" + (tail[0].get("content") or "")}
+        return [system, merged, *tail[1:]], distilled
     return [system, {"role": "user", "content": note}, *tail], distilled

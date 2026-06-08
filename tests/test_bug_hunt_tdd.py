@@ -91,6 +91,24 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, yolo).ok is True
 
 
+def test_compact_never_emits_consecutive_same_role():
+    # BUG: compact insere a nota como 'user'; se tail[0] também é 'user' (acontece com keep_tail ÍMPAR — e o
+    # harness usa keep_tail=3 na recuperação), saem DUAS mensagens 'user' seguidas. OpenAI tolera, mas
+    # Anthropic/Claude EXIGE alternância → erro de API na compaction. Não pode haver role repetido em sequência.
+    from okami.memory.compaction import compact
+    msgs = [{"role": "system", "content": "sys"}]
+    for i in range(10):
+        msgs.append({"role": "assistant", "content": f"acao {i}"})
+        msgs.append({"role": "user", "content": f"[obs] resultado {i}"})
+    for kt in (3, 4, 5, 6, 7):
+        out, _ = compact(msgs, None, keep_tail=kt)
+        roles = [m["role"] for m in out]
+        dups = [i for i in range(1, len(roles)) if roles[i] == roles[i - 1]]
+        assert not dups, f"keep_tail={kt}: roles consecutivos iguais em {dups}: {roles}"
+        # a nota não pode sumir: o conteúdo do resumo tem que aparecer em alguma mensagem
+        assert any("auto-compaction" in (m.get("content") or "") for m in out), "a nota de compaction sumiu"
+
+
 def test_archive_skill_refuses_path_traversal():
     # BUG (path traversal): manage_skill(action=archive) roda ANTES da validação de nome, e _archive_skill
     # fazia `src = root/name` + shutil.move SEM validar → `name='../victim'` movia/destruía um diretório
