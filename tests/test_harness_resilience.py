@@ -589,3 +589,35 @@ def test_stall_with_no_work_stays_bare(tmp_path, monkeypatch):
                 budget=Budget(max_stall_seconds=300, max_consecutive_violations=999))
     res = h.run()
     assert res.state.name == "BLOCKED" and not (res.result or "")   # nada de trabalho → nada salvo
+
+
+def test_cd_prefixed_readonly_commands_batch(tmp_path):
+    # BUG do multitool: os comandos do agente começam com `cd /path && ...`. Sem cd no read-only, viravam
+    # "tem efeito" → não-batcháveis → o batch NUNCA rodava (e extras emitidas eram descartadas → o modelo
+    # achava que foi "REJEITADO em loop"). Agora `cd X && grep/cat/ls` batcha; só o que vem depois do && decide.
+    from okami.core.harness.loop import _is_batchable
+    from okami.core.harness.parsing import Action
+    assert _is_batchable(Action("run_shell", {"cmd": "cd /x && grep foo f"})) is True
+    assert _is_batchable(Action("run_shell", {"cmd": "cd /x && git status"})) is True
+    assert _is_batchable(Action("run_shell", {"cmd": "cd /x && cat file"})) is True
+    assert _is_batchable(Action("run_shell", {"cmd": "cd /x && rm -rf f"})) is False    # rm muta → não batcha
+    assert _is_batchable(Action("run_shell", {"cmd": "cd /x && find . -delete"})) is False
+
+    # batch real: modelo emite 3 cd-greps num turno → AS 3 rodam (1 geração só)
+    for f in "abc":
+        (tmp_path / f"{f}.txt").write_text("x", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ('{"actions":[{"tool":"run_shell","args":{"cmd":"cat a.txt"}},'
+                    '{"tool":"run_shell","args":{"cmd":"cat b.txt"}},'
+                    '{"tool":"run_shell","args":{"cmd":"cat c.txt"}}]}')
+        return '{"tool":"respond","args":{"message":"li os 3"}}'
+
+    h = Harness(generate=gen, task=Task(goal="leia a b c"), workspace=tmp_path)
+    res = h.run()
+    assert res.state.name == "COMPLETE"
+    assert [s.tool for s in res.steps].count("run_shell") == 3   # as 3 leituras rodaram
+    assert calls["n"] == 2                                       # em 2 gerações (batch economizou 2)

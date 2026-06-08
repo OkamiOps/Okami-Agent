@@ -44,7 +44,11 @@ _SHELL_MUTATES = re.compile(
 # (conservador, §3.3) — efeito real disso é 1 classificação a mais no watchdog, NÃO execução.
 _SHELL_READONLY = {"ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "which", "wc",
                    "file", "stat", "tree", "awk", "du", "df", "ps", "env", "printenv", "date",
-                   "whoami", "uname", "hostname", "sort", "uniq", "cut", "diff", "sed"}
+                   "whoami", "uname", "hostname", "sort", "uniq", "cut", "diff", "sed",
+                   # navegação/no-op SEM efeito → `cd X && grep`/`cd X && cat` é read-only e PODE rodar em
+                   # lote (sem isto, todo comando que começa com `cd` virava "tem efeito" e o batch nunca
+                   # acontecia — o multitool não rodava). O que vem DEPOIS do && é que decide o efeito.
+                   "cd", "pushd", "popd", "true", "false", ":", "test", "wait"}
 
 
 # Política de leitura sensível (P0.1): o shell NÃO confina o FS de verdade (cwd=workspace, mas
