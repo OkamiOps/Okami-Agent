@@ -105,6 +105,8 @@ class Harness:
         self._nudged_action = False
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
+        self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
+        self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -240,7 +242,22 @@ class Harness:
                              cache=getattr(_u, "cache_read_tokens", 0),
                              tool_call=bool(comp.tool_calls))
             self.messages.append({"role": "assistant", "content": comp.text})
-            action = _action_from_tool_calls(comp.tool_calls) or parse_action(comp.text)
+
+            # LENGTH-CONTINUATION (Hermes conversation_loop.py): resposta CORTADA pelo limite de saída
+            # (finish_reason='length') → continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar
+            # a entrega pela metade (era o "relatório resumido" — modelo cortou e não retomou). Acumula as
+            # partes e só parseia a ação no texto COMPLETO. Cap p/ não virar loop.
+            if getattr(comp, "finish_reason", "") == "length" and len(self._truncated_parts) < self._MAX_LENGTH_CONT:
+                self._truncated_parts.append(comp.text)
+                self._emit("length_continue", part=len(self._truncated_parts))
+                self.messages.append({"role": "user", "content":
+                    "[Sua resposta foi CORTADA pelo limite de tamanho. Continue EXATAMENTE de onde parou, "
+                    "SEM repetir o que já escreveu, e TERMINE a entrega. Se estava no meio do bloco json de "
+                    "ação, complete-o.]"})
+                continue
+            text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
+            self._truncated_parts = []                 # episódio de truncamento fechado → texto completo
+            action = _action_from_tool_calls(comp.tool_calls) or parse_action(text)
 
             # --- Action-or-Terminate (§3.2) ---
             if action is None or action.tool not in self.registry:
@@ -248,18 +265,18 @@ class Harness:
                 # → isso É a resposta dele. Não rejeita nem mostra "emita JSON" (seria UX de robô num
                 # papo). Só vale em conversa pura, sem ação pedida e sem tentativa de tool malformada.
                 if (action is None and is_conversational(t) and not self._action_expected
-                        and not FUTURE_INTENT.search(comp.text)  # promessa "vou fazer" NÃO é resposta
-                        and '"tool"' not in comp.text and len(comp.text.strip()) >= 2):
+                        and not FUTURE_INTENT.search(text)  # promessa "vou fazer" NÃO é resposta
+                        and '"tool"' not in text and len(text.strip()) >= 2):
                     t.state = TaskState.COMPLETE
-                    t.result = comp.text.strip()
+                    t.result = text.strip()
                     self._emit("complete", summary=t.result)
                     return t
                 self._consecutive_violations += 1
                 self._stats["violations"] += 1
                 hint = ""
-                if action is None and FUTURE_INTENT.search(comp.text):
+                if action is None and FUTURE_INTENT.search(text):
                     hint = " Você descreveu intenção em vez de agir."
-                self._emit("violation", n=self._consecutive_violations, text=comp.text[:200])
+                self._emit("violation", n=self._consecutive_violations, text=text[:200])
                 if self._consecutive_violations >= self.budget.max_consecutive_violations:
                     if self._try_escalate("violações de Action-or-Terminate"):
                         continue
@@ -300,7 +317,7 @@ class Harness:
                 if action.tool in ("respond", "task_complete"):
                     _key = "message" if action.tool == "respond" else "summary"
                     if not str(action.args.get(_key, "")).strip():
-                        _prose = prose_outside_action(comp.text)
+                        _prose = prose_outside_action(text)   # `text` = concatenação (length-continuation)
                         if len(_prose) >= 2:
                             action.args[_key] = _prose
                 result = self._handle_terminal(t, action)

@@ -237,3 +237,41 @@ def test_prompt_has_hermes_action_and_verification_gates():
     # SEGURANÇA preservada: destrutivo defere à aprovação go/no-go, nunca é forçado
     assert "destrutiva nunca é forçada" in low and ("go/no-go" in low or "aprovaç" in low)
     assert "segurança antes de autonomia" in low
+
+
+def test_length_continuation_assembles_truncated_report(tmp_path):
+    # LENGTH-CONTINUATION (Hermes): respond CORTADO pelo limite (finish_reason='length') → continua e
+    # CONCATENA; a entrega final é o relatório INTEIRO, não a metade cortada. (read antes = trabalho real.)
+    from okami.llm.usage import Completion
+    (tmp_path / "x.py").write_text("print(1)", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Completion(text='{"tool": "read_file", "args": {"path": "x.py"}}', finish_reason="tool_calls")
+        if calls["n"] == 2:                          # json do respond CORTADO no meio da message
+            return Completion(text='{"tool": "respond", "args": {"message": "Relatorio P1 do bug X...',
+                              finish_reason="length")
+        return Completion(text=' e P2: o conserto e mover regex. FIM."}}', finish_reason="stop")
+
+    h = Harness(generate=gen, task=Task(goal="faça o relatório do bug"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] == 3                            # read → respond truncado → continuação
+    assert res.state.name == "COMPLETE"
+    assert "Relatorio P1" in (res.result or "") and "FIM." in (res.result or "")   # juntou as 2 partes
+
+
+def test_length_continuation_has_a_cap(tmp_path):
+    # se o modelo NUNCA para de truncar, não entra em loop infinito — termina (bounded).
+    from okami.llm.usage import Completion
+    calls = {"n": 0}
+
+    def gen(messages, schema):
+        calls["n"] += 1
+        return Completion(text=f'pedaco{calls["n"]} ', finish_reason="length")   # sempre cortado, sem json
+
+    h = Harness(generate=gen, task=Task(goal="diga algo"), workspace=tmp_path)
+    res = h.run()
+    assert calls["n"] <= 40                           # bounded — não loopa pra sempre
+    assert res.state.name in ("COMPLETE", "BLOCKED", "FAILED")
