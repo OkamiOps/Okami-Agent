@@ -100,6 +100,136 @@ def test_tui_renders_command_output_with_brain_emoji(tmp_path):
     assert not any("pensando" in n for n in notes), "💭 não foi escondido"
 
 
+def test_format_approval_panel_highlights_tool_and_brief():
+    from okami.tui_app import _format_approval_panel
+    ask = '⚠' + " Aprovar [run_shell] " + '·' + " cmd=rm -rf /tmp/foo" + '\n' + "limpar cache (risco=high)" + '\n' + "/yes " + '·' + " /always " + '·' + " /no"
+    t = _format_approval_panel(ask)
+    plain = t.plain
+    assert "[run_shell]" in plain and "cmd=rm -rf /tmp/foo" in plain
+    assert "risco=high" in plain and "/yes" in plain
+    spans_blob = " ".join(str(s) for s in t.spans) + " " + " ".join(repr(s.style) for s in t.spans if s.style)
+    assert "#00dfe8" in spans_blob, "tool nao esta em ciano (spans: %s)" % (t.spans,)
+    assert "#ffb86c" in spans_blob, "brief nao esta em amarelo (spans: %s)" % (t.spans,)
+
+
+def test_format_approval_panel_risk_badge_color():
+    from okami.tui_app import _format_approval_panel
+    for risk, color in [("low", "#2ecc71"), ("medium", "#ffb86c"), ("high", "#ff7527"), ("critical", "#ff5555")]:
+        ask = '⚠' + " Aprovar [run_shell]" + '\n' + "limpar (risco=" + risk + ")" + '\n' + "/yes /no"
+        t = _format_approval_panel(ask)
+        spans_blob = " ".join(str(s) for s in t.spans) + " " + " ".join(repr(s.style) for s in t.spans if s.style)
+        assert color in spans_blob, "risco-" + risk + " deveria usar " + color + " (spans: %s)" % (t.spans,)
+
+
+def test_format_approval_panel_handles_empty_and_garbage():
+    from okami.tui_app import _format_approval_panel
+    p1 = _format_approval_panel("").plain
+    assert p1
+    p2 = _format_approval_panel(None).plain
+    assert "aprovar" in p2
+    t = _format_approval_panel("aprovacao generica sem tool")
+    assert "aprovacao generica" in t.plain
+
+
+def test_skin_persists_to_home_prefs_json(tmp_path, monkeypatch):
+    # /skin dracula grava em $OKAMI_HOME/prefs.json (NUNCA em CWD) e a proxima sessa o carrega.
+    from okami.tui_app import _save_theme, _load_theme  # /skin persistente (embutido no tui_app)
+    fake_home = tmp_path / "okami-home"
+    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    assert _save_theme("dracula") is True
+    assert (fake_home / "prefs.json").is_file()
+    assert _load_theme("okami") == "dracula"
+
+
+def test_skin_corrupt_file_falls_back_to_default(tmp_path, monkeypatch):
+    # prefs.json lixo/corrompido -> default (NAO levanta).
+    from okami.tui_app import _load_theme  # /skin persistente (embutido no tui_app)
+    fake_home = tmp_path / "okami-home2"
+    fake_home.mkdir()
+    (fake_home / "prefs.json").write_text("{ isto nao e json")
+    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    assert _load_theme("okami") == "okami"
+
+
+def test_skin_next_session_uses_saved_theme(tmp_path, monkeypatch):
+    # REGRESSAO: o __init__ le o tema persistido e aplica no theme do Textual
+    # (senao o /skin so vale 1 sessao, que era o bug que estamos fechando).
+    from okami.tui_app import _save_theme  # /skin persistente (embutido no tui_app)
+    fake_home = tmp_path / "okami-home3"
+    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    assert _save_theme("gruvbox") is True
+    app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                       run_task=_fake_runner, spawn=lambda fn: fn())
+    assert str(app.theme) == "gruvbox", f"esperava gruvbox, recebi {app.theme}"
+
+
+def test_skin_app_crash_does_not_break_with_bad_prefs(tmp_path, monkeypatch):
+    # prefs.json com tipo errado (theme = 123 int) -> app NAO quebra, fica no default.
+    import json as _json
+    fake_home = tmp_path / "okami-home4"
+    fake_home.mkdir()
+    (fake_home / "prefs.json").write_text(_json.dumps({"theme": 123}))
+    monkeypatch.setattr("okami.tui_app._okami_home", lambda: fake_home)
+    app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                       run_task=_fake_runner, spawn=lambda fn: fn())
+    assert str(app.theme) == "okami", f"esperava default okami, recebi {app.theme}"
+
+
+def test_ctrl_d_double_tap_to_quit(tmp_path):
+    # 1o Ctrl-D ARMA e mostra toast (NAO sai); 2o Ctrl-D em < 1.2s SAI. Evita saida acidental (vem do bash).
+    out = {}
+    import asyncio as _a
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.action_quit_app = lambda: out.setdefault("quit", True)
+            # 1o ^D: arma + toast
+            app.action_ctrl_d()
+            await pilot.pause()
+            out["armed1"] = app._exit_armed
+            out["quit_after_1"] = out.get("quit")  # nao deve ter saido
+            out["toast1"] = [v for k, v in app.transcript if k == "note"]
+            # 2o ^D logo em seguida: SAI
+            app.action_ctrl_d()
+            await pilot.pause()
+            out["quit_after_2"] = out.get("quit")
+
+    _a.run(scenario())
+    assert out["quit_after_1"] is None, "1o ^D nao deve sair"
+    assert out["quit_after_2"] is True, "2o ^D em < 1.2s deve sair"
+    assert any("Ctrl-D de novo" in n for n in out["toast1"]), "1o ^D deve mostrar toast"
+    assert out["armed1"] > 0, "_exit_armed foi setado"
+
+
+def test_ctrl_d_idle_outside_window_does_not_quit(tmp_path):
+    # 1o ^D arma; se o 2o ^D vier MUITO depois (>1.2s), re-arma em vez de sair.
+    out = {}
+    import asyncio as _a
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.action_quit_app = lambda: out.setdefault("quit", True)
+            app.action_ctrl_d()
+            await pilot.pause()
+            t1 = app._exit_armed
+            # finge que passaram 2s (acima da janela de 1.2s)
+            app._exit_armed = t1 - 2.0
+            app.action_ctrl_d()
+            await pilot.pause()
+            out["quit"] = out.get("quit")
+            out["toasts"] = [v for k, v in app.transcript if k == "note"]
+
+    _a.run(scenario())
+    assert out["quit"] is None, "^D fora da janela de 1.2s NAO deve sair"
+    assert sum(1 for n in out["toasts"] if "Ctrl-D de novo" in n) == 2, "2 toasts (re-armou)"
+
+
 def test_ctrl_c_copies_selection_to_clipboard(tmp_path):
     # Copiar texto no CLI: com seleção (arraste do mouse), ^C copia (mouse segue ligado).
     out = {}

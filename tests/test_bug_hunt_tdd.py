@@ -57,11 +57,13 @@ def test_session_never_runs_two_tasks_concurrently():
     s.busy = True                                       # simula: tarefa rodando + 1 na fila
 
     threading.Thread(target=lambda: ep._run("c1", "msg1", s), daemon=True).start()
-    assert entered.wait(3), "o _run não chegou no drain"
+    assert entered.wait(5), "o _run não chegou no drain"
     threading.Thread(target=lambda: ep.handle("c1", "msg3"), daemon=True).start()
-    time.sleep(0.05)                                    # deixa o handle(msg3) decidir
+    time.sleep(0.05)                                    # deixa o handle(msg3) decidir (pré-fix: dispara run#3)
     release.set()                                       # libera o finally → drena msg2
-    time.sleep(0.4)
+    deadline = time.monotonic() + 3                     # espera DRENAR de verdade (sem sleep fixo → robusto sob carga)
+    while time.monotonic() < deadline and (s.busy or s.queued or active["n"] > 0):
+        time.sleep(0.01)
     assert active["max"] == 1, f"RACE: {active['max']} tarefas concorrentes na MESMA sessão"
 
 

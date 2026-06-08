@@ -26,6 +26,74 @@ from okami.channels.base import Channel
 from okami import tui as _tui
 from okami.tui import _route_repl_line
 
+# --- /skin persistente (prefs.json em $OKAMI_HOME) -----------------------------
+# Best-effort: prefs e cosmético, NUNCA deve quebrar a TUI (env/IO corrompido → default).
+from okami.home import okami_home as _okami_home
+
+
+def _PREFS_PATH():
+    return _okami_home() / "prefs.json"
+
+
+def _load_theme(default="okami"):
+    """Tema persistido, ou `default` se ausente/inválido. NUNCA levanta."""
+    try:
+        p = _PREFS_PATH()
+        if p.is_file():
+            import json as _json
+            data = _json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                v = data.get("theme")
+                if isinstance(v, str) and v:
+                    return v
+    except Exception:  # noqa: BLE001
+        pass
+    return "okami"
+
+
+def _save_theme(name):
+    """Persiste o tema. Escrita atômica (tmp + rename). Devolve True se salvou."""
+    if not isinstance(name, str) or not name:
+        return False
+    try:
+        import json as _json
+        import os as _os
+        import tempfile as _tempfile
+        home = _okami_home()
+        home.mkdir(parents=True, exist_ok=True)
+        current = {"theme": name}
+        # preserva outras chaves se prefs.json já existe
+        p = _PREFS_PATH()
+        if p.is_file():
+            try:
+                current = _json.loads(p.read_text(encoding="utf-8"))
+                if not isinstance(current, dict):
+                    current = {}
+            except Exception:  # noqa: BLE001
+                current = {}
+        current["theme"] = name
+        fd, tmp = _tempfile.mkstemp(prefix="prefs.", suffix=".tmp", dir=str(home))
+        try:
+            with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                _json.dump(current, f, indent=2, sort_keys=True)
+                f.flush()
+                _os.fsync(f.fileno())
+            _os.replace(tmp, p)
+        except Exception:  # noqa: BLE001
+            try:
+                _os.unlink(tmp)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
+        try:
+            _os.chmod(p, 0o644)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
@@ -121,7 +189,7 @@ if _HAS_TEXTUAL:
         """
 
         BINDINGS = [
-            Binding("ctrl+d", "quit_app", "sair", priority=True),
+            Binding("ctrl+d", "ctrl_d", "sair (2x p/ confirmar)", priority=True),
             Binding("ctrl+c", "ctrl_c", "cancelar/sair", priority=True, show=False),
             Binding("ctrl+l", "clear_log", "limpar"),
         ]
@@ -132,6 +200,10 @@ if _HAS_TEXTUAL:
                      on_started=None):
             super().__init__()
             from okami.gateway import AgentEndpoint
+            try:                                          # registra o tema da marca (senao self.theme="okami" cai no default textual)
+                self.register_theme(OKAMI_THEME)
+            except Exception:  # noqa: BLE001 — Textual ja tem? beleza, segue
+                pass
             self._cid = cid
             self._model_label = model_label
             self._provider_label = provider_label
@@ -154,6 +226,12 @@ if _HAS_TEXTUAL:
             self._exit_armed = 0.0
             self._busy_since: float | None = None
             self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
+            try:                                          # tema persistido de sessoes anteriores (/skin save)
+                saved = _load_theme()
+                if saved and saved in self.available_themes:
+                    self.theme = saved                   # Textual re-tematiza a chrome no startup (incl. "okami")
+            except Exception:  # noqa: BLE001 — prefs ausentes/invalidos: fica no default
+                pass
             self._mouse_on = True                         # DEFAULT ON: mouse capturado (clique no autocomplete/
             #   botões) E seleção do Textual funciona junto — arraste seleciona e SOLTA já copia (on_mouse_up)
             self.transcript: list[tuple[str, str]] = []   # (kind, text) p/ teste
@@ -312,17 +390,24 @@ if _HAS_TEXTUAL:
                 self._input_q.put("/no")
 
         def show_approval(self, ask: str) -> None:
-            """Abre o painel de aprovação com a AÇÃO (tool + arg) — chamado pelo send_approval do canal."""
+            """Abre o painel de aprovação com a AÇÃO (tool + arg + reason + risk) DESTACADAS.
+
+            O ask vem do endpoint no formato `⚠ Aprovar [{tool}] · {brief}
+{reason} (risco={risk})
+/yes ...`.
+            Renderizamos um painel COLORIDO: tool em ciano, brief em amarelo, reason em dim, risk badge
+            pela cor (verde/amarelo/laranja/vermelho), comandos em mute. Resolve "aprovar rm -rf e tao
+            facil quanto cat" -- a acao fica visualmente proeminente."""
             self._approval_text = ask or "⚠ aprovar a ação pendente?"
             try:
-                from rich.markup import escape                # cmd com '[' / '[/]' quebraria o markup do Static
-                self.query_one("#approval-label", Static).update(escape(self._approval_text))
+                panel = _format_approval_panel(self._approval_text)
+                self.query_one("#approval-label", Static).update(panel)
                 self.query_one("#approval").display = True
                 self.query_one("#approve", Button).focus()
             except Exception:  # noqa: BLE001
                 pass
 
-        # ---- worker (único produtor de turnos → sem corrida) -----------------
+        
         def _busy(self) -> bool:
             s = self.ep.sessions.get(self._cid)
             return bool(s and s.busy)
@@ -416,7 +501,10 @@ if _HAS_TEXTUAL:
                 return
             if arg in self.available_themes:
                 self.theme = arg                           # reativo → re-tematiza a chrome na hora
-                log.write(Text(f"  🎨 tema → {arg}", style="dim"))
+                if _save_theme(arg):
+                    log.write(Text(f"  🎨 tema → {arg} (salvo em {_PREFS_PATH()})", style="dim"))
+                else:
+                    log.write(Text(f"  🎨 tema → {arg} (não consegui persistir; vale só desta sessão)", style="dim"))
             else:
                 log.write(Text(f"  🎨 tema '{arg}' não existe. Tente: {avail}", style="dim"))
 
@@ -581,6 +669,17 @@ if _HAS_TEXTUAL:
                     self._exit_armed = now
                     self.sink_note("Ctrl-C de novo (ou Ctrl-D) p/ sair")
 
+        def action_ctrl_d(self) -> None:
+            """Ctrl-D com double-tap de 1.2s p/ evitar saida acidental (vem do bash, onde ^D fecha).
+            1o ^D -> "Ctrl-D de novo p/ sair" (toast) · 2o ^D em < 1.2s -> action_quit_app().
+            """
+            now = time.monotonic()
+            if now - self._exit_armed < 1.2:
+                self.action_quit_app()
+            else:
+                self._exit_armed = now
+                self.sink_note("Ctrl-D de novo p/ sair (1.2s)")
+
         def action_quit_app(self) -> None:
             self._stop.set()
             self.exit()
@@ -605,3 +704,54 @@ def run_chat_tui(*, cfg, ws, name, cid, run_task, approval_mode="manual", model_
                        new=new, spawn=spawn)
     app.run()
     return True
+
+
+def _format_approval_panel(ask: str):
+    """Renderable Rich com a acao DESTACADA (tool/brief/reason/risk) para o painel #approval-label.
+    Pura, testavel. Comandos /yes etc ficam em MUTE pra nao competir com a acao visualmente."""
+    from rich.text import Text
+    t = Text()
+    raw = ask or "⚠ aprovar a ação pendente?"
+    lines = raw.split(chr(10))
+    if not lines:
+        return Text(raw)
+    head = lines[0]
+    if "[" in head and "]" in head:
+        i, j = head.find("["), head.find("]")
+        t.append(head[:i], style="bold #ff7527")
+        t.append(head[i:j + 1], style="bold #00dfe8")
+        rest = head[j + 1:]
+        if chr(0x00b7) in rest:
+            k = rest.find(chr(0x00b7))
+            t.append(rest[:k], style="#f4f4f8")
+            t.append(rest[k:], style="bold #ffb86c")
+        else:
+            t.append(rest, style="#f4f4f8")
+    else:
+        t.append(head, style="bold #ff7527")
+    risk_colors = {"low": "#2ecc71", "medium": "#ffb86c", "high": "#ff7527", "critical": "#ff5555"}
+    for ln in lines[1:]:
+        t.append(chr(10))
+        low = ln.lower()
+        if "risco=" in low:
+            try:
+                risk = low.split("risco=", 1)[1].split(")")[0].strip()
+                rc = risk_colors.get(risk, "#b9bac8")
+            except Exception:
+                rc = "#b9bac8"
+            i = ln.lower().find("(risco=")
+            if i >= 0:
+                t.append(ln[:i], style="dim")
+                t.append(ln[i:ln.lower().find(")", i) + 1], style="bold " + rc)
+                tail = ln[ln.lower().find(")", i) + 1:]
+                if tail:
+                    t.append(tail, style="dim")
+            else:
+                t.append(ln, style="dim")
+        elif ln.strip().startswith("/"):
+            t.append(ln, style="#6c6d80")
+        else:
+            t.append(ln, style="#b9bac8")
+    return t
+
+
