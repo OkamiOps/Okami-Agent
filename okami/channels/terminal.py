@@ -34,24 +34,26 @@ class TerminalChannel(Channel):
             return
         head = text[:1]
         is_reply = head in self._REPLY_MARKS or head not in self._SYS_MARKS   # fala do agente, não sistema
-        body = text[1:].strip() if head in self._REPLY_MARKS else text
-        if is_reply:
-            try:
-                self._console.print(self._turn_rule())                        # separa o turno do agente
-            except Exception:  # noqa: BLE001 — a régua é cosmética; nunca impede a resposta
-                pass
-        if is_reply and ("```" in body or "\n" in body.strip()):             # código/lista → Markdown
-            from rich.markdown import Markdown
-            self._console.print(Markdown(body))
-        else:
+        if not is_reply:                                                      # nota de sistema / rodapé → 1 linha
             self._console.print(self._render(text))
+            return
+        body = text[1:].strip() if head in self._REPLY_MARKS else text
+        self._console.print(self._reply_panel(body, head))                   # resposta em MOLDURA (estilo Hermes)
 
-    def _turn_rule(self):
-        """Régua de turno do agente (▌ okami · hora) — separação clara no REPL, igual à TUI."""
+    def _reply_panel(self, body: str, head: str):
+        """Resposta do agente numa MOLDURA arredondada (título = 🐺 agente · hora; borda laranja da marca),
+        com o corpo em Markdown. É o 'response box' do Hermes — frame claro, não só uma régua."""
         from datetime import datetime
-        from okami import tui as _tui
-        return _tui.author_rule(self.agent_id, color="#ff7527",
-                                when=datetime.now().strftime("%H:%M"))
+        from rich.box import ROUNDED
+        from rich.markdown import Markdown
+        from rich.panel import Panel
+        from rich.text import Text
+        inner = Markdown(body) if ("```" in body or "\n" in body.strip()) else Text(body)
+        # cor da borda pelo prefixo de estado (sucesso/aviso/erro) — default laranja da marca
+        bc = {"✅": "#2ecc71", "⚠": "#ffb86c", "❌": "#ff5555", "❓": "#00dfe8"}.get(head, "#ff7527")
+        return Panel(inner, title=f"[bold {bc}]🐺 {self.agent_id}[/]", title_align="left",
+                     subtitle=f"[dim]{datetime.now().strftime('%H:%M')}[/]", subtitle_align="right",
+                     border_style=bc, box=ROUNDED, padding=(0, 1), expand=True)
 
     @staticmethod
     def _render(text: str) -> str:
