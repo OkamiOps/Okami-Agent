@@ -198,6 +198,8 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
         return "details"
     if head in ("/agents", "/tasks"):                   # painel de atividade (cliente)
         return "agents"
+    if head in ("/replay", "/last"):                    # M8: últimos tool-calls c/ args+saída (cliente)
+        return "replay"
     if head == "/skin":                                 # tema da TUI (cliente)
         return "skin"
     if head == "/mouse":                                # mouse on/off (cliente)
@@ -397,6 +399,29 @@ def author_rule(name: str, *, color: str, when: str = ""):
     if when:
         title.append(f"  {when}", style=MUTE)
     return Rule(title=title, align="left", characters="─", style=color)
+
+
+def replay_view(steps: list[dict], n: int = 10):
+    """/replay (M8): os últimos N tool-calls com args COMPLETOS + preview da saída — p/ inspecionar o que o
+    agente fez (a vista ao vivo trunca/coalesce; aqui você 'reabre' a chamada que errou e vê tudo)."""
+    from rich.console import Group
+    from rich.markup import escape
+    recent = [s for s in (steps or []) if s.get("kind") == "step"][-max(1, n):]
+    if not recent:
+        return Text.from_markup(f"[{MUTE}]↻ nenhum tool-call nesta sessão ainda.[/]")
+    blocks: list = [Text.from_markup(f"[{ORANGE}]↻ últimos {len(recent)} tool-calls[/] [{MUTE}](/replay)[/]")]
+    for s in recent:
+        emoji = tool_emoji(s.get("tool", ""))
+        mark, markc = ("✓", CYAN) if s.get("ok") else ("✗", "red")
+        blocks.append(Text.from_markup(
+            f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{escape(str(s.get('tool', '?')))}[/] "
+            f"[{MUTE}]{escape(_args_full(s.get('args') or {}))}[/]"))
+        out = (s.get("out") or "").strip()
+        if out:
+            preview = out if len(out) <= 300 else out[:300] + " …"
+            for ln in preview.splitlines() or [preview]:
+                blocks.append(Text.from_markup(f"       [{MUTE}]{escape(ln)}[/]"))
+    return Group(*blocks)
 
 
 def event_line(e: dict, detail: str = "collapsed") -> Text | None:

@@ -67,6 +67,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args="[level]", scope="chat", tier="power"),
     CommandDef("agents", "activity panel: current turn, /background and queue", "info", ("tasks",),
                scope="chat", tier="power"),
+    CommandDef("replay", "show the last N tool-calls with full args + output", "info", ("last",),
+               args="[N]", scope="chat", tier="power"),
     CommandDef("skin", "switch the TUI theme (okami | nord | dracula | …)", "info", args="[theme]",
                scope="chat", tier="power"),
     CommandDef("mouse", "toggle the TUI mouse (off = native terminal selection)", "info",

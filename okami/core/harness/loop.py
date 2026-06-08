@@ -528,7 +528,8 @@ class Harness:
             step_n += 1
             _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
             t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
-            self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect)
+            self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
+                       out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
             if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
                 self._poll_waits = 0
             self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),

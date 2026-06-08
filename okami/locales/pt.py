@@ -48,6 +48,7 @@ MESSAGES: dict[str, str] = {
     "cmd.copy": "copia a última resposta pro clipboard (/copy all = conversa inteira)",
     "cmd.details": "verbosidade dos tool-calls: hidden | collapsed | expanded",
     "cmd.agents": "painel de atividade: turno, /background e fila",
+    "cmd.replay": "mostra os últimos N tool-calls com args completos + saída",
     "cmd.skin": "troca o tema da TUI (okami | nord | dracula | …)",
     "cmd.mouse": "liga/desliga o mouse da TUI (off = seleção nativa do terminal)",
     "cmd.whoami": "mostra seu chat id (p/ allowlist)",

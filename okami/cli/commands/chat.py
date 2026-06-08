@@ -191,6 +191,14 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             console.print(tui.activity_panel(bg=ep._bg, busy=_busy(), queued=len(sx.queued) if sx else 0,
                                              procs=ep.process_brief()))
             continue
+        if decision == "replay":                        # M8: últimos tool-calls c/ args COMPLETOS + saída
+            arg = line.split(maxsplit=1)[1].strip() if " " in line else ""
+            try:
+                n = max(1, min(int(arg), 60)) if arg else 10
+            except ValueError:
+                n = 10
+            console.print(tui.replay_view(list(getattr(ep, "_step_log", []) or []), n))
+            continue
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
             console.print(f"[dim]🎨 {decision} só vale na TUI de tela cheia (rode `okami chat` sem --no-tui).[/dim]")
             continue
@@ -322,12 +330,15 @@ def chat(
             console.print(f"[dim](TUI indisponível: {e} — caindo no REPL)[/dim]")
 
     # --- fallback: REPL de linha (prompt_toolkit) -----------------------------
+    import collections as _collections
+
     from okami.channels.terminal import TerminalChannel
 
     # COALESCE a exploração read-only (read/list/find) numa linha-resumo → ~10 linhas em vez de 150 (igual
     # Hermes). Em /details expanded mostra tudo; em collapsed (default) agrupa.
     _READ_TOOLS = {"read_file", "list_dir", "find_files"}
     _expl = {"n": 0, "ok": 0}
+    _step_log = _collections.deque(maxlen=60)             # M8: buffer p/ /replay
 
     def _flush_expl() -> None:
         if _expl["n"]:
@@ -337,6 +348,8 @@ def chat(
             _expl["n"] = _expl["ok"] = 0
 
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
+        if e.get("kind") == "step":
+            _step_log.append(e)                   # guarda TODO step (mesmo coalescido) p/ o /replay
         if (e.get("kind") == "step" and e.get("tool") in _READ_TOOLS
                 and getattr(ep, "_details", "collapsed") == "collapsed"):
             _expl["n"] += 1
@@ -350,6 +363,7 @@ def chat(
     ch = TerminalChannel(name, console=console)
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
                        approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
+    ep._step_log = _step_log                           # M8: o _run_repl lê isto p/ o /replay
     from okami import prefs as _prefs                  # M4: retoma a verbosidade lembrada (default collapsed)
     _saved_det = _prefs.get_pref("repl_details", "collapsed")
     ep._details = _saved_det if _saved_det in tui._DETAIL_LEVELS else "collapsed"

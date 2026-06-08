@@ -270,3 +270,31 @@ def test_repl_history_redacts_secrets_before_persisting():
     body = hist.read_text(encoding="utf-8")
     assert sk not in body, "segredo persistido em plaintext no histórico do REPL"
     assert "API_KEY" in body, "estrutura da linha deveria ser preservada (só o segredo mascarado)"
+
+
+def test_replay_view_and_route():
+    # M8: /replay mostra os últimos tool-calls com args COMPLETOS + saída (a vista ao vivo trunca/coalesce).
+    import io
+
+    from rich.console import Console
+
+    import okami.tui as tui
+    steps = [
+        {"kind": "step", "tool": "run_shell", "args": {"cmd": "ls -la /tmp/foo"}, "ok": False,
+         "out": "ls: /tmp/foo: No such file"},
+        {"kind": "step", "tool": "read_file", "args": {"path": "okami/core/harness/loop.py"}, "ok": True,
+         "out": "import json\nfrom collections import deque"},
+    ]
+    buf = io.StringIO()
+    Console(file=buf, width=100).print(tui.replay_view(steps, 10))
+    out = buf.getvalue()
+    assert "run_shell" in out and "ls -la /tmp/foo" in out, "args completos do run_shell sumiram"
+    assert "read_file" in out and "okami/core/harness/loop.py" in out, "path completo sumiu"
+    assert "No such file" in out, "a saída (o que retornou) não apareceu no replay"
+    # rota /replay e alias /last
+    assert tui._route_repl_line("/replay", busy=False, pending_approval=False) == "replay"
+    assert tui._route_repl_line("/last 5", busy=False, pending_approval=False) == "replay"
+    # vazio não quebra
+    b2 = io.StringIO()
+    Console(file=b2, width=80).print(tui.replay_view([], 10))
+    assert "nenhum tool-call" in b2.getvalue()
