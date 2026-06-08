@@ -320,6 +320,7 @@ class Harness:
                 action = self._batch.pop(0)
                 text = ""
             else:
+                _g0 = _wt.monotonic()                  # cronômetro da geração → torna o gargalo VISÍVEL
                 try:
                     out = self.generate(self.messages, self._action_schema)
                 except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
@@ -350,7 +351,8 @@ class Harness:
                                  tokens_in=getattr(_u, "input_tokens", 0),
                                  tokens_out=getattr(_u, "output_tokens", 0),
                                  cache=getattr(_u, "cache_read_tokens", 0),
-                                 tool_call=bool(comp.tool_calls))
+                                 tool_call=bool(comp.tool_calls),
+                                 secs=round(_wt.monotonic() - _g0, 1))   # quanto a CHAMADA demorou
                 self.messages.append({"role": "assistant", "content": comp.text})
 
                 # LENGTH-CONTINUATION (Hermes): resposta CORTADA pelo limite (finish_reason='length') →

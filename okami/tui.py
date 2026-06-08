@@ -433,6 +433,12 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
         return Text.from_markup(f"  🚧 [{ORANGE}]ainda falta:[/] [{SOFT}]{miss}[/]")
     if k == "salvaged":                                  # turno ia falhar → ENTREGOU o parcial em vez de morrer
         return Text.from_markup(f"  🛟 [{ORANGE}]entrega parcial[/] [{MUTE}]({escape(str(e.get('reason', '')))})[/]")
+    if k == "llm_call":                                  # torna o GARGALO visível: só as gerações LENTAS (>8s)
+        secs = e.get("secs", 0) or 0
+        if secs < 8:
+            return None
+        ti, to = int(e.get("tokens_in", 0)), int(e.get("tokens_out", 0))
+        return Text.from_markup(f"  ⏱ [{MUTE}]geração {secs:.0f}s · {ti // 1000}k↑ {to // 1000}k↓[/]")
     return None
 
 

@@ -23,7 +23,7 @@ contracts:
     forbid_raw_css: true
     require_component_source: true
 learning:                     # auto-aprimoramento MODEL-DRIVEN (estilo Hermes): o MODELO decide o que
-  review: true                # salvar (memória/skill) via tools, guiado pela lista "Do NOT capture".
+  review: false   # PAUSADO p/ teste de skills limpas (reverter p/ true)                # salvar (memória/skill) via tools, guiado pela lista "Do NOT capture".
   review_interval: 6          # a cada N turnos LIMPOS, em BACKGROUND (não bloqueia a resposta).
   auto_skill: false           # destilação MECÂNICA legada (gerava lixo) — superseda pelo review; off.
   auto_tune: true             # calibra o capability profile por modelo a partir das stats (§7).
