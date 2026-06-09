@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 
 from okami.cli._app import app, console
 from okami.cli._shared import _load
 
 auth_app = typer.Typer(invoke_without_command=True,
-                       help="Perfis de AUTH (metadata, sem segredo): `okami auth` lista; `auth status --json`.")
+                       help=_tr("cli.auth", _default="AUTH profiles (metadata, no secrets): `okami auth` lists; `auth status --json`."))
 app.add_typer(auth_app, name="auth")
 
 
@@ -19,7 +20,7 @@ def auth_main(ctx: typer.Context) -> None:
     auth_list()
 
 
-@auth_app.command("list")
+@auth_app.command("list", help=_tr("cli.auth.list", _default="List the auth profiles — type (oauth/cli/api_key), status, and WHERE the credential lives (without the value)."))
 def auth_list() -> None:
     """Lista os perfis de auth — tipo (oauth/cli/api_key), status, e ONDE mora a credencial (sem o valor)."""
     from rich.text import Text
@@ -47,8 +48,8 @@ def auth_list() -> None:
     console.print()
 
 
-@auth_app.command("status")
-def auth_status(json_out: bool = typer.Option(False, "--json", help="Saída JSON (monitoramento/CI).")) -> None:
+@auth_app.command("status", help=_tr("cli.auth.status", _default="Auth profile status (machine-readable with --json)."))
+def auth_status(json_out: bool = typer.Option(False, "--json", help=_tr("cli.auth.status.json", _default="JSON output (monitoring/CI)."))) -> None:
     """Status dos perfis de auth (machine-readable com --json)."""
     from okami.core.auth_profiles import build_auth_profiles
     profs = build_auth_profiles(_load())

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from okami.core import TaskState
 from pathlib import Path
 from okami.cli._app import app, console
@@ -10,18 +11,18 @@ from okami.cli._shared import (
 )
 
 
-@app.command()
+@app.command(help=_tr("cli.task", _default="Run the harness until COMPLETE/BLOCKED/NEEDS_INPUT/FAILED."))
 def task(
-    goal: str = typer.Argument(None, help="Objetivo da tarefa (se vazio, pergunta)."),
+    goal: str = typer.Argument(None, help=_tr("cli.task.goal", _default="Task goal (if empty, prompts).")),
     provider: str = typer.Option(None, "--provider", "-p"),
     model: str = typer.Option(None, "--model", "-m"),
-    workspace: str = typer.Option("workspaces/default", "--workspace", "-w", help="Diretório de trabalho."),
-    exit_: list[str] = typer.Option(None, "--exit", "-e", help="Critério de saída (repetível)."),
+    workspace: str = typer.Option("workspaces/default", "--workspace", "-w", help=_tr("cli.task.workspace", _default="Working directory.")),
+    exit_: list[str] = typer.Option(None, "--exit", "-e", help=_tr("cli.task.exit", _default="Exit criterion (repeatable).")),
     max_steps: int = typer.Option(24, "--max-steps"),
-    escalate_to: str = typer.Option(None, "--escalate", help="Provider forte p/ cascata se travar (§3.5)."),
-    yes: bool = typer.Option(False, "--yes", "-y", "--yolo", help="YOLO: auto-aprova tudo na sessão."),
-    mode: str = typer.Option(None, "--mode", help="Aprovação: manual | smart | off."),
-    agent: str = typer.Option(None, "--agent", "-a", help="Rodar como um agente (agents/<id>)."),
+    escalate_to: str = typer.Option(None, "--escalate", help=_tr("cli.task.escalate", _default="Strong provider to cascade to if stuck.")),
+    yes: bool = typer.Option(False, "--yes", "-y", "--yolo", help=_tr("cli.task.yes", _default="YOLO: auto-approve everything in the session.")),
+    mode: str = typer.Option(None, "--mode", help=_tr("cli.task.mode", _default="Approval: manual | smart | off.")),
+    agent: str = typer.Option(None, "--agent", "-a", help=_tr("cli.task.agent", _default="Run as an agent (agents/<id>).")),
 ) -> None:
     """Roda o harness até COMPLETE/BLOCKED/NEEDS_INPUT/FAILED."""
     if not goal or not goal.strip():            # `okami task` sem objetivo → pergunta (não dá erro seco)

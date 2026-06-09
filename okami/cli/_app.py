@@ -3,9 +3,10 @@ from __future__ import annotations
 import sys
 
 import typer
+from okami.i18n import t as _tr
 from rich.console import Console
 
-app = typer.Typer(add_completion=False, help="Okami Agent — CLI")
+app = typer.Typer(add_completion=False, help=_tr("cli.app", _default="Okami Agent — CLI"))
 
 # UTF-8 consistente em qualquer SO (acentos/§ no console Windows; no-op em Linux/macOS).
 for _stream in (sys.stdout, sys.stderr):

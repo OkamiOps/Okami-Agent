@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 
 from okami.cli._app import app, console
 from okami.cli._shared import _persona_ws
 
 
-@app.command()
+@app.command(help=_tr("cli.rollback", _default="Undo the last N file writes (checkpoints — Hermes-style safety net)."))
 def rollback(
-    n: int = typer.Argument(1, help="Quantas escritas de arquivo reverter (da mais recente)."),
+    n: int = typer.Argument(1, help=_tr("cli.rollback.n", _default="How many file writes to revert (from the most recent).")),
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
@@ -24,11 +25,11 @@ def rollback(
         console.print(f"[yellow]revertido[/yellow] {p}")
 
 
-@app.command()
+@app.command(help=_tr("cli.events", _default="Timeline of the last task (replay/debug) — .okami/events.jsonl."))
 def events(
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option(".", "-w", "--workspace"),
-    n: int = typer.Option(40, "-n", help="Quantos eventos finais mostrar."),
+    n: int = typer.Option(40, "-n", help=_tr("cli.events.n", _default="How many trailing events to show.")),
 ) -> None:
     """Timeline da última task (replay/debug) — .okami/events.jsonl."""
     import datetime as _dt
@@ -54,12 +55,12 @@ def events(
                       f"{f' · {len(traces)} turno(s)' if traces else ''} ──[/dim]")
 
 
-@app.command()
+@app.command(help=_tr("cli.replay", _default="Replay a turn's TRAJECTORY: `okami replay` lists turns; `okami replay <trace>` details one."))
 def replay(
-    trace: str = typer.Argument(None, help="trace_id do turno (sem arg = lista os turnos recentes)."),
+    trace: str = typer.Argument(None, help=_tr("cli.replay.trace", _default="Turn trace_id (no arg = list recent turns).")),
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option(".", "-w", "--workspace"),
-    json_out: bool = typer.Option(False, "--json", help="Saída JSON (CI/ferramenta)."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.replay.json", _default="JSON output (CI/tooling).")),
 ) -> None:
     """Replay da TRAJETÓRIA de um turno (#12): `okami replay` lista turnos; `okami replay <trace>` detalha."""
     import datetime as _dt

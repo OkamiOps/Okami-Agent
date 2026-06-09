@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
@@ -12,10 +13,10 @@ from okami.cli._shared import (
 )
 
 
-@app.command()
+@app.command(help=_tr("cli.transcribe", _default="Transcribe audio with local Whisper (STT)."))
 def transcribe(
-    audio: str = typer.Argument(..., help="Arquivo de áudio (m4a/ogg/mp3/wav)."),
-    model: str = typer.Option("base", "--model", help="Modelo whisper: tiny|base|small."),
+    audio: str = typer.Argument(..., help=_tr("cli.transcribe.audio", _default="Audio file (m4a/ogg/mp3/wav).")),
+    model: str = typer.Option("base", "--model", help=_tr("cli.transcribe.model", _default="Whisper model: tiny|base|small.")),
 ) -> None:
     """Transcreve um áudio com Whisper local (STT)."""
     from okami.voice.stt import WhisperSTT
@@ -24,11 +25,11 @@ def transcribe(
     console.print(WhisperSTT(model=model).transcribe(audio))
 
 
-@app.command()
+@app.command(help=_tr("cli.say", _default="Generate audio from text (Edge TTS)."))
 def say(
-    text: str = typer.Argument(..., help="Texto a falar."),
-    out: str = typer.Option("okami_say.mp3", "--out", "-o", help="Arquivo de saída."),
-    voice: str = typer.Option("pt-BR-AntonioNeural", "--voice", help="Voz Edge TTS."),
+    text: str = typer.Argument(..., help=_tr("cli.say.text", _default="Text to speak.")),
+    out: str = typer.Option("okami_say.mp3", "--out", "-o", help=_tr("cli.say.out", _default="Output file.")),
+    voice: str = typer.Option("pt-BR-AntonioNeural", "--voice", help=_tr("cli.say.voice", _default="Edge TTS voice.")),
 ) -> None:
     """Gera áudio a partir de texto (Edge TTS)."""
     from okami.voice.tts import EdgeTTS
@@ -37,15 +38,15 @@ def say(
     console.print(f"[green]✓ áudio gerado:[/green] {out}")
 
 
-@app.command()
+@app.command(help=_tr("cli.voice", _default="Talk by VOICE (turn-based): speak into the mic, the agent replies by SPEAKING. Ctrl-C exits."))
 def voice(
-    agent: str = typer.Option(None, "-a", "--agent", help="Conversa por voz como um agente."),
+    agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.voice.agent", _default="Talk by voice as an agent.")),
     workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
-    seconds: float = typer.Option(6.0, "--seconds", help="Duração de cada captura do mic."),
-    whisper: str = typer.Option("base", "--whisper", help="Modelo whisper: tiny|base|small."),
-    tts_voice: str = typer.Option("pt-BR-AntonioNeural", "--tts-voice", help="Voz do Edge TTS."),
-    once: bool = typer.Option(False, "--once", help="Um turno só (em vez do loop)."),
-    yolo: bool = typer.Option(False, "-y", "--yolo", help="Auto-aprova ações (sem clique por voz)."),
+    seconds: float = typer.Option(6.0, "--seconds", help=_tr("cli.voice.seconds", _default="Duration of each mic capture.")),
+    whisper: str = typer.Option("base", "--whisper", help=_tr("cli.voice.whisper", _default="Whisper model: tiny|base|small.")),
+    tts_voice: str = typer.Option("pt-BR-AntonioNeural", "--tts-voice", help=_tr("cli.voice.tts_voice", _default="Edge TTS voice.")),
+    once: bool = typer.Option(False, "--once", help=_tr("cli.voice.once", _default="Single turn (instead of the loop).")),
+    yolo: bool = typer.Option(False, "-y", "--yolo", help=_tr("cli.voice.yolo", _default="Auto-approve actions (no click by voice).")),
 ) -> None:
     """Conversa por VOZ (turn-based): fala no mic → o agente responde FALANDO. Ctrl-C sai.
 
@@ -95,7 +96,7 @@ def voice(
         console.print("\n[dim]voz encerrada.[/dim]")
 
 
-@app.command("paperclip")
+@app.command("paperclip", help=_tr("cli.paperclip", _default="Check the Paperclip connection (injected env + GET /api/agents/me)."))
 def paperclip_cmd() -> None:
     """Checa a conexão com o Paperclip (env injetadas + GET /api/agents/me)."""
     import os
@@ -117,7 +118,7 @@ def paperclip_cmd() -> None:
                   f"· budget={me.get('budget')}")
 
 
-@app.command("acp")
+@app.command("acp", help=_tr("cli.acp", _default="ACP (Agent Client Protocol) server — the IDE (Zed/VS Code) drives Okami over stdio. §13."))
 def acp_cmd(agent: str = typer.Option(None, "-a", "--agent"),
             workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Servidor ACP (Agent Client Protocol) — a IDE (Zed/VS Code) dirige o Okami via stdio. §13."""
@@ -135,7 +136,7 @@ def acp_cmd(agent: str = typer.Option(None, "-a", "--agent"),
     run_acp(cfg, ws, run_task)
 
 
-@app.command("tune")
+@app.command("tune", help=_tr("cli.tune", _default="Show the auto-tune (per-model stats + capability recommendation). §7."))
 def tune_cmd(agent: str = typer.Option(None, "-a", "--agent"),
             workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Mostra o auto-tune (stats por modelo + recomendação de capability). §7."""
@@ -157,11 +158,11 @@ def tune_cmd(agent: str = typer.Option(None, "-a", "--agent"),
     console.print(table)
 
 
-@app.command("image")
+@app.command("image", help=_tr("cli.image", _default="Generate an image (gpt-image-2 via Codex subscription). With `--ref photo.png` -> transform the reference."))
 def image_cmd(
-    prompt: str = typer.Argument(..., help="Descrição (sem --ref) ou instrução de transformação (com --ref)."),
+    prompt: str = typer.Argument(..., help=_tr("cli.image.prompt", _default="Description (without --ref) or transform instruction (with --ref).")),
     out: str = typer.Option("image.png", "-o", "--out"),
-    ref: list[str] = typer.Option(None, "--ref", help="Imagem(ns) de referência (repita p/ várias)."),
+    ref: list[str] = typer.Option(None, "--ref", help=_tr("cli.image.ref", _default="Reference image(s) (repeat for several).")),
     model: str = typer.Option("gpt-image-2", "--model"),
     size: str = typer.Option("1024x1024", "--size"),
 ) -> None:

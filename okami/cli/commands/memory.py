@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
@@ -9,11 +10,11 @@ from okami.cli._shared import (
 )
 
 
-mem_app = typer.Typer(invoke_without_command=True, help="Inspecionar/editar a memória de um workspace.")
+mem_app = typer.Typer(invoke_without_command=True, help=_tr("cli.memory", _default="Inspect/edit the memory of a workspace."))
 app.add_typer(mem_app, name="memory")
 
 _WS = typer.Option("workspaces/default", "--workspace", "-w")
-_GLOBAL = typer.Option(False, "--global", "-g", help="Opera na memória GLOBAL (~/.okami), não a do projeto.")
+_GLOBAL = typer.Option(False, "--global", "-g", help=_tr("cli.memory.global", _default="Operate on GLOBAL memory (~/.okami), not the project's."))
 
 
 @mem_app.callback(invoke_without_command=True)
@@ -57,12 +58,12 @@ def _parse_id(raw: str, global_flag: bool) -> tuple[int, bool]:
     return int(s), global_flag
 
 
-@mem_app.command("add")
+@mem_app.command("add", help=_tr("cli.memory.add", _default="Store a fact (the policy classifies the category). --global = preference for any project."))
 def memory_add(
-    text: str = typer.Argument(..., help="Fato a guardar."),
+    text: str = typer.Argument(..., help=_tr("cli.memory.add.text", _default="Fact to store.")),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
-    scope: str = typer.Option("", "--scope", help="Escopo explícito (global|workspace|user:<id>|…)."),
+    scope: str = typer.Option("", "--scope", help=_tr("cli.memory.add.scope", _default="Explicit scope (global|workspace|user:<id>|...).")),
 ) -> None:
     """Guarda um fato (a política classifica a categoria). `--global` = preferência que vale em qualquer projeto."""
     from okami.memory.policy import prepare
@@ -80,9 +81,9 @@ def memory_add(
     console.print(f"[green]✓ lembrado[/green] [dim]({item.kind} · escopo={item.scope} · {where})[/dim]")
 
 
-@mem_app.command("search")
+@mem_app.command("search", help=_tr("cli.memory.search", _default="Search memory (hybrid; includes global if enabled)."))
 def memory_search(
-    query: str = typer.Argument(..., help="Busca (full-text)."),
+    query: str = typer.Argument(..., help=_tr("cli.memory.search.query", _default="Query (full-text).")),
     workspace: str = _WS,
 ) -> None:
     """Busca na memória (híbrida; inclui a global se ligada)."""
@@ -98,7 +99,7 @@ def memory_search(
         console.print(f"- {idp}{i.text[:160]}  [dim]{cite(i)}[/dim]")
 
 
-@mem_app.command("list")
+@mem_app.command("list", help=_tr("cli.memory.list", _default="List recent memory items (with #id for forget/explain)."))
 def memory_list(
     workspace: str = _WS,
 ) -> None:
@@ -122,9 +123,9 @@ def memory_list(
         console.print(f"- {idp}[dim][{i.kind}][/dim] {i.text[:150]}{sc}")
 
 
-@mem_app.command("forget")
+@mem_app.command("forget", help=_tr("cli.memory.forget", _default="Forget an item — drops from retrieval and won't come back via recall."))
 def memory_forget(
-    item_id: str = typer.Argument(..., help="#id do item (ver `okami memory list`; use g1/global:1 p/ a casa)."),
+    item_id: str = typer.Argument(..., help=_tr("cli.memory.forget.item_id", _default="Item #id (see `okami memory list`; use g1/global:1 for home).")),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
@@ -138,12 +139,12 @@ def memory_forget(
         raise typer.Exit(1)
 
 
-@mem_app.command("prune")
+@mem_app.command("prune", help=_tr("cli.memory.prune", _default="Prune low-value auto-learned memory. Facts/preferences/decisions stay intact."))
 def memory_prune(
     workspace: str = _WS,
     global_: bool = _GLOBAL,
-    dry_run: bool = typer.Option(False, "--dry-run", help="Só lista o que removeria (não apaga)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Remove sem confirmar."),
+    dry_run: bool = typer.Option(False, "--dry-run", help=_tr("cli.memory.prune.dry_run", _default="Only list what would be removed (don't delete).")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_tr("cli.memory.prune.yes", _default="Remove without confirming.")),
 ) -> None:
     """Poda memória auto-aprendida de baixo valor (post-mortems de tarefa ancorados na frase do pedido:
     'COMO: para …' e 'ANTI-PADRÃO … terminou …'). Fatos/preferências/decisões ficam intactos."""
@@ -176,9 +177,9 @@ def memory_prune(
                   "[dim]reflect agora só aprende de falha real (não de papo/exploração).[/dim]")
 
 
-@mem_app.command("archive")
+@mem_app.command("archive", help=_tr("cli.memory.archive", _default="Archive an item — drops from retrieval but marked 'archived' (intentional)."))
 def memory_archive(
-    item_id: str = typer.Argument(..., help="#id do item (use g1/global:1 p/ a casa)."),
+    item_id: str = typer.Argument(..., help=_tr("cli.memory.archive.item_id", _default="Item #id (use g1/global:1 for home).")),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
@@ -192,9 +193,9 @@ def memory_archive(
         raise typer.Exit(1)
 
 
-@mem_app.command("explain")
+@mem_app.command("explain", help=_tr("cli.memory.explain", _default="Why/when this memory appeared: metadata + latest retrievals (retrieval_logs)."))
 def memory_explain(
-    item_id: str = typer.Argument(..., help="#id do item (use g1/global:1 p/ a casa)."),
+    item_id: str = typer.Argument(..., help=_tr("cli.memory.explain.item_id", _default="Item #id (use g1/global:1 for home).")),
     workspace: str = _WS,
     global_: bool = _GLOBAL,
 ) -> None:
@@ -224,11 +225,11 @@ def memory_explain(
             console.print(f"    · {when}  score={r['score']:.2f} rank={r['rank']}  “{(r['query'] or '')[:60]}”")
 
 
-@mem_app.command("stats")
+@mem_app.command("stats", help=_tr("cli.memory.stats", _default="Memory metrics: composition, compactness, forget integrity and health score."))
 def memory_stats(
     workspace: str = _WS,
     global_: bool = _GLOBAL,
-    json_out: bool = typer.Option(False, "--json", help="Saída JSON (pra script/CI)."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.memory.stats.json", _default="JSON output (for script/CI).")),
 ) -> None:
     """Métricas da memória (#13): composição, compactness, integridade do forget e health score."""
     from okami.memory import metrics
@@ -260,7 +261,7 @@ def memory_stats(
                   "(okami.memory.metrics.evaluate)[/dim]")
 
 
-@mem_app.command("consolidate")
+@mem_app.command("consolidate", help=_tr("cli.memory.consolidate", _default="Consolidate (heuristic, no LLM): expire stale TTL + merge near-duplicates."))
 def memory_consolidate(
     workspace: str = _WS,
     global_: bool = _GLOBAL,
@@ -273,7 +274,7 @@ def memory_consolidate(
                   f"{r.get('merged', 0)} fundidos)[/dim]")
 
 
-@mem_app.command("export")
+@mem_app.command("export", help=_tr("cli.memory.export", _default="Auditable dump (JSON) of all memory — debug/backup/migration."))
 def memory_export(
     workspace: str = _WS,
     global_: bool = _GLOBAL,

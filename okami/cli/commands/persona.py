@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
@@ -10,9 +11,9 @@ from okami.cli._shared import (
 )
 
 
-@app.command("persona-init")
+@app.command("persona-init", help=_tr("cli.persona-init", _default="Create identity stubs (SOUL/VOICE/PERSONA) in the workspace if absent."))
 def persona_init(
-    name: str = typer.Option("Okami", "--name", help="Nome do agente."),
+    name: str = typer.Option("Okami", "--name", help=_tr("cli.persona-init.name", _default="Agent name.")),
     workspace: str = typer.Option("workspaces/default", "--workspace", "-w"),
 ) -> None:
     """Cria stubs de identidade (SOUL/VOICE/PERSONA) no workspace, se não existirem."""
@@ -22,14 +23,14 @@ def persona_init(
     console.print("[dim]SOUL/VOICE/PERSONA evoluem pelo learning loop (§6/§8); edite à vontade.[/dim]")
 
 
-@app.command("persona-evolve")
+@app.command("persona-evolve", help=_tr("cli.persona-evolve", _default="Evolve VOICE/PERSONA from feedback (go/no-go + changelog + rollback)."))
 def persona_evolve(
-    feedback: str = typer.Argument(..., help="Feedback que molda a identidade (ex.: 'seja mais conciso')."),
-    agent: str = typer.Option(None, "-a", "--agent", help="Agente (usa o workspace dele)."),
+    feedback: str = typer.Argument(..., help=_tr("cli.persona-evolve.feedback", _default="Feedback that shapes the identity (e.g. 'be more concise').")),
+    agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.persona-evolve.agent", _default="Agent (uses its workspace).")),
     workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
-    llm: bool = typer.Option(False, "--llm", help="Refina o bullet via LLM (constrained)."),
-    soul: bool = typer.Option(False, "--soul", help="PERMITE editar o SOUL (protegido; pedido explícito)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Auto-aprova (senão pergunta — go/no-go)."),
+    llm: bool = typer.Option(False, "--llm", help=_tr("cli.persona-evolve.llm", _default="Refine the bullet via LLM (constrained).")),
+    soul: bool = typer.Option(False, "--soul", help=_tr("cli.persona-evolve.soul", _default="ALLOW editing the SOUL (protected; explicit request).")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_tr("cli.persona-evolve.yes", _default="Auto-approve (otherwise asks — go/no-go).")),
 ) -> None:
     """Evolui VOICE/PERSONA a partir de um feedback (go/no-go + changelog + rollback). §8."""
     from okami.learning import persona
@@ -50,7 +51,7 @@ def persona_evolve(
         console.print("[yellow]não aplicado[/yellow] (SOUL exige --soul + aprovação).")
 
 
-@app.command("persona-log")
+@app.command("persona-log", help=_tr("cli.persona-log", _default="Show the identity evolution changelog."))
 def persona_log(
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
@@ -72,9 +73,9 @@ def persona_log(
     console.print(table)
 
 
-@app.command("persona-rollback")
+@app.command("persona-rollback", help=_tr("cli.persona-rollback", _default="Revert the last N evolutions (file + changelog)."))
 def persona_rollback(
-    n: int = typer.Argument(1, help="Quantas evoluções reverter (da mais recente)."),
+    n: int = typer.Argument(1, help=_tr("cli.persona-rollback.n", _default="How many evolutions to revert (from most recent).")),
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
 ) -> None:
@@ -90,7 +91,7 @@ def persona_rollback(
 
 
 taste_app = typer.Typer(invoke_without_command=True,
-                        help="Taste model de design (§9): aprende seu gosto (aprovado→atrai, rejeitado→repele).")
+                        help=_tr("cli.taste", _default="Design taste model: learns your taste (approved -> attract, rejected -> repel)."))
 app.add_typer(taste_app, name="taste")
 
 
@@ -112,17 +113,17 @@ def _taste_feedback(verdict: str, descriptor: str, tags: str | None, agent: str 
     console.print(f"[dim]{prof.steer()}[/dim]")
 
 
-@taste_app.command("like")
-def taste_like(descriptor: str = typer.Argument(..., help="O que você gostou (ex.: 'shadcn, muted, airy')."),
-               tags: str = typer.Option(None, "--tags", help="Tags separadas por vírgula."),
+@taste_app.command("like", help=_tr("cli.taste.like", _default="Approved a design -> becomes an ATTRACTOR (style to pursue)."))
+def taste_like(descriptor: str = typer.Argument(..., help=_tr("cli.taste.like.descriptor", _default="What you liked (e.g. 'shadcn, muted, airy').")),
+               tags: str = typer.Option(None, "--tags", help=_tr("cli.taste.like.tags", _default="Comma-separated tags.")),
                agent: str = typer.Option(None, "-a", "--agent"),
                workspace: str = typer.Option("workspaces/default", "-w", "--workspace")) -> None:
     """Aprovou um design → vira ATRATOR (estilo a perseguir)."""
     _taste_feedback("approved", descriptor, tags, agent, workspace)
 
 
-@taste_app.command("dislike")
-def taste_dislike(descriptor: str = typer.Argument(..., help="O que não gostou (ex.: 'bootstrap, neon')."),
+@taste_app.command("dislike", help=_tr("cli.taste.dislike", _default="Rejected a design -> becomes a REPULSOR (style to avoid)."))
+def taste_dislike(descriptor: str = typer.Argument(..., help=_tr("cli.taste.dislike.descriptor", _default="What you disliked (e.g. 'bootstrap, neon').")),
                   tags: str = typer.Option(None, "--tags"),
                   agent: str = typer.Option(None, "-a", "--agent"),
                   workspace: str = typer.Option("workspaces/default", "-w", "--workspace")) -> None:
@@ -130,8 +131,8 @@ def taste_dislike(descriptor: str = typer.Argument(..., help="O que não gostou 
     _taste_feedback("rejected", descriptor, tags, agent, workspace)
 
 
-@taste_app.command("different")
-def taste_different(descriptor: str = typer.Argument(..., help="Design atual que você quer DIFERENTE."),
+@taste_app.command("different", help=_tr("cli.taste.different", _default="'Want different' -> mild repulsion from the current (explores away from it)."))
+def taste_different(descriptor: str = typer.Argument(..., help=_tr("cli.taste.different.descriptor", _default="Current design you want DIFFERENT.")),
                     tags: str = typer.Option(None, "--tags"),
                     agent: str = typer.Option(None, "-a", "--agent"),
                     workspace: str = typer.Option("workspaces/default", "-w", "--workspace")) -> None:
@@ -139,7 +140,7 @@ def taste_different(descriptor: str = typer.Argument(..., help="Design atual que
     _taste_feedback("want_different", descriptor, tags, agent, workspace)
 
 
-@taste_app.command("show")
+@taste_app.command("show", help=_tr("cli.taste.show", _default="Show the taste profile (attractors/repulsors) + current steering."))
 def taste_show(agent: str = typer.Option(None, "-a", "--agent"),
                workspace: str = typer.Option("workspaces/default", "-w", "--workspace")) -> None:
     """Mostra o taste profile (atratores/repulsores) + o steering atual."""
@@ -158,7 +159,7 @@ def taste_show(agent: str = typer.Option(None, "-a", "--agent"),
     console.print(f"\n[bold]steering:[/bold]\n{prof.steer()}")
 
 
-@taste_app.command("steer")
+@taste_app.command("steer", help=_tr("cli.taste.steer", _default="Print the steering block injected into UI prompts."))
 def taste_steer(agent: str = typer.Option(None, "-a", "--agent"),
                 workspace: str = typer.Option("workspaces/default", "-w", "--workspace")) -> None:
     """Imprime o bloco de steering que é injetado nos prompts de UI."""

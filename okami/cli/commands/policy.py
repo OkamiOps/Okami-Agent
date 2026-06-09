@@ -4,19 +4,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from okami.i18n import t as _tr
 
 from okami.cli._app import app, console
 from okami.cli._shared import _collect_channels, _load
 
-policy_app = typer.Typer(help="Conformance de POLÍTICA autorada (#P1.3): `okami policy check/init/show`.")
+policy_app = typer.Typer(help=_tr("cli.policy", _default="Authored POLICY conformance (#P1.3): `okami policy check/init/show`."))
 app.add_typer(policy_app, name="policy")
 
 
-@policy_app.command("check")
+@policy_app.command("check", help=_tr("cli.policy.check", _default="Evaluate config+workspace against the AUTHORED policy. `--strict` = production posture. Exit!=0 on failure."))
 def policy_check(
-    json_out: bool = typer.Option(False, "--json", help="Artefato de conformance JSON (CI/pre-deploy)."),
-    policy_file: str = typer.Option(None, "--policy", help="Caminho do okami.policy.yaml (default: auto-descobre)."),
-    strict: bool = typer.Option(False, "--strict", help="Postura de PRODUÇÃO/GA (ambiente hostil/público)."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.policy.check.json", _default="JSON conformance artifact (CI/pre-deploy).")),
+    policy_file: str = typer.Option(None, "--policy", help=_tr("cli.policy.check.policy", _default="Path to okami.policy.yaml (default: auto-discover).")),
+    strict: bool = typer.Option(False, "--strict", help=_tr("cli.policy.check.strict", _default="PRODUCTION/GA posture (hostile/public environment).")),
 ) -> None:
     """Avalia config+workspace contra a policy AUTORADA. `--strict` = posture de produção. Exit≠0 se falha."""
     from pathlib import Path as _P
@@ -60,9 +61,9 @@ def policy_check(
     raise typer.Exit(0 if s["ok"] else 1)
 
 
-@policy_app.command("init")
+@policy_app.command("init", help=_tr("cli.policy.init", _default="Create an initial okami.policy.yaml (commented baseline) for you to author conformance."))
 def policy_init(
-    force: bool = typer.Option(False, "--force", help="Sobrescreve um okami.policy.yaml existente."),
+    force: bool = typer.Option(False, "--force", help=_tr("cli.policy.init.force", _default="Overwrite an existing okami.policy.yaml.")),
 ) -> None:
     """Cria um okami.policy.yaml inicial (baseline comentada) p/ você autorar a conformance."""
     from okami.core.policy import scaffold
@@ -74,9 +75,9 @@ def policy_init(
     console.print("[green]✓ okami.policy.yaml criado[/green] [dim](edite e rode: okami policy check)[/dim]")
 
 
-@policy_app.command("show")
+@policy_app.command("show", help=_tr("cli.policy.show", _default="Show the EFFECTIVE policy (baseline + authored okami.policy.yaml; --strict applies the production posture)."))
 def policy_show(
-    strict: bool = typer.Option(False, "--strict", help="Mostra a postura de PRODUÇÃO/GA (overlay aplicado)."),
+    strict: bool = typer.Option(False, "--strict", help=_tr("cli.policy.show.strict", _default="Show the PRODUCTION/GA posture (overlay applied).")),
 ) -> None:
     """Mostra a policy EFETIVA (baseline + okami.policy.yaml autorado; --strict aplica a postura de produção)."""
     import yaml as _yaml

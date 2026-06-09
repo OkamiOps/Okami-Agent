@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
@@ -10,10 +11,10 @@ from okami.cli._shared import (
 from okami.i18n import t
 
 
-@app.command()
+@app.command(help=_tr("cli.setup", _default="Configuration wizard (arrow menus) — providers, login, memory, identity, channel."))
 def setup(
-    section: str = typer.Argument(None, help="provider|default|memory|identity|channel (empty = full wizard)"),
-    memory: str = typer.Option(None, "--memory", help="fts5 | holographic | holographic+honcho (non-interactive)."),
+    section: str = typer.Argument(None, help=_tr("cli.setup.section", _default="provider|default|memory|identity|channel (empty = full wizard)")),
+    memory: str = typer.Option(None, "--memory", help=_tr("cli.setup.memory", _default="fts5 | holographic | holographic+honcho (non-interactive).")),
     honcho_url: str = typer.Option(None, "--honcho-url"),
     honcho_key: str = typer.Option(None, "--honcho-key"),
     embedder_url: str = typer.Option(None, "--embedder-url"),

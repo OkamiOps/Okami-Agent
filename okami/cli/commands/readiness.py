@@ -10,16 +10,17 @@ Responde, na linguagem do operador, três perguntas de GA:
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 
 from okami.cli._app import app, console
 
 
-@app.command("readiness")
+@app.command("readiness", help=_tr("cli.readiness", _default="Release readiness: strict green · CI green · strict HEAD match. Exit≠0 if NOT ready."))
 def readiness(
-    json_out: bool = typer.Option(False, "--json", help="Sinais machine-readable (CI / bot de release)."),
-    no_gh: bool = typer.Option(False, "--no-gh", help="Só o veredito local (offline; ignora GitHub Actions)."),
-    refresh: bool = typer.Option(False, "--refresh", help="Dispara o gate estrito (enforce=true) no HEAD e sai."),
-    branch: str = typer.Option("main", "--branch", help="Branch p/ consultar CI / disparar o gate."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.readiness.json", _default="Machine-readable signals (CI / release bot).")),
+    no_gh: bool = typer.Option(False, "--no-gh", help=_tr("cli.readiness.no_gh", _default="Local verdict only (offline; ignores GitHub Actions).")),
+    refresh: bool = typer.Option(False, "--refresh", help=_tr("cli.readiness.refresh", _default="Trigger the strict gate (enforce=true) on HEAD and exit.")),
+    branch: str = typer.Option("main", "--branch", help=_tr("cli.readiness.branch", _default="Branch to query CI / trigger the gate.")),
 ) -> None:
     """Prontidão de release: strict green · CI green · strict HEAD match. Exit≠0 se NÃO pronto."""
     from okami.core import readiness as R

@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
@@ -39,12 +40,12 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-@app.command()
+@app.command(help=_tr("cli.gateway", _default="Start the Telegram bots (1 per agent). Runs in BACKGROUND by default."))
 def gateway(
     foreground: bool = typer.Option(False, "-f", "--foreground",
-                                    help="Roda no terminal (logs ao vivo, Ctrl+C p/ sair)."),
-    stop: bool = typer.Option(False, "--stop", help="Para o gateway que está em background."),
-    status: bool = typer.Option(False, "--status", help="Mostra se o gateway está no ar."),
+                                    help=_tr("cli.gateway.foreground", _default="Run in the terminal (live logs, Ctrl+C to exit).")),
+    stop: bool = typer.Option(False, "--stop", help=_tr("cli.gateway.stop", _default="Stop the gateway running in the background.")),
+    status: bool = typer.Option(False, "--status", help=_tr("cli.gateway.status", _default="Show whether the gateway is up.")),
 ) -> None:
     """Sobe os bots de Telegram (1 por agente). Por padrão roda em BACKGROUND e te devolve o terminal;
     use -f p/ rodar em primeiro plano, --stop p/ parar, --status p/ checar."""
@@ -104,10 +105,10 @@ def gateway(
                   "[dim]parar:[/dim] okami gateway --stop")
 
 
-@app.command()
+@app.command(help=_tr("cli.serve", _default="Start the HTTP API (POST /chat with a Bearer token). Requires OKAMI_API_TOKEN in .env (fail-closed)."))
 def serve(
     port: int = typer.Option(8765, "-p", "--port"),
-    host: str = typer.Option("127.0.0.1", "--host", help="127.0.0.1 (local) por padrão; 0.0.0.0 expõe à rede."),
+    host: str = typer.Option("127.0.0.1", "--host", help=_tr("cli.serve.host", _default="127.0.0.1 (local) by default; 0.0.0.0 exposes to the network.")),
 ) -> None:
     """Sobe a API HTTP (POST /chat com Bearer token). Requer OKAMI_API_TOKEN no .env (fail-closed)."""
     import os
@@ -139,11 +140,11 @@ def serve(
         console.print("[dim]API parada.[/dim]")
 
 
-@app.command()
+@app.command(help=_tr("cli.room", _default="Multi-agent brainstorm: the moderator decides who speaks (or nobody), no stampede."))
 def room(
-    message: str = typer.Argument(..., help="Mensagem do usuário ao grupo (use @id para mencionar)."),
-    group: int = typer.Option(0, "--group", "-g", help="Índice do grupo em okami.yaml (groups)."),
-    provider: str = typer.Option(None, "--moderator", help="Provider barato p/ o moderador."),
+    message: str = typer.Argument(..., help=_tr("cli.room.message", _default="User message to the group (use @id to mention).")),
+    group: int = typer.Option(0, "--group", "-g", help=_tr("cli.room.group", _default="Group index in okami.yaml (groups).")),
+    provider: str = typer.Option(None, "--moderator", help=_tr("cli.room.moderator", _default="Cheap provider for the moderator.")),
 ) -> None:
     """Brainstorm multi-agente: o moderador decide quem fala (ou ninguém), sem stampede."""
     from okami.agents import effective_config, load_agents
@@ -179,11 +180,11 @@ def room(
         console.print(f"[bold cyan]{agent_id}[/bold cyan] [dim]({_model_of(agent_id)})[/dim]: {text}")
 
 
-@app.command()
+@app.command(help=_tr("cli.heartbeat", _default="One Paperclip heartbeat: picks up the assigned issue, works on it, and reports (§11)."))
 def heartbeat(
-    agent: str = typer.Option(None, "-a", "--agent", help="Agente Okami (workspace/config próprios) p/ executar."),
-    workspace: str = typer.Option(".", "-w", "--workspace", help="Workspace (se não usar -a)."),
-    mode: str = typer.Option("defer", "--mode", help="Governança das ações sensíveis: defer | yolo | off."),
+    agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.heartbeat.agent", _default="Okami agent (own workspace/config) to run.")),
+    workspace: str = typer.Option(".", "-w", "--workspace", help=_tr("cli.heartbeat.workspace", _default="Workspace (if not using -a).")),
+    mode: str = typer.Option("defer", "--mode", help=_tr("cli.heartbeat.mode", _default="Governance of sensitive actions: defer | yolo | off.")),
 ) -> None:
     """Uma batida de heartbeat do Paperclip: pega a issue atribuída, trabalha e reporta (§11)."""
     from okami.channels.paperclip import PaperclipError, run_heartbeat
@@ -210,8 +211,8 @@ def heartbeat(
     console.print(f"[{color}]✓ heartbeat:[/{color}] issue={res.issue_id} status={res.status}")
 
 
-@app.command()
-def route(source: str = typer.Argument(..., help="Origem (ex.: telegram:12345) para rotear.")) -> None:
+@app.command(help=_tr("cli.route", _default="Show which agent a source is routed to (bindings §10)."))
+def route(source: str = typer.Argument(..., help=_tr("cli.route.source", _default="Source (e.g. telegram:12345) to route."))) -> None:
     """Mostra para qual agente uma origem é roteada (bindings §10)."""
     from okami.agents import build_router, load_agents
 
@@ -221,7 +222,7 @@ def route(source: str = typer.Argument(..., help="Origem (ex.: telegram:12345) p
 
 
 service_app = typer.Typer(invoke_without_command=True,
-                          help="Gateway como SERVIÇO (sobe no boot, reinicia se cair): launchd/systemd.")
+                          help=_tr("cli.service", _default="Gateway as a SERVICE (starts on boot, restarts on crash): launchd/systemd."))
 app.add_typer(service_app, name="service")
 
 
@@ -232,7 +233,7 @@ def _service_main(ctx: typer.Context) -> None:
         service.control("status", emit=console.print)
 
 
-@service_app.command("install")
+@service_app.command("install", help=_tr("cli.service.install", _default="Install the gateway as an OS service (runs `okami gateway --foreground` on boot, restarts on crash)."))
 def service_install() -> None:
     """Instala o gateway como serviço do SO (roda `okami gateway --foreground` no boot, reinicia se cair)."""
     from okami.gateway import service
@@ -240,45 +241,45 @@ def service_install() -> None:
         console.print("[dim]controle: okami service start|stop|restart|status · logs: okami logs -f[/dim]")
 
 
-@service_app.command("uninstall")
+@service_app.command("uninstall", help=_tr("cli.service.uninstall", _default="Remove the OS service."))
 def service_uninstall() -> None:
     """Remove o serviço do SO."""
     from okami.gateway import service
     service.uninstall(emit=console.print)
 
 
-@service_app.command("start")
+@service_app.command("start", help=_tr("cli.service.start", _default="Start the service."))
 def service_start() -> None:
     """Inicia o serviço."""
     from okami.gateway import service
     service.control("start", emit=console.print)
 
 
-@service_app.command("stop")
+@service_app.command("stop", help=_tr("cli.service.stop", _default="Stop the service."))
 def service_stop() -> None:
     """Para o serviço."""
     from okami.gateway import service
     service.control("stop", emit=console.print)
 
 
-@service_app.command("restart")
+@service_app.command("restart", help=_tr("cli.service.restart", _default="Restart the service."))
 def service_restart() -> None:
     """Reinicia o serviço."""
     from okami.gateway import service
     service.control("restart", emit=console.print)
 
 
-@service_app.command("status")
+@service_app.command("status", help=_tr("cli.service.status", _default="Show whether the service is up."))
 def service_status() -> None:
     """Mostra se o serviço está no ar."""
     from okami.gateway import service
     service.control("status", emit=console.print)
 
 
-@app.command()
+@app.command(help=_tr("cli.logs", _default="Show the gateway log (service at ~/.okami/logs/gateway.log, or background at .okami/gateway.log)."))
 def logs(
-    follow: bool = typer.Option(False, "-f", "--follow", help="Segue o log ao vivo (tail -f)."),
-    lines: int = typer.Option(200, "-n", "--lines", help="Quantas linhas finais mostrar."),
+    follow: bool = typer.Option(False, "-f", "--follow", help=_tr("cli.logs.follow", _default="Follow the log live (tail -f).")),
+    lines: int = typer.Option(200, "-n", "--lines", help=_tr("cli.logs.lines", _default="How many trailing lines to show.")),
 ) -> None:
     """Mostra o log do gateway (serviço em ~/.okami/logs/gateway.log, ou o background em .okami/gateway.log)."""
     import time as _t
@@ -308,11 +309,11 @@ def logs(
 
 # ─────────────────────────────── supervisão de PROCESSOS (fora do gateway/agente) ───────────────────
 process_app = typer.Typer(invoke_without_command=True,
-                          help="Supervisão dos processos em background do agente: ps · log · kill · signal · wait.")
+                          help=_tr("cli.process", _default="Supervise the agent's background processes: ps · log · kill · signal · wait."))
 app.add_typer(process_app, name="process")
 
-_PWS = typer.Option("workspaces/default", "--workspace", "-w", help="Workspace do agente (onde vivem os processos).")
-_PA = typer.Option(None, "--agent", "-a", help="Agente (agents/<id>) — atalho pro workspace dele.")
+_PWS = typer.Option("workspaces/default", "--workspace", "-w", help=_tr("cli.process.workspace", _default="Agent workspace (where the processes live)."))
+_PA = typer.Option(None, "--agent", "-a", help=_tr("cli.process.agent", _default="Agent (agents/<id>) — shortcut for its workspace."))
 
 
 def _pm(workspace: str, agent: str | None):
@@ -354,25 +355,25 @@ def _process_main(ctx: typer.Context, workspace: str = _PWS, agent: str = _PA) -
         _process_table(_pm(workspace, agent))
 
 
-@process_app.command("list")
+@process_app.command("list", help=_tr("cli.process.list", _default="List the agent's background processes (id · status · pid · command)."))
 def process_list(workspace: str = _PWS, agent: str = _PA) -> None:
     """Lista os processos em background do agente (id · status · pid · comando)."""
     _process_table(_pm(workspace, agent))
 
 
-@app.command()
+@app.command(help=_tr("cli.ps", _default="Shortcut: list the agent's background processes (= okami process list)."))
 def ps(workspace: str = _PWS, agent: str = _PA) -> None:
     """Atalho: lista os processos em background do agente (= okami process list)."""
     _process_table(_pm(workspace, agent))
 
 
-@process_app.command("log")
+@process_app.command("log", help=_tr("cli.process.log", _default="Show (or follow) a process log — redacted (secrets masked)."))
 def process_log(
-    pid_id: str = typer.Argument(..., help="id do processo (de okami ps)."),
+    pid_id: str = typer.Argument(..., help=_tr("cli.process.log.pid_id", _default="Process id (from okami ps).")),
     workspace: str = _PWS,
     agent: str = _PA,
-    lines: int = typer.Option(200, "-n", "--lines", help="Quantas linhas finais."),
-    follow: bool = typer.Option(False, "-f", "--follow", help="Segue o log ao vivo (tail -f)."),
+    lines: int = typer.Option(200, "-n", "--lines", help=_tr("cli.process.log.lines", _default="How many trailing lines.")),
+    follow: bool = typer.Option(False, "-f", "--follow", help=_tr("cli.process.log.follow", _default="Follow the log live (tail -f).")),
 ) -> None:
     """Mostra (ou segue) o log de um processo — redigido (segredo mascarado)."""
     import time as _t
@@ -399,9 +400,9 @@ def process_log(
         return
 
 
-@process_app.command("kill")
+@process_app.command("kill", help=_tr("cli.process.kill", _default="Kill the process (SIGTERM on the group · docker kill if isolated)."))
 def process_kill(
-    pid_id: str = typer.Argument(..., help="id do processo."),
+    pid_id: str = typer.Argument(..., help=_tr("cli.process.kill.pid_id", _default="Process id.")),
     workspace: str = _PWS,
     agent: str = _PA,
 ) -> None:
@@ -412,10 +413,10 @@ def process_kill(
         raise typer.Exit(1)
 
 
-@process_app.command("signal")
+@process_app.command("signal", help=_tr("cli.process.signal", _default="Send an arbitrary signal to the process group."))
 def process_signal(
-    pid_id: str = typer.Argument(..., help="id do processo."),
-    sig: str = typer.Argument("TERM", help="Sinal: TERM·INT·HUP·KILL·USR1·USR2·STOP·CONT·QUIT."),
+    pid_id: str = typer.Argument(..., help=_tr("cli.process.signal.pid_id", _default="Process id.")),
+    sig: str = typer.Argument("TERM", help=_tr("cli.process.signal.sig", _default="Signal: TERM·INT·HUP·KILL·USR1·USR2·STOP·CONT·QUIT.")),
     workspace: str = _PWS,
     agent: str = _PA,
 ) -> None:
@@ -426,9 +427,9 @@ def process_signal(
         raise typer.Exit(1)
 
 
-@process_app.command("wait")
+@process_app.command("wait", help=_tr("cli.process.wait", _default="Wait for the process to finish (up to timeout) and show the exit code."))
 def process_wait(
-    pid_id: str = typer.Argument(..., help="id do processo."),
+    pid_id: str = typer.Argument(..., help=_tr("cli.process.wait.pid_id", _default="Process id.")),
     workspace: str = _PWS,
     agent: str = _PA,
     timeout: float = typer.Option(60.0, "-t", "--timeout"),
@@ -442,11 +443,11 @@ def process_wait(
         console.print(f"[yellow]⏳ #{pid_id} ainda {st.get('status')}[/yellow] (timeout {timeout}s)")
 
 
-@process_app.command("clean")
+@process_app.command("clean", help=_tr("cli.process.clean", _default="Prune ALREADY-FINISHED processes (meta+log+exit) past the TTL."))
 def process_clean(
     workspace: str = _PWS,
     agent: str = _PA,
-    ttl_hours: float = typer.Option(24.0, "--ttl-hours", help="Remove terminados há mais de N horas."),
+    ttl_hours: float = typer.Option(24.0, "--ttl-hours", help=_tr("cli.process.clean.ttl_hours", _default="Remove those finished more than N hours ago.")),
     dry_run: bool = typer.Option(False, "--dry-run"),
 ) -> None:
     """Poda processos JÁ TERMINADOS (meta+log+exit) além do TTL."""
@@ -455,7 +456,7 @@ def process_clean(
     console.print(f"[dim]{len(removed)} processo(s) {verb}.[/dim]")
 
 
-@app.command("mcp")
+@app.command("mcp", help=_tr("cli.mcp", _default="List the configured MCP servers and the tools they expose."))
 def mcp_cmd() -> None:
     """Lista os servidores MCP configurados e as tools que eles expõem."""
     cfg = _load()

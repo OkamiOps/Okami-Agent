@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
@@ -10,13 +11,13 @@ from okami.cli._shared import (
 )
 
 
-@app.command()
+@app.command(help=_tr("cli.skills", _default="List skills (skills/*/SKILL.md). --prune removes low-value auto-distilled ones."))
 def skills(
-    prune: bool = typer.Option(False, "--prune", help="Poda skills auto-distiladas de baixo valor (lixo do auto_skill)."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Com --prune: só lista o que removeria (não apaga)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Com --prune: remove sem confirmar."),
+    prune: bool = typer.Option(False, "--prune", help=_tr("cli.skills.prune", _default="Prune low-value auto-distilled skills (auto_skill junk).")),
+    dry_run: bool = typer.Option(False, "--dry-run", help=_tr("cli.skills.dry_run", _default="With --prune: only list what would be removed (don't delete).")),
+    yes: bool = typer.Option(False, "--yes", "-y", help=_tr("cli.skills.yes", _default="With --prune: remove without confirming.")),
     bad_names: bool = typer.Option(False, "--bad-names",
-                                   help="Com --prune: também poda nomes conversacionais ruins (heurística)."),
+                                   help=_tr("cli.skills.bad_names", _default="With --prune: also prune bad conversational names (heuristic).")),
 ) -> None:
     """Lista as skills (skills/*/SKILL.md). `--prune` remove as auto-distiladas de baixo valor."""
     from okami import skills as skillmod
@@ -77,8 +78,8 @@ def _prune_skills(root, *, dry_run: bool, yes: bool, bad_names: bool) -> None:
                   "[dim]o auto_skill agora só destila tarefa produtiva (não papo/exploração).[/dim]")
 
 
-@app.command()
-def scan(path: str = typer.Argument(..., help="Diretório/arquivo de skill a verificar.")) -> None:
+@app.command(help=_tr("cli.scan", _default="Check a skill's risk (prompt injection, malware, secret exfiltration)."))
+def scan(path: str = typer.Argument(..., help=_tr("cli.scan.path", _default="Skill directory/file to check."))) -> None:
     """Verifica risco de uma skill (prompt injection, malware, exfiltração de segredos)."""
     from okami.skills.skill_security import scan_path
 
@@ -87,12 +88,12 @@ def scan(path: str = typer.Argument(..., help="Diretório/arquivo de skill a ver
     raise typer.Exit(2 if report.blocked else 0)
 
 
-@app.command()
+@app.command(help=_tr("cli.learn", _default="Download a skill, VALIDATE (quarantine + scan), then install into ./skills."))
 def learn(
-    source: str = typer.Argument(..., help="owner/repo, URL, caminho local, ou clawhub:<slug>."),
-    force: bool = typer.Option(False, "--force", help="Instalar mesmo se o scan BLOQUEAR (perigoso)."),
+    source: str = typer.Argument(..., help=_tr("cli.learn.source", _default="owner/repo, URL, local path, or clawhub:<slug>.")),
+    force: bool = typer.Option(False, "--force", help=_tr("cli.learn.force", _default="Install even if the scan BLOCKS (dangerous).")),
     allow_exec: bool = typer.Option(False, "--allow-exec",
-                                    help="Permite fontes que EXECUTAM código no fetch (clawhub/npx) ANTES do scan."),
+                                    help=_tr("cli.learn.allow_exec", _default="Allow sources that EXECUTE code on fetch (clawhub/npx) BEFORE the scan.")),
 ) -> None:
     """Baixa uma skill, VALIDA (quarentena + scan) e só então instala em ./skills (skill.sh/ClawHub)."""
     import shutil

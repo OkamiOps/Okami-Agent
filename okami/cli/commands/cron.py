@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from pathlib import Path
 from okami.cli._app import app, console
@@ -11,7 +12,7 @@ from okami.cli._shared import (
 
 
 cron_app = typer.Typer(invoke_without_command=True,
-                       help="Scheduling (§11): cron, intervalos ('1h','every 30m'), one-shot (ISO).")
+                       help=_tr("cli.cron", _default="Scheduling (§11): cron, intervals ('1h','every 30m'), one-shot (ISO)."))
 app.add_typer(cron_app, name="cron")
 
 
@@ -46,12 +47,12 @@ def _cron_execute(job: dict, workspace: str):
     return t.result or t.reason or t.state.value
 
 
-@cron_app.command("add")
+@cron_app.command("add", help=_tr("cli.cron.add", _default="Schedule a task (persisted; the gateway wakes and runs it, or use `okami cron tick`)."))
 def cron_add(
-    schedule: str = typer.Argument(..., help="cron (5 campos) | intervalo ('1h') | ISO ('2026-06-10T09:00')."),
-    prompt: str = typer.Argument(..., help="O que o agente deve fazer."),
-    agent: str = typer.Option(None, "-a", "--agent", help="Agente que executa (default: global)."),
-    to: str = typer.Option(None, "--to", help="Chat de destino do resultado (gateway)."),
+    schedule: str = typer.Argument(..., help=_tr("cli.cron.add.schedule", _default="cron (5 fields) | interval ('1h') | ISO ('2026-06-10T09:00').")),
+    prompt: str = typer.Argument(..., help=_tr("cli.cron.add.prompt", _default="What the agent should do.")),
+    agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.cron.add.agent", _default="Agent that runs it (default: global).")),
+    to: str = typer.Option(None, "--to", help=_tr("cli.cron.add.to", _default="Destination chat for the result (gateway).")),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
     """Agenda uma tarefa (persistida; o gateway acorda e executa, ou use `okami cron tick`)."""
@@ -61,7 +62,7 @@ def cron_add(
     console.print(f"[green]✓ job[/green] {job['id']} [{job['kind']}] · {schedule} → {prompt[:50]}")
 
 
-@cron_app.command("list")
+@cron_app.command("list", help=_tr("cli.cron.list", _default="List scheduled jobs."))
 def cron_list(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Lista os jobs agendados."""
     from okami.automation.scheduler import Scheduler
@@ -79,7 +80,7 @@ def cron_list(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     console.print(table)
 
 
-@cron_app.command("remove")
+@cron_app.command("remove", help=_tr("cli.cron.remove", _default="Remove a job."))
 def cron_remove(job_id: str = typer.Argument(...),
                 workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Remove um job."""
@@ -89,8 +90,8 @@ def cron_remove(job_id: str = typer.Argument(...),
     console.print(f"[green]✓ removido[/green] {job_id}" if ok else f"[yellow]não achei[/yellow] {job_id}")
 
 
-@cron_app.command("run")
-def cron_run(job_id: str = typer.Argument(..., help="Roda um job AGORA (ignora o schedule)."),
+@cron_app.command("run", help=_tr("cli.cron.run", _default="Run a job immediately (test)."))
+def cron_run(job_id: str = typer.Argument(..., help=_tr("cli.cron.run.job_id", _default="Run a job NOW (ignores the schedule).")),
              workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Executa um job imediatamente (teste)."""
     from okami.automation.scheduler import Scheduler
@@ -105,7 +106,7 @@ def cron_run(job_id: str = typer.Argument(..., help="Roda um job AGORA (ignora o
     sched.mark_run(job_id)
 
 
-@cron_app.command("tick")
+@cron_app.command("tick", help=_tr("cli.cron.tick", _default="Run all DUE jobs once (use with system cron / systemd timer)."))
 def cron_tick(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Roda todos os jobs VENCIDOS uma vez (use com o cron do sistema/systemd timer)."""
     from okami.automation.scheduler import Scheduler
@@ -117,7 +118,7 @@ def cron_tick(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
         console.print("[dim]nada vencido agora.[/dim]")
 
 
-@app.command("hooks")
+@app.command("hooks", help=_tr("cli.hooks", _default="List the configured event hooks (§11)."))
 def hooks_cmd(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Lista os event hooks configurados (§11)."""
     from okami.automation.hooks import HookManager
@@ -131,7 +132,7 @@ def hooks_cmd(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
 
 
 agent_app = typer.Typer(invoke_without_command=True,
-                        help="Multi-agente (§10): cada agente tem workspace/config/persona próprios.")
+                        help=_tr("cli.agent", _default="Multi-agent (§10): each agent has its own workspace/config/persona."))
 app.add_typer(agent_app, name="agent")
 
 
@@ -142,14 +143,14 @@ def agent_main(ctx: typer.Context) -> None:
         agent_list()
 
 
-@agent_app.command("new")
+@agent_app.command("new", help=_tr("cli.agent.new", _default="Create an agent: <home>/agents/<id>/ with agent.yaml + its own identity."))
 def agent_new(
-    agent_id: str = typer.Argument(..., help="ID do agente (vira agents/<id>/)."),
-    name: str = typer.Option(None, "--name", help="Nome (default = id)."),
-    provider: str = typer.Option(None, "--provider", help="Provider default do agente."),
-    memory: str = typer.Option(None, "--memory", help="Backend de memória do agente."),
-    match: list[str] = typer.Option(None, "--match", help="Binding (origem) p/ rotear a este agente."),
-    telegram_token: str = typer.Option(None, "--telegram-token", help="Token do bot Telegram do agente."),
+    agent_id: str = typer.Argument(..., help=_tr("cli.agent.new.agent_id", _default="Agent ID (becomes agents/<id>/).")),
+    name: str = typer.Option(None, "--name", help=_tr("cli.agent.new.name", _default="Name (default = id).")),
+    provider: str = typer.Option(None, "--provider", help=_tr("cli.agent.new.provider", _default="Agent's default provider.")),
+    memory: str = typer.Option(None, "--memory", help=_tr("cli.agent.new.memory", _default="Agent's memory backend.")),
+    match: list[str] = typer.Option(None, "--match", help=_tr("cli.agent.new.match", _default="Binding (origin) to route to this agent.")),
+    telegram_token: str = typer.Option(None, "--telegram-token", help=_tr("cli.agent.new.telegram_token", _default="Agent's Telegram bot token.")),
 ) -> None:
     """Cria um agente: <casa>/agents/<id>/ com agent.yaml + identidade própria."""
     from okami.home import agents_dir
@@ -163,7 +164,7 @@ def agent_new(
                   "[dim]   (NÃO confundir com okami/agents/ que é o código)[/dim]")
 
 
-@agent_app.command("list")
+@agent_app.command("list", help=_tr("cli.agent.list", _default="List agents and their effective config (global + overrides)."))
 def agent_list() -> None:
     """Lista os agentes e a config efetiva (global + overrides)."""
     from okami.agents import load_agents

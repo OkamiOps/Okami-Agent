@@ -5,6 +5,7 @@ import platform
 import sys
 
 import typer
+from okami.i18n import t as _tr
 from okami import __version__
 from okami.llm import providers as prov
 from pathlib import Path
@@ -15,13 +16,13 @@ from okami.cli._shared import (
 from okami.i18n import t
 
 
-@app.command()
+@app.command(help=_tr("cli.run", _default="Single round-trip to the provider (Phase 0)."))
 def run(
-    prompt: str = typer.Argument(..., help="Prompt para o agente."),
-    provider: str = typer.Option(None, "--provider", "-p", help="Nome do provider (default: do okami.yaml)."),
-    model: str = typer.Option(None, "--model", "-m", help="Sobrescreve o model do provider."),
-    system: str = typer.Option(None, "--system", "-s", help="System prompt opcional."),
-    no_stream: bool = typer.Option(False, "--no-stream", help="Desliga streaming."),
+    prompt: str = typer.Argument(..., help=_tr("cli.run.prompt", _default="Prompt for the agent.")),
+    provider: str = typer.Option(None, "--provider", "-p", help=_tr("cli.run.provider", _default="Provider name (default: from okami.yaml).")),
+    model: str = typer.Option(None, "--model", "-m", help=_tr("cli.run.model", _default="Override the provider's model.")),
+    system: str = typer.Option(None, "--system", "-s", help=_tr("cli.run.system", _default="Optional system prompt.")),
+    no_stream: bool = typer.Option(False, "--no-stream", help=_tr("cli.run.no_stream", _default="Disable streaming.")),
 ) -> None:
     """Faz uma ida-e-volta ao provider (Fase 0)."""
     cfg = _load()
@@ -57,9 +58,9 @@ def run(
         raise typer.Exit(1)
 
 
-@app.command("providers")
+@app.command("providers", help=_tr("cli.providers", _default="List configured providers and whether they are ready (★ = default)."))
 def list_providers(
-    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (scripts/CI)."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.providers.json", _default="Structured JSON output (scripts/CI).")),
 ) -> None:
     """Lista os providers configurados e se estão prontos (★ = default)."""
     cfg = _load()
@@ -105,11 +106,11 @@ def list_providers(
     console.print()
 
 
-@app.command()
+@app.command(help=_tr("cli.doctor", _default="Diagnose config, keys and connectivity."))
 def doctor(
-    fix: bool = typer.Option(False, "--fix", help="Conserta o que dá: lock órfão, perms do .env, temp."),
-    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
-    lint: bool = typer.Option(False, "--lint", help="Lint de POSTURA (segurança/exposição), estilo OpenClaw."),
+    fix: bool = typer.Option(False, "--fix", help=_tr("cli.doctor.fix", _default="Fix what it can: orphan locks, .env perms, temp.")),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.doctor.json", _default="Structured JSON output (monitoring/CI).")),
+    lint: bool = typer.Option(False, "--lint", help=_tr("cli.doctor.lint", _default="POSTURE lint (security/exposure), OpenClaw-style.")),
 ) -> None:
     """Diagnostica config, chaves e conectividade. `--fix` repara; `--json` p/ máquina; `--lint` postura."""
     if lint:                                        # conformance/postura (#12): pass/warn/fail
@@ -294,9 +295,9 @@ def doctor(
                                n=len(rm_t), kb=freed / 1024))
 
 
-@app.command()
+@app.command(help=_tr("cli.harden", _default="Apply the HARDENED-STRICT profile (recommended posture for public/GA)."))
 def harden(
-    off: bool = typer.Option(False, "--off", help="Desliga o isolamento estrito (volta ao dev-friendly)."),
+    off: bool = typer.Option(False, "--off", help=_tr("cli.harden.off", _default="Turn off strict isolation (back to dev-friendly).")),
 ) -> None:
     """Aplica o perfil HARDENED-STRICT — a postura recomendada p/ produção pública/GA (#2): superfície
     exposta SEM Docker → run_shell/process DESABILITADOS, não degradam pro host. Grava
@@ -334,9 +335,9 @@ def harden(
     console.print("[dim]   Verifique: okami policy check --strict  ·  reverter: okami harden --off[/dim]")
 
 
-@app.command()
+@app.command(help=_tr("cli.login", _default="Authenticate a subscription provider (device flow / official CLI)."))
 def login(
-    provider: str = typer.Argument(..., help="Provider para autenticar (ex.: codex, minimax)."),
+    provider: str = typer.Argument(..., help=_tr("cli.login.provider", _default="Provider to authenticate (e.g. codex, minimax).")),
 ) -> None:
     """Autentica um provider de assinatura (device flow / CLI oficial)."""
     from okami.llm import oauth
@@ -401,9 +402,9 @@ def login(
     console.print(f"[yellow]'{provider}' não tem fluxo de login.[/yellow] Use .env/api_key.")
 
 
-@app.command()
+@app.command(help=_tr("cli.logout", _default="Log out of a provider: delete the stored credential (to switch accounts or when the plan ends)."))
 def logout(
-    provider: str = typer.Argument(..., help="Provider para sair (ex.: codex, minimax)."),
+    provider: str = typer.Argument(..., help=_tr("cli.logout.provider", _default="Provider to log out of (e.g. codex, minimax).")),
 ) -> None:
     """Sai de um provider: apaga a credencial guardada (p/ trocar de conta ou quando o plano acaba)."""
     from okami.llm import oauth
@@ -431,10 +432,10 @@ def logout(
     console.print(f"[dim]re-autenticar: okami login {provider}[/dim]")
 
 
-@app.command()
+@app.command(help=_tr("cli.gate", _default="Run the design verification gate (§4.3) over a directory."))
 def gate(
-    path: str = typer.Argument(".", help="Diretório a verificar."),
-    contract: str = typer.Option("ui", "--contract", "-c", help="Nome do contrato em okami.yaml."),
+    path: str = typer.Argument(".", help=_tr("cli.gate.path", _default="Directory to check.")),
+    contract: str = typer.Option("ui", "--contract", "-c", help=_tr("cli.gate.contract", _default="Contract name in okami.yaml.")),
 ) -> None:
     """Roda o verification gate de design (§4.3) sobre um diretório."""
     from okami.contracts import check_ui

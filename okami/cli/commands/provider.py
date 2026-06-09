@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
@@ -11,7 +12,7 @@ from okami.cli.commands.basics import list_providers, login  # composição de c
 
 
 provider_app = typer.Typer(invoke_without_command=True,
-                           help="Providers de LLM (§3.5): adicionar, listar, remover, default, login.")
+                           help=_tr("cli.provider", _default="LLM providers: add, list, remove, default, login."))
 app.add_typer(provider_app, name="provider")
 
 
@@ -22,9 +23,9 @@ def provider_main(ctx: typer.Context) -> None:
         provider_list_cmd()
 
 
-@provider_app.command("add")
+@provider_app.command("add", help=_tr("cli.provider.add", _default="Add a provider by picking a catalog preset (arrow menu). No YAML editing."))
 def provider_add_cmd(
-    default: bool = typer.Option(None, "--default/--no-default", help="Definir como provider default."),
+    default: bool = typer.Option(None, "--default/--no-default", help=_tr("cli.provider.add.default", _default="Set as the default provider.")),
 ) -> None:
     """Adiciona um provider escolhendo um preset do catálogo (menu de seta). Sem editar YAML."""
     import yaml as _yaml
@@ -90,14 +91,14 @@ def _provider_finish(pid: str, pdict: dict, *, made_default: bool) -> None:
     console.print("[dim]diagnóstico completo: okami doctor[/dim]")
 
 
-@provider_app.command("list")
+@provider_app.command("list", help=_tr("cli.provider.list", _default="List providers (same as `okami providers`)."))
 def provider_list_cmd() -> None:
     """Lista os providers (igual a `okami providers`)."""
     list_providers()
 
 
-@provider_app.command("remove")
-def provider_remove_cmd(provider_id: str = typer.Argument(..., help="ID do provider a remover.")) -> None:
+@provider_app.command("remove", help=_tr("cli.provider.remove", _default="Remove a provider from okami.yaml."))
+def provider_remove_cmd(provider_id: str = typer.Argument(..., help=_tr("cli.provider.remove.provider_id", _default="ID of the provider to remove."))) -> None:
     """Remove um provider do okami.yaml."""
     import yaml as _yaml
     cfg_path = Path("okami.yaml")
@@ -114,8 +115,8 @@ def provider_remove_cmd(provider_id: str = typer.Argument(..., help="ID do provi
     console.print(f"[green]✓ removido:[/green] {provider_id}")
 
 
-@provider_app.command("default")
-def provider_default_cmd(provider_id: str = typer.Argument(..., help="ID do provider que vira default.")) -> None:
+@provider_app.command("default", help=_tr("cli.provider.default", _default="Set the default provider (writes an override in okami.local.yaml)."))
+def provider_default_cmd(provider_id: str = typer.Argument(..., help=_tr("cli.provider.default.provider_id", _default="ID of the provider to make default."))) -> None:
     """Define o provider default (grava override em okami.local.yaml)."""
     cfg = _load()
     if provider_id not in cfg.providers:
@@ -125,15 +126,15 @@ def provider_default_cmd(provider_id: str = typer.Argument(..., help="ID do prov
     console.print(f"[green]✓ default agora é '{provider_id}'[/green]")
 
 
-@provider_app.command("login")
-def provider_login_cmd(provider_id: str = typer.Argument(..., help="Provider p/ autenticar.")) -> None:
+@provider_app.command("login", help=_tr("cli.provider.login", _default="Shortcut for `okami login <provider>`."))
+def provider_login_cmd(provider_id: str = typer.Argument(..., help=_tr("cli.provider.login.provider_id", _default="Provider to authenticate."))) -> None:
     """Atalho p/ `okami login <provider>`."""
     login(provider_id)
 
 
-@provider_app.command("models")
+@provider_app.command("models", help=_tr("cli.provider.models", _default="List a provider's models — LIVE via /models, else the catalog."))
 def provider_models_cmd(
-    provider_id: str = typer.Argument(None, help="Provider (vazio = todos)."),
+    provider_id: str = typer.Argument(None, help=_tr("cli.provider.models.provider_id", _default="Provider (empty = all).")),
 ) -> None:
     """Lista os modelos de um provider — AO VIVO via /models, senão catálogo (estilo `openclaw models list`)."""
     from okami.llm.models import discover_models

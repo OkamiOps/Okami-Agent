@@ -5,6 +5,7 @@ import json
 import re
 
 import typer
+from okami.i18n import t as _tr
 from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
@@ -104,8 +105,8 @@ def _redact(obj):
 
 
 config_app = typer.Typer(invoke_without_command=True,
-                         help="Config (estilo hermes/openclaw): show/get/set/edit/path/check. "
-                              "Sem subcomando abre o painel interativo. Segredos→.env, resto→okami.local.yaml.")
+                         help=_tr("cli.config", _default="Config (hermes/openclaw-style): show/get/set/edit/path/check. "
+                                  "No subcommand opens the interactive panel. Secrets→.env, rest→okami.local.yaml."))
 app.add_typer(config_app, name="config")
 
 
@@ -220,7 +221,8 @@ def _render_config_view(diff: bool = False) -> None:
     console.print()
 
 
-@config_app.callback(invoke_without_command=True)
+@config_app.callback(invoke_without_command=True,
+                     help=_tr("cli.config.main", _default="`okami config` with no subcommand: show the effective config and open a menu."))
 def config_main(ctx: typer.Context) -> None:
     """`okami config` SEM subcomando: mostra a config efetiva e abre um menu (não exige argumentos).
 
@@ -266,8 +268,8 @@ def config_main(ctx: typer.Context) -> None:
                 pass
 
 
-@config_app.command("show")
-def config_show(diff: bool = typer.Option(False, "--diff", help="Só os overrides (okami.local.yaml).")) -> None:
+@config_app.command("show", help=_tr("cli.config.show", _default="Show the effective config (okami.yaml + overrides), with secrets masked."))
+def config_show(diff: bool = typer.Option(False, "--diff", help=_tr("cli.config.show.diff", _default="Only the overrides (okami.local.yaml)."))) -> None:
     """Mostra a config efetiva (okami.yaml + overrides), com segredos mascarados."""
     if console.is_terminal:                           # TTY → visão bonita (cards + arquivos)
         _render_config_view(diff=diff)
@@ -289,10 +291,10 @@ def _looks_secret_value(val) -> bool:
     return bool(s) and redact(s) != s          # o redator central mexeu → tem padrão de segredo
 
 
-@config_app.command("get")
+@config_app.command("get", help=_tr("cli.config.get", _default="Read a value from the effective config (dotted key). Secrets masked by default."))
 def config_get(
-    key: str = typer.Argument(..., help="Chave pontilhada, ex.: memory.backend"),
-    raw_out: bool = typer.Option(False, "--raw", help="Mostra o valor CRU mesmo se for segredo (cuidado: vaza)."),
+    key: str = typer.Argument(..., help=_tr("cli.config.get.key", _default="Dotted key, e.g. memory.backend")),
+    raw_out: bool = typer.Option(False, "--raw", help=_tr("cli.config.get.raw", _default="Show the RAW value even if it is a secret (careful: leaks).")),
 ) -> None:
     """Lê um valor da config efetiva (chave pontilhada). Segredo é mascarado por padrão (#9; use --raw p/ ver)."""
     import yaml as _yaml
@@ -310,11 +312,11 @@ def config_get(
         console.print(str(val))
 
 
-@config_app.command("set")
+@config_app.command("set", help=_tr("cli.config.set", _default="Set a value — auto-routes: secret (UPPERCASE) → .env, rest → okami.local.yaml."))
 def config_set(
-    key: str = typer.Argument(..., help="Chave pontilhada (ex.: memory.backend) ou env (ex.: OPENAI_API_KEY)."),
-    value: str = typer.Argument(..., help="Valor (true/false/número/lista a,b/json também)."),
-    project: bool = typer.Option(False, "--project", help="Segredo no .env do PROJETO (default = global $OKAMI_HOME/.env, ~/.okami)."),
+    key: str = typer.Argument(..., help=_tr("cli.config.set.key", _default="Dotted key (e.g. memory.backend) or env (e.g. OPENAI_API_KEY).")),
+    value: str = typer.Argument(..., help=_tr("cli.config.set.value", _default="Value (true/false/number/list a,b/json too).")),
+    project: bool = typer.Option(False, "--project", help=_tr("cli.config.set.project", _default="Secret in the PROJECT .env (default = global $OKAMI_HOME/.env, ~/.okami).")),
 ) -> None:
     """Define um valor — auto-roteia: segredo (MAIÚSCULAS) → .env, resto → okami.local.yaml.
 
@@ -342,8 +344,8 @@ def config_set(
     console.print(f"[green]✓ {key}[/green] = {coerced!r} [dim]→ okami.local.yaml[/dim]")
 
 
-@config_app.command("unset")
-def config_unset(key: str = typer.Argument(..., help="Chave pontilhada a remover do override.")) -> None:
+@config_app.command("unset", help=_tr("cli.config.unset", _default="Remove an override (okami.local.yaml). Does not touch the base okami.yaml."))
+def config_unset(key: str = typer.Argument(..., help=_tr("cli.config.unset.key", _default="Dotted key to remove from the override."))) -> None:
     """Remove um override (okami.local.yaml). Não toca no okami.yaml base."""
     import yaml as _yaml
     p = Path("okami.local.yaml")
@@ -356,14 +358,14 @@ def config_unset(key: str = typer.Argument(..., help="Chave pontilhada a remover
         console.print(f"[yellow]não estava nos overrides:[/yellow] {key}")
 
 
-@config_app.command("path")
+@config_app.command("path", help=_tr("cli.config.path", _default="Show where the config files live (incl. the GLOBAL secrets .env)."))
 def config_path() -> None:
     """Mostra onde ficam os arquivos de config (incl. o .env GLOBAL de segredos)."""
     console.print(_files_card())
 
 
-@config_app.command("edit")
-def config_edit(base: bool = typer.Option(False, "--base", help="Abre o okami.yaml em vez do override.")) -> None:
+@config_app.command("edit", help=_tr("cli.config.edit", _default="Open the config in your editor ($EDITOR, else notepad/nano)."))
+def config_edit(base: bool = typer.Option(False, "--base", help=_tr("cli.config.edit.base", _default="Open okami.yaml instead of the override."))) -> None:
     """Abre a config no seu editor ($EDITOR, senão notepad/nano)."""
     import os
     import subprocess
@@ -374,9 +376,9 @@ def config_edit(base: bool = typer.Option(False, "--base", help="Abre o okami.ya
     subprocess.call([editor, str(target)])
 
 
-@config_app.command("check")
+@config_app.command("check", help=_tr("cli.config.check", _default="Validate that the config loads and point out what's missing (lite doctor)."))
 def config_check(
-    json_out: bool = typer.Option(False, "--json", help="Saída JSON (pra script/CI) — igual a doctor/policy."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.config.check.json", _default="JSON output (for script/CI) — like doctor/policy.")),
 ) -> None:
     """Valida que a config carrega e aponta o que falta (lite doctor)."""
     import json as _json

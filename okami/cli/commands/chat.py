@@ -256,18 +256,19 @@ def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> Non
         last_elapsed = _time.time() - t0
 
 
-@app.command()
+@app.command(help=_tr("cli.chat", _default="Chat with the agent IN THE TERMINAL — no Telegram. The session persists (resumes when reopened)."))
 def chat(
-    message: str = typer.Argument(None, help="Mensagem única (modo -q/scripts). Vazio = REPL interativo."),
-    agent: str = typer.Option(None, "-a", "--agent", help="Conversa como um agente (agents/<id>)."),
+    message: str = typer.Argument(None, help=_tr("cli.chat.message", _default="Single message (-q/scripts mode). Empty = interactive REPL.")),
+    agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.chat.agent", _default="Talk as an agent (agents/<id>).")),
     workspace: str = typer.Option("workspaces/default", "-w", "--workspace"),
     provider: str = typer.Option(None, "-p", "--provider"),
     model: str = typer.Option(None, "-m", "--model"),
-    new: bool = typer.Option(False, "--new", help="Começa do zero (arquiva a conversa anterior do terminal)."),
-    yolo: bool = typer.Option(False, "-y", "--yolo", help="Auto-aprova ações sensíveis nesta sessão."),
+    new: bool = typer.Option(False, "--new", help=_tr("cli.chat.new", _default="Start fresh (archives the previous terminal conversation).")),
+    yolo: bool = typer.Option(False, "-y", "--yolo", help=_tr("cli.chat.yolo", _default="Auto-approve sensitive actions this session.")),
     use_tui: bool = typer.Option(False, "--tui/--no-tui",
-                                 help="REPL de linha (default — seleção nativa do terminal, igual Hermes). "
-                                      "--tui usa a TUI Textual de tela cheia (rouba o mouse: sem seleção nativa)."),
+                                 help=_tr("cli.chat.tui",
+                                          _default="Line REPL (default — native terminal selection, Hermes-style). "
+                                                   "--tui uses the full-screen Textual TUI (grabs the mouse: no native selection).")),
 ) -> None:
     """Conversa com o agente NO TERMINAL — sem Telegram. Sessão persiste (retoma ao reabrir).
 

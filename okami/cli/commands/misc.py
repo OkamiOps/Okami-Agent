@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import typer
+from okami.i18n import t as _tr
 from rich.table import Table
 from okami import __version__
 from pathlib import Path
@@ -10,13 +11,13 @@ from okami.cli._shared import _load
 from okami.i18n import t
 
 
-@app.command()
+@app.command(help=_tr("cli.clean", _default="Disk cleanup: orphan locks + temp + audio + finished processes."))
 def clean(
     workspace: str = typer.Option(".", "-w", "--workspace"),
-    lock_stale: float = typer.Option(300.0, "--lock-stale", help="Idade (s) p/ considerar um .lock órfão."),
-    deep: bool = typer.Option(False, "--deep", help="Aplica a RETENÇÃO declarada (sessions/checkpoints/tool_outputs)."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Só MOSTRA o que seria removido (não apaga)."),
-    json_out: bool = typer.Option(False, "--json", help="Relatório por área em JSON (cron/monitoramento)."),
+    lock_stale: float = typer.Option(300.0, "--lock-stale", help=_tr("cli.clean.lock_stale", _default="Age (s) to consider a .lock orphaned.")),
+    deep: bool = typer.Option(False, "--deep", help=_tr("cli.clean.deep", _default="Apply the declared RETENTION (sessions/checkpoints/tool_outputs).")),
+    dry_run: bool = typer.Option(False, "--dry-run", help=_tr("cli.clean.dry_run", _default="Only SHOW what would be removed (delete nothing).")),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.clean.json", _default="Per-area report in JSON (cron/monitoring).")),
 ) -> None:
     """Faxina de disco: lock órfão + temp + áudio + processos terminados. `--deep` aplica a quota
     versionada (bloco `retention:` do okami.yaml); `--dry-run` lista sem apagar; `--json` p/ máquina."""
@@ -56,7 +57,7 @@ def clean(
     console.print()
 
 
-@app.command()
+@app.command(help=_tr("cli.tools", _default="List the agent's tools (category · tier · sensitivity) — declarative registry."))
 def tools() -> None:
     """Lista as ferramentas do agente (categoria · tier · sensibilidade) — registro declarativo (#14)."""
 
@@ -91,9 +92,9 @@ def tools() -> None:
     console.print()
 
 
-@app.command()
+@app.command(help=_tr("cli.status", _default="Resolved view (hermes/openclaw-style status): agent, model, providers, memory, toggles."))
 def status(
-    json_out: bool = typer.Option(False, "--json", help="Saída em JSON estruturado (monitoramento/CI)."),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.status.json", _default="Structured JSON output (monitoring/CI).")),
 ) -> None:
     """Visão resolvida (estilo hermes/openclaw status): agente, modelo, providers, memória, toggles."""
     try:
@@ -294,7 +295,7 @@ _HELP_GROUPS = [
 ]
 
 
-@app.command("help")
+@app.command("help", help=_tr("cli.help", _default="Friendly overview of the commands. Use `okami <command> --help` for details."))
 def help_cmd() -> None:
     """Visão geral dos comandos (amigável). Use `okami <comando> --help` p/ detalhes."""
     from rich.panel import Panel
@@ -313,7 +314,7 @@ def help_cmd() -> None:
     console.print("[dim]dica: comece com[/dim] [bold]okami setup[/bold] [dim]e depois[/dim] [bold]okami chat[/bold]")
 
 
-@app.command()
+@app.command(help=_tr("cli.version", _default="Show the version."))
 def version() -> None:
     """Mostra a versão."""
     console.print(__version__)
@@ -325,12 +326,13 @@ def _version_cb(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback(invoke_without_command=True)
+@app.callback(invoke_without_command=True,
+              help=_tr("cli.root", _default="Okami Agent — CLI. With no command, shows the overview."))
 def _root(
     ctx: typer.Context,
-    _version: bool = typer.Option(False, "--version", "-V", help="Mostra a versão e sai.",
+    _version: bool = typer.Option(False, "--version", "-V", help=_tr("cli.root.version", _default="Show the version and exit."),
                                   callback=_version_cb, is_eager=True),
-    lang: str = typer.Option(None, "--lang", help="Idioma: en | pt (default: en; ou OKAMI_LANG / config lang:)."),
+    lang: str = typer.Option(None, "--lang", help=_tr("cli.root.lang", _default="Language: en | pt (default: en; or OKAMI_LANG / config lang:).")),
 ) -> None:
     """Okami Agent — CLI. Sem comando, mostra a visão geral."""
     if lang:                                          # --lang vence env/config nesta invocação
