@@ -38,7 +38,7 @@ def test_welcome_has_logo_panel_tools_and_skills():
     assert "Skills" in out and "creative" in out and "frontend-shadcn" in out   # categoria inferida
     assert "task_complete" not in out  # tools de controle são ocultadas
     assert "7 ferramentas" in out and "3 skills" in out
-    assert "retomando" in out          # resumed=2
+    assert "resuming" in out          # resumed=2
 
 
 def test_skill_category_inference_and_frontmatter_override():
@@ -52,7 +52,7 @@ def test_skill_category_inference_and_frontmatter_override():
 def test_status_bar_gauge_scales_with_ctx():
     low = _render(tui.status_bar(model="m", ctx_pct=10, turns=1, elapsed=2))
     high = _render(tui.status_bar(model="m", ctx_pct=95, turns=9, elapsed=0))
-    assert "10%" in low and "1 trocas" in low
+    assert "10%" in low and "1 turns" in low
     assert "95%" in high
     assert low.count("█") < high.count("█")     # barra enche conforme o contexto
 

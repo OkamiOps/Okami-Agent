@@ -1,6 +1,30 @@
 """Catálogo Português (pt-BR). Tradução do default (en). Ative com OKAMI_LANG=pt ou `lang: pt` no okami.yaml."""
 
 MESSAGES: dict[str, str] = {
+    # boas-vindas (banner) + painel /agents
+    "welcome.hi": "Bem-vindo ao Okami! ",
+    "welcome.type": "Digite sua mensagem, ou /help para os comandos.",
+    "welcome.resumed": "↻ retomando conversa ({resumed} trocas anteriores)",
+    "welcome.persona": "✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.",
+    "welcome.copy": "🖱 arraste pra selecionar e copie NORMAL (Cmd/Ctrl+C — seleção nativa do terminal) · /copy copia a última resposta inteira.",
+    "activity.title": "⚙ atividade",
+    "activity.current_turn": "turno atual: ",
+    "activity.busy": "ocupado",
+    "activity.idle": "livre",
+    "activity.bg_none": "background: nenhum",
+    "activity.processes": "processos",
+    "activity.queue": "fila: {n} aguardando",
+    # eventos ao vivo do harness (event_line) + barra de status
+    "event.approval": "aprovação:",
+    "event.loop": "loop detectado",
+    "event.stall": "sem progresso, mudando de abordagem",
+    "event.escalate": "escalando p/ modelo mais forte",
+    "event.compact": "compactando contexto",
+    "event.memory": "memória",
+    "event.still_missing": "ainda falta:",
+    "event.salvaged": "entrega parcial",
+    "event.generation": "geração",
+    "status.turns": "trocas",
     # chat / gateway help
     "chat.help": "Sou o agente '{agent}'. Manda a tarefa.\nEssenciais: {ess}\n/commands lista TODOS por categoria.",
     "chat.commands_header": "📜 comandos por categoria:",

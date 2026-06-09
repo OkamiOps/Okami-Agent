@@ -40,9 +40,9 @@ def test_detail_levels_order():
 
 def test_activity_panel_content():
     p = activity_panel(bg={1: "analisa o repo"}, busy=True, queued=2).plain
-    assert "ocupado" in p and "#1 analisa o repo" in p and "2 aguardando" in p
+    assert "busy" in p and "#1 analisa o repo" in p and "2 waiting" in p
     empty = activity_panel().plain
-    assert "background: nenhum" in empty and "livre" in empty
+    assert "background: none" in empty and "idle" in empty
 
 
 def test_route_skin_and_mouse():

@@ -14,6 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from okami.i18n import t as _tr      # i18n: EN default, PT via OKAMI_LANG=pt (`t` colide c/ a var local Text)
+
 # Paleta da MARCA Okami (design-system v0.2): Onyx/Bone + acentos OKLCH → hex.
 ORANGE = "#ff7527"      # Heat Orange — acento primário/interativo
 MAGENTA = "#ff39d1"     # Neon Magenta — acento
@@ -286,13 +288,15 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     panel = Panel(Group(_tools_skills(tools, skills), Text(""), footer), border_style=ORANGE,
                   title=f"[bold {ORANGE}]Okami Agent[/] [{DIM}]v{version}[/]", title_align="center")
     tips = Text()
-    tips.append("\nBem-vindo ao Okami! ", style=f"bold {FG}")
-    tips.append("Digite sua mensagem, ou /help para os comandos.", style=SOFT)
+    tips.append("\n" + _tr("welcome.hi", _default="Welcome to Okami! "), style=f"bold {FG}")
+    tips.append(_tr("welcome.type", _default="Type your message, or /help for commands."), style=SOFT)
     if resumed:
-        tips.append(f"\n↻ retomando conversa ({resumed} trocas anteriores)", style=MUTE)
-    tips.append("\n✦ /persona <preset> muda o tom · /feedback molda o jeito dele falar.", style=MUTE)
-    tips.append("\n🖱 arraste pra selecionar e copie NORMAL (Cmd/Ctrl+C — seleção nativa do terminal) · "
-                "/copy copia a última resposta inteira.", style=MUTE)
+        tips.append("\n" + _tr("welcome.resumed", _default="↻ resuming conversation ({resumed} prior turns)",
+                                resumed=resumed), style=MUTE)
+    tips.append("\n" + _tr("welcome.persona", _default="✦ /persona <preset> shifts the tone · /feedback shapes "
+                           "how it talks."), style=MUTE)
+    tips.append("\n" + _tr("welcome.copy", _default="🖱 drag to select and copy NORMALLY (Cmd/Ctrl+C — native "
+                           "terminal selection) · /copy copies the whole last reply."), style=MUTE)
     return Group(header, Text(""), panel, tips)
 
 
@@ -331,23 +335,25 @@ def activity_panel(*, bg: dict | None = None, busy: bool = False, queued: int = 
     bg = bg or {}
     procs = procs or []
     t = Text()
-    t.append("⚙ atividade\n", style=f"bold {CYAN}")
-    t.append("  turno atual: ", style=MUTE)
-    t.append(("ocupado" if busy else "livre") + "\n", style=ORANGE if busy else SOFT)
+    t.append(_tr("activity.title", _default="⚙ activity") + "\n", style=f"bold {CYAN}")
+    t.append("  " + _tr("activity.current_turn", _default="current turn: "), style=MUTE)
+    t.append((_tr("activity.busy", _default="busy") if busy else _tr("activity.idle", _default="idle")) + "\n",
+             style=ORANGE if busy else SOFT)
     if bg:
         t.append(f"  background ({len(bg)}):\n", style=MUTE)
         for bid, desc in list(bg.items())[:10]:
             t.append(f"    ▶ #{bid} {desc}\n", style=SOFT)
     else:
-        t.append("  background: nenhum\n", style=MUTE)
+        t.append("  " + _tr("activity.bg_none", _default="background: none") + "\n", style=MUTE)
     running = [p for p in procs if p.get("status") == "running"]
     if procs:                                            # processos OS (servidor/build) — kill real: /process kill
-        t.append(f"  processos ({len(running)} ativos / {len(procs)}):\n", style=MUTE)
+        t.append("  " + _tr("activity.processes", _default="processes", ) + f" ({len(running)}/{len(procs)}):\n",
+                 style=MUTE)
         for p in procs[-8:]:
             sym = "▶" if p.get("status") == "running" else "✅" if p.get("status") == "exited" else "·"
             t.append(f"    {sym} {p.get('id', '?')} {(p.get('cmd') or '')[:40]}\n", style=SOFT)
     if queued:
-        t.append(f"  fila: {queued} aguardando\n", style="#ffb86c")
+        t.append("  " + _tr("activity.queue", _default="queue: {n} waiting", n=queued) + "\n", style="#ffb86c")
     return t
 
 
@@ -444,26 +450,32 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
                              + (f" [{MUTE}]{escape(str(prev))}[/]" if prev else ""))
         return t
     if k == "approval_request":
-        return Text.from_markup(f"  🔐 [{ORANGE}]aprovação:[/] [{SOFT}]{escape(str(e.get('reason', '')))}[/]")
+        return Text.from_markup(f"  🔐 [{ORANGE}]{_tr('event.approval', _default='approval:')}[/] "
+                                f"[{SOFT}]{escape(str(e.get('reason', '')))}[/]")
     if k == "loop":
-        return Text.from_markup(f"  🔁 [{ORANGE}]loop detectado[/] [{MUTE}](x{escape(str(e.get('repeats', '?')))})[/]")
+        return Text.from_markup(f"  🔁 [{ORANGE}]{_tr('event.loop', _default='loop detected')}[/] "
+                                f"[{MUTE}](x{escape(str(e.get('repeats', '?')))})[/]")
     if k == "stall":
-        return Text.from_markup("  🤔 [%s]sem progresso, mudando de abordagem[/]" % ORANGE)
+        return Text.from_markup(f"  🤔 [{ORANGE}]{_tr('event.stall', _default='no progress, changing approach')}[/]")
     if k == "escalate":
-        return Text.from_markup(f"  🧠 [{MAGENTA}]escalando p/ modelo mais forte[/] [{MUTE}]({escape(str(e.get('why', '')))})[/]")
+        return Text.from_markup(f"  🧠 [{MAGENTA}]{_tr('event.escalate', _default='escalating to a stronger model')}[/] "
+                                f"[{MUTE}]({escape(str(e.get('why', '')))})[/]")
     if k == "compact":
-        return Text.from_markup(f"  🗜️ [{CYAN}]compactando contexto[/] [{MUTE}]({escape(str(e.get('promoted', 0)))} → memória)[/]")
+        return Text.from_markup(f"  🗜️ [{CYAN}]{_tr('event.compact', _default='compacting context')}[/] "
+                                f"[{MUTE}]({escape(str(e.get('promoted', 0)))} → {_tr('event.memory', _default='memory')})[/]")
     if k == "complete_rejected":
         miss = escape(", ".join(str(m) for m in e.get("missing", [])))
-        return Text.from_markup(f"  🚧 [{ORANGE}]ainda falta:[/] [{SOFT}]{miss}[/]")
+        return Text.from_markup(f"  🚧 [{ORANGE}]{_tr('event.still_missing', _default='still missing:')}[/] [{SOFT}]{miss}[/]")
     if k == "salvaged":                                  # turno ia falhar → ENTREGOU o parcial em vez de morrer
-        return Text.from_markup(f"  🛟 [{ORANGE}]entrega parcial[/] [{MUTE}]({escape(str(e.get('reason', '')))})[/]")
+        return Text.from_markup(f"  🛟 [{ORANGE}]{_tr('event.salvaged', _default='partial delivery')}[/] "
+                                f"[{MUTE}]({escape(str(e.get('reason', '')))})[/]")
     if k == "llm_call":                                  # torna o GARGALO visível: só as gerações LENTAS (>8s)
         secs = e.get("secs", 0) or 0
         if secs < 8:
             return None
         ti, to = int(e.get("tokens_in", 0)), int(e.get("tokens_out", 0))
-        return Text.from_markup(f"  ⏱ [{MUTE}]geração {secs:.0f}s · {ti // 1000}k↑ {to // 1000}k↓[/]")
+        return Text.from_markup(f"  ⏱ [{MUTE}]{_tr('event.generation', _default='generation')} "
+                                f"{secs:.0f}s · {ti // 1000}k↑ {to // 1000}k↓[/]")
     return None
 
 
@@ -477,7 +489,7 @@ def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     t.append(model, style=f"bold {FG}")
     t.append("  ctx ", style=MUTE)
     t.append(f"{gauge} {ctx_pct:>3}%", style=CYAN if ctx_pct < 80 else "red")
-    t.append(f"  · {turns} trocas", style=MUTE)
+    t.append(f"  · {turns} {_tr('status.turns', _default='turns')}", style=MUTE)
     if elapsed:
         t.append(f"  · ⏱ {elapsed:.0f}s", style=MUTE)
     return t

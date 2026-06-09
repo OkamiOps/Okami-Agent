@@ -83,3 +83,19 @@ def test_migrated_cli_keys_have_pt_translation():
     body = {k for k in used if k.split(".")[0] in ("doctor", "status", "setup")}
     missing = sorted(k for k in body if k not in MESSAGES)
     assert not missing, f"chaves sem tradução PT: {missing}"
+
+
+def test_tui_strings_bilingual_english_default():
+    # i18n da TUI: EN é o default (inline _default), PT vem do catálogo via OKAMI_LANG=pt.
+    import okami.i18n as i18n
+    import okami.tui as tui
+    try:
+        i18n.set_lang("en")
+        assert "no progress" in tui.event_line({"kind": "stall"}).plain
+        assert "loop detected" in tui.event_line({"kind": "loop", "repeats": 2}).plain
+        assert "turns" in tui.status_bar(model="m", ctx_pct=5, turns=3, elapsed=0).plain
+        i18n.set_lang("pt")
+        assert "sem progresso" in tui.event_line({"kind": "stall"}).plain
+        assert "trocas" in tui.status_bar(model="m", ctx_pct=5, turns=3, elapsed=0).plain
+    finally:
+        i18n.set_lang(None)

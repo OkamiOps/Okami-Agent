@@ -193,7 +193,7 @@ def test_process_brief_feeds_activity_panel():
     pid = ProcessManager(ep.ws).start("sleep 30")["id"]
     panel = tui.activity_panel(bg={}, busy=False, queued=0, procs=ep.process_brief())
     txt = panel.plain if hasattr(panel, "plain") else str(panel)
-    assert "processos" in txt and pid in txt
+    assert "processes" in txt and pid in txt
     ProcessManager(ep.ws).kill(pid)
 
 
