@@ -118,3 +118,32 @@ def test_known_regex_limits_still_gated_by_approval():
                 "rm -rf /home/../", "cd / && rm -rf *", "rm -rf /."):
         assert _cat(cmd) == "destructive_shell", \
             f"limite conhecido PERDEU o gate de aprovação (regressão): {cmd!r} → {_cat(cmd)}"
+
+
+
+def test_audit_v4_printenv_blocked():
+    # audit 2026-06-09 v4: printenv puro (sem args) era BYPASS — dump de todas as var de env
+    # (API_KEY, TOKEN, etc.). Fix: ancorar com word-boundary + negative-lookahead.
+    for cmd in ("printenv", "printenv HOME", "printenv | head", "  printenv", ";printenv",
+                "&&printenv", "|printenv"):
+        assert _SENSITIVE_PATH.search(cmd), (
+            f"REGRESSAO: printenv sem/sem-args escapou do _SENSITIVE_PATH: {cmd!r}")
+
+
+def test_audit_v4_private_etc_blocked():
+    # audit 2026-06-09 v4: /private/etc/* é symlink do /etc/* no macOS — sudoers, passwd, shadow.
+    # Fix: alternar /private?/etc/(passwd|shadow|sudoers?).
+    for cmd in ("/private/etc/sudoers", "/private/etc/passwd", "/private/etc/shadow",
+                "sed -i s/x/y/ /private/etc/sudoers",
+                "cat /private/etc/passwd",
+                "cat /etc/sudoers"):  # regressao: nao pode PARAR de bloquear /etc/
+        assert _SENSITIVE_PATH.search(cmd), (
+            f"REGRESSAO: /private/etc (macOS) escapou do _SENSITIVE_PATH: {cmd!r}")
+
+
+def test_audit_v4_printenv_no_false_positive_on_substring():
+    # regressao do proprio fix: word-boundary de 'printenv' casava 'printenv.txt', 'printer', etc.
+    # Fix final: negative lookahead (?![.\w]).
+    for cmd in ("cat printenv.txt", "echo printer", "myprinter", "the_printenv_module"):
+        assert not _SENSITIVE_PATH.search(cmd), (
+            f"FALSO-POSITIVO: substring tipo 'printenv.txt' foi bloqueado: {cmd!r}")

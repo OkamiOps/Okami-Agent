@@ -56,7 +56,7 @@ _SHELL_READONLY = {"ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "wh
 # profundidade (yolo/docker liberam). Não é à prova de ofuscação, mas mata o `cat .env`/exfil óbvio.
 _SENSITIVE_PATH = re.compile(
     r"\.env\b|\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
-    r"\.pem\b|\.key\b|/etc/(passwd|shadow)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
+    r"\.pem\b|\.key\b|/etc/(passwd|shadow|sudoers?)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
     r"secrets?\.(env|json|ya?ml)"
     # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s); NAO o nome solto
     # ('config.json'/'settings.json' sao comuns -> narrowed, falso-positivo do audit anterior).
@@ -66,7 +66,9 @@ _SENSITIVE_PATH = re.compile(
     # audit 2026-06-08 P3 residual: DB client (pgpass/my.cnf), cloud SDK legacy (boto/azure), env-leak via
     # /proc + printenv/echo $VAR + env|grep. Ancorados (?![.\w]) pra nao casar em arquivo comum.
     r"|[/~.](?:pgpass|my\.cnf|my\.login\.cnf)(?![.\w])|(?:^|[/~])\.boto(?![.\w])|[/~.]azure/"
-    r"|/proc/(self|1)/environ\b|\benv\s*\|\s*grep\b|\bprintenv\s+[A-Z_]|\becho\s+\$[A-Z_]",
+    r"|/proc/(self|1)/environ\b|\benv\s*\|\s*grep\b|(?<![.\w])printenv(?![.\w])|\becho\s+\$[A-Z_]"
+    # audit 2026-06-09 v4: macOS /private/etc é symlink do /etc real — alias obrigatório.
+    r"|/private?/etc/(passwd|shadow|sudoers?)",
     re.IGNORECASE,
 )
 
