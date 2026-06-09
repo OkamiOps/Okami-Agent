@@ -38,6 +38,21 @@ def redact(text: str) -> str:
     return text
 
 
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def safe_text(text: str) -> str:
+    """Remove surrogates SOLITÁRIOS (U+D800–U+DFFF) trocando-os por U+FFFD (�).
+
+    No Windows o console às vezes injeta meio-surrogate no input (emoji/colagem). Eles NÃO são UTF-8
+    válido e estouram qualquer `.encode('utf-8')` — histórico do prompt_toolkit, print do Rich, JSON
+    pro LLM (UnicodeEncodeError: 'surrogates not allowed'). Texto comum e emoji VÁLIDO passam intactos.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    return _LONE_SURROGATE.sub("�", text)
+
+
 def looks_secret(text: str) -> bool:
     """True se `text` contém um padrão de segredo conhecido (= o redator mexeria nele).
 

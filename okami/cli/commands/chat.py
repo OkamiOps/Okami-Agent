@@ -18,11 +18,13 @@ def _make_redacting_history(path: str):
     e isso ia VERBATIM p/ ~/.okami/chat_history (plaintext). Agora passa pelo redact() (sk-/ghp_/Bearer/AKIA…)."""
     from prompt_toolkit.history import FileHistory
 
-    from okami.core.redact import redact
+    from okami.core.redact import redact, safe_text
 
     class _RedactingFileHistory(FileHistory):
         def store_string(self, string: str) -> None:
-            super().store_string(redact(string))
+            # safe_text antes: no Windows o buffer pode ter surrogate solitário → store_string estourava
+            # ('surrogates not allowed') e crashava o REPL no Enter, ANTES mesmo de devolver a linha.
+            super().store_string(redact(safe_text(string)))
 
     return _RedactingFileHistory(path)
 
@@ -44,6 +46,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
     Ctrl-C cancela o turno (NÃO sai), Ctrl-D sai. Sem prompt_toolkit → cai no REPL simples (bloqueante),
     pra nunca quebrar o básico. O ponto-chave é o `patch_stdout`: o progresso ao vivo do agente não
     corrompe a linha que você está digitando (o que faz o terminal sentir 'perfeito')."""
+    from okami.core.redact import safe_text
     if not sys.stdin.isatty():            # pipe/CI/sem terminal → REPL simples (prompt_toolkit travaria no /dev/tty)
         _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
         return
@@ -165,6 +168,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             else:
                 console.print(f"[dim]{_tr('chat.exit_hint', _default='Ctrl-D or /exit to quit')}[/dim]")
             continue
+        line = safe_text(line)                          # Windows: limpa surrogate solitário (print/rota/LLM)
         if not (line and line.strip()):
             continue
         if line.strip().startswith("/"):                # comando: eco curto (não vira moldura de fala)
@@ -233,6 +237,8 @@ def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> Non
         except (EOFError, KeyboardInterrupt):
             console.print(f"[dim]{_tr('chat.bye', _default='bye')} 🐺[/dim]")
             break
+        from okami.core.redact import safe_text
+        line = safe_text(line)                          # Windows: surrogate solitário estouraria print/LLM
         cmd = line.strip().lower()
         if cmd in ("/exit", "/quit", "exit", "quit", ":q"):
             console.print(f"[dim]{_tr('chat.bye', _default='bye')} 🐺[/dim]")
