@@ -287,10 +287,12 @@ def chat(
     from okami.gateway import AgentEndpoint
     from okami.runner import run_task as _rt
 
-    cfg, ws, name = _resolve_agent(agent, workspace)
+    cfg, ws, name, home = _resolve_agent(agent, workspace)
     ws.mkdir(parents=True, exist_ok=True)
 
     def run_task(c, w, goal, **kw):                # honra -p/-m; mas /model da sessão (kw) vence
+        kw.setdefault("agent_home", home)         # casa ISOLADA (memória/identidade) ≠ projeto onde mexe
+        kw.setdefault("open_fs", True)            # CLI = DONO: alcança TODO o FS (relativo no CWD, absoluto livre)
         return _rt(c, w, goal, provider=kw.pop("provider", provider), model=kw.pop("model", model), **kw)
 
     mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
@@ -299,7 +301,8 @@ def chat(
     if message:                                   # modo não-interativo (-q / pipe / script)
         from okami.channels.terminal import TerminalChannel
         ch = TerminalChannel(name, console=console)
-        ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode)
+        ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode,
+                           agent_home=home, open_fs=True)   # casa isolada + acesso a todo o FS (dono)
         if new:
             ep.session(cid).history.clear()
             ep.store.reset(cid)
@@ -374,6 +377,7 @@ def chat(
 
     ch = TerminalChannel(name, console=console)
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
+                       agent_home=home, open_fs=True,    # casa isolada + acesso a todo o FS (dono)
                        approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
     ep._step_log = _step_log                           # M8: o _run_repl lê isto p/ o /replay
     from okami import prefs as _prefs                  # M4: retoma a verbosidade lembrada (default collapsed)

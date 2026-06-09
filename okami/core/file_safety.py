@@ -24,13 +24,21 @@ class FileTooLarge(ValueError):
     """Arquivo/conteúdo acima do teto — barrado p/ não estourar memória/saída."""
 
 
-def safe_path(workspace: Path, rel: str) -> Path:
-    """Resolve `rel` DENTRO de `workspace` e bloqueia escape.
+def safe_path(workspace: Path, rel: str, *, open_fs: bool = False) -> Path:
+    """Resolve `rel` (relativo ancora em `workspace`; absoluto vale como veio) e, por padrão, BLOQUEIA
+    escape do workspace.
 
-    `.resolve()` canoniciza `..` E segue symlinks — um link apontando p/ fora do workspace
-    resolve p/ um caminho fora do jail e cai no bloqueio (symlink-escape coberto de graça)."""
+    `.resolve()` canoniciza `..` E segue symlinks — um link apontando p/ fora do workspace resolve p/ um
+    caminho fora do jail e cai no bloqueio (symlink-escape coberto de graça).
+
+    `open_fs=True` (DONO no CLI): dispensa o jail → o agente alcança QUALQUER arquivo do computador
+    (relativo no `workspace`=CWD, absoluto livre). As proteções que CONTINUAM valendo: aprovação go/no-go,
+    `_SENSITIVE_PATH` (segredos) e o hardline. NUNCA ligue em superfície não-confiável (Telegram/grupo):
+    lá `open_fs=False` e o jail de workspace segue confinando."""
     ws = workspace.resolve()
     p = (ws / rel).resolve()
+    if open_fs:
+        return p
     if p != ws and ws not in p.parents:
         raise PathEscape(f"caminho fora do workspace: {rel}")
     return p

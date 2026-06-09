@@ -60,7 +60,7 @@ def voice(
     from okami.voice.stt import WhisperSTT
     from okami.voice.tts import EdgeTTS
 
-    cfg, ws, name = _resolve_agent(agent, workspace)
+    cfg, ws, name, home = _resolve_agent(agent, workspace)
     ws.mkdir(parents=True, exist_ok=True)
 
     class _CaptureChannel(TerminalChannel):     # captura a fala do agente p/ o TTS (e mostra no terminal)
@@ -74,7 +74,8 @@ def voice(
 
     ch = _CaptureChannel()
     mode = "yolo" if yolo else (cfg.approvals or {}).get("mode", "manual")
-    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode)
+    ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode,
+                       agent_home=home, open_fs=True)   # voz = dono: casa isolada + acesso a todo o FS
     cid = "voice"
 
     def respond(user_text: str) -> str:

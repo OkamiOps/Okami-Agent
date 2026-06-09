@@ -120,6 +120,7 @@ class ToolContext:
     spawn: object | None = None  # delega um subtask a um subagente isolado (Callable(goal, agent, model)->str)
     sandbox: object | None = None  # SandboxPolicy do run_shell (None → default_policy()); §P0 #2
     skills_dir: object | None = None  # raiz das skills (p/ manage_skill criar/editar) — review/genesis
+    open_fs: bool = False  # DONO no CLI: dispensa o jail de workspace (acesso a todo o FS). Telegram/grupo=False
 
 
 @dataclass
@@ -156,4 +157,5 @@ def openai_tools(registry: dict) -> list[dict]:
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
     """Jail de workspace + bloqueio de symlink-escape (centralizado em core.file_safety)."""
     from okami.core.file_safety import safe_path
-    return safe_path(ctx.workspace, rel)  # PathEscape é ValueError → callers `except ValueError` seguem
+    # open_fs (dono no CLI) dispensa o jail; Telegram/grupo mantém ctx.open_fs=False → confinado.
+    return safe_path(ctx.workspace, rel, open_fs=getattr(ctx, "open_fs", False))  # PathEscape=ValueError

@@ -85,10 +85,17 @@ def run_task(
     surface: str = "cli",                        # superfície (cli/telegram/group/paperclip/subagent) → tool policy
     registry_filter: set[str] | None = None,     # allowlist de tools (None=todas) — review usa o conjunto seguro
     learn: bool = True,                          # False → pula o review pós-turno (sem recursão no próprio review)
+    agent_home: str | Path | None = None,        # CASA do agente (identidade/memória/sessões/learning) — se
+                                                 # None, = workspace (retrocompat). Separa "onde mora o agente"
+                                                 # de "onde ele mexe em arquivos" (workspace=projeto/CWD).
+    open_fs: bool = False,                        # DONO no CLI: agente alcança TODO o FS (relativo no CWD,
+                                                 # absoluto livre). Telegram/grupo = False (jail do workspace).
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
-    ws = Path(workspace)
+    ws = Path(workspace)                          # operacional: jail de arquivos, shell, find, @refs
     ws.mkdir(parents=True, exist_ok=True)
+    home = Path(agent_home) if agent_home else ws  # casa: memória/identidade/taste/learning (ISOLADA do projeto)
+    home.mkdir(parents=True, exist_ok=True)
     if skills_dir is None:                    # casa central (projeto/okami.yaml ou ~/.okami) — não o CWD cru
         from okami.home import skills_dir as _skills_home
         skills_dir = str(_skills_home())
@@ -107,15 +114,16 @@ def run_task(
     def _spawn(subgoal, agent=None, model_=None):     # subagente em runtime (#1), com guarda de profundidade
         if depth >= 2:
             return "(limite de profundidade de subagentes atingido)"
-        scfg, sws = cfg, ws
+        scfg, sws, shome = cfg, ws, home
         if agent:
             from okami.agents import effective_config, load_agents
             from okami.config import load_raw
             spec = load_agents().get(agent)
             if spec:
                 graw, _ = load_raw()
-                scfg, sws = effective_config(graw, spec), spec.dir
+                scfg, sws, shome = effective_config(graw, spec), spec.dir, spec.dir
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
+                       agent_home=shome, open_fs=open_fs,   # casa do sub (não polui o CWD); herda acesso amplo
                        surface="subagent", emit=emit)   # subagente: surface restrita (não spawna de novo)
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
@@ -154,7 +162,7 @@ def run_task(
     from okami.learning import taste as tastemod
     ui_task = bool((cfg.contracts or {}).get("ui")) or any(
         k in s.name.lower() for s in routed for k in ("frontend", "design", "shadcn", "heroui", "ui"))
-    taste_block = tastemod.TasteProfile.load(ws).steer() if ui_task else ""
+    taste_block = tastemod.TasteProfile.load(home).steer() if ui_task else ""
     # Persona Compiler (#8): direção CURTA do turno (registro técnico em papo + estado emocional),
     # read-only — a identidade inteira segue indo via core_block. Vazio quando não há sinal.
     from okami.learning.compiler import compile_turn
@@ -168,9 +176,9 @@ def run_task(
         for a in s.aliases:
             skills_map.setdefault(a, s.body)
 
-    mem = open_memory(ws, backend=cfg.memory.get("backend", "sqlite-fts5"),
+    mem = open_memory(home, backend=cfg.memory.get("backend", "sqlite-fts5"),
                       embedder=embedder, config=cfg.memory)
-    core_block = memfiles.core_block(ws, cfg.memory.get("files", {}))
+    core_block = memfiles.core_block(home, cfg.memory.get("files", {}))
 
     from okami.core.tool_policy import filter_registry
     registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
@@ -224,7 +232,7 @@ def run_task(
                       skills=skills_map, registry=registry, cancel=cancel,
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
                       images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
-                      sandbox=sandbox, skills_dir=skills_dir)
+                      sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs)
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
@@ -243,7 +251,7 @@ def run_task(
                 # Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): o modelo decide o que salvar via tools,
                 # guiado pela lista "Do NOT capture", a cada N turnos e SÓ em conclusão limpa. Substitui a
                 # destilação MECÂNICA (que gerava lixo). auto_skill mecânico fica como legado opt-in.
-                _maybe_background_review(cfg, ws, t, skills_dir=skills_dir, model=model, provider=provider, emit=emit)
+                _maybe_background_review(cfg, home, t, skills_dir=skills_dir, model=model, provider=provider, emit=emit)
                 if (cfg.learning or {}).get("auto_skill"):     # legado (default off): destilação mecânica
                     name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
                     if name:

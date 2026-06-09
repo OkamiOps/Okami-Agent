@@ -51,11 +51,13 @@ class AgentEndpoint(EndpointCommandsMixin):
                  approval_mode: str = "manual", approval_timeout: float = 120.0,
                  max_history_chars: int = 6000, stt=None, tts=None, spawn: Callable | None = None,
                  auto_resume: bool = False, max_sessions: int = 500, on_event: Callable | None = None,
-                 reactions: bool = False):
+                 reactions: bool = False, agent_home=None, open_fs: bool = False):
         self.on_event = on_event             # progresso ao vivo (tool-calls/loop/compact) — chat liga, Telegram não
         self.agent_id = agent_id
         self.cfg = cfg
-        self.ws = ws
+        self.ws = ws                         # workspace OPERACIONAL (arquivos): CLI=CWD, gateway=casa do agente
+        self.home = agent_home or ws         # CASA do agente (sessões/memória/identidade) — ISOLADA do projeto
+        self.open_fs = open_fs               # DONO no CLI alcança todo o FS; Telegram/grupo = False (confinado)
         self.channel = channel
         from okami.core.tool_policy import surface_of
         self.surface = surface_of(channel)   # CLI/telegram/group/paperclip → tool policy por superfície (P1.4)
@@ -67,7 +69,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         self.max_history_chars = max_history_chars
         self.auto_resume = auto_resume       # retomar tarefa interrompida no boot (com guarda anti-loop)
         self.max_sessions = max_sessions
-        self.store = TranscriptStore(ws)     # 2 camadas: metadados + transcript append-only (§13)
+        self.store = TranscriptStore(self.home)  # 2 camadas: metadados + transcript (na CASA, não no projeto)
         from okami.gateway.approvals import ApprovalStore
         self.approvals = ApprovalStore(ws)   # aprovação como objeto persistente single-use (#7)
         self.sessions: dict[str, Session] = {}
@@ -857,6 +859,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             try:
                 approve = (lambda req: True) if _yolo else (lambda req: False)   # fail-closed sem interação
                 task = self.run_task(self.cfg, self.ws, _p, approve=approve, surface=self.surface,
+                                     agent_home=self.home, open_fs=self.open_fs,   # casa isolada + acesso (CLI)
                                      cancel=_ev.is_set,   # harness checa entre passos → para no /background cancel
                                      on_event=_on_ev)     # progresso ao vivo → /background log <id>
                 if _ev.is_set():
@@ -953,6 +956,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
             kw.setdefault("surface", self.surface)        # tool policy por superfície (P1.4)
+            kw.setdefault("agent_home", self.home)         # casa isolada (memória/identidade ≠ projeto)
+            kw.setdefault("open_fs", self.open_fs)         # acesso amplo no CLI; gateway confinado
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             task = self.run_task(self.cfg, self.ws, text, **kw)
             _elapsed = time.time() - _t0

@@ -501,8 +501,18 @@ def _ensure_agent(agent_id: str, *, name: str | None = None, provider: str | Non
 
 
 def _resolve_agent(agent: str | None, workspace: str):
-    """(cfg, ws, nome) de um agente. Sem -a, usa o agente DEFAULT (agents.default do setup);
-    só cai no workspace global se não houver agente nenhum configurado."""
+    """(cfg, ws_arquivos, nome, casa) de um agente. Sem -a, usa o agente DEFAULT (agents.default do setup).
+
+    SEPARA dois conceitos que antes eram o MESMO diretório (e prendiam o agente na pastinha de config):
+      - casa (identidade SOUL/VOICE/PERSONA + memória + sessões): ISOLADA em agents/<id>/ (ou, sem agente,
+        workspaces/default). Nunca vai pro projeto do usuário.
+      - ws_arquivos (onde o agente LÊ/EDITA): `--workspace` explícito vence; senão o CWD (a pasta onde a
+        pessoa rodou o okami). Com open_fs (CLI) o agente ainda alcança caminhos absolutos em todo o FS."""
+    def _ws_file() -> Path:
+        if workspace and workspace != "workspaces/default":
+            return Path(workspace).expanduser()
+        return Path.cwd()                          # padrão: trabalha NA pasta onde você rodou o okami
+
     if not agent:                                  # sem -a → tenta o agente default
         try:
             agent = (_load().agents or {}).get("default")
@@ -516,13 +526,10 @@ def _resolve_agent(agent: str | None, workspace: str):
             console.print(f"[red]agente '{agent}' não existe[/red] (crie: okami agent new {agent})")
             raise typer.Exit(1)
         graw, _ = load_raw()
-        return effective_config(graw, spec), spec.dir, agent
-    # sem agente: o workspace DEFAULT ('workspaces/default') NÃO vai pro CWD cru — ancora na casa/projeto
-    ws = Path(workspace)
-    if workspace == "workspaces/default" and not ws.is_absolute():
-        from okami.home import base_dir
-        ws = base_dir() / "workspaces" / "default"
-    return _load(), ws, "okami"
+        return effective_config(graw, spec), _ws_file(), agent, spec.dir
+    # sem agente: casa = workspaces/default (memória isolada na casa global), arquivos = --workspace/CWD
+    from okami.home import base_dir
+    return _load(), _ws_file(), "okami", base_dir() / "workspaces" / "default"
 
 
 def _write_local(update: dict) -> None:
