@@ -1,6 +1,7 @@
 """Chat de terminal (§13): TerminalChannel + AgentEndpoint reusam toda a lógica do gateway."""
 
 from __future__ import annotations
+import pytest
 
 import tempfile
 
@@ -60,7 +61,7 @@ def test_terminal_slash_commands_work():
     ws = tempfile.mkdtemp()
     ch, ep = _ep(ws)
     ep.handle("terminal", "/help")
-    assert any("Essentials" in t and "/commands" in t for _, t in ch.sent)   # _help localizado (EN default)
+    assert any("Essenciais" in t and "/commands" in t for _, t in ch.sent)   # módulo sob locale pt
     ep.handle("terminal", "/status")
     assert any("livre" in t for _, t in ch.sent)
 
@@ -68,3 +69,13 @@ def test_terminal_slash_commands_work():
 def test_terminal_not_allowed_blocks():
     ch = TerminalChannel("okami", allow_chats=["7"])
     assert ch.allowed("7") and not ch.allowed("999")
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

@@ -16,6 +16,7 @@ from typing import Callable
 from okami.gateway.endpoint_commands import EndpointCommandsMixin
 from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
 from okami.gateway.sessions import TranscriptStore
+from okami.i18n import t as _tr
 
 
 class Session:
@@ -148,13 +149,17 @@ class AgentEndpoint(EndpointCommandsMixin):
             if auto_resume and s.resume_attempts < max_attempts:
                 s.resume_attempts += 1
                 self._save_meta(cid, s)                # marca a tentativa ANTES (sobrevive a novo crash)
-                self.channel.send(cid, "↻ retomando a tarefa interrompida pelo restart…")
+                self.channel.send(cid, _tr("gw.resuming", _default="↻ resuming the task interrupted by the restart…"))
                 s.busy = True
                 self._spawn(lambda c=cid, t=last, ss=s: self._run(c, t, ss, resume=True))
             else:
-                why = "tentei retomar e não rolou" if s.resume_attempts else "o gateway reiniciou"
-                self.channel.send(cid, f"⚠ {why}: sua última mensagem ficou sem resposta — "
-                                       f"«{last[:80]}». Mande /retry pra eu continuar.")
+                why = (_tr("gw.resume_retry_failed", _default="I tried to resume and it didn't work")
+                       if s.resume_attempts
+                       else _tr("gw.gateway_restarted", _default="the gateway restarted"))
+                self.channel.send(cid, "⚠ " + _tr(
+                    "gw.interrupted_notice",
+                    _default="{why}: your last message went unanswered — «{last}». Send /retry to continue.",
+                    why=why, last=last[:80]))
 
 
     def _evolve(self, chat_id, note: str) -> None:
@@ -163,7 +168,9 @@ class AgentEndpoint(EndpointCommandsMixin):
         try:
             edit = persona.propose(note)
             persona.apply_evolution(self.ws, edit, approve=None)      # auto: não pergunta
-            self.channel.send(chat_id, f"🧬 anotado ({edit.target}): {edit.text}\n(/undo p/ reverter)")
+            self.channel.send(chat_id, "🧬 " + _tr(
+                "gw.evolve_noted", _default="noted ({target}): {text}\n(/undo to revert)",
+                target=edit.target, text=edit.text))
         except Exception as e:  # noqa: BLE001
             self.channel.send(chat_id, f"❌ {e}")
 
@@ -175,7 +182,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         try:
             for _ in persona.observe(self.ws, user_text, scale=int(pc.get("gradual_scale", 1)),
-                                     emit=lambda m: self.channel.send(chat_id, f"🧬 saquei: {m}")):
+                                     emit=lambda m: self.channel.send(chat_id, "🧬 " + _tr(
+                                         "gw.observe_got_it", _default="got it: {m}", m=m))):
                 pass
         except Exception:  # noqa: BLE001 — nunca quebra o chat (mas registra: #4 self-review)
             from okami import log
@@ -211,7 +219,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         from okami.learning import persona
         try:
             persona.observe_llm(self.cfg, self.ws, s.history, scale=int(pc.get("gradual_scale", 1)),
-                                emit=lambda m: self.channel.send(chat_id, f"🧬 percebi: {m}"))
+                                emit=lambda m: self.channel.send(chat_id, "🧬 " + _tr(
+                                    "gw.observe_noticed", _default="noticed: {m}", m=m)))
         except Exception:  # noqa: BLE001
             from okami import log
             log.dbg("persona.observe_llm falhou", exc_info=True)
@@ -243,8 +252,12 @@ class AgentEndpoint(EndpointCommandsMixin):
                 if isinstance(_v, str) and _v:
                     brief = f" · {_k}={_v[:80]}"
                     break
-            ask = (f"⚠ Aprovar [{req.get('tool', '?')}]{brief}\n{req['reason']} (risco={req.get('risk', '?')})"
-                   f"\n/yes (1x) · /always (libera '{_cat}' a sessão toda) · /no")
+            ask = "⚠ " + _tr(
+                "gw.approve_ask",
+                _default="Approve [{tool}]{brief}\n{reason} (risk={risk})"
+                         "\n/yes (once) · /always (allow '{cat}' for the whole session) · /no",
+                tool=req.get("tool", "?"), brief=brief, reason=req["reason"],
+                risk=req.get("risk", "?"), cat=_cat)
             _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
             if _sa:
                 try:
@@ -266,15 +279,18 @@ class AgentEndpoint(EndpointCommandsMixin):
             if always and _cat:                          # aprova a CATEGORIA pra sessão toda (não pergunta mais)
                 s.approved_cats.add(_cat)
                 self._save_meta(chat_id, s)
-                self.channel.send(chat_id, f"✅ aprovado · '{_cat}' liberado pra esta sessão (não pergunto mais)")
+                self.channel.send(chat_id, "✅ " + _tr(
+                    "gw.approved_category",
+                    _default="approved · '{cat}' allowed for this session (won't ask again)", cat=_cat))
             else:
-                self.channel.send(chat_id, "✅ aprovado" if ok else "❌ negado")
+                self.channel.send(chat_id, "✅ " + _tr("gw.approved", _default="approved") if ok
+                                  else "❌ " + _tr("gw.denied", _default="denied"))
             return ok
         return approve
 
     def handle(self, chat_id, text: str) -> None:
         if not self.channel.allowed(chat_id):
-            self.channel.send(chat_id, "🚫 chat não autorizado.")
+            self.channel.send(chat_id, "🚫 " + _tr("gw.chat_unauthorized", _default="chat not authorized."))
             return
         self._last_chat = str(chat_id)                 # alvo do notify_on_complete (#1/#8) best-effort
         text = (text or "").strip()
@@ -284,7 +300,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             q, want = pend if isinstance(pend, tuple) else (pend, "")   # tolera fila pura (compat)
             verb, _, got = text.partition(":")         # "/yes" | "/yes:<nonce>" (botão)
             if got and want and got != want:           # nonce velho/errado = clique stale → IGNORA
-                self.channel.send(chat_id, "⌛ esse botão expirou (outra ação aconteceu). Use /yes ou /no.")
+                self.channel.send(chat_id, "⌛ " + _tr(
+                    "gw.button_expired",
+                    _default="that button expired (another action happened). Use /yes or /no."))
                 return
             store = getattr(self, "approvals", None)   # ausente em endpoint bare (alguns testes/compat)
             if want and store is not None:             # #7: consome o registro durável (single-use + expiração)
@@ -292,12 +310,14 @@ class AgentEndpoint(EndpointCommandsMixin):
                 decision = "approved" if verb.strip().lower() in _ap else "denied"
                 res = store.consume(want, decision)
                 if not res.ok and res.reason != "desconhecido":   # já usado / expirado → recusa (não re-executa)
-                    self.channel.send(chat_id, f"⌛ aprovação inválida ({res.reason}). Use /yes ou /no de novo.")
+                    self.channel.send(chat_id, "⌛ " + _tr(
+                        "gw.approval_invalid",
+                        _default="invalid approval ({reason}). Use /yes or /no again.", reason=res.reason))
                     return
             q.put(verb)
             return
         if text.partition(":")[0].lower() in ("/yes", "/no", "/always", "/sempre"):   # aprovação sem nada pendente
-            self.channel.send(chat_id, "nada pendente pra aprovar agora.")
+            self.channel.send(chat_id, _tr("gw.nothing_to_approve", _default="nothing pending to approve right now."))
             return
         s = self.session(chat_id)
         low = text.lower()
@@ -309,8 +329,11 @@ class AgentEndpoint(EndpointCommandsMixin):
             cdef = _cmds.resolve(tok)
             if cdef is None:
                 sg = _cmds.suggest(tok)
-                hint = (" Você quis dizer " + ", ".join("/" + x for x in sg) + "?") if sg else " — /commands lista tudo."
-                self.channel.send(chat_id, f"❓ comando desconhecido: {tok}.{hint}")
+                hint = ((" " + _tr("gw.did_you_mean", _default="Did you mean")
+                         + " " + ", ".join("/" + x for x in sg) + "?") if sg
+                        else " — " + _tr("gw.commands_lists_all", _default="/commands lists everything."))
+                self.channel.send(chat_id, "❓ " + _tr(
+                    "gw.unknown_command", _default="unknown command: {tok}.", tok=tok) + hint)
                 return
             text = "/" + cdef.name + text[len(tok):]       # reescreve pro canônico → as branches casam
             low = text.lower()
@@ -321,30 +344,36 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.history.clear()
             s.approved_cats.clear()                    # sessão nova → zera as aprovações de /always
             self.store.reset(chat_id)                  # arquiva o transcript e zera a contagem
-            self.channel.send(chat_id, "🧹 conversa reiniciada.")
+            self.channel.send(chat_id, "🧹 " + _tr("gw.conversation_reset", _default="conversation reset."))
             return
         if low == "/status":
-            bg = f" · ▶{len(self._bg)} background" if self._bg else ""
-            q = f" · 🕓{len(s.queued)} fila" if s.queued else ""
+            bg = (" · ▶" + _tr("gw.status_background", _default="{n} background", n=len(self._bg))) if self._bg else ""
+            q = (" · 🕓" + _tr("gw.status_queue", _default="{n} queued", n=len(s.queued))) if s.queued else ""
             ttl = f" · 📝 {s.title}" if s.title else ""
             mute = " · 🔇" if s.voice_off else ""
             _turns = int(self.store.entry(chat_id).get("node_count", 0)) // 2 or len(s.history) // 2
-            self.channel.send(chat_id, f"agente {self.agent_id}{ttl} · "
-                              f"{'ocupado' if s.busy else 'livre'} · {_turns} trocas · "
-                              f"yolo={'on' if s.yolo else 'off'}{mute}{bg}{q}")
+            state = (_tr("gw.status_busy", _default="busy") if s.busy
+                     else _tr("gw.status_free", _default="free"))
+            self.channel.send(chat_id, _tr(
+                "gw.status_line",
+                _default="agent {agent}{ttl} · {state} · {turns} exchanges · yolo={yolo}",
+                agent=self.agent_id, ttl=ttl, state=state, turns=_turns,
+                yolo=("on" if s.yolo else "off")) + f"{mute}{bg}{q}")
             return
         if low == "/yolo":
             s.yolo = True
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, "⚡ YOLO on (auto-aprova nesta sessão).")
+            self.channel.send(chat_id, "⚡ " + _tr(
+                "gw.yolo_on", _default="YOLO on (auto-approves in this session)."))
             return
         if low == "/normal":
             s.yolo = False
             _had = len(s.approved_cats)
             s.approved_cats.clear()                      # revoga as aprovações de sessão (/always) também
             self._save_meta(chat_id, s)
-            extra = f" ({_had} aprovação(ões) de sessão revogada(s))" if _had else ""
-            self.channel.send(chat_id, f"🔒 aprovação normal.{extra}")
+            extra = (" " + _tr("gw.normal_revoked",
+                               _default="({n} session approval(s) revoked)", n=_had)) if _had else ""
+            self.channel.send(chat_id, "🔒 " + _tr("gw.normal", _default="normal approval.") + extra)
             return
         if low.startswith("/voice"):
             arg = text[len("/voice"):].strip().lower()
@@ -355,8 +384,10 @@ class AgentEndpoint(EndpointCommandsMixin):
             else:
                 s.voice_off = not s.voice_off          # sem arg → alterna
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, "🔈 áudio DESLIGADO nesta sessão." if s.voice_off
-                              else "🔊 áudio LIGADO (respondo em voz quando o TTS está ativo).")
+            self.channel.send(chat_id, "🔈 " + _tr("gw.voice_off", _default="audio OFF in this session.")
+                              if s.voice_off
+                              else "🔊 " + _tr("gw.voice_on",
+                                               _default="audio ON (I reply by voice when TTS is active)."))
             return
         if low.startswith("/busy"):
             arg = text[len("/busy"):].strip().lower()
@@ -365,29 +396,34 @@ class AgentEndpoint(EndpointCommandsMixin):
             elif arg in ("interrupt", "corta", "stop"):
                 s.busy_mode = "interrupt"
             elif arg in ("", "status"):
-                q = f" · {len(s.queued)} na fila" if s.queued else ""
-                self.channel.send(chat_id, f"⏳ modo ocupado: {s.busy_mode}{q}. Opções: queue · interrupt.")
+                q = (" · " + _tr("gw.busy_queued_count", _default="{n} in queue", n=len(s.queued))) if s.queued else ""
+                self.channel.send(chat_id, "⏳ " + _tr(
+                    "gw.busy_status", _default="busy mode: {mode}", mode=s.busy_mode) + q
+                    + ". " + _tr("gw.busy_options", _default="Options: queue · interrupt."))
                 return
             else:
-                self.channel.send(chat_id, "uso: /busy queue (fila) | interrupt (corta a atual) | status")
+                self.channel.send(chat_id, _tr(
+                    "gw.busy_usage",
+                    _default="usage: /busy queue (queue) | interrupt (cuts the current one) | status"))
                 return
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, f"⏳ ocupado → {s.busy_mode}.")
+            self.channel.send(chat_id, "⏳ " + _tr("gw.busy_set", _default="busy → {mode}.", mode=s.busy_mode))
             return
         if low in ("/reload", "/reloadconfig"):        # #12: hot-reload de config (sem reiniciar)
             ok, msg = self.reload_config()
-            self.channel.send(chat_id, f"🔄 config recarregada — {msg}" if ok else f"✗ config inválida: {msg}")
+            self.channel.send(chat_id, "🔄 " + _tr("gw.config_reloaded", _default="config reloaded — {msg}", msg=msg)
+                              if ok else "✗ " + _tr("gw.config_invalid", _default="invalid config: {msg}", msg=msg))
             return
         if low == "/stop":
             s.cancel = True
-            self.channel.send(chat_id, "⏹ parando após o passo atual…")
+            self.channel.send(chat_id, "⏹ " + _tr("gw.stopping", _default="stopping after the current step…"))
             return
         if low in ("/retry", "/continuar"):            # retoma a última tarefa que ficou sem resposta
             if s.busy:
-                self.channel.send(chat_id, "⏳ já estou processando.")
+                self.channel.send(chat_id, "⏳ " + _tr("gw.already_processing", _default="already processing."))
                 return
             if not s.interrupted():
-                self.channel.send(chat_id, "nada interrompido para retomar.")
+                self.channel.send(chat_id, _tr("gw.nothing_to_resume", _default="nothing interrupted to resume."))
                 return
             last = s.history[-1][1]                     # o USER pendente continua; _run não re-adiciona
             s.busy, s.cancel = True, False
@@ -396,15 +432,17 @@ class AgentEndpoint(EndpointCommandsMixin):
         if low.startswith("/feedback"):                # molda a identidade (§8), com go/no-go
             note = text[len("/feedback"):].strip()
             if not note:
-                self.channel.send(chat_id, "uso: /feedback <como devo me comportar/falar>")
+                self.channel.send(chat_id, _tr(
+                    "gw.feedback_usage", _default="usage: /feedback <how I should behave/speak>"))
                 return
             self._evolve(chat_id, note)                   # explícito → aplica na hora (auto)
             return
         if low in ("/undo", "/rollback"):              # reverte a última evolução de identidade
             from okami.learning import persona
             removed = persona.rollback(self.ws, 1)
-            self.channel.send(chat_id, (f"↩ revertido: {removed[0].get('text')}" if removed
-                                        else "nada para reverter."))
+            self.channel.send(chat_id, ("↩ " + _tr("gw.reverted", _default="reverted: {text}",
+                                                   text=removed[0].get("text")) if removed
+                                        else _tr("gw.nothing_to_revert", _default="nothing to revert.")))
             return
         cmd0 = low.split(maxsplit=1)[0]
         if cmd0 in ("/like", "/dislike", "/different"):   # taste de design (§9): aprende o gosto
@@ -412,20 +450,26 @@ class AgentEndpoint(EndpointCommandsMixin):
             verdict = {"/like": "approved", "/dislike": "rejected", "/different": "want_different"}[cmd0]
             desc = text.split(maxsplit=1)[1].strip() if " " in text else ""
             if not desc:
-                self.channel.send(chat_id, f"uso: {cmd0} <o que achou do design (ex.: 'bootstrap, neon')>")
+                self.channel.send(chat_id, _tr(
+                    "gw.taste_usage",
+                    _default="usage: {cmd} <what you thought of the design (e.g. 'bootstrap, neon')>", cmd=cmd0))
                 return
             prof = taste.record_feedback(self.ws, verdict, desc)
-            self.channel.send(chat_id, f"🎨 anotei o gosto (atrai={len(prof.attractors)}, "
-                                       f"repele={len(prof.repulsors)}).")
+            self.channel.send(chat_id, "🎨 " + _tr(
+                "gw.taste_noted", _default="noted your taste (likes={attracts}, dislikes={repels}).",
+                attracts=len(prof.attractors), repels=len(prof.repulsors)))
             return
         if low.startswith("/think"):                   # esforço de raciocínio desta sessão (gpt-5/codex)
             arg = text[len("/think"):].strip().lower()
             if arg in ("", "off", "auto", "default"):
                 s.reasoning_effort = ""
-                self.channel.send(chat_id, "🧠 think no default do modelo. Níveis: minimal·low·medium·high.")
+                self.channel.send(chat_id, "🧠 " + _tr(
+                    "gw.think_default",
+                    _default="think at the model default. Levels: minimal·low·medium·high."))
             else:
                 s.reasoning_effort = arg
-                self.channel.send(chat_id, f"🧠 think = {arg} (vale nesta sessão).")
+                self.channel.send(chat_id, "🧠 " + _tr(
+                    "gw.think_set", _default="think = {arg} (applies in this session).", arg=arg))
             self._save_meta(chat_id, s)
             return
         if low.startswith("/persona"):                 # overlay TEMPORÁRIO de sessão (estilo /personality)
@@ -433,22 +477,29 @@ class AgentEndpoint(EndpointCommandsMixin):
             arg = text[len("/persona"):].strip()
             if arg.lower() in ("", "off", "reset", "normal"):
                 s.persona_overlay = ""
-                self.channel.send(chat_id, "🎭 persona padrão. Presets: " + ", ".join(persona.PERSONA_PRESETS))
+                self.channel.send(chat_id, "🎭 " + _tr("gw.persona_default", _default="default persona. Presets: ")
+                                  + ", ".join(persona.PERSONA_PRESETS))
             else:
                 s.persona_overlay = persona.overlay(arg)
-                self.channel.send(chat_id, f"🎭 nesta sessão: {arg} (/persona off p/ voltar)")
+                self.channel.send(chat_id, "🎭 " + _tr(
+                    "gw.persona_set", _default="this session: {arg} (/persona off to go back)", arg=arg))
             self._save_meta(chat_id, s)
             return
         if low == "/sethome":                           # destino dos lembretes/cron sem alvo explícito
             self.set_home(chat_id)
-            self.channel.send(chat_id, "🏠 este chat virou a CASA dos lembretes/agendamentos sem destino.")
+            self.channel.send(chat_id, "🏠 " + _tr(
+                "gw.sethome",
+                _default="this chat is now HOME for reminders/schedules with no explicit target."))
             return
         if low.startswith("/topic"):                    # tópicos do Telegram já viram sessões separadas (auto)
             cur = ":" in cid and cid.rsplit(":", 1)[1]
-            here = f"\nVocê está no tópico {cur} (conversa separada)." if cur else ""
-            self.channel.send(chat_id, "🧵 cada TÓPICO do Telegram neste chat é uma conversa separada "
-                              "(histórico/sessão próprios) — automático. Crie um tópico no app pra abrir "
-                              "outra linha de conversa em paralelo." + here)
+            here = ("\n" + _tr("gw.topic_here",
+                                _default="You're in topic {cur} (separate conversation).", cur=cur)) if cur else ""
+            self.channel.send(chat_id, "🧵 " + _tr(
+                "gw.topic_info",
+                _default="each Telegram TOPIC in this chat is a separate conversation "
+                         "(its own history/session) — automatic. Create a topic in the app to open "
+                         "another parallel conversation thread.") + here)
             return
         if low == "/commands":                          # registry: lista completa por categoria
             self.channel.send(chat_id, self._commands_text())
@@ -463,7 +514,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, self._config_text())
             return
         if low == "/whoami":
-            self.channel.send(chat_id, f"🪪 chat id: {chat_id} · agente: {self.agent_id}")
+            self.channel.send(chat_id, "🪪 " + _tr(
+                "gw.whoami", _default="chat id: {chat_id} · agent: {agent}",
+                chat_id=chat_id, agent=self.agent_id))
             return
         if low == "/models":                            # ANTES de /model (startswith colide)
             self.channel.send(chat_id, self._models_text())
@@ -487,11 +540,14 @@ class AgentEndpoint(EndpointCommandsMixin):
         if low.startswith("/title"):                   # nome amigável da conversa (aparece no /status e /sessions)
             arg = text.split(maxsplit=1)[1].strip() if " " in text else ""
             if not arg:
-                self.channel.send(chat_id, f"📝 título: {s.title}" if s.title else "sem título. Uso: /title <nome>")
+                self.channel.send(chat_id, "📝 " + _tr("gw.title_current", _default="title: {title}", title=s.title)
+                                  if s.title
+                                  else _tr("gw.title_none", _default="no title. Usage: /title <name>"))
                 return
             s.title = arg[:80]
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, f"📝 conversa renomeada: {s.title}")
+            self.channel.send(chat_id, "📝 " + _tr(
+                "gw.title_renamed", _default="conversation renamed: {title}", title=s.title))
             return
         cmd_bg = low.split(maxsplit=1)[0]
         if cmd_bg in ("/background", "/bg"):            # roda EM PARALELO (sessão isolada) e avisa no fim
@@ -512,9 +568,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                     chat_id, parts[1].strip() if len(parts) > 1 else "", yolo=s.yolo))
                 return
             if not prompt:
-                self.channel.send(chat_id, "uso: /background <tarefa> · /background --process <cmd> "
-                                  "(servidor/build) · /background status · /background log <id> · "
-                                  "/background cancel <id>. Rodo em paralelo e aviso no fim.")
+                self.channel.send(chat_id, _tr(
+                    "gw.background_usage",
+                    _default="usage: /background <task> · /background --process <cmd> "
+                             "(server/build) · /background status · /background log <id> · "
+                             "/background cancel <id>. I run it in parallel and report when done."))
                 return
             self._spawn_background(chat_id, prompt, yolo=s.yolo)
             return
@@ -532,15 +590,19 @@ class AgentEndpoint(EndpointCommandsMixin):
             elif psub in ("signal", "sig"):
                 self.channel.send(chat_id, self._process_signal(parg))
             else:
-                self.channel.send(chat_id, "uso: /process status · /process log <id> [linhas] · "
-                                  "/process kill <id> · /process signal <id> <SINAL>. (kill imediato, real)")
+                self.channel.send(chat_id, _tr(
+                    "gw.process_usage",
+                    _default="usage: /process status · /process log <id> [lines] · "
+                             "/process kill <id> · /process signal <id> <SIGNAL>. (immediate, real kill)"))
             return
         from okami.automation.scheduler import Scheduler, infer_commitment   # §11: "me lembra de X amanhã" → agenda
         ic = infer_commitment(text, time.time())
         if ic:
             schedule, prompt = ic
             job = Scheduler(".").add(schedule, prompt, agent=self.agent_id, target=str(chat_id))
-            self.channel.send(chat_id, f"⏰ agendei [{job['schedule']}]: {prompt}")
+            self.channel.send(chat_id, "⏰ " + _tr(
+                "gw.scheduled", _default="scheduled [{schedule}]: {prompt}",
+                schedule=job["schedule"], prompt=prompt))
             return
         with self._sess_lock:                           # check-then-set ATÔMICO vs. o drain do finally (race)
             if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
@@ -553,9 +615,11 @@ class AgentEndpoint(EndpointCommandsMixin):
         if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
             self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
         elif decision == "interrupt":
-            self.channel.send(chat_id, "⏹ interrompendo a atual — já começo a sua nova mensagem.")
+            self.channel.send(chat_id, "⏹ " + _tr(
+                "gw.interrupting", _default="interrupting the current one — starting your new message now."))
         else:
-            self.channel.send(chat_id, f"⏳ guardei na fila (#{qn}) — começo quando a atual terminar.")
+            self.channel.send(chat_id, "⏳ " + _tr(
+                "gw.queued", _default="queued (#{n}) — I'll start when the current one finishes.", n=qn))
 
     def _react(self, chat_id, emoji: str) -> None:
         """Reage à última mensagem do usuário (Telegram). Best-effort, opt-in (self.reactions)."""
@@ -605,7 +669,8 @@ class AgentEndpoint(EndpointCommandsMixin):
     def _fmt_processes(procs: list[dict]) -> str:
         """Bloco de processos OS (servidor/build longo) — kill IMEDIATO, ao contrário do background cooperativo."""
         icon = {"running": "▶", "exited": "✅", "unknown": "·"}
-        out = ["⚙ processos (OS real — kill imediato: /process kill <id>):"]
+        out = ["⚙ " + _tr("gw.processes_header",
+                           _default="processes (real OS — immediate kill: /process kill <id>):")]
         for p in procs[-15:]:
             st = p.get("status", "?")
             ec = p.get("exit_code")
@@ -620,16 +685,18 @@ class AgentEndpoint(EndpointCommandsMixin):
         jobs = self._bgreg.list(15)
         out: list[str] = []
         if queued:                                       # mensagens enfileiradas (digitou enquanto ocupado)
-            out.append(f"⏳ fila desta sessão: {queued} aguardando")
+            out.append("⏳ " + _tr("gw.bgstatus_queue",
+                                   _default="this session's queue: {n} waiting", n=queued))
         if jobs:
             icon = {"running": "▶", "done": "✅", "failed": "❌", "interrupted": "⏸", "cancelled": "⏹"}
-            out.append("📋 tarefas /background (durável — sobrevive a restart):")
+            out.append("📋 " + _tr("gw.bgstatus_jobs_header",
+                                   _default="/background tasks (durable — survives restart):"))
             for j in jobs:
                 when = (_dt.datetime.fromtimestamp(j["started_at"]).strftime("%d/%m %H:%M")
                         if j.get("started_at") else "?")
                 out.append(f"  {icon.get(j.get('state'), '·')} #{j['id']} [{when}] {(j.get('prompt') or '')[:60]}")
         else:
-            out.append("▶ nenhuma tarefa /background ainda.")
+            out.append("▶ " + _tr("gw.bgstatus_none", _default="no /background tasks yet."))
         try:
             procs = self._pm().list()
         except Exception:  # noqa: BLE001
@@ -643,13 +710,18 @@ class AgentEndpoint(EndpointCommandsMixin):
         """/background --process <cmd>: sobe um servidor/build como PROCESSO OS (kill real), não thread.
         Comando sensível/destrutivo direto do chat só com /yolo — senão fail-closed (DNA de segurança)."""
         if not cmd:
-            return ("uso: /background --process <comando> (ex.: npm run dev) — sobe como PROCESSO OS, "
-                    "com kill REAL (/process kill <id>) e log paginado (/process log <id>).")
+            return _tr(
+                "gw.bgproc_usage",
+                _default="usage: /background --process <command> (e.g. npm run dev) — runs as an OS PROCESS, "
+                         "with a REAL kill (/process kill <id>) and paginated log (/process log <id>).")
         from okami.core.approval import classify
         sens = classify("process_start", {"cmd": cmd})
         if sens and not yolo:                            # destrutivo/sensível sem yolo → NEGA
-            return (f"🚫 recusei: {sens.reason} (risco {sens.risk}). Comando sensível direto do chat só com "
-                    "/yolo nesta sessão — ou peça pra MIM rodar (aí passa pelo go/no-go).")
+            return "🚫 " + _tr(
+                "gw.bgproc_refused",
+                _default="refused: {reason} (risk {risk}). A sensitive command straight from the chat only "
+                         "with /yolo in this session — or ask ME to run it (then it goes through go/no-go).",
+                reason=sens.reason, risk=sens.risk)
         try:
             from okami.core.sandbox import SandboxPolicy
             pol = SandboxPolicy.from_config((self.cfg.sandbox if self.cfg else None) or {})
@@ -658,11 +730,14 @@ class AgentEndpoint(EndpointCommandsMixin):
         try:
             meta = self._pm().start(cmd, pol, notify=True)   # notify → aviso quando terminar
         except ValueError as e:                          # sandbox bloqueou (sensível/docker exigido)
-            return f"✗ não subiu: {e}"
+            return "✗ " + _tr("gw.bgproc_no_start", _default="didn't start: {e}", e=e)
         except Exception as e:  # noqa: BLE001
-            return f"✗ falha ao subir o processo: {e}"
-        return (f"⚙ processo {meta['id']} no ar (PID {meta['pid']}) — kill real: /process kill {meta['id']} · "
-                f"log: /process log {meta['id']}. Te aviso quando terminar.")
+            return "✗ " + _tr("gw.bgproc_start_fail", _default="failed to start the process: {e}", e=e)
+        return "⚙ " + _tr(
+            "gw.bgproc_up",
+            _default="process {pid_id} up (PID {pid}) — real kill: /process kill {pid_id} · "
+                     "log: /process log {pid_id}. I'll let you know when it finishes.",
+            pid_id=meta["id"], pid=meta["pid"])
 
     def _process_status(self) -> str:
         try:
@@ -670,8 +745,10 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception:  # noqa: BLE001
             procs = []
         if not procs:
-            return ("⚙ nenhum processo OS agora. Servidores/builds longos que o agente sobe (process_start) "
-                    "aparecem aqui — com kill imediato (/process kill <id>), diferente do background cooperativo.")
+            return "⚙ " + _tr(
+                "gw.process_none",
+                _default="no OS processes right now. Long servers/builds the agent starts (process_start) "
+                         "show up here — with immediate kill (/process kill <id>), unlike the cooperative background.")
         return self._fmt_processes(procs)
 
     def _process_log(self, arg: str) -> str:
@@ -679,62 +756,84 @@ class AgentEndpoint(EndpointCommandsMixin):
         Mostra a faixa (X–Y de Z) e um link explícito p/ a PRÓXIMA página."""
         toks = arg.split()
         if not toks:
-            return "uso: /process log <id> [linhas] [offset]. Ex.: /process log ab12 40 0 (do começo)."
+            return _tr(
+                "gw.proclog_usage",
+                _default="usage: /process log <id> [lines] [offset]. E.g. /process log ab12 40 0 (from the start).")
         pid = toks[0]
         n = int(toks[1]) if len(toks) > 1 and toks[1].lstrip("-").isdigit() else 30
         explicit = len(toks) > 2 and toks[2].lstrip("-").isdigit()
         offset = int(toks[2]) if explicit else -n        # default: as últimas N linhas
         page = self._pm().log_page(pid, offset=offset, limit=n)
         if not page["lines"]:
-            return f"📄 processo {pid}: sem log nessa faixa (ou id inexistente)."
+            return "📄 " + _tr(
+                "gw.proclog_empty", _default="process {pid}: no log in that range (or id doesn't exist).", pid=pid)
         start, end, total = page["offset"] + 1, page["offset"] + page["shown"], page["total"]
-        out = [f"📄 processo {pid} — linhas {start}–{end} de {total}:"]
+        out = ["📄 " + _tr(
+            "gw.proclog_header", _default="process {pid} — lines {start}–{end} of {total}:",
+            pid=pid, start=start, end=end, total=total)]
         out += ["  " + ln for ln in page["lines"]]
         if end < total:                                  # próxima página explícita
-            out.append(f"… +{total - end} linha(s): /process log {pid} {n} {end}")
+            out.append(_tr(
+                "gw.proclog_more", _default="… +{rest} more line(s): /process log {pid} {n} {end}",
+                rest=total - end, pid=pid, n=n, end=end))
         return "\n".join(out)
 
     def _process_kill(self, arg: str) -> str:
         toks = arg.split()
         if not toks:
-            return "uso: /process kill <id> (ids em /process status)."
+            return _tr("gw.prockill_usage", _default="usage: /process kill <id> (ids in /process status).")
         pid = toks[0]
         if self._pm().poll(pid).get("status") == "unknown":
-            return f"✗ processo {pid} não existe (veja /process status)."
+            return "✗ " + _tr(
+                "gw.prockill_unknown", _default="process {pid} doesn't exist (see /process status).", pid=pid)
         ok = self._pm().kill(pid)
-        return f"🛑 processo {pid} morto (SIGTERM no grupo)." if ok else f"✗ não consegui matar {pid}."
+        return ("🛑 " + _tr("gw.prockill_done", _default="process {pid} killed (SIGTERM on the group).", pid=pid)
+                if ok else "✗ " + _tr("gw.prockill_fail", _default="couldn't kill {pid}.", pid=pid))
 
     def _process_signal(self, arg: str) -> str:
         toks = arg.split()
         if len(toks) < 2:
-            return "uso: /process signal <id> <SINAL> (ex.: HUP, KILL, USR1, STOP, CONT)."
+            return _tr(
+                "gw.procsig_usage",
+                _default="usage: /process signal <id> <SIGNAL> (e.g. HUP, KILL, USR1, STOP, CONT).")
         pid, name = toks[0], toks[1].upper().lstrip("SIG")
         ok = self._pm().signal(pid, name)
-        return f"📶 sinal {name} → {pid}." if ok else f"✗ não consegui sinalizar {pid} (id/sinal inválido?)."
+        return ("📶 " + _tr("gw.procsig_sent", _default="signal {name} → {pid}.", name=name, pid=pid)
+                if ok else "✗ " + _tr(
+                    "gw.procsig_fail", _default="couldn't signal {pid} (invalid id/signal?).", pid=pid))
 
     def _background_log(self, arg: str) -> str:
         toks = arg.split()
         if not toks or not toks[0].lstrip("#").isdigit():
-            return "uso: /background log <id> [linhas] (ids em /background status)."
+            return _tr("gw.bglog_usage", _default="usage: /background log <id> [lines] (ids in /background status).")
         bid = int(toks[0].lstrip("#"))
         n = int(toks[1]) if len(toks) > 1 and toks[1].isdigit() else 30
         lines = self._bgreg.tail(bid, n)
         if not lines:
-            return f"📄 background #{bid}: sem log ainda (ou id inexistente)."
-        return f"📄 background #{bid} (últimas {len(lines)} linhas):\n" + "\n".join("  " + ln for ln in lines)
+            return "📄 " + _tr(
+                "gw.bglog_empty", _default="background #{bid}: no log yet (or id doesn't exist).", bid=bid)
+        return "📄 " + _tr(
+            "gw.bglog_header", _default="background #{bid} (last {n} lines):", bid=bid, n=len(lines)) \
+            + "\n" + "\n".join("  " + ln for ln in lines)
 
     def _background_cancel(self, arg: str) -> str:
         a = arg.lstrip("#").strip()
         if not a.isdigit():
-            return "uso: /background cancel <id> (veja os ids em /background status)."
+            return _tr(
+                "gw.bgcancel_usage",
+                _default="usage: /background cancel <id> (see ids in /background status).")
         bid = int(a)
         ev = self._bg_cancel.get(bid)
         if ev is None:
-            return (f"✗ background #{bid} não está rodando agora (já terminou, foi cancelado, ou era de "
-                    "outra sessão/processo). Veja /background status.")
+            return "✗ " + _tr(
+                "gw.bgcancel_not_running",
+                _default="background #{bid} isn't running now (already finished, was cancelled, or belonged to "
+                         "another session/process). See /background status.", bid=bid)
         ev.set()
-        return (f"⏹ cancelando background #{bid} — para no próximo passo (cooperativo). Se ele subiu um "
-                "servidor/build, veja /process status e mate na hora com /process kill <id>.")
+        return "⏹ " + _tr(
+            "gw.bgcancel_cancelling",
+            _default="cancelling background #{bid} — stops at the next step (cooperative). If it started a "
+                     "server/build, see /process status and kill it now with /process kill <id>.", bid=bid)
 
     def _spawn_background(self, chat_id, prompt: str, *, yolo: bool = False) -> None:
         """/background: roda `prompt` numa tarefa ISOLADA (não toca no histórico da sessão), em paralelo,
@@ -744,8 +843,10 @@ class AgentEndpoint(EndpointCommandsMixin):
         ev = threading.Event()                           # sinal de cancelamento cooperativo (como o /stop)
         self._bg_cancel[bid] = ev
         self._bg[bid] = prompt[:60]
-        self.channel.send(chat_id, f"▶ background #{bid} rodando — sigo livre pra conversar; te aviso no fim. "
-                          f"(/background cancel {bid} pra parar)")
+        self.channel.send(chat_id, "▶ " + _tr(
+            "gw.bg_running",
+            _default="background #{bid} running — I stay free to chat; I'll report when done. "
+                     "(/background cancel {bid} to stop)", bid=bid))
 
         from okami.gateway.background import event_line_plain
 
@@ -759,18 +860,23 @@ class AgentEndpoint(EndpointCommandsMixin):
                                      cancel=_ev.is_set,   # harness checa entre passos → para no /background cancel
                                      on_event=_on_ev)     # progresso ao vivo → /background log <id>
                 if _ev.is_set():
-                    self._bgreg.append_log(_bid, "⏹ cancelado")
-                    self._bgreg.finish(_bid, state="cancelled", result="cancelado pelo usuário")
-                    self.channel.send(chat_id, f"⏹ background #{_bid} cancelado.")
+                    self._bgreg.append_log(_bid, "⏹ " + _tr("gw.bg_log_cancelled", _default="cancelled"))
+                    self._bgreg.finish(_bid, state="cancelled",
+                                       result=_tr("gw.bg_cancelled_by_user", _default="cancelled by the user"))
+                    self.channel.send(chat_id, "⏹ " + _tr(
+                        "gw.bg_cancelled", _default="background #{bid} cancelled.", bid=_bid))
                 else:
-                    out = (getattr(task, "result", "") or "").strip() or "(sem saída textual)"
-                    self._bgreg.append_log(_bid, "✅ concluído")
+                    out = (getattr(task, "result", "") or "").strip() or _tr(
+                        "gw.bg_no_output", _default="(no textual output)")
+                    self._bgreg.append_log(_bid, "✅ " + _tr("gw.bg_log_done", _default="done"))
                     self._bgreg.finish(_bid, state="done", result=out)
-                    self.channel.send(chat_id, f"✅ background #{_bid} pronto:\n{out}")
+                    self.channel.send(chat_id, "✅ " + _tr(
+                        "gw.bg_done", _default="background #{bid} ready:", bid=_bid) + "\n" + out)
             except Exception as e:  # noqa: BLE001 — background nunca derruba o endpoint
-                self._bgreg.append_log(_bid, f"❌ erro: {e}")
+                self._bgreg.append_log(_bid, "❌ " + _tr("gw.bg_log_error", _default="error: {e}", e=e))
                 self._bgreg.finish(_bid, state="failed", result=str(e))
-                self.channel.send(chat_id, f"❌ background #{_bid} falhou: {e}")
+                self.channel.send(chat_id, "❌ " + _tr(
+                    "gw.bg_failed", _default="background #{bid} failed: {e}", bid=_bid, e=e))
             finally:
                 self._bg.pop(_bid, None)
                 self._bg_cancel.pop(_bid, None)
@@ -814,7 +920,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                 _typing(chat_id)
             except Exception:  # noqa: BLE001 — typing nunca quebra o turno
                 pass
-        self.channel.send(chat_id, f"💭 {self.agent_id} está pensando…")   # 💭 = indicador (TUI esconde, barra mostra 🧠)
+        self.channel.send(chat_id, "💭 " + _tr(
+            "gw.thinking", _default="{agent} is thinking…", agent=self.agent_id))   # 💭 = indicador (TUI esconde, barra mostra 🧠)
         self._react(chat_id, "👀")                       # 👀 = processando (Telegram)
         try:
             approve = self._approve(chat_id, s)
@@ -887,7 +994,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
         except Exception as e:  # noqa: BLE001 — USER já está no transcript → detectável como interrompido
-            self.channel.send(chat_id, f"❌ erro: {e}")
+            self.channel.send(chat_id, "❌ " + _tr("gw.run_error", _default="error: {e}", e=e))
             self._react(chat_id, "👎")
         finally:
             with self._sess_lock:                        # reset+drain ATÔMICO vs. o check-then-set do dispatch
@@ -927,9 +1034,10 @@ class AgentEndpoint(EndpointCommandsMixin):
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
                 try:
                     text = self.stt.transcribe(msg.audio)
-                    self.channel.send(msg.chat_id, f"🎤 ouvi: «{text}»")
+                    self.channel.send(msg.chat_id, "🎤 " + _tr("gw.heard", _default="heard: «{text}»", text=text))
                 except Exception as e:  # noqa: BLE001
-                    self.channel.send(msg.chat_id, f"❌ não entendi o áudio: {e}")
+                    self.channel.send(msg.chat_id, "❌ " + _tr(
+                        "gw.audio_unclear", _default="couldn't understand the audio: {e}", e=e))
                     continue
             if getattr(msg, "image", None):            # foto → vision (§6)
                 self._img[str(msg.chat_id)] = msg.image
@@ -945,7 +1053,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         new_mode = (getattr(cfg, "approvals", None) or {}).get("mode", self.approval_mode)
         if new_mode != self.approval_mode:
             self.approval_mode = new_mode
-            changed.append(f"aprovação={new_mode}")
+            changed.append(_tr("gw.reload_approval", _default="approval={mode}", mode=new_mode))
         old_sb = (getattr(self.cfg, "sandbox", None) or {})
         new_sb = (getattr(cfg, "sandbox", None) or {})
         if new_sb != old_sb:
@@ -961,7 +1069,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception as e:  # noqa: BLE001
             return False, str(e)
         changed = self.apply_config(cfg)
-        return True, (", ".join(changed) if changed else "sem mudanças aplicáveis em quente")
+        return True, (", ".join(changed) if changed else _tr(
+            "gw.reload_no_changes", _default="no hot-applicable changes"))
 
     def _notify_completed_processes(self) -> None:
         """Fila de notificações de processo (#1/#8/#P1.4): conclusão + watch hits, avisa no chat."""
@@ -975,11 +1084,15 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         for n in notes:
             if n.get("kind") == "watch":
-                self.channel.send(chat, f"👁 processo {n['id']}: padrão «{n['pattern']}» apareceu "
-                                  f"({n['count']}×): {str(n.get('cmd', ''))[:50]}")
+                self.channel.send(chat, "👁 " + _tr(
+                    "gw.notify_watch",
+                    _default="process {id}: pattern «{pattern}» appeared ({count}×): {cmd}",
+                    id=n["id"], pattern=n["pattern"], count=n["count"], cmd=str(n.get("cmd", ""))[:50]))
             else:
-                self.channel.send(chat, f"✅ processo {n['id']} terminou (exit={n.get('exit_code')}): "
-                                  f"{str(n.get('cmd', ''))[:60]}")
+                self.channel.send(chat, "✅ " + _tr(
+                    "gw.notify_done",
+                    _default="process {id} finished (exit={exit_code}): {cmd}",
+                    id=n["id"], exit_code=n.get("exit_code"), cmd=str(n.get("cmd", ""))[:60]))
 
     def loop(self) -> None:
         try:                                            # boot: registra o menu '/' (Telegram setMyCommands)

@@ -1,6 +1,7 @@
 """Hot-reload de config (#12): ConfigReloader (mtime+validação) + apply_config + /reload no gateway."""
 
 from __future__ import annotations
+import pytest
 
 from types import SimpleNamespace
 
@@ -102,3 +103,13 @@ def test_gateway_reload_invalid_config(tmp_path, monkeypatch):
     ep = _bare_ep()
     ok, msg = ep.reload_config()
     assert not ok and ep.approval_mode == "manual"     # manteve a anterior
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

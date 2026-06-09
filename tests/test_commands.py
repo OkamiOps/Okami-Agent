@@ -1,6 +1,7 @@
 """Slash command registry (estilo Hermes CommandDef): resolução de alias, did-you-mean, dispatch."""
 
 from __future__ import annotations
+import pytest
 
 from okami import commands as cmds
 from okami.gateway import AgentEndpoint
@@ -56,7 +57,7 @@ def _ep(tmp_path):
 def test_new_commands_dispatch(tmp_path):
     ep, ch = _ep(tmp_path)
     ep.handle("c1", "/commands")
-    assert "commands by category" in ch.sent[-1] and "session:" in ch.sent[-1]   # EN é o default agora
+    assert "comandos por categoria" in ch.sent[-1] and "sessão:" in ch.sent[-1]   # módulo sob locale pt
     ep.handle("c1", "/tools")
     assert "ferramentas:" in ch.sent[-1] and "read_file" in ch.sent[-1]
     ep.handle("c1", "/whoami")
@@ -80,3 +81,13 @@ def test_model_show_and_switch(tmp_path):
     ep.handle("c1", "/model openai-codex/gpt-5.4")
     assert ep.session("c1").model_override == "openai-codex/gpt-5.4"
     assert "→ openai-codex/gpt-5.4" in ch.sent[-1]
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

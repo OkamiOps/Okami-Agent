@@ -1,6 +1,7 @@
 """Session service: arquivar (/new) · listar (/sessions) · retomar (/resume) · exportar (/export)."""
 
 from __future__ import annotations
+import pytest
 
 import itertools
 
@@ -54,3 +55,13 @@ def test_session_commands_via_gateway(tmp_path):
     assert "retomei" in ch.sent[-1] and ep.session("c").history          # carregou no histórico da sessão
     ep.handle("c", "/export")
     assert "exportado" in ch.sent[-1]
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

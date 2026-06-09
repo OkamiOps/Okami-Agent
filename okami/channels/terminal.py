@@ -9,6 +9,7 @@ aprovação go/no-go, vision — tudo o que o Telegram tem. (Estilo Hermes `herm
 from __future__ import annotations
 
 from okami.channels.base import Channel
+from okami.i18n import t as _tr
 
 
 class TerminalChannel(Channel):
@@ -75,7 +76,7 @@ class TerminalChannel(Channel):
         O `text` já traz a ação + as opções (/yes · /always · /no)."""
         self.sent.append((str(chat_id), text))
         if self._console is None:  # pragma: no cover
-            print("\a⚠ APROVAÇÃO PENDENTE — /yes /always /no\n" + text)
+            print("\a" + _tr("terminal.approval_pending_plain", _default="⚠ APPROVAL PENDING — /yes /always /no") + "\n" + text)
             return
         import sys
         try:
@@ -88,13 +89,14 @@ class TerminalChannel(Channel):
         from rich.panel import Panel
         from rich.text import Text
         body = Group(Text(text, style="bold"),
-                     Text("→ tecle  y (sim)  ·  a (sempre, não pergunta mais)  ·  n (não)",
+                     Text(_tr("terminal.approval_keys",
+                              _default="→ press  y (yes)  ·  a (always, stop asking)  ·  n (no)"),
                           style="bold green"))
-        self._console.print(Panel(body, title="[bold black on yellow] ⚠ APROVAÇÃO PENDENTE [/]",
+        self._console.print(Panel(body, title="[bold black on yellow]" + _tr("terminal.approval_pending", _default=" ⚠ APPROVAL PENDING ") + "[/]",
                                   title_align="left", border_style="bold yellow", box=HEAVY, padding=(0, 1)))
 
     def send_audio(self, chat_id, audio_path) -> None:
-        self._print(f"[dim]🔊 áudio: {audio_path}[/dim]")
+        self._print("[dim]🔊 " + _tr("terminal.audio", _default="audio: {path}", path=audio_path) + "[/dim]")
 
     # --- entrada ---------------------------------------------------------------
     def poll(self):

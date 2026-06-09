@@ -1,6 +1,7 @@
 """Nonce na aprovação Telegram (P1.3): o botão amarra ao pedido; clique stale não aprova."""
 
 from __future__ import annotations
+import pytest
 
 import queue
 
@@ -85,3 +86,13 @@ def test_gateway_persistent_single_use(tmp_path):
     ep._pending["7"] = (q, "non1")                     # botão reenviado/reclicado
     ep.handle("7", "/yes:non1")                        # 2º clique → recusado (single-use)
     assert q.empty() and any("inválida" in m for m in ep.channel.sent)
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

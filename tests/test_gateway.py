@@ -1,6 +1,7 @@
 """Testes do gateway (sessões + slash commands + concorrência + go/no-go), canal fake."""
 
 from __future__ import annotations
+import pytest
 
 import threading
 import time
@@ -193,7 +194,7 @@ def test_process_brief_feeds_activity_panel():
     pid = ProcessManager(ep.ws).start("sleep 30")["id"]
     panel = tui.activity_panel(bg={}, busy=False, queued=0, procs=ep.process_brief())
     txt = panel.plain if hasattr(panel, "plain") else str(panel)
-    assert "processes" in txt and pid in txt
+    assert "processos" in txt and pid in txt
     ProcessManager(ep.ws).kill(pid)
 
 
@@ -801,3 +802,13 @@ def test_ctx_pct_real_tokens_and_trocas_total():
     assert e.get("ctx_pct") == 20 and int(e.get("node_count", 0)) // 2 == 1
     ep.handle("7", "de novo")
     assert int(ep.store.entry("7").get("node_count", 0)) // 2 == 2  # trocas CRESCE (não trava em 8)
+
+
+@pytest.fixture(autouse=True)
+def _i18n_pt_locale():
+    """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o
+    comportamento EN-default é coberto por test_i18n). Reseta após cada teste."""
+    import okami.i18n as _i18n
+    _i18n.set_lang("pt")
+    yield
+    _i18n.set_lang(None)

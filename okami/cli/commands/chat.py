@@ -6,6 +6,7 @@ import sys
 import typer
 from okami import __version__
 from pathlib import Path
+from okami.i18n import t as _tr
 from okami.cli._app import app, console
 from okami.cli._shared import (
     _resolve_agent,
@@ -96,7 +97,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         cols = _sh.get_terminal_size((80, 24)).columns
         return ANSI(f"{_DIM}{'─' * max(8, cols)}{_RST}\n{_ORANGE}❯{_RST} ")
 
-    _placeholder = ANSI(f"{_DIM}fala comigo…   / p/ comandos · ^C cancela · ^D sai{_RST}")
+    _placeholder = ANSI(f"{_DIM}{_tr('chat.placeholder', _default='talk to me…   / for commands · ^C cancel · ^D exit')}{_RST}")
     inflight: "collections.deque[str]" = collections.deque()   # digitado enquanto ocupado (FIFO)
     stop = threading.Event()
 
@@ -111,7 +112,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
                 try:
                     ep.handle(cid, inflight.popleft())
                 except Exception as e:  # noqa: BLE001 — um turno que falha não derruba o REPL
-                    console.print(f"[red]erro: {e}[/red]")
+                    console.print(f"[red]{_tr('chat.error', _default='error')}: {e}[/red]")
             _t.sleep(0.08)
 
     threading.Thread(target=_drain, daemon=True).start()
@@ -120,8 +121,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     def _toolbar():
         if cid in ep._pending:                    # APROVAÇÃO pendente → barra BERRANTE (preto sobre amarelo)
-            return ANSI("\x1b[1;30;43m ⚠ APROVAÇÃO PENDENTE — tecle  [y] sim  ·  [a] sempre (não pergunta "
-                        "mais)  ·  [n] não                                            \x1b[0m")
+            return ANSI("\x1b[1;30;43m " + _tr("chat.approval_bar",
+                        _default="⚠ APPROVAL PENDING — press  [y] yes  ·  [a] always (stop asking)  ·  [n] no")
+                        + "                                            \x1b[0m")
         try:
             pct, turns = ctx_pct(), len(ep.session(cid).history) // 2
         except Exception:  # noqa: BLE001
@@ -129,20 +131,21 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         if _busy():                               # contador AO VIVO de quanto o agente está pensando (volta o elapsed)
             if _busy_since[0] is None:
                 _busy_since[0] = _t.monotonic()
-            state = f"🧠 pensando  {int(_t.monotonic() - _busy_since[0])}s"
+            state = f"🧠 {_tr('chat.toolbar.thinking', _default='thinking')}  {int(_t.monotonic() - _busy_since[0])}s"
         else:
             _busy_since[0] = None
-            state = "● pronto"
-        q = f"  ·  {len(inflight)} na fila" if inflight else ""
-        return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} trocas  ·  {state}{q}"
-                    "    Ctrl-C cancela · Ctrl-D sai ")
+            state = "● " + _tr("chat.toolbar.ready", _default="ready")
+        q = f"  ·  {len(inflight)} {_tr('chat.toolbar.queued', _default='queued')}" if inflight else ""
+        return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} {_tr('status.turns', _default='turns')}  ·  {state}{q}"
+                    f"    {_tr('chat.toolbar.keys', _default='Ctrl-C cancel · Ctrl-D exit')} ")
 
     def _user_panel(msg: str):                        # fala do usuário em MOLDURA CIANO (simetria c/ o agente laranja)
         from datetime import datetime
         from rich.box import ROUNDED
         from rich.panel import Panel
         from rich.text import Text
-        return Panel(Text(msg, style="#f4f4f8"), title="[bold #00dfe8]● você[/]", title_align="left",
+        return Panel(Text(msg, style="#f4f4f8"),
+                     title=f"[bold #00dfe8]● {_tr('chat.you', _default='you')}[/]", title_align="left",
                      subtitle=f"[dim]{datetime.now().strftime('%H:%M')}[/]", subtitle_align="right",
                      border_style="#00dfe8", box=ROUNDED, padding=(0, 1), expand=True)
 
@@ -158,9 +161,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
                 s = ep.sessions.get(cid)
                 if s:
                     s.cancel = True
-                console.print("[yellow]⏹ cancelando…[/yellow]")
+                console.print(f"[yellow]⏹ {_tr('chat.cancelling', _default='cancelling…')}[/yellow]")
             else:
-                console.print("[dim]Ctrl-D ou /exit p/ sair[/dim]")
+                console.print(f"[dim]{_tr('chat.exit_hint', _default='Ctrl-D or /exit to quit')}[/dim]")
             continue
         if not (line and line.strip()):
             continue
@@ -184,7 +187,7 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             ep._details = lv
             from okami import prefs as _prefs                # M4: persiste a verbosidade → sobrevive ao restart
             _prefs.set_pref("repl_details", lv)
-            console.print(f"[dim]🔎 detalhes dos tool-calls: {lv} (lembrado)[/dim]")
+            console.print(f"[dim]🔎 {_tr('chat.details_set', _default='tool-call detail: {lv} (remembered)', lv=lv)}[/dim]")
             continue
         if decision == "agents":                        # cliente: painel de atividade
             sx = ep.sessions.get(cid)
@@ -200,20 +203,19 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             console.print(tui.replay_view(list(getattr(ep, "_step_log", []) or []), n))
             continue
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
-            console.print(f"[dim]🎨 {decision} só vale na TUI de tela cheia (rode `okami chat` sem --no-tui).[/dim]")
+            console.print(f"[dim]🎨 {_tr('chat.tui_only', _default='{cmd} only works in the full-screen TUI (run `okami chat` without --no-tui).', cmd=decision)}[/dim]")
             continue
         if decision == "copy":                          # no REPL o terminal NÃO captura o mouse → seleção nativa
-            console.print("[dim]📋 no modo --no-tui você seleciona com o mouse e copia normal "
-                          "(Cmd/Ctrl+C). O /copy é da TUI de tela cheia.[/dim]")
+            console.print(f"[dim]📋 {_tr('chat.copy_hint', _default='in --no-tui mode you select with the mouse and copy normally (Cmd/Ctrl+C). /copy belongs to the full-screen TUI.')}[/dim]")
             continue
         if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
             inflight.append(line)
             if decision == "queue":
-                console.print(f"[dim]↩ na fila ({len(inflight)}) — respondo assim que terminar[/dim]")
+                console.print(f"[dim]↩ {_tr('chat.queued_hint', _default='queued ({n}) — I will reply as soon as I finish', n=len(inflight))}[/dim]")
             continue
         ep.handle(cid, line)                            # approval | stop → direto (não inicia turno novo)
     stop.set()
-    console.print("[dim]tchau 🐺[/dim]")
+    console.print(f"[dim]{_tr('chat.bye', _default='bye')} 🐺[/dim]")
 
 
 def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
@@ -229,11 +231,11 @@ def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> Non
         try:
             line = console.input("[bold #ff7527]›[/bold #ff7527] ")
         except (EOFError, KeyboardInterrupt):
-            console.print("[dim]tchau 🐺[/dim]")
+            console.print(f"[dim]{_tr('chat.bye', _default='bye')} 🐺[/dim]")
             break
         cmd = line.strip().lower()
         if cmd in ("/exit", "/quit", "exit", "quit", ":q"):
-            console.print("[dim]tchau 🐺[/dim]")
+            console.print(f"[dim]{_tr('chat.bye', _default='bye')} 🐺[/dim]")
             break
         if cmd == "/help":
             console.print(tui.help_table())
@@ -246,7 +248,7 @@ def _run_repl_simple(ep, cid, console, tui, *, model_label: str, ctx_pct) -> Non
             s = ep.sessions.get(cid)
             if s and s.busy:
                 s.cancel = True
-                console.print("[yellow]⏹ cancelando…[/yellow]")
+                console.print(f"[yellow]⏹ {_tr('chat.cancelling', _default='cancelling…')}[/yellow]")
                 try:
                     _wait_for_turn(ep, cid)
                 except KeyboardInterrupt:
@@ -327,7 +329,7 @@ def chat(
                             skills=sks, version=__version__, new=new):
                 return
         except Exception as e:  # noqa: BLE001 — TUI falhou? cai no REPL, nunca deixa o usuário na mão
-            console.print(f"[dim](TUI indisponível: {e} — caindo no REPL)[/dim]")
+            console.print(f"[dim]({_tr('chat.tui_unavailable', _default='TUI unavailable: {e} — falling back to the REPL', e=e)})[/dim]")
 
     # --- fallback: REPL de linha (prompt_toolkit) -----------------------------
     import collections as _collections
@@ -344,7 +346,10 @@ def chat(
         if _expl["n"]:
             fail = _expl["n"] - _expl["ok"]
             tail = f" · [red]{fail} ✗[/]" if fail else ""
-            console.print(f"  🔎 [dim]explorou {_expl['n']} (read/list/find) — {_expl['ok']} ok{tail}[/dim]")
+            console.print("  🔎 [dim]"
+                          + _tr("chat.explored", _default="explored {n} (read/list/find) — {ok} ok",
+                                n=_expl["n"], ok=_expl["ok"])
+                          + f"{tail}[/dim]")
             _expl["n"] = _expl["ok"] = 0
 
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
