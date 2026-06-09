@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import typer
+from okami.config import config_dir
 from okami.i18n import t as _tr
-from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
     _load, _provider_add_flow, _write_local,
@@ -37,7 +37,7 @@ def provider_add_cmd(
         console.print("[dim]cancelado.[/dim]")
         raise typer.Exit(1)
     pid, pdict = res
-    cfg_path = Path("okami.yaml")
+    cfg_path = config_dir() / "okami.yaml"
     raw = (_yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}) or {}
     provs = raw.setdefault("providers", {})
     if pid in provs:                               # NÃO clobbera: mescla sobre o existente (preserva extras)
@@ -101,7 +101,7 @@ def provider_list_cmd() -> None:
 def provider_remove_cmd(provider_id: str = typer.Argument(..., help=_tr("cli.provider.remove.provider_id", _default="ID of the provider to remove."))) -> None:
     """Remove um provider do okami.yaml."""
     import yaml as _yaml
-    cfg_path = Path("okami.yaml")
+    cfg_path = config_dir() / "okami.yaml"
     raw = (_yaml.safe_load(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}) or {}
     provs = raw.get("providers") or {}
     if provider_id not in provs:

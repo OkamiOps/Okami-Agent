@@ -10,6 +10,7 @@ from pathlib import Path
 
 import typer
 
+from okami.config import config_dir
 from okami.config import OkamiConfig, load_config
 from okami.core import TaskState
 from okami.cli._app import console
@@ -107,7 +108,7 @@ def _persist_always_allow(category: str) -> None:
     """Adiciona uma categoria ao approvals.always_allow em okami.local.yaml (cross-sessão)."""
     import yaml as _yaml
 
-    p = Path("okami.local.yaml")
+    p = config_dir() / "okami.local.yaml"
     data = {}
     if p.exists():
         data = _yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -518,7 +519,7 @@ def _resolve_agent(agent: str | None, workspace: str):
 def _write_local(update: dict) -> None:
     """Mescla chaves no okami.local.yaml (override não-destrutivo do okami.yaml) — escrita durável."""
     from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
-    p = Path("okami.local.yaml")
+    p = config_dir() / "okami.local.yaml"
     data = read_yaml_resilient(p, default={})       # recupera de backup se o atual estiver corrompido
     data.update(update)
     secure_write_yaml(p, data)                       # atômico + backup rotacionado + .last-good (P1.2)

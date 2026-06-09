@@ -1,6 +1,7 @@
 """Testes da camada de arquivos .md (sempre on), merge de config e `okami setup`."""
 
 from __future__ import annotations
+import pytest
 
 import yaml
 
@@ -86,3 +87,10 @@ def test_setup_writes_local_yaml(tmp_path, monkeypatch):
     written = yaml.safe_load((tmp_path / "okami.local.yaml").read_text(encoding="utf-8"))
     assert written["memory"]["backend"] == "holographic"
     assert written["memory"]["files"]["user"] == 4000
+
+
+@pytest.fixture(autouse=True)
+def _okami_home_to_tmp(tmp_path, monkeypatch):
+    """config_dir() grava na CASA (~/.okami) quando não há projeto no CWD — aponta OKAMI_HOME pro tmp do
+    teste p/ não tocar a casa real e manter as asserções em tmp_path."""
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path))

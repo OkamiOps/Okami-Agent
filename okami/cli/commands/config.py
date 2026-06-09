@@ -5,6 +5,7 @@ import json
 import re
 
 import typer
+from okami.config import config_dir
 from okami.i18n import t as _tr
 from pathlib import Path
 from okami.cli._app import app, console
@@ -122,7 +123,7 @@ def _config_file_rows():
     from okami.config import global_env_path
     from okami.home import base_dir, okami_home
     return [("casa", okami_home()), ("dados (base)", base_dir()),
-            ("base", Path("okami.yaml")), ("overrides", Path("okami.local.yaml")),
+            ("base", config_dir() / "okami.yaml"), ("overrides", config_dir() / "okami.local.yaml"),
             (".env projeto", Path(".env")), (".env global", global_env_path()),
             ("policy", Path("okami.policy.yaml"))]
 
@@ -202,7 +203,7 @@ def _render_config_view(diff: bool = False) -> None:
     ], width=console.width))
     # YAML efetivo (ou overrides) em card largo
     if diff:
-        p = Path("okami.local.yaml")
+        p = config_dir() / "okami.local.yaml"
         if not p.exists():
             console.print(_ui.panel(_ui.hint("sem overrides — okami.local.yaml não existe"),
                                     title="Overrides", accent=_ui.MAGENTA))
@@ -276,7 +277,7 @@ def config_show(diff: bool = typer.Option(False, "--diff", help=_tr("cli.config.
         return
     import yaml as _yaml                               # pipe/script → YAML cru (greppável), segredos mascarados
     if diff:
-        p = Path("okami.local.yaml")
+        p = config_dir() / "okami.local.yaml"
         console.print(p.read_text(encoding="utf-8") if p.exists() else "(sem overrides)")
         return
     from okami.config import load_raw
@@ -335,7 +336,7 @@ def config_set(
         console.print(f"[dim]→ guarde como env var:[/dim] [bold]okami config set {env_name} <valor>[/bold]")
         console.print(f"[dim]  e referencie no yaml com:[/dim] [bold]okami config set {key} '${{{env_name}}}'[/bold]")
         raise typer.Exit(2)
-    p = Path("okami.local.yaml")
+    p = config_dir() / "okami.local.yaml"
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
     coerced = _coerce(value)
     _dotted_set(data, key, coerced)
@@ -348,7 +349,7 @@ def config_set(
 def config_unset(key: str = typer.Argument(..., help=_tr("cli.config.unset.key", _default="Dotted key to remove from the override."))) -> None:
     """Remove um override (okami.local.yaml). Não toca no okami.yaml base."""
     import yaml as _yaml
-    p = Path("okami.local.yaml")
+    p = config_dir() / "okami.local.yaml"
     data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
     if _dotted_del(data, key):
         from okami.core.safe_io import secure_write_yaml
@@ -369,7 +370,7 @@ def config_edit(base: bool = typer.Option(False, "--base", help=_tr("cli.config.
     """Abre a config no seu editor ($EDITOR, senão notepad/nano)."""
     import os
     import subprocess
-    target = Path("okami.yaml" if base else "okami.local.yaml")
+    target = config_dir() / ("okami.yaml" if base else "okami.local.yaml")
     if not target.exists():
         target.write_text("# overrides locais do Okami (mescla sobre o okami.yaml)\n", encoding="utf-8")
     editor = os.environ.get("EDITOR") or ("notepad" if os.name == "nt" else "nano")

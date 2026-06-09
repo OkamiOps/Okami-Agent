@@ -1,6 +1,7 @@
 """Wizard de setup (onboarding): atalho não-interativo + criação do okami.yaml do zero."""
 
 from __future__ import annotations
+import pytest
 
 
 import yaml
@@ -80,6 +81,7 @@ def test_setup_agent_section_creates_named_agent(tmp_path, monkeypatch):
 def test_provider_add_writes_yaml_and_secret(tmp_path, monkeypatch):
     """`okami provider add` grava o provider no okami.yaml e a chave no .env GLOBAL (não no yaml)."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OKAMI_HOME", raising=False)    # este teste gerencia a casa via HOME (~/.okami)
     monkeypatch.setenv("HOME", str(tmp_path))          # ~ → tmp (segredo vai pro .env GLOBAL ~/.okami/.env)
     # evita rede no teste: discover_models devolve um catálogo fixo
     monkeypatch.setattr("okami.llm.models.discover_models",
@@ -184,3 +186,10 @@ def test_help_command_lists_groups():
     res = runner.invoke(app, ["help"])
     assert res.exit_code == 0
     assert "provider add" in res.output and "Começar" in res.output
+
+
+@pytest.fixture(autouse=True)
+def _okami_home_to_tmp(tmp_path, monkeypatch):
+    """config_dir() grava na CASA (~/.okami) quando não há projeto no CWD — aponta OKAMI_HOME pro tmp do
+    teste p/ não tocar a casa real e manter as asserções em tmp_path."""
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path))

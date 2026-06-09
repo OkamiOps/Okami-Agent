@@ -1,6 +1,7 @@
 """Segredo em chave pontilhada (#6): config NÃO grava segredo em texto no YAML versionável."""
 
 from __future__ import annotations
+import pytest
 
 from typer.testing import CliRunner
 
@@ -74,3 +75,10 @@ def test_config_get_normal_scalar_shown(tmp_path, monkeypatch):
     _write_local(tmp_path, "memory:\n  backend: holographic\n")
     res = runner.invoke(app, ["config", "get", "memory.backend"])
     assert res.exit_code == 0 and "holographic" in res.output
+
+
+@pytest.fixture(autouse=True)
+def _okami_home_to_tmp(tmp_path, monkeypatch):
+    """config_dir() grava na CASA (~/.okami) quando não há projeto no CWD — aponta OKAMI_HOME pro tmp do
+    teste p/ não tocar a casa real e manter as asserções em tmp_path."""
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path))

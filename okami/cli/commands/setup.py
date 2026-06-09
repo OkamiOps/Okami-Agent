@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import typer
+from okami.config import config_dir
 from okami.i18n import t as _tr
-from pathlib import Path
 from okami.cli._app import app, console
 from okami.cli._shared import (
     _load, _build_memory_block, _pick_model, _provider_add_flow, _SETUP_SECTIONS, _slug, _ensure_agent,
@@ -31,7 +31,7 @@ def setup(
     # --- atalho não-interativo: só memória (compat: scripts/CI) ---------------
     if memory:
         mem = _build_memory_block(memory, honcho_url, honcho_key, embedder_url, embedder_model)
-        Path("okami.local.yaml").write_text(
+        (config_dir() / "okami.local.yaml").write_text(
             _yaml.safe_dump({"memory": mem}, allow_unicode=True, sort_keys=False), encoding="utf-8")
         console.print(t("setup.local_written", _default="[green]✓ okami.local.yaml written[/green] (backend={backend})",
                         backend=mem['backend']))
@@ -42,21 +42,21 @@ def setup(
                         section=section, sections=', '.join(_SETUP_SECTIONS)))
         raise typer.Exit(1)
 
-    cfg_path = Path("okami.yaml")
+    cfg_path = config_dir() / "okami.yaml"
     fresh = not cfg_path.exists()
     local: dict = {}
-    if Path("okami.local.yaml").exists():
-        local = _yaml.safe_load(Path("okami.local.yaml").read_text(encoding="utf-8")) or {}
+    if (config_dir() / "okami.local.yaml").exists():
+        local = _yaml.safe_load((config_dir() / "okami.local.yaml").read_text(encoding="utf-8")) or {}
 
     def save_local() -> None:
-        Path("okami.local.yaml").write_text(
+        (config_dir() / "okami.local.yaml").write_text(
             _yaml.safe_dump(local, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     # Painel de localização (estilo Hermes "Configuration Location")
     from rich.panel import Panel
 
     from okami.home import agents_dir
-    loc = Path.cwd()
+    loc = config_dir()
     head = t("setup.panel.head", _default="[bold #ff7527]🐺 Okami — configuration[/]")
     if not fresh:
         head += "\n" + t("setup.panel.already",

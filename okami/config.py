@@ -177,10 +177,30 @@ def find_config(start: Path | None = None) -> Path:
             p = d / n
             if p.exists():
                 return p
+    # Fallback GLOBAL: a casa (~/.okami / $OKAMI_HOME). Sem isto, um install global só funcionava se você
+    # rodasse de DENTRO do projeto — `okami chat` de qualquer outro diretório (caso do Windows) quebrava.
+    from okami.home import okami_home
+    for n in DEFAULT_CONFIG_NAMES:
+        p = okami_home() / n
+        if p.exists():
+            return p
     raise FileNotFoundError(
-        f"okami.yaml não encontrado (procurei a partir de {start}). "
-        "Rode no diretório do projeto ou crie um okami.yaml."
+        f"okami.yaml não encontrado (procurei em {start}, nos ancestrais, e em {okami_home()}). "
+        "Rode `okami setup` (grava na casa global) ou crie um okami.yaml no projeto."
     )
+
+
+def config_dir() -> Path:
+    """Onde okami.yaml/okami.local.yaml moram p/ LER e ESCREVER: a pasta do projeto (okami.yaml no CWD/
+    ancestral) se houver; senão a casa GLOBAL (~/.okami). É a fonte única dos comandos de config (setup/
+    config set/unset/edit) — garante que um install global grava e lê na casa, de qualquer diretório."""
+    try:
+        return find_config().parent
+    except FileNotFoundError:
+        from okami.home import okami_home
+        h = okami_home()
+        h.mkdir(parents=True, exist_ok=True)
+        return h
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
