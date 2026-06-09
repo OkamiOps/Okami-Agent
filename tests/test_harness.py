@@ -346,3 +346,16 @@ def test_harness_injects_workspace_root_into_system_prompt(tmp_path):
     h.run()
     sys_msg = h.messages[0]["content"]
     assert "app.py" in sys_msg and str(tmp_path) in sys_msg
+
+
+def test_system_prompt_instructs_mirror_user_language():
+    # BUG (idioma): o agente respondia em PT mesmo recebendo inglês (system prompt + persona em PT, sem
+    # regra de idioma). Agora o prompt manda ESPELHAR o idioma da pessoa, nos dois modos (conversa/trabalho).
+    from okami.core.harness.models import Task
+    from okami.core.harness.prompt import build_system_prompt
+    from okami.core.tools import default_registry
+    reg = default_registry()
+    for goal in ("hi, how are you?", "analise o repositório"):
+        sp = build_system_prompt(Task(goal=goal), reg)
+        assert "<idioma>" in sp, "regra de idioma ausente do system prompt"
+        assert "MESMO idioma" in sp and "inglês" in sp, "não instrui espelhar o idioma da pessoa"
