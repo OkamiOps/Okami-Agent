@@ -467,7 +467,8 @@ def _slug(name: str) -> str:
 
 
 def _ensure_agent(agent_id: str, *, name: str | None = None, provider: str | None = None,
-                  memory: str | None = None, match=None, telegram_token: str | None = None) -> bool:
+                  memory: str | None = None, match=None, telegram_token: str | None = None,
+                  telegram_allow=None, telegram_allow_all: bool = False) -> bool:
     """Cria (ou atualiza) agents/<id>/: agent.yaml + identidade própria. Idempotente.
     Devolve True se acabou de criar. É o que materializa a estrutura multi-agente em disco."""
     import yaml as _yaml
@@ -485,6 +486,14 @@ def _ensure_agent(agent_id: str, *, name: str | None = None, provider: str | Non
         spec["match"] = list(match)
     if telegram_token:
         spec.setdefault("channels", {}).setdefault("telegram", {})["token"] = telegram_token
+    if telegram_allow:   # lista específica → AUTORITATIVA: não é "todos" (limpa allow_all fantasma)
+        tg = spec.setdefault("channels", {}).setdefault("telegram", {})
+        tg["allow_chats"] = list(telegram_allow)
+        tg.pop("allow_all", None)
+    if telegram_allow_all:   # todos → a lista vira irrelevante; remove p/ não confundir (allow_all domina)
+        tg = spec.setdefault("channels", {}).setdefault("telegram", {})
+        tg["allow_all"] = True
+        tg.pop("allow_chats", None)
     d.mkdir(parents=True, exist_ok=True)
     af.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False) or "{}\n", encoding="utf-8")
     _write_persona_stubs(d, name or agent_id)

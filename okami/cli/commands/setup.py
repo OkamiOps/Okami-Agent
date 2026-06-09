@@ -11,6 +11,78 @@ from okami.cli._shared import (
 from okami.i18n import t
 
 
+def _parse_chat_ids(raw: str) -> list:
+    """'123, -456 ; @user' → [123, -456, '@user']. Aceita id numérico (DM/grupo) ou @username."""
+    out: list = []
+    for part in (raw or "").replace(";", ",").split(","):
+        p = part.strip()
+        if not p:
+            continue
+        out.append(int(p) if p.lstrip("-").isdigit() else p)
+    return out
+
+
+def _capture_telegram_chat_ids(token: str, *, transport=None, tries: int = 8) -> dict:
+    """Captura o(s) chat_id de quem mandar mensagem pro bot AGORA (getUpdates). Mata a dor de
+    'não sei meu chat_id': a pessoa manda uma msg pro bot e o id aparece sozinho. Devolve {id: nome}."""
+    if transport is None:
+        from okami.channels.telegram import TelegramTransport
+        transport = TelegramTransport(token)
+    found: dict = {}
+    offset = 0
+    for _ in range(max(1, tries)):
+        try:
+            updates = transport.get_updates(offset=offset, timeout=2)
+        except Exception:  # noqa: BLE001 — sem rede/token errado → cai no fallback manual
+            break
+        for u in updates:
+            offset = max(offset, int(u.get("update_id", 0)) + 1)
+            msg = u.get("message") or u.get("edited_message") or u.get("channel_post") or {}
+            chat = msg.get("chat") or {}
+            cid = chat.get("id")
+            if cid is not None:
+                found[cid] = chat.get("username") or chat.get("first_name") or chat.get("title") or str(cid)
+        if found:
+            break
+    return found
+
+
+def _ask_telegram_allowlist(token: str):
+    """Pergunta QUEM pode falar com o bot (deny-by-default). Devolve (allow_chats|None, allow_all:bool).
+    Recomenda a auto-detecção; cai pra manual/allow_all/depois. Sem isto o bot ficava MUDO."""
+    from okami import menu
+    how = menu.select(
+        t("setup.channel.allow.prompt",
+          _default="Who can talk to the bot? (deny-by-default — without this it stays SILENT)"),
+        [("auto", t("setup.channel.allow.auto", _default="Detect my chat_id automatically (recommended)"),
+          t("setup.channel.allow.auto_hint", _default="message the bot and I grab the id")),
+         ("manual", t("setup.channel.allow.manual", _default="Type the chat_id(s)")),
+         ("all", t("setup.channel.allow.all", _default="Allow EVERYONE"),
+          t("setup.channel.allow.all_hint", _default="allow_all — insecure, testing only")),
+         ("later", t("setup.channel.allow.later", _default="Set it up later"))],
+        default="auto")
+    if how == "all":
+        console.print(t("setup.channel.allow.all_warn",
+                        _default="[yellow]⚠ allow_all: ANYONE who finds the bot can use it. Use only in a controlled test.[/yellow]"))
+        return None, True
+    if how == "manual":
+        return _parse_chat_ids(menu.text(t("setup.channel.allow.manual_prompt",
+                                           _default="chat_id(s), comma-separated"))) or None, False
+    if how == "auto":
+        console.print(t("setup.channel.allow.auto_go",
+                        _default="[bold]Open Telegram → send ANY message to your bot now[/bold], then press Enter."))
+        menu.text(t("setup.channel.allow.auto_wait", _default="Enter once you've sent it"), default="")
+        found = _capture_telegram_chat_ids(token)
+        if found:
+            for cid, who in found.items():
+                console.print(t("setup.channel.allow.got", _default="[green]✓ got chat_id {id}[/green] ({who})", id=cid, who=who))
+            return list(found.keys()), False
+        console.print(t("setup.channel.allow.none",
+                        _default="[yellow]didn't catch a message[/yellow] — type the chat_id or leave empty to set up later."))
+        return _parse_chat_ids(menu.text(t("setup.channel.allow.manual_prompt", _default="chat_id(s), comma-separated"))) or None, False
+    return None, False   # later
+
+
 @app.command(help=_tr("cli.setup", _default="Configuration wizard (arrow menus) — providers, login, memory, identity, channel."))
 def setup(
     section: str = typer.Argument(None, help=_tr("cli.setup.section", _default="provider|default|memory|identity|channel (empty = full wizard)")),
@@ -191,10 +263,22 @@ def setup(
         if menu.confirm(t("setup.channel.confirm",
                           _default="Set up a Telegram bot now? (otherwise, use the terminal chat)"), default=False):
             token = menu.text(t("setup.channel.token", _default="Bot token (@BotFather)"), password=True)
-            _ensure_agent(agent_id, telegram_token=token)   # anexa a token ao agente default
+            if not (token or "").strip():
+                console.print(t("setup.channel.no_token", _default="[dim]no token — skipped[/dim]"))
+                return
+            allow_chats, allow_all = _ask_telegram_allowlist(token)   # QUEM pode falar (deny-by-default)
+            _ensure_agent(agent_id, telegram_token=token, telegram_allow=allow_chats, telegram_allow_all=allow_all)
             console.print(t("setup.channel.linked",
                             _default="[green]✓ Telegram linked to agent '{agent_id}'[/green] — start it with: okami gateway",
                             agent_id=agent_id))
+            if allow_all:
+                console.print(t("setup.channel.who_all", _default="[dim]allowlist: EVERYONE (allow_all)[/dim]"))
+            elif allow_chats:
+                console.print(t("setup.channel.who_list", _default="[dim]allowlist: {ids}[/dim]",
+                                ids=", ".join(str(c) for c in allow_chats)))
+            else:
+                console.print(t("setup.channel.who_none",
+                                _default="[yellow]⚠ no allowlist yet — the bot stays SILENT. Add later: okami setup channel[/yellow]"))
         else:
             console.print(t("setup.channel.skip", _default="[dim]all good — talk to it via: okami chat[/dim]"))
 

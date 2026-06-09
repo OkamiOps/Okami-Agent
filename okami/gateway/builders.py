@@ -96,7 +96,8 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
             cfg = effective_config(global_raw, spec)
             if not tg.get("allow_chats") and not tg.get("allow_all"):   # fail-closed: avisa ALTO
                 emit(f"⚠ [{aid}] Telegram SEM allowlist → deny-by-default (bot não responde ninguém). "
-                     f"Adicione channels.telegram.allow_chats: [<seu_chat_id>] ou allow_all: true (inseguro).")
+                     f"Resolva fácil: `okami setup channel` (detecta teu chat_id sozinho) — ou edite "
+                     f"channels.telegram.allow_chats: [<seu_chat_id>] / allow_all: true (inseguro).")
             channel = (make_channel or TelegramChannel)(tg["token"], allow_chats=tg.get("allow_chats"),
                                                         allow_all=bool(tg.get("allow_all", False)))
             eps.append(_mk_endpoint(aid, spec, cfg, channel))

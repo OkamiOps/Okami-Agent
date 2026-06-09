@@ -1,6 +1,23 @@
 """Catálogo Português (pt-BR). Tradução do default (en). Ative com OKAMI_LANG=pt ou `lang: pt` no okami.yaml."""
 
 MESSAGES: dict[str, str] = {
+    'setup.channel.allow.prompt': 'Quem pode falar com o bot? (deny-by-default — sem isto ele fica MUDO)',
+    'setup.channel.allow.auto': 'Detectar meu chat_id automaticamente (recomendado)',
+    'setup.channel.allow.auto_hint': 'manda uma msg pro bot e eu pego o id',
+    'setup.channel.allow.manual': 'Digitar o(s) chat_id',
+    'setup.channel.allow.manual_prompt': 'chat_id(s), separados por vírgula',
+    'setup.channel.allow.all': 'Liberar pra TODOS',
+    'setup.channel.allow.all_hint': 'allow_all — inseguro, só pra teste',
+    'setup.channel.allow.all_warn': '[yellow]⚠ allow_all: QUALQUER um que achar o bot pode usar. Só em teste controlado.[/yellow]',
+    'setup.channel.allow.later': 'Configurar depois',
+    'setup.channel.allow.auto_go': '[bold]Abre o Telegram → manda QUALQUER mensagem pro teu bot agora[/bold], e aperte Enter.',
+    'setup.channel.allow.auto_wait': 'Enter quando tiver mandado',
+    'setup.channel.allow.got': '[green]✓ peguei o chat_id {id}[/green] ({who})',
+    'setup.channel.allow.none': '[yellow]não captei nenhuma mensagem[/yellow] — digite o chat_id ou deixe vazio pra configurar depois.',
+    'setup.channel.no_token': '[dim]sem token — pulei[/dim]',
+    'setup.channel.who_all': '[dim]allowlist: TODOS (allow_all)[/dim]',
+    'setup.channel.who_list': '[dim]allowlist: {ids}[/dim]',
+    'setup.channel.who_none': '[yellow]⚠ ainda sem allowlist — o bot fica MUDO. Adicione depois: okami setup channel[/yellow]',
     # i18n lote 3: CLI --help (Typer)
     "cli.app": "Okami Agent — CLI",
     "cli.gateway": "Sobe os bots de Telegram (1 por agente). Por padrão roda em BACKGROUND e te devolve o terminal;\nuse -f p/ rodar em primeiro plano, --stop p/ parar, --status p/ checar.",
