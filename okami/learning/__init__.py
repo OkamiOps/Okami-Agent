@@ -95,8 +95,11 @@ def is_auto_distilled(skill) -> bool:
     marcador `origin: auto-distilled` (skills novas) OU a ASSINATURA do corpo — determinístico
     ('(sequência de tools que funcionou)') ou por LLM ('## Quando usar' + '## Cuidados'). Nenhum
     desses padrões aparece em skill CURADA do repo (verificado), então não há falso-positivo."""
-    if str((skill.meta or {}).get("origin", "")) == "auto-distilled":
+    origin = str((skill.meta or {}).get("origin", ""))
+    if origin == "auto-distilled":
         return True
+    if origin:                                   # origin EXPLÍCITO ≠ auto (ex.: 'agent' via manage_skill/review)
+        return False                             # → curada; heurística de corpo não pode comê-la
     body = skill.body or ""
     if AUTO_BODY_MARKER in body:
         return True
@@ -116,90 +119,118 @@ def _is_distillable(task: Task) -> bool:
     return len(real) >= 4 and len({s.tool for s in real}) >= 2 and len(effectful) >= 2
 
 
-def distill_skill(task: Task, model_name: str = "?") -> dict | None:
-    """Destila uma SKILL.md de uma tarefa BEM-sucedida e NÃO-trivial (≥4 passos, ≥2 tools distintas).
-    Devolve {name, body} ou None. Determinístico (a versão por LLM entra depois)."""
-    if not _is_distillable(task):
-        return None
-    tools = [s.tool for s in task.steps if s.tool not in _META_TOOLS]
-    name = _skill_name(task.goal, tools=tools)             # nome CURTO de conteúdo, não a frase literal
-    if not name:
-        return None
-    seq = " → ".join(tools)
-    body = (f"# {task.goal[:60]}\n\n"
-            f"## Quando usar\nTarefas do tipo: {task.goal[:200]}\n\n"
-            f"## Como (sequência de tools que funcionou)\n{seq}\n\n"
-            f"## Resultado esperado\n{(task.result or '')[:300]}\n")
-    return {"name": name, "body": body}
+def validate_distilled(sk: dict, goal: str) -> str | None:
+    """Gate DETERMINÍSTICO anti-lixo (objeção ou None) — barra skill ruim mesmo se o LLM escorregar.
+
+    Reproduz os 4 modos de falha reais ('tu-fez-cagada', 'sou-marcos-santos'…): nome copiado do começo
+    da frase do pedido, descrição = frase crua, corpo-transcript (conversa verbatim) e corpo raso
+    (setas de tools não são procedimento). Hermes valida deterministicamente em cima do LLM — igual aqui."""
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        return unicodedata.normalize("NFKD", str(s).lower()).encode("ascii", "ignore").decode()
+
+    name = str(sk.get("name") or "")
+    desc = str(sk.get("description") or "")
+    body = str(sk.get("body") or "")
+    if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+){1,3}", name) or len(name) > 32:
+        return "nome fora do padrão (kebab-case, 2-4 palavras, ≤32 chars)"
+    # padrão real do lixo ('tu-fez-cagada', 'sou-marcos-santos'): nome = trecho CONSECUTIVO do começo
+    # da frase. ≥3 palavras seguidas é cópia, não tópico (2 palavras tipo 'deploy-docker' são legítimas).
+    gtoks = re.findall(r"[a-z0-9]+", _norm(goal))
+    if len(name.split("-")) >= 3 and " ".join(name.split("-")) in " ".join(gtoks[:10]):
+        return "nome copiado do começo da frase do pedido (artefato de sessão, não classe)"
+    if not 20 <= len(desc) <= 200:
+        return "descrição ausente/curta/longa (alvo: 'Use quando <gatilho>. <comportamento>.')"
+    if _norm(desc)[:40] == _norm(goal)[:40]:
+        return "descrição é a frase crua do pedido"
+    if len(body) < 200 or "## " not in body:
+        return "corpo raso/sem seções — sequência de tools não é procedimento"
+    g, b = _norm(goal), _norm(body)
+    if len(g) >= 60 and any(g[i:i + 60] in b for i in range(0, len(g) - 59, 20)):
+        return "corpo contém a conversa verbatim (transcript, não procedimento)"
+    return None
+
+
+# Prompt alinhado ao Hermes (skill-authoring + background_review): skill = CLASSE de trabalho,
+# descrição "Use quando <gatilho>", corpo com seções, e o direito de dizer NÃO (worth=false).
+_DISTILL_SYSTEM = """Você decide se uma tarefa concluída merece virar uma SKILL reutilizável — e, SÓ se merecer, escreve a skill. "NÃO vale" é o resultado mais comum e é legítimo: melhor nenhuma skill do que lixo.
+
+worth=false quando: tarefa pontual/one-off ("organize ISSO", "corrige ESSE erro"), papo/correção conversacional, apresentação pessoal, narrativa de uma sessão. worth=true SÓ quando emergiu um PROCEDIMENTO de uma CLASSE de trabalho que vai se repetir com outros dados.
+
+Se worth=true:
+- name: a CLASSE em kebab-case, 2-4 palavras (ex.: 'organizar-arvore-pastas', 'deploy-docker'). NUNCA frase do pedido, número de PR, erro ou codinome da sessão.
+- description: "Use quando <gatilho observável>. <o que a skill faz em 1 linha>." (≤160 chars, 3ª pessoa)
+- intent_examples: 2-3 PARÁFRASES genéricas de pedidos que deveriam acionar a skill (não a frase original).
+- body: markdown com '## Quando usar' (incl. "Não use para: …"), '## Procedimento' (passos numerados, genéricos, com as tools certas), '## Cuidados' (armadilhas reais vistas na tarefa). Genérico: outros dados, mesmos passos. PROIBIDO colar a conversa, o resultado literal ou tom de chat ("Pronto!")."""
 
 
 def distill_skill_llm(cfg, task: Task, provider: str | None = None) -> dict | None:
-    """Destila uma SKILL.md RICA via LLM (constrained): Quando usar / Como / Cuidados. Fallback p/ a
-    versão determinística se o LLM falhar. cfg=None → pula direto p/ o determinístico."""
+    """Destila uma SKILL.md via LLM com julgamento 'vale salvar?' + gate determinístico.
+    SEM fallback mecânico: LLM indisponível/falhou/worth=false/gate reprovou → None (nada gravado)."""
     if cfg is None or not _is_distillable(task):
         return None
     from okami.llm import providers as prov
 
-    seq = " → ".join(s.tool for s in task.steps
-                     if s.tool not in ("task_complete", "task_blocked", "need_input"))
-    schema = {"type": "object", "properties": {"name": {"type": "string"}, "body": {"type": "string"}},
-              "required": ["name", "body"]}
-    msgs = [{"role": "system", "content": "Destila uma SKILL.md REUTILIZÁVEL da tarefa concluída. "
-             "'name' = TÓPICO curto em kebab-case, 2 a 4 palavras (≤32 chars), descrevendo a CAPACIDADE "
-             "genérica (ex.: 'analise-de-codigo', 'deploy-docker', 'busca-em-logs'). NUNCA copie a frase "
-             "do usuário, NUNCA use 'eu/voce/agora/pra/por-favor' nem verbos de pedido. "
-             "'body' = markdown com '## Quando usar', '## Como' (passos genéricos), '## Cuidados'. "
-             "Conciso e genérico (não específico demais)."},
-            {"role": "user", "content": f"OBJETIVO: {task.goal}\nSEQUÊNCIA DE TOOLS: {seq}\n"
-             f"RESULTADO: {(task.result or '')[:300]}"}]
+    seq = " → ".join(s.tool for s in task.steps if s.tool not in _META_TOOLS)
+    schema = {"type": "object", "properties": {
+        "worth": {"type": "boolean"}, "name": {"type": "string"}, "description": {"type": "string"},
+        "intent_examples": {"type": "array", "items": {"type": "string"}}, "body": {"type": "string"}},
+        "required": ["worth", "name", "description", "body"]}
+    msgs = [{"role": "system", "content": _DISTILL_SYSTEM},
+            {"role": "user", "content": f"PEDIDO: {task.goal[:800]}\nAÇÕES (tools): {seq}\n"
+             f"RESULTADO (não copie p/ a skill): {(task.result or '')[:300]}"}]
     try:
         d = json.loads(prov.complete_messages(cfg, msgs, provider=provider, response_schema=schema))
-        # mesmo o nome do LLM passa pelo limpador (tira filler/frase literal se o modelo escorregar);
-        # sem 'name' → deriva do objetivo (conteúdo), não da frase crua.
-        tools = [s.tool for s in task.steps if s.tool not in ("task_complete", "task_blocked", "need_input")]
-        name = _skill_name(str(d.get("name") or task.goal), tools=tools)
-        body = str(d.get("body") or "")
-        return {"name": name, "body": body} if name and len(body) > 40 else None
     except Exception:  # noqa: BLE001
         return None
+    if not d.get("worth"):
+        return None
+    sk = {"name": str(d.get("name") or "").strip(),
+          "description": str(d.get("description") or "").strip(),
+          "intent_examples": [str(x).strip() for x in (d.get("intent_examples") or []) if str(x).strip()][:3],
+          "body": str(d.get("body") or "").strip()}
+    return None if validate_distilled(sk, task.goal or "") else sk
 
 
 def _render_skill_md(sk: dict, task: Task) -> str:
-    """Empacota a skill destilada com frontmatter — captura a FRASE REAL do pedido como `intent_example`.
-    É isso que faz a skill aprendida ser achável por INTENÇÃO (não só pelo nome) na próxima tarefa
-    parecida — o loop que fecha 'skills difíceis de acionar'. Se o distilador já trouxe frontmatter,
-    respeita (não duplica)."""
+    """Empacota a skill destilada com frontmatter LIMPO: description do LLM ("Use quando…"),
+    intent_examples = paráfrases GENERALIZADAS do LLM + a frase real do pedido como última âncora
+    (achável por intenção sem sujar a descrição). Se o distilador já trouxe frontmatter, respeita."""
     import yaml
 
     body = (sk.get("body") or "").strip()
     if body.startswith("---"):
         return body + "\n"
     goal = (task.goal or "").strip()
+    examples = list(sk.get("intent_examples") or [])
+    if goal and goal[:200] not in examples:
+        examples.append(goal[:200])                       # âncora de retrieval, nunca a descrição
     meta = {
         "name": sk["name"],
-        "description": (sk.get("description") or goal)[:160],
-        "intent_examples": [goal[:200]] if goal else [],   # a frase literal do usuário vira âncora de intenção
+        "description": str(sk.get("description") or "")[:160],
+        "intent_examples": examples[:4],
         "origin": "auto-distilled",                        # marcado → `okami skills prune` poda com precisão
     }
     return "---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n" + body + "\n"
 
 
 def maybe_write_skill(task: Task, skills_dir: str = "skills", model_name: str = "?", cfg=None) -> str | None:
-    """Destila (LLM se `cfg`, senão determinístico) → ESCANEIA (segurança, regra do usuário: skill
-    criada pelo agente é validada antes de ativar) → grava em skills/<name>/SKILL.md COM frontmatter
-    (intent_examples = pedido real → achável por intenção). Devolve nome/None."""
+    """Destila via LLM (julgamento + gate) → ESCANEIA o documento INTEIRO (segurança) → grava em
+    skills/<name>/SKILL.md. SEM fallback mecânico: sem cfg/LLM → None (nada gravado). Devolve nome/None."""
     from okami.skills.skill_security import Severity, scan_text
 
-    sk = distill_skill_llm(cfg, task) or distill_skill(task, model_name)
+    sk = distill_skill_llm(cfg, task)
     if not sk:
         return None
-    if any(f.severity >= Severity.HIGH for f in scan_text(sk["name"], sk["body"])):
+    rendered = _render_skill_md(sk, task)                 # escaneia o doc final (inclui intent_examples)
+    if any(f.severity >= Severity.HIGH for f in scan_text(sk["name"], rendered)):
         return None                                       # nunca ativa skill insegura (defesa em profundidade)
     f = Path(skills_dir) / sk["name"] / "SKILL.md"
     if f.exists():
         return None                                       # não sobrescreve skill existente
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(_render_skill_md(sk, task), encoding="utf-8", newline="\n")
+    f.write_text(rendered, encoding="utf-8", newline="\n")
     return sk["name"]
 
 

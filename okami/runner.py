@@ -257,10 +257,10 @@ def run_task(
                 # guiado pela lista "Do NOT capture", a cada N turnos e SÓ em conclusão limpa. Substitui a
                 # destilação MECÂNICA (que gerava lixo). auto_skill mecânico fica como legado opt-in.
                 _maybe_background_review(cfg, home, t, skills_dir=skills_dir, model=model, provider=provider, emit=emit)
-                if (cfg.learning or {}).get("auto_skill"):     # legado (default off): destilação mecânica
+                if (cfg.learning or {}).get("auto_skill"):     # opt-in: destilação pós-tarefa (LLM-ou-nada,
                     name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
-                    if name:
-                        emit(f"🧠 skill destilada (mecânico/legado): {name}")
+                    if name:                                   # julgamento worth + gate determinístico)
+                        emit(f"🧠 skill destilada: {name}")
             except Exception:  # noqa: BLE001
                 pass
     finally:

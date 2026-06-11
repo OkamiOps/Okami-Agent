@@ -53,6 +53,21 @@ def test_prune_removes_auto_keeps_curated(tmp_path, monkeypatch):
     assert not (skroot / "apresentacao-amigavel").exists()      # LLM-distilada também podada
 
 
+def test_prune_keeps_agent_written_skill_with_template_sections(tmp_path, monkeypatch):
+    # skill BOA escrita pelo agente (origin: agent, via manage_skill/review) usa as MESMAS seções
+    # '## Quando usar'/'## Cuidados' — a heurística de corpo não pode comê-la (caso real:
+    # 'organizar-downloads' quase podada junto com o lixo).
+    skroot = tmp_path / "skills"
+    skroot.mkdir()
+    _mk(skroot, "organizar-downloads",
+        "## Quando usar\npedidos de organizar pasta\n## Como\npassos\n## Cuidados\nnão deletar\n",
+        meta_extra="origin: agent\n")
+    monkeypatch.setattr("okami.home.skills_dir", lambda: skroot)
+    res = runner.invoke(app, ["skills", "--prune", "--yes"])
+    assert res.exit_code == 0
+    assert (skroot / "organizar-downloads").exists()
+
+
 def test_prune_nothing_when_all_curated(tmp_path, monkeypatch):
     skroot = tmp_path / "skills"
     skroot.mkdir()

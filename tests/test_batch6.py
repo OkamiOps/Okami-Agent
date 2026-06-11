@@ -47,7 +47,7 @@ def test_distill_skill_llm_falls_back_when_no_cfg():
     t = Task(goal="x")
     t.state = TaskState.COMPLETE
     t.steps = [Step(i, tl, {}, "", True) for i, tl in enumerate(["a", "b", "c", "d"])]
-    assert learning.distill_skill_llm(None, t) is None         # sem cfg → None (cai no determinístico)
+    assert learning.distill_skill_llm(None, t) is None         # sem cfg → None (LLM-ou-nada: NADA é gravado)
 
 
 # ---------------------------------------------------------------- browser (§13)
