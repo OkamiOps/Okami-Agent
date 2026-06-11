@@ -92,11 +92,22 @@ class TelegramClient:
         return res.get("result", [])
 
     def send_message(self, chat_id, text: str, thread: int | None = None) -> dict:
+        from okami.channels.markdown_telegram import to_html
         res: dict = {}
         for chunk in _split_message(text, 4000):          # >4096 → várias partes (não trunca mais)
             p = {"chat_id": chat_id, "text": chunk}
             if thread is not None:
                 p["message_thread_id"] = thread           # tópico de fórum (conversa paralela)
+            # FORMATAÇÃO (Hermes): markdown do agente vira HTML do Telegram (negrito/código/link de
+            # verdade, não asteriscos literais). Texto puro segue cru (sem custo/risco de parse); se a
+            # API recusar o HTML (entidade quebrada/tag partida no split), reenvia cru — nunca perde.
+            rendered = to_html(chunk)
+            if rendered != chunk:
+                try:
+                    res = self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
+                    continue
+                except urllib.error.HTTPError:
+                    pass                                   # parse recusado → manda o texto original
             res = self._call("sendMessage", p)
         return res
 
