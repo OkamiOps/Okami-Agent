@@ -111,6 +111,26 @@ class TelegramClient:
             res = self._call("sendMessage", p)
         return res
 
+    def edit_message(self, chat_id, message_id, text: str, thread: int | None = None) -> bool:
+        """Edita uma mensagem (editMessageText) — base do streaming-by-edit. HTML com fallback p/ cru;
+        ignora o 'message is not modified' (texto igual) e erros best-effort (edição nunca quebra o turno)."""
+        from okami.channels.markdown_telegram import to_html
+        p = {"chat_id": chat_id, "message_id": int(message_id), "text": text[:4000]}
+        if thread is not None:
+            p["message_thread_id"] = thread
+        rendered = to_html(p["text"])
+        try:
+            if rendered != p["text"]:
+                try:
+                    self._call("editMessageText", dict(p, text=rendered, parse_mode="HTML"))
+                    return True
+                except urllib.error.HTTPError:
+                    pass                                   # parse recusado → tenta cru
+            self._call("editMessageText", p)
+            return True
+        except Exception:  # noqa: BLE001 — "not modified"/rede → best-effort
+            return False
+
     def send_chat_action(self, chat_id, action: str = "typing", thread: int | None = None) -> None:
         try:
             p = {"chat_id": chat_id, "action": action}
@@ -230,6 +250,7 @@ class TelegramChannel(Channel):
 
     name = "telegram"
     supports_media = True      # liga a convenção MEDIA:<path> no prompt do gateway
+    supports_edit = True       # liga o streaming-by-edit (status editado ao vivo)
 
     def __init__(self, token: str, allow_chats=None, allow_all: bool = False):
         self.client = TelegramClient(token)
@@ -332,6 +353,16 @@ class TelegramChannel(Channel):
     def send(self, chat_id, text: str) -> None:
         chat, thread = self._decode(chat_id)
         self.client.send_message(chat, text, thread=thread)
+
+    def send_status(self, chat_id, text: str):
+        """Manda a mensagem de status e devolve o message_id (p/ editar ao vivo). None se falhar."""
+        chat, thread = self._decode(chat_id)
+        res = self.client.send_message(chat, text, thread=thread)
+        return ((res or {}).get("result") or {}).get("message_id")
+
+    def edit_message(self, chat_id, msg_id, text: str) -> bool:
+        chat, thread = self._decode(chat_id)
+        return self.client.edit_message(chat, msg_id, text, thread=thread)
 
     def set_reaction(self, chat_id, message_id, emoji: str) -> None:
         chat, _ = self._decode(chat_id)                  # reação é no chat real (thread não se aplica)

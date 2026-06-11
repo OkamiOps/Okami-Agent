@@ -965,8 +965,12 @@ class AgentEndpoint(EndpointCommandsMixin):
                 _typing(chat_id)
             except Exception:  # noqa: BLE001 — typing nunca quebra o turno
                 pass
-        self.channel.send(chat_id, "💭 " + _tr(
-            "gw.thinking", _default="{agent} is thinking…", agent=self.agent_id))   # 💭 = indicador (TUI esconde, barra mostra 🧠)
+        _thinking = "💭 " + _tr("gw.thinking", _default="{agent} is thinking…", agent=self.agent_id)
+        _status_id = None                                # streaming-by-edit: 1 msg de status editada ao vivo
+        if getattr(self.channel, "supports_edit", False):
+            _status_id = self.channel.send_status(chat_id, _thinking)
+        if _status_id is None:                           # canal sem edição → comportamento de sempre
+            self.channel.send(chat_id, _thinking)
         self._react(chat_id, "👀")                       # 👀 = processando (Telegram)
         try:
             approve = self._approve(chat_id, s)
@@ -984,6 +988,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                 kw_pre = ["SOUL.md", "VOICE.md", "PERSONA.md", "USER.md"]
             else:
                 kw_pre = None
+            if _status_id is not None:                    # streaming-by-edit: edita a msg de status ao vivo
+                on_ev = self._status_on_event(chat_id, _status_id, _thinking, on_ev)
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
             if kw_pre:
                 kw["prelearned_files"] = kw_pre
@@ -1046,6 +1052,10 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.channel.send(chat_id, footer)
             self._react(chat_id, {"COMPLETE": "👍", "BLOCKED": "👎",
                                   "NEEDS_INPUT": "🤔"}.get(task.state.name, "👎"))
+            if _status_id is not None:                   # resolve a msg de status (não fica "💭 pensando")
+                _done = {"COMPLETE": "✅", "BLOCKED": "⚠", "NEEDS_INPUT": "❓"}.get(task.state.name, "❌")
+                self.channel.edit_message(chat_id, _status_id, _done + " " + _tr(
+                    "gw.done", _default="done"))
             if not s.voice_off:                          # /voice off muta o áudio (TTS lê o texto LIMPO)
                 self._maybe_voice(chat_id, reply_text or reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
@@ -1064,6 +1074,45 @@ class AgentEndpoint(EndpointCommandsMixin):
             if nxt is not None:                          # spawn FORA do lock (não segura a trava no trabalho)
                 nxt_text, nxt_img = nxt
                 self._spawn(lambda t=nxt_text, im=nxt_img: self._run(chat_id, t, s, images=im))
+
+    def _status_on_event(self, chat_id, status_id, header: str, base):
+        """on_event que EDITA a msg de status ao vivo com o progresso (tool-calls), com throttle. Encadeia
+        o on_event original (base) se houver. Best-effort — edição nunca quebra o turno."""
+        import time as _t
+
+        from okami.gateway.streamedit import StreamEditor
+        from okami.tui import tool_emoji
+        ed = StreamEditor(header=header)
+
+        def _ev(e):
+            if base is not None:
+                try:
+                    base(e)
+                except Exception:  # noqa: BLE001
+                    pass
+            line = ""
+            k = e.get("kind")
+            if k == "step":
+                line = f"{tool_emoji(e.get('tool', ''))} {e.get('tool', '')}"
+            elif k == "loop":
+                line = "🔁 ajustando a abordagem"
+            elif k == "compact":
+                line = "🗜️ compactando o contexto"
+            elif k == "escalate":
+                line = "🧠 escalando p/ modelo mais forte"
+            if not line:
+                return
+            now = _t.monotonic()
+            ed.feed(line, now=now)
+            if ed.due(now):
+                try:
+                    self.channel.edit_message(chat_id, status_id, ed.render())
+                    ed.mark_sent(now)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        _ev._status_id = status_id        # expõe o id p/ a finalização editar pro estado terminal
+        return _ev
 
     def _maybe_voice(self, chat_id, text: str) -> None:
         if not self.tts:

@@ -24,6 +24,7 @@ class Inbound:
 class Channel:
     name: str = "channel"
     supports_media: bool = False   # canal entrega anexo nativo? (liga a convenção MEDIA:<path>)
+    supports_edit: bool = False    # canal edita msg já enviada? (liga streaming-by-edit do status)
 
     def start(self) -> None:
         """Inicialização opcional (handshake, getMe, etc.)."""
@@ -41,6 +42,14 @@ class Channel:
     def send_media(self, chat_id, path, caption: str = "", voice: bool = False,
                    document: bool = False) -> None:
         """Envia um arquivo como anexo nativo. Default: ignora (canal sem mídia)."""
+
+    def send_status(self, chat_id, text: str):
+        """Envia uma mensagem de STATUS e devolve o id dela (p/ editar depois). Default: None (sem edição)."""
+        return None
+
+    def edit_message(self, chat_id, msg_id, text: str) -> bool:
+        """Edita uma mensagem já enviada. Default: no-op (canal sem edição)."""
+        return False
 
     def allowed(self, chat_id) -> bool:
         return True
