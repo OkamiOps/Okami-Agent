@@ -18,6 +18,16 @@ from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
 from okami.gateway.sessions import TranscriptStore
 from okami.i18n import t as _tr
 
+# Convenção de anexos (estilo Hermes): entra no system_extra quando o canal entrega mídia nativa.
+MEDIA_HINT = (
+    "ENVIO DE ARQUIVOS NESTE CANAL: para entregar um arquivo ao usuário (imagem, PDF, planilha, "
+    "áudio, vídeo, zip…), inclua `MEDIA:<caminho_absoluto>` numa linha própria da resposta final "
+    "(ex.: MEDIA:/tmp/relatorio.pdf). O gateway converte em anexo nativo — NÃO cole o conteúdo do "
+    "arquivo no texto. Diretivas opcionais (numa linha antes das tags): [[as_document]] manda imagem "
+    "como documento (sem compressão); [[audio_as_voice]] manda .ogg/.opus como mensagem de voz. "
+    "Use apenas caminhos de arquivos que EXISTEM no disco."
+)
+
 
 class Session:
     """Estado de uma conversa (um chat × um agente)."""
@@ -897,6 +907,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         genesis = genesis_pending(self.ws)                 # 1ª config (§8.2): onboarding de primeiro contato
         if genesis:
             ctx = GENESIS_BLOCK + ("\n\n" + ctx if ctx else "")
+        if getattr(self.channel, "supports_media", False):   # canal com anexo → agente sabe o MEDIA:<path>
+            ctx = MEDIA_HINT + ("\n\n" + ctx if ctx else "")
         if images:                                         # foto recebida → salva no inbox + instrui (§13)
             import json as _json
             import shutil
@@ -987,14 +999,25 @@ class AgentEndpoint(EndpointCommandsMixin):
                                         "NEEDS_INPUT": "❓ "}.get(task.state.name, "❌ ")
             if task.state.name == "FAILED" and task.result:   # falhou MAS salvou entrega parcial → ⚠, não ❌ mudo
                 prefix = "⚠ "
-            self.channel.send(chat_id, prefix + reply)
+            reply_text, reply_media = reply, []
+            if getattr(self.channel, "supports_media", False):   # MEDIA:<path> na resposta → anexo nativo
+                from okami.channels.media import extract_media
+                reply_text, reply_media = extract_media(reply)
+            if reply_text.strip() or not reply_media:       # resposta só-anexo não manda texto vazio
+                self.channel.send(chat_id, prefix + reply_text)
+            for m in reply_media:
+                try:
+                    self.channel.send_media(chat_id, m.path, voice=m.voice, document=m.document)
+                except Exception as me:  # noqa: BLE001 — anexo falhou → avisa com o caminho (não engole)
+                    self.channel.send(chat_id, "⚠ " + _tr(
+                        "gw.media_failed", _default="couldn't attach {path}: {e}", path=m.path, e=me))
             footer = self._turn_footer(s, stats, _elapsed)   # linha de custo: ctx · tokens · tempo
             if footer:
                 self.channel.send(chat_id, footer)
             self._react(chat_id, {"COMPLETE": "👍", "BLOCKED": "👎",
                                   "NEEDS_INPUT": "🤔"}.get(task.state.name, "👎"))
-            if not s.voice_off:                          # /voice off muta o áudio nesta sessão
-                self._maybe_voice(chat_id, reply)
+            if not s.voice_off:                          # /voice off muta o áudio (TTS lê o texto LIMPO)
+                self._maybe_voice(chat_id, reply_text or reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
@@ -1025,6 +1048,19 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception:  # noqa: BLE001 — TTS é best-effort, nunca quebra a resposta
             pass
 
+    def _inbox_file(self, path, name: str | None = None) -> str:
+        """Copia um arquivo recebido pro inbox/ do workspace (nome original legível) e devolve
+        o caminho relativo — o agente acessa direto, sem depender do temp do canal."""
+        import shutil
+        inbox = Path(self.ws) / "inbox"
+        try:
+            inbox.mkdir(parents=True, exist_ok=True)
+            dst = inbox / (name or Path(path).name)
+            shutil.copy(path, dst)
+            return f"inbox/{dst.name}"
+        except Exception:  # noqa: BLE001 — sem inbox → entrega o caminho do temp mesmo
+            return str(path)
+
     def poll_once(self) -> None:
         for msg in self.channel.poll():
             mid = getattr(msg, "msg_id", "")
@@ -1047,6 +1083,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             if getattr(msg, "image", None):            # foto → vision (§6)
                 self._img[str(msg.chat_id)] = msg.image
                 self.handle(msg.chat_id, text or "Analise a imagem que enviei.")
+                continue
+            if getattr(msg, "file", None):             # documento/vídeo → inbox do workspace + nota
+                rel = self._inbox_file(msg.file, getattr(msg, "file_name", "") or None)
+                note = _tr("gw.file_received",
+                           _default="[the user sent a file: `{rel}` — saved in the workspace]", rel=rel)
+                self.handle(msg.chat_id, f"{text}\n\n{note}" if text else note)
                 continue
             if text:
                 self.handle(msg.chat_id, text)

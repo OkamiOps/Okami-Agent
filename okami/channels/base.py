@@ -16,11 +16,14 @@ class Inbound:
     text: str = ""
     audio: str | None = None   # caminho do áudio baixado (voz) → STT transcreve
     image: str | None = None   # caminho da imagem baixada (vision §6) → modelo multimodal
+    file: str | None = None    # caminho de documento/vídeo baixado → vai pro inbox do workspace
+    file_name: str = ""        # nome original do arquivo (p/ salvar legível no inbox)
     msg_id: str = ""           # id único da mensagem no canal → idempotência por turno (#3)
 
 
 class Channel:
     name: str = "channel"
+    supports_media: bool = False   # canal entrega anexo nativo? (liga a convenção MEDIA:<path>)
 
     def start(self) -> None:
         """Inicialização opcional (handshake, getMe, etc.)."""
@@ -34,6 +37,10 @@ class Channel:
 
     def send_audio(self, chat_id, audio_path) -> None:
         """Envia áudio (TTS). Default: ignora (canal sem voz)."""
+
+    def send_media(self, chat_id, path, caption: str = "", voice: bool = False,
+                   document: bool = False) -> None:
+        """Envia um arquivo como anexo nativo. Default: ignora (canal sem mídia)."""
 
     def allowed(self, chat_id) -> bool:
         return True

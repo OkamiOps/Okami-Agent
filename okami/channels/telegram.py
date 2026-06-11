@@ -13,7 +13,19 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from okami.channels import media as _media
 from okami.channels.base import Channel, Inbound
+
+_PHOTO_MAX = 10 * 1024 * 1024      # sendPhoto recusa >10MB → cai para sendDocument
+_UPLOAD_MAX = 50 * 1024 * 1024     # upload do Bot API público capa em 50MB
+_DOWNLOAD_MAX = 20 * 1024 * 1024   # getFile capa em 20MB (entrada)
+
+
+def _file_size(path) -> int:
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
 
 
 def _split_message(text: str, limit: int = 4000) -> list[str]:
@@ -141,28 +153,72 @@ class TelegramClient:
             out.write_bytes(r.read())
         return str(out)
 
-    def send_audio(self, chat_id, audio_path) -> dict:
-        """Envia um arquivo de áudio (mp3) via multipart."""
+    def _call_multipart(self, method: str, params: dict, field: str, path,
+                        timeout: float = 120.0) -> dict:
+        """POST multipart/form-data com UM arquivo (`field`) + campos extras (`params`)."""
+        import mimetypes
+        p = Path(path)
+        ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
         boundary = "----okami" + secrets.token_hex(12)
-        path = Path(audio_path)
-        parts = [
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n".encode(),
-            (f"--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"{path.name}\"\r\n"
-             "Content-Type: audio/mpeg\r\n\r\n").encode(),
-            path.read_bytes(),
-            f"\r\n--{boundary}--\r\n".encode(),
-        ]
-        body = b"".join(parts)
-        req = urllib.request.Request(f"{self.base}/sendAudio", data=body, method="POST")
+        parts = [f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
+                 for k, v in params.items()]
+        parts.append((f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; "
+                      f"filename=\"{p.name}\"\r\nContent-Type: {ctype}\r\n\r\n").encode())
+        parts.append(p.read_bytes())
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        req = urllib.request.Request(f"{self.base}/{method}", data=b"".join(parts), method="POST")
         req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-        with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
             return json.loads(r.read().decode("utf-8"))
+
+    def send_audio(self, chat_id, audio_path) -> dict:
+        """Envia um arquivo de áudio (mp3/m4a) via multipart (mantido p/ o TTS do gateway)."""
+        return self._call_multipart("sendAudio", {"chat_id": chat_id}, "audio", audio_path)
+
+    def send_media(self, chat_id, path, caption: str = "", thread: int | None = None,
+                   voice: bool = False, document: bool = False) -> dict:
+        """Roteia um arquivo pro método nativo certo (estilo Hermes): foto/animação/vídeo/voz/
+        áudio/documento pela EXTENSÃO. `document=True` força documento (imagem sem recompressão);
+        `voice=True` manda .ogg/.opus como bolha de voz. Foto grande/recusada → documento."""
+        ext = Path(str(path)).suffix.lower().lstrip(".")
+        size = _file_size(path)
+        if size > _UPLOAD_MAX:
+            raise ValueError(f"arquivo de {size // (1024 * 1024)}MB excede os 50MB do Bot API")
+        if document:
+            method, field = "sendDocument", "document"
+        elif ext in _media.IMAGE_EXTS:
+            if size > _PHOTO_MAX:                          # sendPhoto capa em 10MB
+                method, field = "sendDocument", "document"
+            else:
+                method, field = "sendPhoto", "photo"
+        elif ext in _media.ANIMATION_EXTS:
+            method, field = "sendAnimation", "animation"
+        elif ext in _media.VIDEO_EXTS:
+            method, field = "sendVideo", "video"
+        elif voice and ext in _media.VOICE_EXTS:
+            method, field = "sendVoice", "voice"
+        elif ext in {"mp3", "m4a"}:                        # sendAudio só aceita mp3/m4a
+            method, field = "sendAudio", "audio"
+        else:
+            method, field = "sendDocument", "document"
+        params: dict = {"chat_id": chat_id}
+        if caption:
+            params["caption"] = caption[:1024]             # limite de caption do Telegram
+        if thread is not None:
+            params["message_thread_id"] = thread
+        try:
+            return self._call_multipart(method, params, field, path)
+        except urllib.error.HTTPError:
+            if method == "sendPhoto":                      # foto recusada (formato/dimensão) → documento
+                return self._call_multipart("sendDocument", params, "document", path)
+            raise
 
 
 class TelegramChannel(Channel):
     """Adapter Telegram para a interface Channel do gateway."""
 
     name = "telegram"
+    supports_media = True      # liga a convenção MEDIA:<path> no prompt do gateway
 
     def __init__(self, token: str, allow_chats=None, allow_all: bool = False):
         self.client = TelegramClient(token)
@@ -206,11 +262,16 @@ class TelegramChannel(Channel):
             chat = (msg.get("chat") or {}).get("id")
             if chat is None:
                 continue
+            mid = str(msg.get("message_id") or u.get("update_id") or "")
+            # tópico de fórum → vira "chat:thread": o endpoint trata como conversa SEPARADA (auto).
+            thr = msg.get("message_thread_id")
+            cid = f"{chat}:{thr}" if (msg.get("is_topic_message") and thr) else str(chat)
+            caption = msg.get("caption", "") or ""
             voice = msg.get("voice") or msg.get("audio")   # nota de voz ou áudio
             if voice and voice.get("file_id"):
                 try:
                     audio = self.client.download_file(voice["file_id"])
-                    out.append(Inbound("telegram", str(chat), text="", audio=audio))
+                    out.append(Inbound("telegram", cid, text="", audio=audio, msg_id=mid))
                     continue
                 except Exception:  # noqa: BLE001 — falhou o download → ignora o áudio
                     pass
@@ -218,16 +279,37 @@ class TelegramChannel(Channel):
             if photo:
                 try:
                     img = self.client.download_file(photo[-1]["file_id"])   # maior resolução
-                    out.append(Inbound("telegram", str(chat), text=msg.get("caption", ""), image=img))
+                    out.append(Inbound("telegram", cid, text=caption, image=img, msg_id=mid))
+                    continue
+                except Exception:  # noqa: BLE001
+                    pass
+            # documento/vídeo → baixa e entrega o CAMINHO ao agente (vai pro inbox do workspace).
+            attach = msg.get("document") or msg.get("video") or msg.get("video_note") or msg.get("animation")
+            if attach and attach.get("file_id"):
+                name = attach.get("file_name") or "arquivo"
+                if (attach.get("file_size") or 0) > _DOWNLOAD_MAX:   # getFile capa em 20MB → nem tenta
+                    note = (f"[o usuário tentou enviar «{name}», mas o arquivo passa de 20MB e o "
+                            "Telegram Bot API não deixa baixar — peça outro meio (link, split, etc.)]")
+                    out.append(Inbound("telegram", cid, text=(f"{caption}\n{note}" if caption else note),
+                                       msg_id=mid))
+                    continue
+                try:
+                    fp = self.client.download_file(attach["file_id"])
+                    out.append(Inbound("telegram", cid, text=caption, file=fp, file_name=name, msg_id=mid))
+                    continue
+                except Exception:  # noqa: BLE001
+                    pass
+            sticker = msg.get("sticker")                    # sticker estático (webp) → vision, como foto
+            if sticker and sticker.get("file_id") and not sticker.get("is_animated") \
+                    and not sticker.get("is_video"):
+                try:
+                    img = self.client.download_file(sticker["file_id"])
+                    out.append(Inbound("telegram", cid, text=caption, image=img, msg_id=mid))
                     continue
                 except Exception:  # noqa: BLE001
                     pass
             txt = msg.get("text")
             if txt:
-                mid = str(msg.get("message_id") or u.get("update_id") or "")
-                # tópico de fórum → vira "chat:thread": o endpoint trata como conversa SEPARADA (auto).
-                thr = msg.get("message_thread_id")
-                cid = f"{chat}:{thr}" if (msg.get("is_topic_message") and thr) else str(chat)
                 out.append(Inbound("telegram", cid, text=txt, msg_id=mid))
         return out
 
@@ -255,6 +337,12 @@ class TelegramChannel(Channel):
     def send_audio(self, chat_id, audio_path) -> None:
         chat, _ = self._decode(chat_id)
         self.client.send_audio(chat, audio_path)
+
+    def send_media(self, chat_id, path, caption: str = "", voice: bool = False,
+                   document: bool = False) -> None:
+        chat, thread = self._decode(chat_id)               # tópico de fórum vai junto
+        self.client.send_media(chat, path, caption=caption, thread=thread,
+                               voice=voice, document=document)
 
     def allowed(self, chat_id) -> bool:
         # DENY-BY-DEFAULT: sem allowlist, NINGUÉM passa (a não ser allow_all explícito). Agente com
