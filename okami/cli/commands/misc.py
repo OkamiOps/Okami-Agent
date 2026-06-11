@@ -273,7 +273,7 @@ _HELP_GROUPS = [
     ("Config", [("config show", "config efetiva (segredos mascarados)"),
                 ("config set <k> <v>", "muda um valor (segredo→.env, resto→local)"),
                 ("config get <k>", "lê um valor"), ("config path", "onde ficam os arquivos"),
-                ("fs home", "libera ~/ inteiro (Documents/Pictures/Desktop…); full=FS todo")]),
+                ("fs home", "libera QUALQUER pasta em ~/ (Vídeos/Música/…); fs full = a máquina toda")]),
     ("Conversar / rodar", [("chat -q \"...\"", "uma pergunta e sai (script)"),
                            ("run \"...\"", "ida-e-volta crua ao provider"),
                            ("task \"...\"", "harness até concluir (com critérios -e)"),

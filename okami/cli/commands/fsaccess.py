@@ -18,7 +18,7 @@ _MODES = ("workspace", "home", "full")
 
 @app.command("fs", help=_tr("cli.fs", _default="File access in one line: okami fs home|full|workspace [--allow extra,dirs]."))
 def fs(
-    mode: str = typer.Argument(..., help=_tr("cli.fs.mode", _default="workspace (jail) | home (~/ all) | full (whole FS).")),
+    mode: str = typer.Argument(..., help=_tr("cli.fs.mode", _default="workspace (jail) | home (ANY folder under ~/: Videos, Music, anything) | full (ANY folder on the machine).")),
     allow: str = typer.Option("", "--allow", help=_tr("cli.fs.allow", _default="Comma-separated EXTRA dirs beyond the profile (e.g. /Volumes/x).")),
     agent: str = typer.Option("okami", "--agent", "-a", help=_tr("cli.fs.agent", _default="Agent to configure (default: okami).")),
 ) -> None:
@@ -44,13 +44,18 @@ def fs(
     af.write_text(yaml.safe_dump(spec, allow_unicode=True, sort_keys=False) or "{}\n", encoding="utf-8")
 
     if m == "home":
-        console.print(f"[green]✓ {agent}: acesso à sua pasta pessoal (~/) liberado[/green] — "
-                      "Documents, Pictures, Desktop, Downloads e tudo embaixo de ~/.")
+        console.print(f"[green]✓ {agent}: liberado QUALQUER pasta embaixo de ~/[/green] — Vídeos, Música, "
+                      "Documentos, Imagens, Downloads, Desktop e [bold]qualquer outra[/bold] que você tenha lá. "
+                      "Sem whitelist: é a sua pasta pessoal inteira.")
+        console.print("[dim]pasta fora de ~/ (disco externo, /data…)? use [/dim]okami fs full[dim] ou [/dim]"
+                      "okami fs home --allow /Volumes/Externo")
     elif m == "full":
-        console.print(f"[green]✓ {agent}: acesso ao FILESYSTEM INTEIRO liberado.[/green] "
+        console.print(f"[green]✓ {agent}: liberado o FILESYSTEM INTEIRO[/green] — qualquer pasta da máquina "
+                      "(home, /Volumes, discos externos, /data, o que for). "
                       "[yellow]Use só em máquina de confiança.[/yellow]")
     else:
-        console.print(f"[green]✓ {agent}: confinado ao workspace (jail seguro).[/green]")
+        console.print(f"[green]✓ {agent}: confinado ao workspace (jail seguro).[/green] "
+                      "[dim]Pra abrir tudo: [/dim]okami fs home[dim] (sua home) ou [/dim]okami fs full[dim] (a máquina toda).[/dim]")
     if extra:
         console.print(f"[dim]+ extras:[/dim] {', '.join(extra)}")
     console.print("[dim]segredos (.env/.ssh/.aws) seguem bloqueados. Reinicie o gateway p/ aplicar:[/dim] okami gateway")
