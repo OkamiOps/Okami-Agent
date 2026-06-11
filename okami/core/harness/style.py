@@ -12,9 +12,10 @@ _RICH_MARKDOWN = {"cli", "tui", "subagent", "terminal", "api"}
 
 # Hint de FORMATO por canal: o que cada superfície renderiza (e o que NÃO renderiza).
 _SURFACE_HINT = {
-    "telegram": ("FORMATO NESTE CANAL (Telegram): use **negrito**, _itálico_, `código`, blocos ``` e "
+    "telegram": ("FORMATO NESTE CANAL (Telegram, vira HTML de verdade): **negrito**, _itálico_, ~~riscado~~, "
+                 "`código`, blocos ```lang … ```, [link](url), `> citação` (blockquote), `||spoiler||`, e "
                  "listas com `-`. O Telegram NÃO tem tabela — em vez de tabela markdown, use lista com "
-                 "`rótulo: valor`. Cabeçalhos `##` viram negrito. Seja claro e direto."),
+                 "`rótulo: valor`. Cabeçalhos `##` viram negrito. Capriche no formato; seja claro e direto."),
     "slack": ("FORMATO NESTE CANAL (Slack/mrkdwn): *negrito* com um asterisco, _itálico_, `código`, "
               "blocos ``` e listas com `-`. Slack NÃO tem tabela — use lista com `rótulo: valor`."),
     "discord": ("FORMATO NESTE CANAL (Discord): **negrito**, *itálico*, `código`, blocos ``` e listas. "

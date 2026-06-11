@@ -13,17 +13,26 @@ import re
 _FENCE = re.compile(r"```([A-Za-z0-9_+-]*)\n?(.*?)```", re.S)
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _BOLD = re.compile(r"\*\*(.+?)\*\*", re.S)
+_UND_BOLD = re.compile(r"__(.+?)__", re.S)                 # __x__ → negrito (antes do itálico _x_)
 _STAR_ITALIC = re.compile(r"\*([^*\n]+)\*")
 # _itálico_ só com fronteira de palavra: snake_case_nome não vira itálico.
 _UND_ITALIC = re.compile(r"(?<![\w_])_([^_\n]+)_(?![\w_])")
 _STRIKE = re.compile(r"~~(.+?)~~", re.S)
+_SPOILER = re.compile(r"\|\|(.+?)\|\|", re.S)              # ||x|| → spoiler (Telegram <tg-spoiler>)
 _LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _HEADER = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
+# blockquote: rodado APÓS o escape → casa o '>' já como '&gt;'. Agrupa linhas '> ' consecutivas.
+_QUOTE_LINE = re.compile(r"(?:^&gt;[ \t]?.*(?:\n|$))+", re.M)
+
+
+def _quote_block(m: re.Match) -> str:
+    inner = "\n".join(re.sub(r"^&gt;[ \t]?", "", ln) for ln in m.group(0).rstrip("\n").split("\n"))
+    return f"<blockquote>{inner}</blockquote>\n"
 
 
 def to_html(md: str) -> str:
-    """Converte um subconjunto de markdown p/ as tags HTML que o Telegram aceita
-    (<b> <i> <s> <code> <pre> <a>). Conteúdo de código é protegido (não formata por dentro)."""
+    """Converte um subconjunto de markdown p/ as tags HTML que o Telegram aceita: <b> <i> <s> <code>
+    <pre> <a> <tg-spoiler> <blockquote>. Conteúdo de código é protegido (não formata por dentro)."""
     text = md or ""
     stash: dict[str, str] = {}
 
@@ -43,14 +52,18 @@ def to_html(md: str) -> str:
     text = _INLINE_CODE.sub(lambda m: _keep(f"<code>{html.escape(m.group(1), quote=False)}</code>"), text)
     # 2) escapa o texto normal (&<>) — as tags que NÓS geramos entram depois disso
     text = html.escape(text, quote=False)
-    # 3) formatação (ordem: link → negrito → itálico → riscado → header)
+    # 3) formatação (ordem: link → negrito ** e __ → itálico * e _ → riscado → spoiler → header)
     text = _LINK.sub(r'<a href="\2">\1</a>', text)
     text = _BOLD.sub(r"<b>\1</b>", text)
+    text = _UND_BOLD.sub(r"<b>\1</b>", text)
     text = _STAR_ITALIC.sub(r"<i>\1</i>", text)
-    text = _UND_ITALIC.sub(r"<i>\1</i>", text)
+    text = _UND_ITALIC.sub(r"<i>\1</i>", text)             # roda depois do negrito → **_x_** aninha certo
     text = _STRIKE.sub(r"<s>\1</s>", text)
+    text = _SPOILER.sub(r"<tg-spoiler>\1</tg-spoiler>", text)
     text = _HEADER.sub(r"<b>\1</b>", text)
-    # 4) devolve os trechos de código protegidos
+    # 4) blockquote: agrupa linhas '&gt; ' consecutivas num só <blockquote> (Telegram suporta)
+    text = _QUOTE_LINE.sub(_quote_block, text).rstrip("\n") if "&gt;" in text else text
+    # 5) devolve os trechos de código protegidos
     for key, rendered in stash.items():
         text = text.replace(key, rendered)
     return text

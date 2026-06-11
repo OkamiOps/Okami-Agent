@@ -56,6 +56,53 @@ def test_bullet_list_kept():
     assert to_html("- item um\n- item dois") == "- item um\n- item dois"
 
 
+def test_spoiler():
+    assert to_html("o final é ||surpresa||") == "o final é <tg-spoiler>surpresa</tg-spoiler>"
+
+
+def test_blockquote_single_line():
+    assert to_html("> uma citação") == "<blockquote>uma citação</blockquote>"
+
+
+def test_blockquote_multi_line_merges():
+    out = to_html("> linha um\n> linha dois")
+    assert out == "<blockquote>linha um\nlinha dois</blockquote>"
+
+
+def test_blockquote_then_normal_text():
+    out = to_html("> citado\n\ntexto normal")
+    assert "<blockquote>citado</blockquote>" in out and "texto normal" in out
+    assert "&gt;" not in out                               # o '>' do quote não vira &gt; literal
+
+
+def test_bold_inside_blockquote():
+    assert to_html("> isso é **forte**") == "<blockquote>isso é <b>forte</b></blockquote>"
+
+
+def test_underscore_bold_double():
+    assert to_html("__importante__") == "<b>importante</b>"
+
+
+def test_nested_bold_italic():
+    # **_x_** → negrito contendo itálico
+    assert to_html("**_destaque_**") == "<b><i>destaque</i></b>"
+
+
+def test_combined_realistic_doc_is_valid():
+    md = ("## Resumo\n\n"
+          "Achei **2 bugs** no `parser.py`:\n"
+          "- linha 10: _off-by-one_\n"
+          "- linha 22: ||spoiler do fix||\n\n"
+          "> nota: rodar os testes antes\n\n"
+          "```python\nx = 1\n```")
+    out = to_html(md)
+    assert "<b>Resumo</b>" in out and "<b>2 bugs</b>" in out
+    assert "<code>parser.py</code>" in out and "<i>off-by-one</i>" in out
+    assert "<tg-spoiler>spoiler do fix</tg-spoiler>" in out
+    assert "<blockquote>nota: rodar os testes antes</blockquote>" in out
+    assert "<pre><code class=\"language-python\">x = 1</code></pre>" in out
+
+
 # ----------------------------------------------------------------- envio com parse_mode + fallback
 def test_send_message_uses_html_parse_mode(monkeypatch):
     c = TelegramClient("tok")
