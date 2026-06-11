@@ -91,56 +91,51 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
-@app.command(help=_tr("cli.gateway", _default="Start the Telegram bots (1 per agent). Runs in BACKGROUND by default."))
-def gateway(
-    foreground: bool = typer.Option(False, "-f", "--foreground",
-                                    help=_tr("cli.gateway.foreground", _default="Run in the terminal (live logs, Ctrl+C to exit).")),
-    stop: bool = typer.Option(False, "--stop", help=_tr("cli.gateway.stop", _default="Stop the gateway running in the background.")),
-    status: bool = typer.Option(False, "--status", help=_tr("cli.gateway.status", _default="Show whether the gateway is up.")),
-) -> None:
-    """Sobe os bots de Telegram (1 por agente). Por padrão roda em BACKGROUND e te devolve o terminal;
-    use -f p/ rodar em primeiro plano, --stop p/ parar, --status p/ checar."""
+def _gw_state():
+    """(pidfile, logfile, pid|None, alive) — estado atual do gateway em background."""
+    pidfile, logfile = _gateway_files()
+    pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text().strip().isdigit() else None
+    return pidfile, logfile, pid, (pid is not None and _pid_alive(pid))
+
+
+def _gw_stop(quiet_if_stopped: bool = False) -> bool:
+    """Para o gateway (SIGTERM + espera morrer). True se havia um rodando."""
     import os
     import subprocess
-
-    pidfile, logfile = _gateway_files()
-    running_pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text().strip().isdigit() else None
-    alive = running_pid is not None and _pid_alive(running_pid)
-
-    if status:
-        console.print(f"[green]● no ar[/green] (pid {running_pid}) · log: {logfile}" if alive
-                      else "[dim]○ parado[/dim]")
-        return
-    if stop:
-        if not alive:
+    import time
+    pidfile, _, pid, alive = _gw_state()
+    if not alive:
+        if not quiet_if_stopped:
             console.print("[dim]gateway não está rodando.[/dim]")
-            pidfile.unlink(missing_ok=True)
-            return
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(running_pid)], capture_output=True)
-        else:
-            import signal
-            os.kill(running_pid, signal.SIGTERM)
         pidfile.unlink(missing_ok=True)
-        console.print(f"[yellow]⏹ gateway parado[/yellow] (pid {running_pid})")
-        return
+        return False
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+    else:
+        import signal
+        os.kill(pid, signal.SIGTERM)
+    for _ in range(50):                              # espera ATÉ morrer (restart não pode correr c/ o velho)
+        if not _pid_alive(pid):
+            break
+        time.sleep(0.1)
+    pidfile.unlink(missing_ok=True)
+    console.print(f"[yellow]⏹ gateway parado[/yellow] (pid {pid})")
+    return True
 
+
+def _gw_start_background() -> None:
+    """Sobe o gateway destacado (background) e devolve o terminal."""
+    import os
+    import subprocess
+    pidfile, logfile, pid, alive = _gw_state()
     from okami.agents import load_agents
     if not load_agents():
         console.print("[yellow]nenhum agente. Crie com: okami agent new <id>[/yellow]")
         raise typer.Exit(1)
-    if alive and not foreground:
-        console.print(f"[yellow]gateway já está no ar[/yellow] (pid {running_pid}). Pare com: okami gateway --stop")
+    if alive:
+        console.print(f"[yellow]gateway já está no ar[/yellow] (pid {pid}). "
+                      "Reinicie com: okami gateway restart")
         return
-
-    if foreground:                                # primeiro plano: logs ao vivo, bloqueia (Ctrl+C)
-        from okami.config import load_raw
-        from okami.gateway import run_gateway
-        graw, _ = load_raw()
-        run_gateway(graw, load_agents(), emit=lambda m: console.print(f"🤖 {m}"))
-        return
-
-    # background (default): relança a si mesmo destacado e DEVOLVE o terminal
     flags = {}
     if os.name == "nt":
         flags["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -152,8 +147,54 @@ def gateway(
                             cwd=os.getcwd(), **flags)
     pidfile.write_text(str(proc.pid))
     console.print(f"[green]🤖 gateway no ar em background[/green] (pid {proc.pid}) — terminal livre.")
-    console.print(f"[dim]logs:[/dim] {logfile}   [dim]status:[/dim] okami gateway --status   "
-                  "[dim]parar:[/dim] okami gateway --stop")
+    console.print("[dim]logs:[/dim] okami logs -f   [dim]status:[/dim] okami gateway status   "
+                  "[dim]reiniciar:[/dim] okami gateway restart   [dim]parar:[/dim] okami gateway stop")
+
+
+_GW_ACTIONS = ("start", "stop", "status", "restart")
+
+
+@app.command(help=_tr("cli.gateway", _default="Telegram bots (1 per agent): okami gateway [start|stop|status|restart]. Background by default."))
+def gateway(
+    action: str = typer.Argument("start", help=_tr("cli.gateway.action", _default="start (default) | stop | status | restart")),
+    foreground: bool = typer.Option(False, "-f", "--foreground",
+                                    help=_tr("cli.gateway.foreground", _default="Run in the terminal (live logs, Ctrl+C to exit).")),
+    stop: bool = typer.Option(False, "--stop", help=_tr("cli.gateway.stop", _default="(alias) = okami gateway stop")),
+    status: bool = typer.Option(False, "--status", help=_tr("cli.gateway.status", _default="(alias) = okami gateway status")),
+) -> None:
+    """Ciclo de vida do gateway: start (default, background) · stop · status · restart.
+    As flags --stop/--status seguem valendo (alias). -f roda em primeiro plano (Ctrl+C sai)."""
+    act = "stop" if stop else "status" if status else action.strip().lower()
+    if act not in _GW_ACTIONS:
+        console.print(f"[red]ação '{action}' não reconhecida.[/red] Use: [bold]start[/bold] (default) · "
+                      "[bold]stop[/bold] · [bold]status[/bold] · [bold]restart[/bold]")
+        raise typer.Exit(2)
+
+    if act == "status":
+        _, logfile, pid, alive = _gw_state()
+        console.print(f"[green]● no ar[/green] (pid {pid}) · log: {logfile}" if alive
+                      else "[dim]○ parado[/dim]")
+        return
+    if act == "stop":
+        _gw_stop()
+        return
+    if act == "restart":
+        _gw_stop(quiet_if_stopped=True)              # parado → só sobe (restart idempotente)
+        _gw_start_background()
+        return
+
+    # start
+    if foreground:                                   # primeiro plano: logs ao vivo, bloqueia (Ctrl+C)
+        from okami.agents import load_agents
+        if not load_agents():
+            console.print("[yellow]nenhum agente. Crie com: okami agent new <id>[/yellow]")
+            raise typer.Exit(1)
+        from okami.config import load_raw
+        from okami.gateway import run_gateway
+        graw, _ = load_raw()
+        run_gateway(graw, load_agents(), emit=lambda m: console.print(f"🤖 {m}"))
+        return
+    _gw_start_background()
 
 
 @app.command(help=_tr("cli.serve", _default="Start the HTTP API (POST /chat with a Bearer token). Requires OKAMI_API_TOKEN in .env (fail-closed)."))
