@@ -35,7 +35,7 @@ def _workspace_orientation(workspace) -> str:
 
 
 def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
-                        surface: str = "cli") -> str:
+                        surface: str = "cli", model: str = "") -> str:
     lines = []
     for t in registry.values():
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
@@ -104,8 +104,9 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
 ==="""
 
     orient = f"\n\n{_workspace_orientation(workspace)}" if workspace is not None else ""
-    from okami.core.harness.style import style_block   # estilo VISÍVEL (markdown/idioma/canal) — não no manual
-    style = style_block(surface)
+    from okami.core.harness.style import model_family_guidance, style_block   # estilo VISÍVEL (markdown/idioma/canal)
+    _fam = model_family_guidance(model)
+    style = style_block(surface) + (f"\n\n{_fam}" if _fam else "")
 
     if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
         crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria

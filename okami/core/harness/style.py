@@ -79,6 +79,37 @@ numa conversa em inglês (nem o contrário). Na dúvida ou 1ª mensagem, use o i
 </idioma>"""
 
 
+# Guidance por FAMÍLIA de modelo (Hermes prompt_builder: blocos condicionais por nome do modelo).
+# Curto de propósito — só o que muda a mania daquela família. Forte (Claude) segue instrução → sem bloco.
+_FAMILY_OPENAI = ("AFINADO PRO SEU MODELO: aja, não prometa — se disse que vai rodar/ler/criar, FAÇA a "
+                  "tool call no MESMO turno. Cheque o pré-requisito antes (existe? instalado?), e VERIFIQUE "
+                  "o resultado com tool antes de afirmar 'pronto'. Não pergunte o que dá pra descobrir sozinho.")
+_FAMILY_GEMINI = ("AFINADO PRO SEU MODELO: seja CONCISO — poucas frases, foco em ação e resultado, não "
+                  "narração. Use CAMINHO ABSOLUTO nas ferramentas; rode leituras independentes em PARALELO "
+                  "(um lote); flags não-interativas no shell (-y/--no-input).")
+_FAMILY_WEAK_OPEN = ("AFINADO PRO SEU MODELO: emita UMA ação por turno — um único bloco ```json "
+                     "{\"tool\":\"...\",\"args\":{...}}```. Não narre o que vai fazer: chame a ferramenta. "
+                     "Não responda de memória o que uma tool confere (arquivo/sistema/data) — use a tool.")
+
+# Famílias por substring no nome do modelo (litellm: 'openai/gpt-5.4', 'gemini-3-pro', 'zai/glm-5'…).
+_FAMILY_RULES = (
+    (("gpt", "codex", "grok", "o1", "o3", "o4"), _FAMILY_OPENAI),
+    (("gemini", "gemma"), _FAMILY_GEMINI),
+    (("qwen", "deepseek", "glm", "minimax", "mimo", "kimi", "moonshot"), _FAMILY_WEAK_OPEN),
+)
+
+
+def model_family_guidance(model: str) -> str:
+    """Bloco curto específico da família do `model` (vazio p/ Claude/forte e desconhecidos — não infla)."""
+    m = (model or "").lower()
+    if not m:
+        return ""
+    for needles, block in _FAMILY_RULES:
+        if any(n in m for n in needles):
+            return block
+    return ""
+
+
 def style_block(surface: str = "cli") -> str:
     """Orientação de ESTILO da resposta (markdown + idioma + formato do canal). Visível no prompt."""
     surf = (surface or "cli").lower()

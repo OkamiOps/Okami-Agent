@@ -155,8 +155,10 @@ class Harness:
         skills_dir=None,
         open_fs: bool = False,
         surface: str = "cli",
+        model: str = "",
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
+        self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
         self.generate = generate
         self.escalate = escalate  # gerador de modelo mais forte (§3.5 cascata)
@@ -271,7 +273,7 @@ class Harness:
         self.messages = [
             {"role": "system", "content": build_system_prompt(t, self.registry, extra,
                                                               workspace=self.ctx.workspace,
-                                                              surface=self.surface)},
+                                                              surface=self.surface, model=self.model)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)
