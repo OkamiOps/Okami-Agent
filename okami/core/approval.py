@@ -135,6 +135,39 @@ class Sensitive:
     risk: str  # low | medium | high | critical
 
 
+# Rótulos humanos por categoria de risco — usados pra DESTACAR o porquê no prompt de aprovação
+# (paridade OpenClaw exec-approvals: o humano vê O QUE é arriscado, não só "Approve?").
+_RISK_LABELS = {
+    "destructive_shell": "destrutivo (rm -rf / mkfs / dd / shutdown…)",
+    "sudo": "privilégio elevado (sudo/doas)",
+    "git_push": "publica no repositório remoto (git push)",
+    "publish": "publica pacote (npm/pip/cargo publish)",
+    "remote_exec": "baixa e executa da internet (pipe p/ shell) — vetor clássico de RCE",
+    "network_write": "escrita de rede (POST/PUT/DELETE)",
+    "system_change": "mudança de sistema (chmod/docker rm…)",
+}
+
+
+def command_risks(cmd: str) -> list[str]:
+    """Lista HUMANA dos riscos detectados num comando shell (vazia = nada flagrado). Reusa as mesmas
+    regras do classify — isto é só a camada de APRESENTAÇÃO p/ o prompt de aprovação."""
+    if not (cmd or "").strip():
+        return []
+    out: list[str] = []
+    hard = detect_hardline(cmd)
+    if hard:
+        out.append(f"CATASTRÓFICO: {hard}")
+    if _RUNS_QUOTED.search(cmd):
+        out.append("executa string dinâmica (eval / sh -c) — o conteúdo das aspas é COMANDO")
+    c = _strip_quoted(cmd)
+    seen: set[str] = set()
+    for rx, cat, _risk in _SHELL_RULES:
+        if cat not in seen and rx.search(c):
+            seen.add(cat)
+            out.append(_RISK_LABELS.get(cat, cat))
+    return out
+
+
 def classify(tool: str, args: dict) -> Sensitive | None:
     """None se não-sensível; senão (razão, categoria, risco)."""
     if tool in ("write_file", "edit_file"):              # edit_file também escreve → mesma trava

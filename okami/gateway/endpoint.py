@@ -289,6 +289,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                          "\n/yes (once) · /always (allow '{cat}' for the whole session) · /no",
                 tool=req.get("tool", "?"), brief=brief, reason=req["reason"],
                 risk=req.get("risk", "?"), cat=_cat)
+            if req.get("tool") in ("run_shell", "process_start"):   # destaca O QUE é arriscado (OpenClaw)
+                from okami.core.approval import command_risks
+                _risks = command_risks(str((req.get("args") or {}).get("cmd", "")))
+                if _risks:
+                    ask += "\n" + "\n".join(f"  ‼ {r}" for r in _risks[:5])
             _sa = getattr(self.channel, "send_approval", None)   # botões inline se o canal suportar
             if _sa:
                 try:
