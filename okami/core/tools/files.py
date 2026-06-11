@@ -207,6 +207,133 @@ class FindFiles(Tool):
         return ToolResult(True, "\n".join(sorted(hits)) or f"(nada casou com '{args['query']}')", effect=False)
 
 
+def _fs_pair(ctx, args):
+    """Resolve src/dst com jail + denylist de segredo. Retorna (src, dst) ou ToolResult de erro."""
+    for k in ("src", "dst"):
+        v = args.get(k)
+        if not isinstance(v, str) or not v:
+            return ToolResult(False, f"'{k}' precisa ser uma string não-vazia.", effect=False)
+        if getattr(ctx.sandbox, "mode", "") != "yolo" and _SENSITIVE_PATH.search(v):
+            return ToolResult(False, "caminho sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
+                              f"bloqueado p/ não vazar segredo. ({v})", effect=False)
+    try:
+        return _safe_path(ctx, args["src"]), _safe_path(ctx, args["dst"])
+    except ValueError as e:
+        return ToolResult(False, str(e), effect=False)
+
+
+class MakeDir(Tool):
+    name = "make_dir"
+    description = "Cria um diretório (com os pais, tipo mkdir -p). Já existir não é erro."
+    args_schema = {"path": "caminho do diretório a criar"}
+    required = ("path",)
+
+    def run(self, args, ctx):
+        rel = args.get("path")
+        if not isinstance(rel, str) or not rel:
+            return ToolResult(False, "make_dir: 'path' precisa ser uma string não-vazia.", effect=False)
+        try:
+            p = _safe_path(ctx, rel)
+            p.mkdir(parents=True, exist_ok=True)
+        except ValueError as e:
+            return ToolResult(False, str(e), effect=False)
+        except OSError as e:
+            return ToolResult(False, f"erro ao criar {rel}: {e}", effect=False)
+        return ToolResult(True, f"diretório pronto: {rel}", effect=True)
+
+
+class MovePath(Tool):
+    name = "move_path"
+    description = ("Move/renomeia arquivo OU pasta (cria os diretórios-pai do destino). Funciona com "
+                   "binário e pasta inteira — é o jeito certo de ORGANIZAR arquivos (não use "
+                   "read+write). Recusa sobrescrever destino existente.")
+    args_schema = {"src": "caminho de origem (arquivo ou pasta)",
+                   "dst": "caminho de destino (novo nome/local)"}
+    required = ("src", "dst")
+
+    def run(self, args, ctx):
+        pair = _fs_pair(ctx, args)
+        if isinstance(pair, ToolResult):
+            return pair
+        src, dst = pair
+        if not src.exists():
+            return ToolResult(False, f"origem não existe: {args['src']} — use list_dir p/ conferir o nome.",
+                              effect=False)
+        if dst.exists():
+            return ToolResult(False, f"destino já existe: {args['dst']} — escolha outro nome (move_path "
+                              "não sobrescreve).", effect=False)
+        import shutil
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        except OSError as e:
+            return ToolResult(False, f"erro ao mover: {e}", effect=False)
+        return ToolResult(True, f"movido: {args['src']} → {args['dst']}", effect=True)
+
+
+class CopyPath(Tool):
+    name = "copy_path"
+    description = "Copia arquivo OU pasta (recursivo; cria os pais do destino). Recusa sobrescrever."
+    args_schema = {"src": "caminho de origem", "dst": "caminho de destino"}
+    required = ("src", "dst")
+
+    def run(self, args, ctx):
+        pair = _fs_pair(ctx, args)
+        if isinstance(pair, ToolResult):
+            return pair
+        src, dst = pair
+        if not src.exists():
+            return ToolResult(False, f"origem não existe: {args['src']}", effect=False)
+        if dst.exists():
+            return ToolResult(False, f"destino já existe: {args['dst']} — copy_path não sobrescreve.",
+                              effect=False)
+        import shutil
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        except OSError as e:
+            return ToolResult(False, f"erro ao copiar: {e}", effect=False)
+        return ToolResult(True, f"copiado: {args['src']} → {args['dst']}", effect=True)
+
+
+class DeletePath(Tool):
+    name = "delete_path"
+    description = ("Remove arquivo/pasta de forma REVERSÍVEL: move pra lixeira do Okami "
+                   "(~/.okami/trash) em vez de apagar de verdade. Nada é destruído.")
+    args_schema = {"path": "arquivo ou pasta a remover (vai pra lixeira)"}
+    required = ("path",)
+
+    def run(self, args, ctx):
+        rel = args.get("path")
+        if not isinstance(rel, str) or not rel:
+            return ToolResult(False, "delete_path: 'path' precisa ser uma string não-vazia.", effect=False)
+        if getattr(ctx.sandbox, "mode", "") != "yolo" and _SENSITIVE_PATH.search(rel):
+            return ToolResult(False, "caminho sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
+                              f"bloqueado. ({rel})", effect=False)
+        try:
+            p = _safe_path(ctx, rel)
+        except ValueError as e:
+            return ToolResult(False, str(e), effect=False)
+        if not p.exists():
+            return ToolResult(False, f"não existe: {rel}", effect=False)
+        import shutil
+        import time
+        from okami.home import okami_home
+        trash = okami_home() / "trash" / time.strftime("%Y%m%d-%H%M%S")
+        dst = trash / p.name
+        try:
+            trash.mkdir(parents=True, exist_ok=True)
+            if dst.exists():                                   # mesmo nome no mesmo segundo → sufixo
+                dst = trash / f"{p.name}.{len(list(trash.iterdir()))}"
+            shutil.move(str(p), str(dst))
+        except OSError as e:
+            return ToolResult(False, f"erro ao mover pra lixeira: {e}", effect=False)
+        return ToolResult(True, f"movido pra lixeira: {rel} → {dst} (reversível)", effect=True)
+
+
 class RunShell(Tool):
     name = "run_shell"
     description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "

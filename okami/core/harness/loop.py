@@ -279,7 +279,8 @@ class Harness:
             {"role": "system", "content": build_system_prompt(t, self.registry, extra,
                                                               workspace=self.ctx.workspace,
                                                               surface=self.surface, model=self.model,
-                                                              allow_paths=self.ctx.allow_paths)},
+                                                              allow_paths=self.ctx.allow_paths,
+                                                              open_fs=self.ctx.open_fs)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)

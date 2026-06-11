@@ -35,7 +35,8 @@ def _workspace_orientation(workspace) -> str:
 
 
 def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
-                        surface: str = "cli", model: str = "", allow_paths=None) -> str:
+                        surface: str = "cli", model: str = "", allow_paths=None,
+                        open_fs: bool = False) -> str:
     lines = []
     for t in registry.values():
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
@@ -104,11 +105,18 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
 ==="""
 
     orient = f"\n\n{_workspace_orientation(workspace)}" if workspace is not None else ""
-    if allow_paths:                                   # pastas extras liberadas (config) → o agente PRECISA saber
+    if open_fs:                                       # fs: full — capacidade sem anúncio = não existe (bug Minerva)
+        orient += ("\n\nACESSO TOTAL A ARQUIVOS: você NÃO está confinado ao workspace — pode ler/escrever/"
+                   "mover/criar em QUALQUER pasta da máquina usando caminho ABSOLUTO (ex.: "
+                   "`/Users/<user>/Downloads/x.pdf`). Caminho relativo continua resolvendo no workspace. "
+                   "Pra organizar arquivos use make_dir/move_path/copy_path/delete_path (não read+write). "
+                   "Segredos (.env/.ssh/.aws) seguem bloqueados.")
+    elif allow_paths:                                   # pastas extras liberadas (config) → o agente PRECISA saber
         _aps = ", ".join(f"`{p}`" for p in allow_paths)
-        orient += (f"\n\nPASTAS EXTRAS LIBERADAS (além do workspace): {_aps}. Você PODE ler/listar/buscar "
-                   "nelas com caminho ABSOLUTO (read_file, list_dir, find_files, run_shell). Use o caminho "
-                   "completo, não relativo ao workspace.")
+        orient += (f"\n\nPASTAS EXTRAS LIBERADAS (além do workspace): {_aps} — e TUDO embaixo delas, "
+                   "qualquer subpasta. Você PODE ler/listar/buscar E escrever/mover/criar/copiar nelas "
+                   "com caminho ABSOLUTO (read_file, list_dir, make_dir, move_path, copy_path…). Use o "
+                   "caminho completo, não relativo ao workspace. Segredos (.env/.ssh/.aws) seguem bloqueados.")
     from okami.core.harness.style import model_family_guidance, style_block   # estilo VISÍVEL (markdown/idioma/canal)
     _fam = model_family_guidance(model)
     style = style_block(surface) + (f"\n\n{_fam}" if _fam else "")
