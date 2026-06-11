@@ -90,6 +90,7 @@ def run_task(
                                                  # de "onde ele mexe em arquivos" (workspace=projeto/CWD).
     open_fs: bool = False,                        # DONO no CLI: agente alcança TODO o FS (relativo no CWD,
                                                  # absoluto livre). Telegram/grupo = False (jail do workspace).
+    allow_paths: list | None = None,             # pastas extras liberadas além do workspace (config tools.allow_paths)
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)                          # operacional: jail de arquivos, shell, find, @refs
@@ -126,7 +127,7 @@ def run_task(
                 graw, _ = load_raw()
                 scfg, sws, shome = effective_config(graw, spec), spec.dir, spec.dir
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
-                       agent_home=shome, open_fs=open_fs,   # casa do sub (não polui o CWD); herda acesso amplo
+                       agent_home=shome, open_fs=open_fs, allow_paths=allow_paths,   # herda acesso amplo
                        surface="subagent", emit=emit)   # subagente: surface restrita (não spawna de novo)
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
@@ -236,7 +237,7 @@ def run_task(
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
                       images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
                       sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
-                      model=model or pc.model)
+                      model=model or pc.model, allow_paths=allow_paths)
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)

@@ -24,7 +24,7 @@ class FileTooLarge(ValueError):
     """Arquivo/conteúdo acima do teto — barrado p/ não estourar memória/saída."""
 
 
-def safe_path(workspace: Path, rel: str, *, open_fs: bool = False) -> Path:
+def safe_path(workspace: Path, rel: str, *, open_fs: bool = False, allow_paths=None) -> Path:
     """Resolve `rel` (relativo ancora em `workspace`; absoluto vale como veio) e, por padrão, BLOQUEIA
     escape do workspace.
 
@@ -32,16 +32,24 @@ def safe_path(workspace: Path, rel: str, *, open_fs: bool = False) -> Path:
     caminho fora do jail e cai no bloqueio (symlink-escape coberto de graça).
 
     `open_fs=True` (DONO no CLI): dispensa o jail → o agente alcança QUALQUER arquivo do computador
-    (relativo no `workspace`=CWD, absoluto livre). As proteções que CONTINUAM valendo: aprovação go/no-go,
-    `_SENSITIVE_PATH` (segredos) e o hardline. NUNCA ligue em superfície não-confiável (Telegram/grupo):
-    lá `open_fs=False` e o jail de workspace segue confinando."""
+    (relativo no `workspace`=CWD, absoluto livre).
+
+    `allow_paths` (config `tools.allow_paths`): pastas EXTRAS liberadas além do workspace (ex.: ~/Downloads).
+    Mais seguro que open_fs — só os diretórios listados. `~` é expandido.
+
+    As proteções que CONTINUAM valendo em qualquer caso: aprovação go/no-go, `_SENSITIVE_PATH` (segredos)
+    e o hardline. NUNCA ligue `open_fs` em superfície não-confiável; prefira `allow_paths` pontual."""
     ws = workspace.resolve()
     p = (ws / rel).resolve()
     if open_fs:
         return p
-    if p != ws and ws not in p.parents:
-        raise PathEscape(f"caminho fora do workspace: {rel}")
-    return p
+    if p == ws or ws in p.parents:
+        return p
+    for ap in (allow_paths or []):                      # pastas extras liberadas (config)
+        base = Path(str(ap)).expanduser().resolve()
+        if p == base or base in p.parents:
+            return p
+    raise PathEscape(f"caminho fora do workspace: {rel}")
 
 
 def read_text_capped(p: Path, *, limit: int = MAX_READ_BYTES) -> str:

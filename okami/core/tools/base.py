@@ -121,6 +121,7 @@ class ToolContext:
     sandbox: object | None = None  # SandboxPolicy do run_shell (None → default_policy()); §P0 #2
     skills_dir: object | None = None  # raiz das skills (p/ manage_skill criar/editar) — review/genesis
     open_fs: bool = False  # DONO no CLI: dispensa o jail de workspace (acesso a todo o FS). Telegram/grupo=False
+    allow_paths: list = field(default_factory=list)  # pastas extras liberadas além do workspace (config tools.allow_paths)
 
 
 @dataclass
@@ -157,5 +158,7 @@ def openai_tools(registry: dict) -> list[dict]:
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
     """Jail de workspace + bloqueio de symlink-escape (centralizado em core.file_safety)."""
     from okami.core.file_safety import safe_path
-    # open_fs (dono no CLI) dispensa o jail; Telegram/grupo mantém ctx.open_fs=False → confinado.
-    return safe_path(ctx.workspace, rel, open_fs=getattr(ctx, "open_fs", False))  # PathEscape=ValueError
+    # open_fs (dono no CLI) dispensa o jail; allow_paths libera pastas extras (config); Telegram sem
+    # nenhum dos dois mantém o jail. PathEscape = ValueError.
+    return safe_path(ctx.workspace, rel, open_fs=getattr(ctx, "open_fs", False),
+                     allow_paths=getattr(ctx, "allow_paths", None))

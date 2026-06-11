@@ -65,13 +65,14 @@ class AgentEndpoint(EndpointCommandsMixin):
                  approval_mode: str = "manual", approval_timeout: float = 120.0,
                  max_history_chars: int = 6000, stt=None, tts=None, spawn: Callable | None = None,
                  auto_resume: bool = False, max_sessions: int = 500, on_event: Callable | None = None,
-                 reactions: bool = False, agent_home=None, open_fs: bool = False):
+                 reactions: bool = False, agent_home=None, open_fs: bool = False, allow_paths=None):
         self.on_event = on_event             # progresso ao vivo (tool-calls/loop/compact) — chat liga, Telegram não
         self.agent_id = agent_id
         self.cfg = cfg
         self.ws = ws                         # workspace OPERACIONAL (arquivos): CLI=CWD, gateway=casa do agente
         self.home = agent_home or ws         # CASA do agente (sessões/memória/identidade) — ISOLADA do projeto
         self.open_fs = open_fs               # DONO no CLI alcança todo o FS; Telegram/grupo = False (confinado)
+        self.allow_paths = list(allow_paths or [])   # pastas extras liberadas além do workspace (config tools.allow_paths)
         self.channel = channel
         from okami.core.tool_policy import surface_of
         self.surface = surface_of(channel)   # CLI/telegram/group/paperclip → tool policy por superfície (P1.4)
@@ -900,6 +901,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 approve = (lambda req: True) if _yolo else (lambda req: False)   # fail-closed sem interação
                 task = self.run_task(self.cfg, self.ws, _p, approve=approve, surface=self.surface,
                                      agent_home=self.home, open_fs=self.open_fs,   # casa isolada + acesso (CLI)
+                                     allow_paths=self.allow_paths,   # pastas extras liberadas (config)
                                      cancel=_ev.is_set,   # harness checa entre passos → para no /background cancel
                                      on_event=_on_ev)     # progresso ao vivo → /background log <id>
                 if _ev.is_set():
@@ -1006,6 +1008,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             kw.setdefault("surface", self.surface)        # tool policy por superfície (P1.4)
             kw.setdefault("agent_home", self.home)         # casa isolada (memória/identidade ≠ projeto)
             kw.setdefault("open_fs", self.open_fs)         # acesso amplo no CLI; gateway confinado
+            kw.setdefault("allow_paths", self.allow_paths) # pastas extras liberadas (config tools.allow_paths)
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             task = self.run_task(self.cfg, self.ws, text, **kw)
             _elapsed = time.time() - _t0

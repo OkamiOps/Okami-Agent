@@ -156,6 +156,7 @@ class Harness:
         open_fs: bool = False,
         surface: str = "cli",
         model: str = "",
+        allow_paths: list | None = None,
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -176,7 +177,7 @@ class Harness:
         self.hooks = hooks                 # event hooks (§11): before_tool pode VETAR
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
-                               open_fs=open_fs)
+                               open_fs=open_fs, allow_paths=list(allow_paths or []))
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
@@ -277,7 +278,8 @@ class Harness:
         self.messages = [
             {"role": "system", "content": build_system_prompt(t, self.registry, extra,
                                                               workspace=self.ctx.workspace,
-                                                              surface=self.surface, model=self.model)},
+                                                              surface=self.surface, model=self.model,
+                                                              allow_paths=self.ctx.allow_paths)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)

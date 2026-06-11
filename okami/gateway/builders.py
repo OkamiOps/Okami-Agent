@@ -10,6 +10,14 @@ from okami.gateway.endpoint import AgentEndpoint
 from okami.gateway.group import GroupEndpoint
 
 
+def _endpoint_kwargs_from_cfg(cfg) -> dict:
+    """Lê do bloco `tools` da config o acesso a arquivos do endpoint: open_fs (todo o FS) e allow_paths
+    (pastas extras além do workspace). Resolve a dor 'agente no Telegram não lê ~/Downloads'."""
+    tools = (getattr(cfg, "tools", None) or {})
+    return {"open_fs": bool(tools.get("open_fs", False)),
+            "allow_paths": list(tools.get("allow_paths") or [])}
+
+
 def build_group_endpoints(global_raw: dict, agents: dict, groups: list,
                           emit: Callable[[str], None] = lambda m: None,
                           make_channel=None) -> list["GroupEndpoint"]:
@@ -70,7 +78,8 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
                              stt=make_stt(voice.get("stt")), tts=make_tts(voice.get("tts")),
                              auto_resume=bool(gw.get("auto_resume", False)),
                              max_sessions=int(gw.get("max_sessions", 500)),
-                             reactions=bool(gw.get("reactions", False)))
+                             reactions=bool(gw.get("reactions", False)),
+                             **_endpoint_kwargs_from_cfg(cfg))
 
     eps: list[AgentEndpoint] = []
     seen_tokens: dict[str, str] = {}                   # token → 1º agente que o usou (anti-conflito multi-profile)
