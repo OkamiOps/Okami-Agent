@@ -205,6 +205,10 @@ class Harness:
         self._batch: list[Action] = []                 # leituras restantes da MESMA geração (batch — Hermes)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
+        from okami.core.harness.loopguard import ProgressTracker
+        self._progress = ProgressTracker()             # não-progresso por OUTPUT (OpenClaw): poll/read que não muda
+        self._stall_nudged: set[str] = set()           # já avisei que ESTA tool não anda? (1x por tool)
+        self._MAX_SAME_OUTPUT = 2                       # 3ª saída idêntica seguida da mesma tool → nudge
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -539,6 +543,17 @@ class Harness:
                        out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
             if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
                 self._poll_waits = 0
+            # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
+            # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
+            if res.ok and not res.effect:
+                _same = self._progress.stalled_count(action.tool, res.output)
+                if _same >= self._MAX_SAME_OUTPUT and action.tool not in self._stall_nudged:
+                    self._stall_nudged.add(action.tool)
+                    self._emit("no_progress", tool=action.tool, repeats=_same + 1)
+                    self.messages.append({"role": "user", "content":
+                        f"'{action.tool}' devolveu a MESMA saída {_same + 1} vezes seguidas — repetir não vai "
+                        "mudar o resultado. Faça algo DIFERENTE (outra abordagem/tool), ou ENTREGUE o que já "
+                        "tem, ou declare task_blocked. Se era espera de processo, mate (process_kill) e siga."})
             self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
                         ok=res.ok, effect=res.effect, out_chars=len(res.output))
             if self.hooks is not None:
