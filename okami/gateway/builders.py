@@ -10,12 +10,28 @@ from okami.gateway.endpoint import AgentEndpoint
 from okami.gateway.group import GroupEndpoint
 
 
+def fs_access_from_tools(tools: dict) -> dict:
+    """Resolve o ACESSO A ARQUIVOS do bloco `tools` num par (open_fs, allow_paths) — padrão de mercado
+    (OpenClaw `workspaceOnly` / Hermes denylist): UM knob `tools.fs` em vez de listar pasta por pasta.
+
+      tools.fs: workspace  (default) → só o workspace (jail; deny-by-default p/ Telegram)
+      tools.fs: home                 → TUDO embaixo de ~/ (Documents, Pictures, Desktop, Downloads…)
+      tools.fs: full                 → o filesystem inteiro (= open_fs)
+    `tools.open_fs: true` segue valendo (alias de full). `tools.allow_paths` adiciona extras fora da
+    home (ex.: /Volumes/x). Segredo (.env/.ssh/.aws) continua bloqueado pelo _SENSITIVE_PATH nos 3."""
+    from pathlib import Path
+    tools = tools or {}
+    mode = str(tools.get("fs", "workspace")).strip().lower()
+    open_fs = bool(tools.get("open_fs", False)) or mode == "full"
+    allow = list(tools.get("allow_paths") or [])
+    if mode == "home":                                # ~/ inteiro liberado, sem listar subpastas
+        allow = [str(Path.home()), *allow]
+    return {"open_fs": open_fs, "allow_paths": allow}
+
+
 def _endpoint_kwargs_from_cfg(cfg) -> dict:
-    """Lê do bloco `tools` da config o acesso a arquivos do endpoint: open_fs (todo o FS) e allow_paths
-    (pastas extras além do workspace). Resolve a dor 'agente no Telegram não lê ~/Downloads'."""
-    tools = (getattr(cfg, "tools", None) or {})
-    return {"open_fs": bool(tools.get("open_fs", False)),
-            "allow_paths": list(tools.get("allow_paths") or [])}
+    """Acesso a arquivos do endpoint a partir do bloco `tools` (ver fs_access_from_tools)."""
+    return fs_access_from_tools(getattr(cfg, "tools", None) or {})
 
 
 def build_group_endpoints(global_raw: dict, agents: dict, groups: list,
