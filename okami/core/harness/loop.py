@@ -355,7 +355,8 @@ class Harness:
                     # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
                     if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
                         continue
-                    return self._fail(t, f"provider falhou: {fail.reason}")
+                    from okami.core.errors import friendly_failure   # mensagem HUMANA (não "falhou: overloaded")
+                    return self._fail(t, friendly_failure(fail.reason))
                 comp = as_completion(out)          # tolera str (JSON-em-texto) E Completion (nativo)
                 self._shrunk_retry = False         # gerou com sucesso → libera novo encolhimento p/ falha futura
                 _u = comp.usage                     # usage POR CHAMADA no trajeto (P2 observabilidade)

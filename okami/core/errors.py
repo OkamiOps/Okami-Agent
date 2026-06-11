@@ -97,6 +97,33 @@ def classify_provider(exc) -> Failure:
     return _mk(_PROVIDER_MAP.get(ce.reason, FailureKind.UNKNOWN), ce.reason, status=ce.status)
 
 
+# Mensagem HUMANA por motivo de falha — o usuário no chat vê isto em vez de "provider falhou: overloaded".
+# Diz O QUE houve e O QUE fazer. Já reflete que o fallback automático foi tentado e também não rolou.
+_FRIENDLY = {
+    "overloaded": ("o modelo está sobrecarregado agora (e o fallback também não respondeu). "
+                   "Tente de novo em alguns instantes — costuma normalizar rápido."),
+    "rate_limit": ("bati no limite de uso do provedor (rate limit). Espere um pouco e tente de novo, "
+                   "ou troque de modelo com /model."),
+    "auth": "a credencial do provedor falhou — refaça o login (ex.: `okami login`) e tente de novo.",
+    "auth_permanent": "a credencial do provedor está inválida/expirada — refaça o login e tente de novo.",
+    "context_overflow": ("a conversa ficou longa demais p/ a janela do modelo. Use /compact p/ resumir "
+                         "ou /new p/ começar limpo."),
+    "content_policy": "o provedor recusou o conteúdo por política. Reformule o pedido.",
+    "timeout": ("o modelo demorou demais p/ responder (e o fallback também). Tente de novo, ou use um "
+                "modelo mais rápido com /model."),
+    "server_error": "o provedor teve um erro interno (e o fallback também). Tente de novo em instantes.",
+}
+
+
+def friendly_failure(reason: str) -> str:
+    """Frase humana e acionável p/ um motivo de falha de provider. Desconhecido → frase genérica
+    com o motivo cru (não engole a informação)."""
+    r = (reason or "").strip().lower()
+    if r in _FRIENDLY:
+        return _FRIENDLY[r]
+    return f"não consegui falar com o modelo agora ({reason}). Tente de novo em instantes."
+
+
 def classify_tool(result) -> Failure:
     """Falha de tool (ToolResult ok=False ou exceção): distingue NEGAÇÃO de sandbox de falha comum."""
     text = getattr(result, "output", None)
