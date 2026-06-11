@@ -192,6 +192,11 @@ def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = pr
     for ep in everyone:
         threading.Thread(target=ep.loop, daemon=True).start()
     _start_scheduler(eps, emit)                        # §11: jobs agendados entregam no chat
+    try:                                               # watchdog de memória (grep [MEMORY] → vazamento lento)
+        from okami.observability.memwatch import start_memory_watch
+        start_memory_watch(emit)
+    except Exception:  # noqa: BLE001 — observabilidade nunca derruba o boot
+        pass
     emit(f"gateway no ar: {len(eps)} agente(s) DM + {len(groups)} grupo(s). Ctrl+C para sair.")
     try:
         while True:
