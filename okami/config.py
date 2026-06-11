@@ -45,12 +45,15 @@ class CapabilityProfile(BaseModel):
     """Andaime adaptativo por modelo (§3.5). Cresce nas próximas fases.
 
     tool_mode:
+      - auto:             DERIVA da capacidade (tier) — default. weak/local → json_constrained;
+                          strong → json_text; native_tools → native. Tira o footgun de o modelo
+                          fraco ficar no json_text mudo (sem enforcement) e nunca chamar tool.
       - json_text:        ação como bloco ```json``` no texto (qualquer modelo).
       - json_constrained: força JSON válido via response_format json_schema (locais/fracos).
       - native:           tool-calling nativo do provider (forte). (parcial — futuro)
     """
 
-    tool_mode: str = "json_text"
+    tool_mode: str = "auto"
     vision: bool = False        # modelo aceita imagem (vision §6) — só multimodais
 
 
@@ -98,6 +101,18 @@ class ProviderConfig(BaseModel):
     # "só conversar"; substitui a função forçadora do json_constrained). Vazio = não envia (default do provider).
     tool_choice: str = ""
     notes: str | None = None
+
+    def effective_tool_mode(self) -> str:
+        """tool_mode REAL desta config: 'auto' deriva da capacidade (tier/native_tools). Explícito
+        vence sempre — preset/usuário que fixou json_text/json_constrained não é re-derivado."""
+        mode = (self.capability.tool_mode or "auto").strip().lower()
+        if mode and mode != "auto":
+            return mode
+        if self.native_tools:                       # schemas nativos → o transport manda function-calling
+            return "native"
+        if self.tier in ("weak", "local"):          # fraco/local: força JSON válido (senão não chama tool)
+            return "json_constrained"
+        return "json_text"                          # strong/unknown: JSON-em-texto basta
 
     def resolved_key(self) -> str | None:
         keys = self.key_pool()
