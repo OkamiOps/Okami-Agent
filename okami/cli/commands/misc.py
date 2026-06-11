@@ -266,14 +266,17 @@ _HELP_GROUPS = [
                  ("chat", "conversa no terminal (TUI)"),
                  ("status", "visão resolvida (agente, modelo, providers, toggles)"),
                  ("doctor", "diagnostica config, chaves e conectividade")]),
+    ("Canais (Telegram)", [("channel add telegram <token>", "conecta o bot (jeito fácil, sem o wizard)"),
+                           ("channel list", "mostra os canais e quem pode falar"),
+                           ("pair list / approve <código>", "libera quem pediu acesso (deny-by-default)"),
+                           ("gateway", "sobe os bots de Telegram")]),
     ("Config", [("config show", "config efetiva (segredos mascarados)"),
                 ("config set <k> <v>", "muda um valor (segredo→.env, resto→local)"),
                 ("config get <k>", "lê um valor"), ("config path", "onde ficam os arquivos")]),
     ("Conversar / rodar", [("chat -q \"...\"", "uma pergunta e sai (script)"),
                            ("run \"...\"", "ida-e-volta crua ao provider"),
                            ("task \"...\"", "harness até concluir (com critérios -e)"),
-                           ("room \"...\"", "brainstorm multi-agente (moderador)"),
-                           ("gateway", "sobe os bots de Telegram")]),
+                           ("room \"...\"", "brainstorm multi-agente (moderador)")]),
     ("Providers", [("provider add", "adiciona um modelo do catálogo"),
                    ("providers", "lista providers e prontidão"),
                    ("provider default <id>", "troca o default"),
@@ -311,7 +314,10 @@ def help_cmd() -> None:
             t.add_row(f"okami {cmd}", desc)
         console.print(f"[bold #ff7527]{group}[/]")
         console.print(t)
-    console.print("[dim]dica: comece com[/dim] [bold]okami setup[/bold] [dim]e depois[/dim] [bold]okami chat[/bold]")
+    console.print("[dim]começo rápido:[/dim] [bold]okami setup[/bold] [dim]→[/dim] [bold]okami chat[/bold]   "
+                  "[dim]| Telegram:[/dim] [bold]okami channel add telegram <token> --allow-all[/bold] "
+                  "[dim]→[/dim] [bold]okami gateway[/bold]")
+    console.print("[dim]detalhe de um comando:[/dim] [bold]okami <comando> --help[/bold]")
 
 
 @app.command(help=_tr("cli.version", _default="Show the version."))
