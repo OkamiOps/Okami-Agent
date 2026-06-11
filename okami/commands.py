@@ -84,6 +84,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                tier="power"),
     CommandDef("config", "show the effective config (secrets masked)", "system", tier="power"),
     CommandDef("reload", "hot-reload the config (without restarting)", "system", ("reloadconfig",), tier="power"),
+    CommandDef("restart", "restart the gateway (applies updated code/config)", "system", tier="power"),
 ]
 
 CATEGORY_ORDER = ["session", "model", "identity", "info", "system"]

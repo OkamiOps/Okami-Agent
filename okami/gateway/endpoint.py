@@ -457,6 +457,11 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, "🔄 " + _tr("gw.config_reloaded", _default="config reloaded — {msg}", msg=msg)
                               if ok else "✗ " + _tr("gw.config_invalid", _default="invalid config: {msg}", msg=msg))
             return
+        if low == "/restart":                          # reinicia o gateway DO CHAT (Hermes /restart):
+            from okami.gateway import restart as _rst  # código/config novos sem ir ao terminal
+            ok, msg = _rst.schedule_self_restart()
+            self.channel.send(chat_id, ("🔄 " if ok else "✗ ") + msg)
+            return
         if low == "/stop":
             s.cancel = True
             self.channel.send(chat_id, "⏹ " + _tr("gw.stopping", _default="stopping after the current step…"))

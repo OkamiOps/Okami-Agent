@@ -519,6 +519,7 @@ MESSAGES: dict[str, str] = {
     "cmd.sethome": "define este chat como destino dos lembretes/agendamentos (cron)",
     "cmd.config": "mostra a config efetiva (segredos mascarados)",
     "cmd.reload": "recarrega a config em quente (sem reiniciar)",
+    "cmd.restart": "reinicia o gateway (aplica código/config novos)",
     # ── doctor (okami doctor) ──
     "doctor.lint_summary": "{p} ok · {w} avisos · {f} falhas",
     "doctor.prov.experimental": "experimental",
