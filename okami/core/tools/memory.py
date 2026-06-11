@@ -49,7 +49,7 @@ class RememberUser(Tool):
 
     def run(self, args, ctx):
         from okami.memory import files as _f
-        if not _f.append_user(ctx.workspace, args["text"]):    # recusou (segredo) → não finge sucesso
+        if not _f.append_user(ctx.home, args["text"]):    # CASA do agente (não o workspace/CWD); recusa segredo
             return ToolResult(True, "(não anotei — parece conter um segredo; não guardo isso no USER.md)",
                               effect=False)
         return ToolResult(True, f"USER.md += {args['text'][:80]}", effect=True)
@@ -66,8 +66,8 @@ class FinishSetup(Tool):
         from okami.memory import files as _f
         about = (args.get("about_user") or "").strip()
         if about:
-            _f.append_user(ctx.workspace, about)
-        marker = ctx.workspace / ".okami" / "genesis.done"
+            _f.append_user(ctx.home, about)               # identidade mora na CASA do agente
+        marker = ctx.home / ".okami" / "genesis.done"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("done\n", encoding="utf-8")
         return ToolResult(True, "configuração inicial concluída ✓", effect=True)

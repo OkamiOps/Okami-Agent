@@ -157,6 +157,7 @@ class Harness:
         surface: str = "cli",
         model: str = "",
         allow_paths: list | None = None,
+        agent_home=None,                # CASA do agente (memória/identidade) — ≠ workspace (onde mexe)
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -177,7 +178,8 @@ class Harness:
         self.hooks = hooks                 # event hooks (§11): before_tool pode VETAR
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
-                               open_fs=open_fs, allow_paths=list(allow_paths or []))
+                               open_fs=open_fs, allow_paths=list(allow_paths or []),
+                               agent_home=agent_home)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
@@ -722,7 +724,7 @@ class Harness:
         if item is not None:
             self.memory.write(item)
             self.events.emit("memory_write", kind=item.kind, text=item.text[:200])
-        _mfiles.append_fact(self.ctx.workspace, f"{t.goal} → {t.result}")
+        _mfiles.append_fact(self.ctx.home, f"{t.goal} → {t.result}")   # CASA do agente, não o CWD
 
     def _fail(self, t: Task, reason: str) -> Task:
         # REDE DE SEGURANÇA GERAL (não-específica da tarefa): qualquer que seja o motivo do corte

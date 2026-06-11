@@ -237,7 +237,8 @@ def run_task(
                       checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
                       images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
                       sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
-                      model=model or pc.model, allow_paths=allow_paths)
+                      model=model or pc.model, allow_paths=allow_paths,
+                      agent_home=home)              # memória/identidade escrevem na CASA, não no CWD
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)

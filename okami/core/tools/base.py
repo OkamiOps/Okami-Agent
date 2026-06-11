@@ -122,6 +122,13 @@ class ToolContext:
     skills_dir: object | None = None  # raiz das skills (p/ manage_skill criar/editar) — review/genesis
     open_fs: bool = False  # DONO no CLI: dispensa o jail de workspace (acesso a todo o FS). Telegram/grupo=False
     allow_paths: list = field(default_factory=list)  # pastas extras liberadas além do workspace (config tools.allow_paths)
+    agent_home: Path | None = None  # CASA do agente (memória/identidade/genesis) — ≠ workspace (onde ele MEXE)
+
+    @property
+    def home(self) -> Path:
+        """Onde memória/identidade MORAM: agent_home se setado, senão o workspace (retrocompat).
+        Sem isto, MEMORY.md/USER.md vazavam pro CWD (ex.: ~/MEMORY.md jogado na raiz da home)."""
+        return Path(self.agent_home) if self.agent_home else self.workspace
 
 
 @dataclass
