@@ -68,7 +68,13 @@ COMPACT_RATIO = 0.72
 
 
 def context_window_tokens(pc: ProviderConfig) -> int:
-    return pc.context_window or _TIER_WINDOW.get(pc.tier, 16000)
+    if pc.context_window:                              # explícito na config SEMPRE vence
+        return pc.context_window
+    from okami.llm.model_catalog import model_info     # janela REAL do modelo (models.dev-lite)
+    info = model_info(pc.model)
+    if info:
+        return info.context_window
+    return _TIER_WINDOW.get(pc.tier, 16000)            # desconhecido → default por tier (antigo)
 
 
 def compaction_threshold_chars(pc: ProviderConfig, ratio: float = COMPACT_RATIO) -> int:

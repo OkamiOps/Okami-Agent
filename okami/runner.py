@@ -105,8 +105,11 @@ def run_task(
     if ref_block:
         extra_context = (ref_block + "\n\n" + extra_context) if extra_context else ref_block
 
-    # Vision (§6): só manda imagem p/ modelo multimodal; senão, avisa e segue texto (failover decide).
-    if images and not cfg.provider(provider).capability.vision:
+    # Vision (§6): só manda imagem p/ modelo multimodal — flag explícita OU catálogo de capacidade
+    # (gpt-4o/5.x, claude, gemini… já passam sem configurar capability.vision na mão).
+    from okami.llm.model_catalog import model_vision
+    _pc_v = cfg.provider(provider)
+    if images and not (_pc_v.capability.vision or model_vision(model or _pc_v.model)):
         emit("modelo atual sem visão — imagem ignorada (configure capability.vision: true num provider).")
         extra_context = "[O usuário enviou imagem(ns), mas este modelo não tem visão.]\n\n" + extra_context
         images = None
