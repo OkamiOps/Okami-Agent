@@ -119,3 +119,12 @@ def test_validate_distilled_unit():
     assert v({**GOOD, "name": "Tu Fez"}, GOAL)                   # não-kebab
     assert v({**GOOD, "description": ""}, GOAL)
     assert v({**GOOD, "body": ""}, GOAL)
+
+
+def test_review_prompt_carries_hermes_doctrine():
+    # doutrina do Hermes: frustração = sinal de SKILL; memória = fato declarativo, não instrução
+    from okami.learning.review import build_review_goal
+    p = build_review_goal("PEDIDO: x")
+    assert "FRUSTRAÇÃO" in p
+    assert "FATO DECLARATIVO" in p
+    assert "NÃO capture" in p                          # do-not-capture continua presente

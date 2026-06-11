@@ -31,11 +31,18 @@ e GENERALIZÁVEL. "Nada a salvar" é um resultado legítimo e comum — NÃO inv
 
 SALVE (use a tool certa):
 - MEMÓRIA sobre a PESSOA (`remember_user`): preferência, jeito de trabalhar, como gosta de ser tratada,
-  decisão que ela tomou. É o que evita ela ter que repetir.
+  decisão que ela tomou. É o que evita ela ter que repetir. Escreva como FATO DECLARATIVO, nunca como
+  instrução a si mesmo: "prefere respostas curtas" ✓ — "responda sempre curto" ✗. Se o fato estará
+  velho numa semana, NÃO é memória.
 - MEMÓRIA do projeto/ambiente (`remember`): fato durável, convenção, decisão técnica, um FIX que vale.
 - SKILL (`manage_skill`): SÓ se emergiu um PROCEDIMENTO reutilizável de uma CLASSE de tarefa (não a tarefa
   específica de hoje). Prefira EDITAR uma skill existente (action=edit) a criar uma nova. Nome no nível de
   CLASSE (kebab-case, ≤3 palavras) — nunca a frase do pedido / PR / erro / codinome.
+
+FRUSTRAÇÃO DO USUÁRIO é sinal de SKILL de primeira classe (não só de memória): "para de fazer X",
+"tá verboso demais", "você SEMPRE faz Y e eu odeio" → corrija a SKILL que governa aquela classe de
+tarefa (a memória captura QUEM a pessoa é; a skill captura COMO fazer aquele tipo de trabalho p/ ela).
+Correção de SEQUÊNCIA ("primeiro A, depois B") vira um Cuidado/passo na skill, não um fato solto.
 
 {do_not}
 

@@ -16,6 +16,53 @@ def estimate_chars(messages: list[dict]) -> int:
     return sum(len(m.get("content") or "") for m in messages)
 
 
+_OBS_PREFIX = "OBSERVAÇÃO (passo "
+_PRUNE_MIN = 400          # observação menor que isto não vale podar (a 1-linha não economizaria nada)
+
+
+def prune_observations(messages: list[dict], *, keep_tail: int = 6,
+                       min_chars: int = _PRUNE_MIN) -> tuple[list[dict], int]:
+    """Fase 1 BARATA da compactação (pré-pass do Hermes, sem LLM): tool-results antigos viram
+    1 linha informativa e saídas IDÊNTICAS repetidas são deduplicadas (apontando pro passo mais
+    recente). A janela recente (keep_tail) fica intocada. Retorna (mensagens, chars_economizados).
+
+    Sem perda real: o transcript bruto segue na sessão — aqui só sai do CONTEXTO do modelo."""
+    import hashlib
+    if len(messages) <= keep_tail + 1:
+        return messages, 0
+    out = list(messages)
+    head_idx = range(1, len(out) - keep_tail)         # nunca o system (0) nem o tail
+    # passada 1 (de trás pra frente): saída idêntica → a mais RECENTE vence; antigas viram ponteiro
+    newest: dict[str, str] = {}                       # hash do corpo -> "passo N" mais recente
+    dup: dict[int, str] = {}                          # índice antigo -> passo recente que tem o conteúdo
+    for i in reversed(head_idx):
+        c = out[i].get("content") or ""
+        if not c.startswith(_OBS_PREFIX) or len(c) < min_chars:
+            continue
+        header, _, body = c.partition("\n")
+        h = hashlib.md5(body.encode("utf-8", "ignore")).hexdigest()
+        if h in newest:
+            dup[i] = newest[h]
+        else:
+            newest[h] = header[len(_OBS_PREFIX):].split(",", 1)[0]   # "N" do passo
+    saved = 0
+    for i in head_idx:
+        c = out[i].get("content") or ""
+        if not c.startswith(_OBS_PREFIX) or len(c) < min_chars:
+            continue
+        header = c.partition("\n")[0]
+        if i in dup:
+            short = (f"{header}\n[saída idêntica à do passo {dup[i]} — deduplicada; "
+                     "use a versão mais recente]")
+        else:
+            short = (f"{header}\n[podado: {len(c)} chars saíram do contexto; o conteúdo bruto "
+                     "segue no transcript da sessão — refaça a leitura se precisar dele]")
+        if len(short) < len(c):
+            saved += len(c) - len(short)
+            out[i] = {**out[i], "content": short}
+    return out, saved
+
+
 def compact(messages: list[dict], memory: Memory | None, *,
             keep_tail: int = 6, source: str = "compaction") -> tuple[list[dict], int]:
     """Retorna (mensagens_compactadas, n_destiladas). Mantém system + últimas keep_tail.

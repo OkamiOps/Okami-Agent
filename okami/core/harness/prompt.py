@@ -1,6 +1,7 @@
 """Prompt/observação: system prompt, format_observation, _user_start, check_exit (§3.4/§3.7)."""
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -164,10 +165,26 @@ Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa 
 _TOOL_RESULT_BUDGET = 8_000
 
 
-def format_observation(step_n: int, tool: str, res: ToolResult) -> str:
+def format_observation(step_n: int, tool: str, res: ToolResult, workspace=None) -> str:
+    """Formata o tool-result p/ o modelo. Saída GRANDE: o meio sai do contexto (head/tail), mas a
+    ÍNTEGRA (já redigida) vai pra .okami/results/ do workspace — recuperável com read_file
+    (offset/limit) sem rodar a tool de novo (porta do tool_result_storage do Hermes)."""
     status = "ok" if res.ok else "ERRO"
-    from okami.core.redact import clean_output      # strip ANSI + redact segredo + head/tail (P1.1)
-    return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{clean_output(res.output)}"
+    from okami.core.redact import clean_output, redact, strip_ansi   # ANSI + segredo + head/tail (P1.1)
+    cleaned = clean_output(res.output)
+    if workspace is not None and "chars omitidos" in cleaned:        # houve corte → persiste a íntegra
+        try:
+            from pathlib import Path
+            d = Path(workspace) / ".okami" / "results"
+            d.mkdir(parents=True, exist_ok=True)
+            f = d / f"step{step_n}-{re.sub(r'[^a-z0-9_-]+', '_', tool.lower())}.txt"
+            f.write_text(redact(strip_ansi(res.output or "")), encoding="utf-8", newline="\n")
+            rel = str(f.relative_to(workspace))
+            cleaned += (f"\n[saída COMPLETA salva em `{rel}` — se precisar do trecho omitido, "
+                        "leia com read_file(path, offset=N, limit=M); NÃO rode a tool de novo.]")
+        except OSError:
+            pass                                                     # spill é best-effort
+    return f"OBSERVAÇÃO (passo {step_n}, {tool} → {status}):\n{cleaned}"
 
 
 def _user_start(images: list, text: str = "Comece.") -> object:

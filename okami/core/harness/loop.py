@@ -325,10 +325,16 @@ class Harness:
                 t.reason = "cancelado pelo usuário (/stop)"
                 self._emit("cancelled")
                 return t
-            # Auto-compaction (§6.4): promove à memória + ponteiro, antes de comprimir.
+            # Auto-compaction (§6.4) em DUAS fases (Hermes): primeiro a poda BARATA de tool-results
+            # antigos (1-linha + dedup, sem perda — transcript segue na sessão); só se ainda estourar,
+            # o compact pesado (drop de mensagens + destilação à memória).
             if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
-                self.messages, promoted = _compaction.compact(self.messages, self.memory)
-                self._emit("compact", promoted=promoted)
+                self.messages, _saved = _compaction.prune_observations(self.messages)
+                if _saved:
+                    self._emit("compact", promoted=0, pruned_chars=_saved)
+                if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
+                    self.messages, promoted = _compaction.compact(self.messages, self.memory)
+                    self._emit("compact", promoted=promoted)
             # LOTE (batch — Hermes roda VÁRIAS por turno): se sobraram LEITURAS da mesma geração, roda a
             # próxima SEM nova chamada ao modelo — corta os round-trips (o gargalo de velocidade vs Hermes).
             # Só leitura entra no lote; ação que muta/encerra/pede aprovação segue 1-por-turno.
@@ -607,7 +613,8 @@ class Harness:
                 wrapped = persisted_output_wrapper(saved, len(res.output),
                                                    res.output[:_TOOL_RESULT_BUDGET])
                 obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
-            self.messages.append({"role": "user", "content": format_observation(step_n, action.tool, obs_res)})
+            self.messages.append({"role": "user", "content": format_observation(
+                step_n, action.tool, obs_res, workspace=self.ctx.workspace)})
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
 
