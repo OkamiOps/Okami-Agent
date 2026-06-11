@@ -134,10 +134,12 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
             return "(sem endpoint p/ entregar)"
         task = ep.run_task(ep.cfg, ep.ws, job["prompt"], agent_home=ep.home, open_fs=ep.open_fs)
         result = task.result or task.reason or task.state.value
+        from okami.automation.scheduler import delivery_decision
+        deliver, text = delivery_decision(result)      # [SILENT] → registra mas não manda pro chat
         target = job.get("target") or ep.home_chat()   # alvo explícito, senão a CASA (/sethome)
-        if target:                                     # entrega no chat (estilo OpenClaw cron→canal)
-            ep.channel.send(target, f"⏰ {job['id']}: {result}")
-        return result
+        if deliver and target:                         # entrega no chat (estilo OpenClaw cron→canal)
+            ep.channel.send(target, f"⏰ {job['id']}: {text}")
+        return text
 
     def loop():
         while True:

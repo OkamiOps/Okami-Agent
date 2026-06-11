@@ -132,6 +132,17 @@ def infer_commitment(text: str, now_ts: float) -> tuple[str, str] | None:
     return sched, action[:120]
 
 
+def delivery_decision(result: str) -> tuple[bool, str]:
+    """Decide se a saída de um job vai pro chat. Resultado começando com `[SILENT]` (estilo Hermes) é
+    salvo/registrado mas NÃO entregue — corta o spam de cron 'sem novidade'. Devolve (entregar, texto)."""
+    import re
+    s = (result or "")
+    m = re.match(r"\s*\[silent\]\s*", s, re.IGNORECASE)
+    if m:
+        return False, s[m.end():].strip()
+    return True, s
+
+
 class Scheduler:
     def __init__(self, root: str = ".", *, clock=time.time):
         self.path = Path(root) / ".okami" / "cron.json"
