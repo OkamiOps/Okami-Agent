@@ -13,6 +13,57 @@ from okami.cli._shared import (
 )
 
 
+@app.command("pair", help=_tr("cli.pair", _default="Approve chats dynamically: okami pair list|approve <code>|add <chat_id>|revoke <chat_id>."))
+def pair(
+    action: str = typer.Argument(..., help=_tr("cli.pair.action", _default="list | approve | add | revoke.")),
+    value: str = typer.Argument("", help=_tr("cli.pair.value", _default="code (approve) or chat_id (add/revoke).")),
+    agent: str = typer.Option(None, "--agent", "-a", help=_tr("cli.pair.agent", _default="Agent whose allowlist to manage (default: current workspace).")),
+    workspace: str = typer.Option(".", "--workspace", "-w", help=_tr("cli.pair.ws", _default="Workspace/home dir (default: current).")),
+) -> None:
+    """Pareamento dinâmico (dono): aprova chats que pediram acesso, sem editar agent.yaml na mão."""
+    from okami.cli._shared import _persona_ws
+    from okami.gateway.pairing import PairingStore
+    store = PairingStore(_persona_ws(agent, workspace))
+    act = action.strip().lower()
+    if act == "list":
+        pend = store.pending()
+        appr = store.approved()
+        if pend:
+            t = Table(title="pareamentos pendentes")
+            t.add_column("código", style="bold")
+            t.add_column("chat_id")
+            for p in pend:
+                t.add_row(p["code"], str(p["chat_id"]))
+            console.print(t)
+        else:
+            console.print("[dim]nenhum pedido de pareamento pendente.[/dim]")
+        console.print(f"[dim]aprovados:[/dim] {', '.join(appr) if appr else '—'}")
+        return
+    if act == "approve":
+        cid = store.approve(value)
+        if cid:
+            console.print(f"[green]✓ chat {cid} aprovado[/green] (código {value.strip().upper()}).")
+        else:
+            console.print(f"[red]código '{value}' inválido ou expirado.[/red]")
+            raise typer.Exit(1)
+        return
+    if act == "add":
+        if not value.strip():
+            console.print("[red]informe o chat_id:[/red] okami pair add <chat_id>")
+            raise typer.Exit(2)
+        store.approve_chat(value.strip())
+        console.print(f"[green]✓ chat {value.strip()} aprovado[/green] (direto).")
+        return
+    if act == "revoke":
+        if store.revoke(value.strip()):
+            console.print(f"[green]✓ chat {value.strip()} revogado.[/green]")
+        else:
+            console.print(f"[yellow]chat {value.strip()} não estava aprovado.[/yellow]")
+        return
+    console.print(f"[red]ação '{action}' não reconhecida[/red] — use: list | approve | add | revoke")
+    raise typer.Exit(2)
+
+
 def _gateway_files() -> tuple[Path, Path]:
     """Estado do gateway na CASA (~/.okami), não espalhado no CWD: runtime/gateway.pid + logs/gateway.log.
     Lê do legado .okami/ do CWD só pra migração (não cria mais lá)."""

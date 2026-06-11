@@ -18,6 +18,10 @@ from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
 from okami.gateway.sessions import TranscriptStore
 from okami.i18n import t as _tr
 
+# Superfícies REMOTAS (o dono não está no terminal) → chat não-autorizado entra no fluxo de pareamento
+# (recebe código, dono aprova pelo CLI). CLI/terminal a pessoa já é o dono → recusa seca.
+_REMOTE_SURFACES = {"telegram", "group", "slack", "discord", "mattermost", "api"}
+
 # Convenção de anexos (estilo Hermes): entra no system_extra quando o canal entrega mídia nativa.
 MEDIA_HINT = (
     "ENVIO DE ARQUIVOS NESTE CANAL: para entregar um arquivo ao usuário (imagem, PDF, planilha, "
@@ -82,6 +86,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self.store = TranscriptStore(self.home)  # 2 camadas: metadados + transcript (na CASA, não no projeto)
         from okami.gateway.approvals import ApprovalStore
         self.approvals = ApprovalStore(ws)   # aprovação como objeto persistente single-use (#7)
+        from okami.gateway.pairing import PairingStore
+        self._pairing = PairingStore(self.home)   # allowlist dinâmico: chat pede acesso → dono aprova (CLI)
         self.sessions: dict[str, Session] = {}
         self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
         #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
@@ -146,6 +152,19 @@ class AgentEndpoint(EndpointCommandsMixin):
         p = self._home_file()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(str(chat_id), encoding="utf-8")
+
+    def _emit_pairing_prompt(self, chat_id) -> None:
+        """Chat não-autorizado: gera/reusa um código de pareamento e instrui o usuário a pedir ao dono
+        que aprove pelo CLI (`okami pair approve <code>`). Deny-by-default segue — só o dono libera."""
+        code = self._pairing.request_code(chat_id)
+        if not code:                                     # corrida: aprovado entre o gate e aqui → segue
+            self.handle(chat_id, "/help")
+            return
+        self.channel.send(chat_id, "🔐 " + _tr(
+            "gw.pairing_prompt",
+            _default=("access not authorized yet. Your pairing code is *{code}* — ask the owner to "
+                      "approve it with `okami pair approve {code}` (or `okami pair add {chat}`)."),
+            code=code, chat=chat_id))
 
     def prune_sessions(self, max_sessions: int = 500, max_age_days: float = 30.0) -> int:
         return self.store.prune(max_sessions=max_sessions, max_age_days=max_age_days)
@@ -301,8 +320,14 @@ class AgentEndpoint(EndpointCommandsMixin):
         return approve
 
     def handle(self, chat_id, text: str) -> None:
-        if not self.channel.allowed(chat_id):
-            self.channel.send(chat_id, "🚫 " + _tr("gw.chat_unauthorized", _default="chat not authorized."))
+        # DENY-BY-DEFAULT + PAREAMENTO: o allowlist do canal (agent.yaml) OU a aprovação dinâmica
+        # (PairingStore) abrem o chat. Não-autorizado recebe um CÓDIGO p/ o dono aprovar pelo CLI —
+        # em vez do "🚫 não autorizado" seco que deixava o bot mudo até editar config na mão.
+        if not (self.channel.allowed(chat_id) or self._pairing.is_approved(chat_id)):
+            if self.surface in _REMOTE_SURFACES:         # canal remoto → pareamento (dono aprova pelo CLI)
+                self._emit_pairing_prompt(chat_id)
+            else:                                        # CLI/terminal: a pessoa já é o dono → recusa seca
+                self.channel.send(chat_id, "🚫 " + _tr("gw.chat_unauthorized", _default="chat not authorized."))
             return
         self._last_chat = str(chat_id)                 # alvo do notify_on_complete (#1/#8) best-effort
         text = (text or "").strip()
