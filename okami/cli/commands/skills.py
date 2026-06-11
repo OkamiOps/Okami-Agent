@@ -78,23 +78,69 @@ def _prune_skills(root, *, dry_run: bool, yes: bool, bad_names: bool) -> None:
                   "[dim]o auto_skill agora só destila tarefa produtiva (não papo/exploração).[/dim]")
 
 
-@app.command("skill", help=_tr("cli.skill_new", _default="Create a new skill: okami skill new <name> [--description --triggers --body]."))
+def _skill_hub_action(action: str, name: str) -> None:
+    """list/verify/remove das skills instaladas (proveniência via skills-lock.json)."""
+    from okami.home import skills_dir
+    from okami.skills import hub
+    lock_root = Path(".")                                 # mesmo lugar que `okami learn` grava o lock
+    sk_root = skills_dir()
+    items = hub.installed(lock_root, sk_root)
+    if action == "list":
+        if not items:
+            console.print("[dim]nenhuma skill com proveniência registrada (instale com `okami learn`).[/dim]")
+            return
+        table = Table(title="Skills instaladas")
+        table.add_column("nome", style="bold")
+        table.add_column("origem")
+        table.add_column("versão")
+        table.add_column("íntegra")
+        for it in items:
+            mark = "[green]✓[/green]" if it["ok"] else ("[red]ausente[/red]" if not it["present"]
+                                                        else "[red]✗ adulterada[/red]")
+            table.add_row(it["name"], it["source"] or "—", it["version"] or "—", mark)
+        console.print(table)
+        return
+    if action == "verify":
+        bad = [it["name"] for it in items if not it["ok"]]
+        if bad:
+            console.print(f"[red]✗ {len(bad)} skill(s) com problema:[/red] {', '.join(bad)}")
+            raise typer.Exit(1)
+        console.print(f"[green]✓ {len(items)} skill(s) íntegra(s).[/green]")
+        return
+    if action == "remove":
+        if not name.strip():
+            console.print("[red]informe o nome:[/red] okami skill remove <nome>")
+            raise typer.Exit(2)
+        if hub.remove(lock_root, sk_root, name.strip()):
+            console.print(f"[green]✓ skill '{name.strip()}' removida[/green] (pasta + lockfile).")
+        else:
+            console.print(f"[yellow]skill '{name.strip()}' não estava instalada.[/yellow]")
+        return
+
+
+@app.command("skill", help=_tr("cli.skill_cmd", _default="Manage skills: okami skill new|list|verify|remove [name]."))
 def skill(
-    action: str = typer.Argument(..., help=_tr("cli.skill.action", _default="Action (use: new).")),
-    name: str = typer.Argument(..., help=_tr("cli.skill.name", _default="Skill name (kebab-case, short — a CLASS of task, not a phrase).")),
+    action: str = typer.Argument(..., help=_tr("cli.skill.action", _default="new | list | verify | remove.")),
+    name: str = typer.Argument("", help=_tr("cli.skill.name", _default="Skill name (kebab-case; not needed for list).")),
     description: str = typer.Option("", "--description", "-d", help=_tr("cli.skill.desc", _default="One-line description (≤120 chars).")),
     triggers: str = typer.Option("", "--triggers", "-t", help=_tr("cli.skill.triggers", _default="Comma-separated trigger keywords.")),
     body: str = typer.Option("", "--body", "-b", help=_tr("cli.skill.body", _default="Skill body in markdown (## Quando usar / ## Como / ## Cuidados). Omit to open $EDITOR.")),
 ) -> None:
-    """Cria uma skill nova (humano). Valida nome, roda o scan de segurança e recusa conteúdo de risco."""
+    """Gerencia skills: new (criar), list (instaladas + proveniência), verify (integridade), remove."""
     import re as _re
 
     import yaml as _yaml
     from okami.home import skills_dir
     from okami.skills.skill_security import Severity, scan_text
 
+    if action in ("list", "verify", "remove"):
+        _skill_hub_action(action, name)
+        return
     if action != "new":
-        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] okami skill new <nome>")
+        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove")
+        raise typer.Exit(2)
+    if not name.strip():
+        console.print("[red]informe o nome:[/red] okami skill new <nome>")
         raise typer.Exit(2)
     nm = name.strip().lower()
     if not _re.match(r"^[a-z0-9][a-z0-9._-]{1,47}$", nm) or nm.count("-") > 3:
