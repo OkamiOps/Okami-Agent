@@ -1,4 +1,4 @@
-"""Fuzzer de regressão: _SENSITIVE_PATH, _SHELL_MUTATES, _FILE_RULES (approval), classify().
+"""Fuzzer de regressão: _SENSITIVE_PATH e _SHELL_MUTATES (via shell_has_effect).
 
 Reproduz os achados do audit 2026-06-08 (commit 64ce387) — execute:
     uv run python scripts/audit_fuzz_approval_and_shell.py
@@ -10,8 +10,7 @@ Exit code != 0 se houver qualquer falha — útil em CI.
 from __future__ import annotations
 
 import sys
-from okami.core.tools.base import _SENSITIVE_PATH, _SHELL_MUTATES, shell_has_effect
-from okami.core.approval import classify
+from okami.core.tools.base import _SENSITIVE_PATH, shell_has_effect
 
 # Casos que DEVEM ser detectados como sensíveis (esperado: blocked=True)
 SENSITIVE_MUST_BLOCK = [

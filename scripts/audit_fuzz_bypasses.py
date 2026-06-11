@@ -1,8 +1,7 @@
 """Fuzzer 3: tentar bypasses nos regexes sensíveis."""
 from __future__ import annotations
 import sys
-from okami.core.tools.base import _SENSITIVE_PATH, _SHELL_MUTATES, shell_has_effect
-from okami.core.approval import classify
+from okami.core.tools.base import _SENSITIVE_PATH
 
 # Tentativas de bypass conhecidas
 bypasses = [

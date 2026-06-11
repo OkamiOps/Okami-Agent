@@ -3,9 +3,7 @@
 O `_SENSITIVE_PATH` original bloqueia paths 'conhecidos' mas tem 11 BYPASSES confirmados.
 Aqui testo vetores complementares: redirecionamento, substituição de comando, expansão."""
 from __future__ import annotations
-import sys
 from okami.core.tools.base import _SENSITIVE_PATH
-from okami.core.approval import classify
 
 # Casos que DEVERIAM ser detectados como sensíveis (esperado: retorna True do regex OU Sensitive)
 LEAK_VECTORS = [

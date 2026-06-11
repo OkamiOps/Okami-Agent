@@ -23,7 +23,6 @@ Exit code 0 = todos os casos esperados passam; 1 = algum BYPASS ou FALSO+ foi en
 """
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 

@@ -1,12 +1,11 @@
 """Fuzzer 5: TOCTOU de path traversal e symlink escape no write_text_atomic / safe_path."""
 from __future__ import annotations
 import sys
-import os
 import tempfile
 from pathlib import Path
 
 # Importa após configurar path
-from okami.core.file_safety import safe_path, write_text_atomic, PathEscape, FileTooLarge
+from okami.core.file_safety import safe_path, PathEscape
 
 # Workspace fake
 with tempfile.TemporaryDirectory() as tmpdir:
