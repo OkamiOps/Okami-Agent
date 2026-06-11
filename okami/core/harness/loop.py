@@ -154,7 +154,9 @@ class Harness:
         sandbox=None,
         skills_dir=None,
         open_fs: bool = False,
+        surface: str = "cli",
     ):
+        self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
         self.generate = generate
         self.escalate = escalate  # gerador de modelo mais forte (§3.5 cascata)
@@ -268,7 +270,8 @@ class Harness:
         first = _user_start(self.images, text=t.goal) if is_conversational(t) else _user_start(self.images)
         self.messages = [
             {"role": "system", "content": build_system_prompt(t, self.registry, extra,
-                                                              workspace=self.ctx.workspace)},
+                                                              workspace=self.ctx.workspace,
+                                                              surface=self.surface)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)

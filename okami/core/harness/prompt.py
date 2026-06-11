@@ -34,7 +34,8 @@ def _workspace_orientation(workspace) -> str:
             f"{tree}\nPra localizar algo cujo nome varia, use `find_files` (ignora caso/hífen/underscore).")
 
 
-def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None) -> str:
+def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
+                        surface: str = "cli") -> str:
     lines = []
     for t in registry.values():
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
@@ -66,33 +67,6 @@ NÃO faça "faxina" (apagar __pycache__/.bak/temp), NÃO crie arquivos de rascun
 peça explicitamente MUDAR/CONSERTAR/CRIAR. Ex.: "ache bugs PRA gente corrigir" = LISTE os bugs (com
 arquivo:linha e o porquê), NÃO conserte. Na dúvida entre relatar e mexer, RELATE.
 </escopo>
-<entrega>
-A resposta final vai INTEIRA e ESTRUTURADA em MARKDOWN — a TUI renderiza tabela, seção e cor; texto
-corrido num parágrafo único fica FEIO e ilegível (é a entrega ruim). REGRAS DE FORMATO, sempre:
-- Seções com `## Título` e LINHA EM BRANCO entre elas. NUNCA um parágrafo gigante.
-- COMPARAÇÃO → TABELA markdown (`| aspecto | A | B | C |`, uma linha por aspecto), nunca prosa.
-- TESTES → TABELA (`| suíte | passou | falhou |`) + a LISTA das falhas reais (qual teste/erro), não só "X/Y".
-- ITENS/BUGS → lista `- **nome** (\`arquivo:linha\`) — porquê` (+ o fix se pediram).
-ESQUELETO de um relatório (preencha com o REAL; corte seção que não se aplica; adapte ao pedido):
-
-## <título curto>
-### Resumo
-<2–3 linhas, no SEU tom>
-### Testes rodados
-| suíte | passou | falhou |
-|---|---|---|
-| … | … | … |
-### Comparação
-| aspecto | Okami | Hermes | OpenClaw |
-|---|---|---|---|
-| … | … | … | … |
-### Achados (arquivo:linha)
-- **<achado>** (\`arquivo:linha\`) — <porquê>
-
-PROIBIDO: parágrafo corrido sem seções/tabela; "relatório no chat" / "segue acima" / "entregue antes"
-(over-claim); jogar o conteúdo só na memória e mandar resumo. Se não está ESCRITO e ESTRUTURADO aqui,
-não existe.
-</entrega>
 <persistencia>
 Use ferramenta sempre que melhora correção/completude/grounding. Não pare cedo se outra chamada melhora
 o resultado; se uma tool volta vazia/parcial, tente outra abordagem antes de desistir. Continue até a
@@ -117,12 +91,6 @@ Faltou algo (arquivo/repo/ferramenta)? Tente o lookup (find_files/read_file/run_
 need_input quando a info NÃO for recuperável por tool — UMA pergunta específica (não um menu). Se não
 der pra fazer, DIGA direto o que falta; se prosseguir incompleto, rotule a suposição explicitamente.
 </contexto_faltando>
-<idioma>
-Responda SEMPRE no MESMO idioma da ÚLTIMA mensagem da pessoa: escreveu em inglês → responda em inglês;
-em português → português; em espanhol → espanhol. Espelhe o idioma dela a CADA turno. Sua identidade
-(SOUL/VOICE) pode estar em português, mas a LÍNGUA da resposta segue a da pessoa — NUNCA force português
-numa conversa em inglês (nem o contrário). Na dúvida ou 1ª mensagem, use o idioma em que ela te escreveu.
-</idioma>
 <bloqueio_honesto> (anti-alucinação — Hermes TASK_COMPLETION)
 Se uma tool/install/rede FALHA e bloqueia o caminho real, diga isso DIRETAMENTE e tente alternativa
 (outro jeito, outra abordagem, ou perguntar). NUNCA substitua por saída FABRICADA — dado inventado,
@@ -136,6 +104,8 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
 ==="""
 
     orient = f"\n\n{_workspace_orientation(workspace)}" if workspace is not None else ""
+    from okami.core.harness.style import style_block   # estilo VISÍVEL (markdown/idioma/canal) — não no manual
+    style = style_block(surface)
 
     if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
         crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria
@@ -152,6 +122,8 @@ CRITÉRIOS DE SAÍDA (o harness verifica DE VERDADE — use `task_complete` só 
 travar, `task_blocked`; se faltar algo que só a pessoa sabe, `need_input`):
 {crit_txt}{orient}
 
+{style}
+
 {manual}
 
 Próxima ação (um único bloco json)."""
@@ -164,6 +136,8 @@ recite a memória nem anuncie que lembra ("como você sabe…", "lembrando que�
 Responda à PESSOA antes do problema — se ela desabafa, está cansada ou empolgada, reage a isso antes
 de entrar no técnico. Tenha opinião de verdade: concorda, discorda, fala que é furada quando for. Não
 descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo executável, age; senão, é papo.{orient}
+
+{style}
 
 {manual}
 
