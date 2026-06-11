@@ -43,18 +43,9 @@ def build_group_endpoints(global_raw: dict, agents: dict, groups: list,
 
 
 def _build_channel(ctype: str, cc: dict):
-    """Fábrica de canal não-Telegram (#15). KeyError se faltar um campo obrigatório."""
-    common = {"allow_chats": cc.get("allow_chats"), "allow_all": bool(cc.get("allow_all", False))}
-    if ctype == "slack":
-        from okami.channels.slack import SlackChannel
-        return SlackChannel(cc["token"], cc["channel_id"], **common)
-    if ctype == "discord":
-        from okami.channels.discord import DiscordChannel
-        return DiscordChannel(cc["token"], cc["channel_id"], **common)
-    if ctype == "mattermost":
-        from okami.channels.mattermost import MattermostChannel
-        return MattermostChannel(cc["base_url"], cc["token"], cc["channel_id"], **common)
-    raise KeyError(ctype)
+    """Fábrica de canal não-Telegram (#15) — delega ao registry declarativo. KeyError se faltar campo."""
+    from okami.gateway.channel_registry import build_channel
+    return build_channel(ctype, cc)
 
 
 def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] = lambda m: None,
@@ -102,7 +93,8 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
                                                         allow_all=bool(tg.get("allow_all", False)))
             eps.append(_mk_endpoint(aid, spec, cfg, channel))
             emit(f"agente '{aid}' no ar (canal {channel.name})")
-        for ctype in ("slack", "discord", "mattermost"):     # #15: mais canais, mesma interface
+        from okami.gateway.channel_registry import rest_channel_types
+        for ctype in rest_channel_types():                   # #15: canais REST do registry (sem if/elif)
             cc = chans.get(ctype) or {}
             if not cc.get("token"):
                 continue
