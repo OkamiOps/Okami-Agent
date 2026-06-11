@@ -272,7 +272,8 @@ class McpTool(Tool):
             ok, text = self._client.call_tool(self._remote, args)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro MCP {self.name}: {e}")
-        return ToolResult(ok, text, effect=True)
+        from okami.core.tools.base import untrusted_wrap   # servidor externo = dado, não instrução
+        return ToolResult(ok, untrusted_wrap(self.name, text) if ok else text, effect=True)
 
 
 def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):

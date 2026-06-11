@@ -128,7 +128,9 @@ class Browse(Tool):
                          args.get("screenshot"))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"browse falhou: {e}")
-        return ToolResult(True, out, effect=args.get("action") in ("click", "fill"))
+        from okami.core.tools.base import untrusted_wrap   # página externa = dado, não instrução
+        return ToolResult(True, untrusted_wrap("browse", out),
+                          effect=args.get("action") in ("click", "fill"))
 
 
 class GenerateImage(Tool):

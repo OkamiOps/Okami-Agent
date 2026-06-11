@@ -1,0 +1,120 @@
+"""Guarda de rate-limit CROSS-SESSÃO (porta do nous_rate_guard do Hermes).
+
+Dor real do Marcos: "overloaded por 2 vezes". O gateway, o cron e o CLI rodam em processos
+separados — um 429/529 num deles não impedia os outros de martelar o mesmo provider (cada
+turno re-tentava 3×, amplificando o buraco). Agora o primeiro 429 grava o reset em
+~/.okami/rate_limits/<provider>.json e TODA sessão checa o arquivo antes de chamar.
+"""
+from __future__ import annotations
+
+import json
+import time
+
+from okami.llm import rate_guard as rg
+
+
+def test_no_file_means_clear(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    assert rg.blocked_for("anthropic") == 0.0
+
+
+def test_note_and_block(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_rate_limited("anthropic", ttl=120)
+    left = rg.blocked_for("anthropic")
+    assert 100 < left <= 120
+    assert rg.blocked_for("openai") == 0.0           # outro provider não é afetado
+
+
+def test_expired_means_clear(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    f = tmp_path / "rate_limits" / "anthropic.json"
+    f.parent.mkdir(parents=True)
+    f.write_text(json.dumps({"until": time.time() - 5}))
+    assert rg.blocked_for("anthropic") == 0.0
+
+
+def test_retry_after_wins_over_ttl(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_rate_limited("nous", ttl=3600, retry_after=30)
+    assert rg.blocked_for("nous") <= 30              # provider sabe melhor que o default
+
+
+def test_overloaded_uses_short_ttl(tmp_path, monkeypatch):
+    # 503/529 é transitório (segundos/minutos) — não pode parquear por 1h como o 429
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_overloaded("anthropic")
+    left = rg.blocked_for("anthropic")
+    assert 0 < left <= 60
+
+
+def test_corrupt_file_fails_open(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    f = tmp_path / "rate_limits" / "x.json"
+    f.parent.mkdir(parents=True)
+    f.write_text("{lixo")
+    assert rg.blocked_for("x") == 0.0                # guarda nunca pode travar o agente
+
+
+def test_clear(tmp_path, monkeypatch):
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_rate_limited("anthropic", ttl=120)
+    rg.clear("anthropic")
+    assert rg.blocked_for("anthropic") == 0.0
+
+
+# ── integração com o loop de retry (complete_messages_ex) ───────────────────
+
+def _cfg2():
+    from okami.config import build_config
+    return build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "api_keys": ["k1", "k2", "k3"], "fallback": ["b"]},
+        "b": {"model": "mb", "api_key": "kb"}}})
+
+
+def test_429_notes_guard_and_blocked_provider_probes_once(tmp_path, monkeypatch):
+    from okami.llm import providers as prov
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    calls = []
+
+    def fake(pc, messages, model, schema, overrides):
+        calls.append(pc.name)
+        if pc.name == "a":
+            raise RuntimeError("429 too many requests")
+        return "ok-b"
+
+    monkeypatch.setattr(prov, "_complete_one", fake)
+    out = prov.complete_messages(_cfg2(), [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert out == "ok-b"
+    assert rg.blocked_for("a") > 0                    # 429 gravou a marca cross-sessão
+
+    # 2ª sessão (mesmo processo aqui, mas a marca é via ARQUIVO): 'a' bloqueado → UMA sonda só,
+    # sem rodar as 3 chaves — era a amplificação que detonava a quota
+    calls.clear()
+    out = prov.complete_messages(_cfg2(), [{"role": "user", "content": "y"}], _sleep=lambda s: None)
+    assert out == "ok-b"
+    assert calls.count("a") == 1
+
+
+def test_overloaded_notes_short_guard(tmp_path, monkeypatch):
+    from okami.llm import providers as prov
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+
+    def fake(pc, messages, model, schema, overrides):
+        if pc.name == "a":
+            raise RuntimeError("overloaded_error 529")
+        return "ok-b"
+
+    monkeypatch.setattr(prov, "_complete_one", fake)
+    prov.complete_messages(_cfg2(), [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert 0 < rg.blocked_for("a") <= 60
+
+
+def test_success_clears_guard(tmp_path, monkeypatch):
+    from okami.llm import providers as prov
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_overloaded("a", ttl=60)
+    monkeypatch.setattr(prov, "_complete_one", lambda pc, m, mo, s, o: "ok-a")
+    out = prov.complete_messages(_cfg2(), [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert out == "ok-a"
+    assert rg.blocked_for("a") == 0.0                 # voltou a funcionar → limpa a marca

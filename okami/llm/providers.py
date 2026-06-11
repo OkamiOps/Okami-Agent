@@ -240,6 +240,13 @@ def complete_messages_ex(
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
     attempts = max(1, len(pc.key_pool()))
+    # Guarda CROSS-SESSÃO (Hermes nous_rate_guard): outro processo (gateway/cron/CLI) tomou
+    # 429/529 deste provider → UMA sonda no máximo, sem rodar todas as chaves (era a amplificação
+    # de retry que aprofundava o buraco da quota). Fail-open: a sonda re-testa e atualiza a marca.
+    from okami.llm import rate_guard as _rg
+    _was_blocked = _rg.blocked_for(pc.name) > 0
+    if _was_blocked:
+        attempts = 1
     last_exc: Exception | None = None
     do_fallback = True
     for attempt in range(1, attempts + 1):
@@ -252,10 +259,16 @@ def complete_messages_ex(
                 raise EmptyResponse("resposta vazia do provider")
             if not res.provider:                      # garante served-by mesmo no caminho legado/teste
                 res.provider = pc.name
+            if _was_blocked:                          # voltou a responder → limpa a marca cross-sessão
+                _rg.clear(pc.name)
             return res
         except Exception as e:  # noqa: BLE001
             last_exc = e
             ce = _err.classify(e)
+            if ce.reason == "rate_limit":             # marca CROSS-SESSÃO: outros processos param de martelar
+                _rg.note_rate_limited(pc.name)
+            elif ce.reason == "overloaded":
+                _rg.note_overloaded(pc.name)
             if ce.rotate_key:
                 _park_key(ov.get("_api_key"), ce)     # 429 → parqueia a chave
             if not ce.retryable:                      # 400/content-policy/auth-perm → não insiste

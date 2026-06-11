@@ -27,7 +27,8 @@ def test_mcp_tools_wrap_into_registry():
         assert "mock__echo" in tools and "mock__add" in tools
         assert tools["mock__add"].required == ("a", "b")   # veio do inputSchema
         res = tools["mock__echo"].run({"text": "hello"}, None)
-        assert res.ok and res.output == "hello"
+        assert res.ok and "hello" in res.output
+        assert '<untrusted_tool_result source="mock__echo"' in res.output   # MCP = dado externo
     finally:
         for c in clients:
             c.close()
