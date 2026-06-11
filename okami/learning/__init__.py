@@ -180,8 +180,14 @@ def distill_skill_llm(cfg, task: Task, provider: str | None = None) -> dict | No
     msgs = [{"role": "system", "content": _DISTILL_SYSTEM},
             {"role": "user", "content": f"PEDIDO: {task.goal[:800]}\nAÇÕES (tools): {seq}\n"
              f"RESULTADO (não copie p/ a skill): {(task.result or '')[:300]}"}]
+    if provider is None:                          # fundo → modelo AUXILIAR barato se configurado
+        from okami.llm.aux import aux_for
+        provider, aux_model = aux_for(cfg, "distill")
+    else:
+        aux_model = None
     try:
-        d = json.loads(prov.complete_messages(cfg, msgs, provider=provider, response_schema=schema))
+        d = json.loads(prov.complete_messages(cfg, msgs, provider=provider, model=aux_model,
+                                              response_schema=schema))
     except Exception:  # noqa: BLE001
         return None
     if not d.get("worth"):

@@ -14,13 +14,17 @@ class RememberFact(Tool):
     required = ("text",)
 
     def run(self, args, ctx):
-        if ctx.memory is None:
+        if ctx.memory is None and not ctx.stage_writes:
             return ToolResult(False, "memória não ativa")
         from okami.memory.policy import prepare
         item = prepare(args.get("text", ""), source="agent")   # classifica + barra efêmero/trivial
         if item is None:
             return ToolResult(True, "(contexto efêmero/trivial — não guardei na memória de longo prazo)",
                               effect=False)
+        if ctx.stage_writes:                          # background/review c/ write_approval → fila do dono
+            from okami.memory.staging import PendingStore
+            pid = PendingStore(ctx.home).stage("fact", item.text, origin="review")
+            return ToolResult(True, f"(staged p/ aprovação do dono: {pid} — /memory pending)", effect=True)
         ctx.memory.write(item)
         return ToolResult(True, f"lembrado [{item.kind}]: {item.text[:80]}", effect=True)
 
@@ -49,6 +53,10 @@ class RememberUser(Tool):
 
     def run(self, args, ctx):
         from okami.memory import files as _f
+        if ctx.stage_writes:                          # background/review c/ write_approval → fila do dono
+            from okami.memory.staging import PendingStore
+            pid = PendingStore(ctx.home).stage("user", args["text"], origin="review")
+            return ToolResult(True, f"(staged p/ aprovação do dono: {pid} — /memory pending)", effect=True)
         if not _f.append_user(ctx.home, args["text"]):    # CASA do agente (não o workspace/CWD); recusa segredo
             return ToolResult(True, "(não anotei — parece conter um segredo; não guardo isso no USER.md)",
                               effect=False)

@@ -123,6 +123,7 @@ class ToolContext:
     open_fs: bool = False  # DONO no CLI: dispensa o jail de workspace (acesso a todo o FS). Telegram/grupo=False
     allow_paths: list = field(default_factory=list)  # pastas extras liberadas além do workspace (config tools.allow_paths)
     agent_home: Path | None = None  # CASA do agente (memória/identidade/genesis) — ≠ workspace (onde ele MEXE)
+    stage_writes: bool = False  # escrita de memória vai pra FILA de aprovação (review/background c/ write_approval)
 
     @property
     def home(self) -> Path:

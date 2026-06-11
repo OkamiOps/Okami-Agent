@@ -158,6 +158,7 @@ class Harness:
         model: str = "",
         allow_paths: list | None = None,
         agent_home=None,                # CASA do agente (memória/identidade) — ≠ workspace (onde mexe)
+        stage_writes: bool = False,     # escrita de memória → fila de aprovação (review + write_approval)
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -179,7 +180,7 @@ class Harness:
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
                                open_fs=open_fs, allow_paths=list(allow_paths or []),
-                               agent_home=agent_home)
+                               agent_home=agent_home, stage_writes=stage_writes)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])

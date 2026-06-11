@@ -174,6 +174,7 @@ class OkamiConfig(BaseModel):
     harness: dict[str, Any] = Field(default_factory=dict)    # {max_steps:200, max_stall_seconds:300} — passos/anti-travamento
     retention: dict[str, Any] = Field(default_factory=dict)  # poda/quota de disco p/ gateway long-running (ver maintenance.py)
     paperclip: dict[str, Any] = Field(default_factory=dict)  # {"require_evidence": true} — control plane exige prova p/ done
+    auxiliary: dict[str, Any] = Field(default_factory=dict)  # modelo BARATO p/ fundo: {default|distill|review|moderator: {provider, model}}
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -274,6 +275,7 @@ def build_config(raw: dict) -> OkamiConfig:
         harness=raw.get("harness") or {},
         retention=raw.get("retention") or raw.get("cleanup") or {},
         paperclip=raw.get("paperclip") or {},
+        auxiliary=raw.get("auxiliary") or {},
     )
 
 

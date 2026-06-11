@@ -55,7 +55,10 @@ def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit
     ctx = summarize_turn(task)
 
     def _bg():
-        run_review(cfg, ws, ctx, skills_dir=skills_dir, model=model, provider=provider, emit=lambda m: None)
+        from okami.llm.aux import aux_for
+        aux_p, aux_m = aux_for(cfg, "review")        # fundo → modelo auxiliar barato (Hermes: −85% custo)
+        run_review(cfg, ws, ctx, skills_dir=skills_dir,
+                   model=aux_m or model, provider=aux_p or provider, emit=lambda m: None)
     if lc.get("review_sync"):              # síncrono (testes / CLI one-shot que sai rápido)
         _bg()
     else:                                 # background: roda DEPOIS de a pessoa já ter a resposta
@@ -238,7 +241,9 @@ def run_task(
                       images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
                       sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
                       model=model or pc.model, allow_paths=allow_paths,
-                      agent_home=home)              # memória/identidade escrevem na CASA, não no CWD
+                      agent_home=home,              # memória/identidade escrevem na CASA, não no CWD
+                      # write_approval: escrita AUTOMÁTICA (review em background) vai pra fila do dono
+                      stage_writes=(surface == "review" and bool((cfg.memory or {}).get("write_approval"))))
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)

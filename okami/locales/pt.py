@@ -520,6 +520,7 @@ MESSAGES: dict[str, str] = {
     "cmd.config": "mostra a config efetiva (segredos mascarados)",
     "cmd.reload": "recarrega a config em quente (sem reiniciar)",
     "cmd.restart": "reinicia o gateway (aplica código/config novos)",
+    "cmd.memory": "escritas de memória pendentes: /memory pending|approve|reject (write_approval)",
     # ── doctor (okami doctor) ──
     "doctor.lint_summary": "{p} ok · {w} avisos · {f} falhas",
     "doctor.prov.experimental": "experimental",

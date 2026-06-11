@@ -462,6 +462,28 @@ class AgentEndpoint(EndpointCommandsMixin):
             ok, msg = _rst.schedule_self_restart()
             self.channel.send(chat_id, ("🔄 " if ok else "✗ ") + msg)
             return
+        if low.startswith("/memory"):                  # fila de aprovação de escrita (write_approval)
+            from okami.memory.staging import PendingStore
+            st = PendingStore(self.home or self.ws)
+            parts = text.split()
+            sub = parts[1].lower() if len(parts) > 1 else "pending"
+            which = parts[2] if len(parts) > 2 else "all"
+            if sub in ("approve", "aprovar"):
+                n = st.approve(which)
+                self.channel.send(chat_id, f"✓ {n} escrita(s) de memória aprovada(s) e aplicada(s).")
+            elif sub in ("reject", "rejeitar"):
+                n = st.reject(which)
+                self.channel.send(chat_id, f"✗ {n} escrita(s) descartada(s).")
+            else:                                      # pending (default)
+                items = st.pending()
+                if not items:
+                    self.channel.send(chat_id, "(nada pendente — a fila de memória está vazia)")
+                else:
+                    lines = [f"• {i['id']} [{i['kind']}] {i['text'][:120]}" for i in items]
+                    self.channel.send(chat_id, "Escritas de memória aguardando aprovação:\n" +
+                                      "\n".join(lines) +
+                                      "\n\n/memory approve <id|all> · /memory reject <id|all>")
+            return
         if low == "/stop":
             s.cancel = True
             self.channel.send(chat_id, "⏹ " + _tr("gw.stopping", _default="stopping after the current step…"))
