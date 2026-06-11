@@ -50,7 +50,8 @@ def test_distinct_msg_ids_both_processed():
     ep, handled = _bare_ep([Inbound("telegram", "7", text="a", msg_id="m1"),
                             Inbound("telegram", "7", text="b", msg_id="m2")])
     ep.poll_once()
-    assert handled == [("7", "a"), ("7", "b")]
+    # nada se perde: rajada do MESMO chat no lote agora COALESCE num turno só (ver gateway/coalesce.py)
+    assert handled == [("7", "a\nb")]
 
 
 def test_proc_start_is_stable_for_same_process():

@@ -1087,6 +1087,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             return str(path)
 
     def poll_once(self) -> None:
+        fresh = []
         for msg in self.channel.poll():
             mid = getattr(msg, "msg_id", "")
             if mid:                                        # idempotência por turno (#3): entrega duplicada → ignora
@@ -1096,6 +1097,9 @@ class AgentEndpoint(EndpointCommandsMixin):
                 if len(self._seen_msgs) > 1000:            # LRU simples (descarta o mais antigo)
                     self._seen_msgs.popitem(last=False)
                 self._last_msg_id[str(msg.chat_id)] = mid  # alvo das reações 👀/👍/👎
+            fresh.append(msg)
+        from okami.gateway.coalesce import coalesce_inbound
+        for msg in coalesce_inbound(fresh):                # rajada do MESMO chat no lote → 1 turno
             text = msg.text
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
                 try:
