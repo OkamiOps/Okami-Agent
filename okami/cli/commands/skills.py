@@ -78,6 +78,59 @@ def _prune_skills(root, *, dry_run: bool, yes: bool, bad_names: bool) -> None:
                   "[dim]o auto_skill agora só destila tarefa produtiva (não papo/exploração).[/dim]")
 
 
+@app.command("skill", help=_tr("cli.skill_new", _default="Create a new skill: okami skill new <name> [--description --triggers --body]."))
+def skill(
+    action: str = typer.Argument(..., help=_tr("cli.skill.action", _default="Action (use: new).")),
+    name: str = typer.Argument(..., help=_tr("cli.skill.name", _default="Skill name (kebab-case, short — a CLASS of task, not a phrase).")),
+    description: str = typer.Option("", "--description", "-d", help=_tr("cli.skill.desc", _default="One-line description (≤120 chars).")),
+    triggers: str = typer.Option("", "--triggers", "-t", help=_tr("cli.skill.triggers", _default="Comma-separated trigger keywords.")),
+    body: str = typer.Option("", "--body", "-b", help=_tr("cli.skill.body", _default="Skill body in markdown (## Quando usar / ## Como / ## Cuidados). Omit to open $EDITOR.")),
+) -> None:
+    """Cria uma skill nova (humano). Valida nome, roda o scan de segurança e recusa conteúdo de risco."""
+    import re as _re
+
+    import yaml as _yaml
+    from okami.home import skills_dir
+    from okami.skills.skill_security import Severity, scan_text
+
+    if action != "new":
+        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] okami skill new <nome>")
+        raise typer.Exit(2)
+    nm = name.strip().lower()
+    if not _re.match(r"^[a-z0-9][a-z0-9._-]{1,47}$", nm) or nm.count("-") > 3:
+        console.print("[red]nome inválido:[/red] kebab-case curto (≤48 chars, ≤3 hífens), nível de CLASSE "
+                      "— não a frase do pedido. Ex.: `okami skill new deploy-flow`.")
+        raise typer.Exit(2)
+    root = skills_dir()
+    f = root / nm / "SKILL.md"
+    if f.exists():
+        console.print(f"[red]skill '{nm}' já existe[/red] em {f} — edite o arquivo ou escolha outro nome.")
+        raise typer.Exit(1)
+    if not body.strip():                                  # sem --body → abre o editor (ou pede no stdin)
+        tmpl = ("## Quando usar\n<em que situação esta skill se aplica>\n\n"
+                "## Como\n<passo a passo do procedimento>\n\n## Cuidados\n<armadilhas/limites>\n")
+        body = typer.edit(tmpl) or ""
+    body = body.strip()
+    if len(body) < 20:
+        console.print("[red]corpo curto demais[/red] — descreva ## Quando usar / ## Como / ## Cuidados.")
+        raise typer.Exit(2)
+    findings = [f for f in scan_text(nm, body) if f.severity >= Severity.HIGH]
+    if findings:
+        console.print("[red]skill bloqueada pelo scan de segurança (HIGH)[/red] — reescreva sem o padrão de risco:")
+        for fd in findings[:5]:
+            console.print(f"  [yellow]·[/yellow] {fd.kind}: {fd.why}")
+        raise typer.Exit(1)
+    meta = {"name": nm, "description": (description.strip() or nm)[:120], "origin": "human"}
+    trg = [s.strip().lower() for s in _re.split(r"[,;]", triggers) if s.strip()]
+    if trg:
+        meta["triggers"] = trg
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("---\n" + _yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n" + body + "\n",
+                 encoding="utf-8", newline="\n")
+    console.print(f"[green]✓ skill '{nm}' criada[/green] em {f}")
+    console.print("[dim]revise o risco com:[/dim] okami scan " + str(f.parent))
+
+
 @app.command(help=_tr("cli.scan", _default="Check a skill's risk (prompt injection, malware, secret exfiltration)."))
 def scan(path: str = typer.Argument(..., help=_tr("cli.scan.path", _default="Skill directory/file to check."))) -> None:
     """Verifica risco de uma skill (prompt injection, malware, exfiltração de segredos)."""

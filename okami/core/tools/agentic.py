@@ -29,12 +29,14 @@ class UseSkill(Tool):
 
 class ManageSkill(Tool):
     name = "manage_skill"
-    description = ("Cria/edita uma SKILL reutilizável (procedimento de uma CLASSE de tarefa) — use no review "
-                   "de auto-aprimoramento. Nome no NÍVEL DE CLASSE (kebab-case, ≤3 palavras): NUNCA a frase do "
-                   "pedido, número de PR, string de erro ou codinome. action=create|edit. Corpo em markdown "
-                   "(## Quando usar / ## Como / ## Cuidados).")
-    args_schema = {"action": "create|edit|archive", "name": "kebab-case curto (nível de classe)",
-                   "description": "1 linha (≤120 chars)", "body": "markdown do procedimento (create/edit)"}
+    description = ("Cria/edita uma SKILL reutilizável (procedimento de uma CLASSE de tarefa). Quando você "
+                   "descobrir um jeito durável de fazer uma classe de tarefa, GRAVE como skill. Nome no NÍVEL "
+                   "DE CLASSE (kebab-case, ≤3 palavras): NUNCA a frase do pedido, nº de PR, string de erro ou "
+                   "codinome. action=create|edit (corpo em markdown: ## Quando usar / ## Como / ## Cuidados), "
+                   "write_file (adiciona script/referência à skill: path relativo + body), archive.")
+    args_schema = {"action": "create|edit|write_file|archive", "name": "kebab-case curto (nível de classe)",
+                   "description": "1 linha (≤120 chars)", "body": "markdown do procedimento, ou conteúdo do arquivo (write_file)",
+                   "path": "write_file: caminho relativo dentro da skill (ex.: scripts/run.sh)"}
     required = ("action", "name")
 
     def run(self, args, ctx):
@@ -55,6 +57,27 @@ class ManageSkill(Tool):
         if not _re.match(r"^[a-z0-9][a-z0-9._-]{1,47}$", name) or name.count("-") > 3:
             return ToolResult(False, "nome inválido: kebab-case curto (≤48 chars, ≤3 hífens), nível de CLASSE "
                               "(não a frase do pedido / PR / erro / codinome).")
+        if args.get("action") == "write_file":           # adiciona script/referência à skill existente
+            skill_dir = Path(root) / name
+            if not (skill_dir / "SKILL.md").exists():
+                return ToolResult(False, f"skill '{name}' não existe — crie com action=create primeiro.")
+            rel = str(args.get("path", "")).strip()
+            if not rel:
+                return ToolResult(False, "write_file precisa de `path` (relativo dentro da skill).")
+            try:                                          # jail: o arquivo TEM que cair dentro da skill
+                from okami.core.file_safety import safe_path
+                dst = safe_path(skill_dir, rel, open_fs=False)
+            except ValueError:
+                return ToolResult(False, "path inválido: tem que ficar DENTRO da pasta da skill (sem escapar).")
+            content = str(args.get("body", ""))
+            if any(f.severity >= Severity.HIGH for f in scan_text(rel, content)):
+                return ToolResult(False, "arquivo bloqueado pelo scan de segurança (HIGH) — reescreva sem o padrão de risco.")
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(content, encoding="utf-8", newline="\n")
+            except OSError as e:
+                return ToolResult(False, f"falha ao gravar arquivo da skill: {e}")
+            return ToolResult(True, f"arquivo '{rel}' gravado em skill '{name}'", effect=True)
         body = str(args.get("body", "")).strip()
         if len(body) < 20:
             return ToolResult(False, "corpo curto demais — descreva ## Quando usar / ## Como / ## Cuidados.")
