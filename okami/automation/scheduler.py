@@ -132,6 +132,24 @@ def infer_commitment(text: str, now_ts: float) -> tuple[str, str] | None:
     return sched, action[:120]
 
 
+def gate_allows(job: dict, cwd: str = ".", timeout: float = 30.0) -> bool:
+    """Wake-gate (estilo Hermes): job com `gate` (comando shell BARATO) roda o gate ANTES do agente —
+    exit 0 = acorda o LLM; exit ≠0 = pula em silêncio ('nada mudou, não gasta token'). Sem gate ou
+    gate com ERRO de execução → fail-open (True): um gate quebrado não pode calar o job pra sempre."""
+    cmd = str(job.get("gate") or "").strip()
+    if not cmd:
+        return True
+    import subprocess
+    from okami.core.tools import sanitized_env
+    try:
+        # gate é comando do OPERADOR (config confiável), não input do modelo → shell=True ok.
+        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602
+                           timeout=timeout, env=sanitized_env())  # nosemgrep — gate do operador (B602 acima)
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001 — erro de spawn/timeout → fail-open
+        return True
+
+
 def delivery_decision(result: str) -> tuple[bool, str]:
     """Decide se a saída de um job vai pro chat. Resultado começando com `[SILENT]` (estilo Hermes) é
     salvo/registrado mas NÃO entregue — corta o spam de cron 'sem novidade'. Devolve (entregar, texto)."""
@@ -163,7 +181,7 @@ class Scheduler:
         os.replace(tmp, self.path)
 
     def add(self, schedule: str, prompt: str, agent: str | None = None, target: str | None = None,
-            action: str | None = None) -> dict:
+            action: str | None = None, gate: str | None = None) -> dict:
         jobs = self.load()
         base = _slug(prompt)
         jid, i = base, 2
@@ -174,6 +192,8 @@ class Scheduler:
                "prompt": prompt, "agent": agent, "target": target, "enabled": True, "last_run": None}
         if action:                                   # ação INTERNA (ex.: 'curator') em vez de prompt p/ o harness
             job["action"] = action
+        if gate:                                     # wake-gate: comando barato decide se ACORDA o agente
+            job["gate"] = gate
         jobs.append(job)
         self.save(jobs)
         return job

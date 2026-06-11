@@ -132,9 +132,11 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
         ep = by_agent.get(job.get("agent")) or (eps[0] if eps else None)
         if ep is None:
             return "(sem endpoint p/ entregar)"
+        from okami.automation.scheduler import delivery_decision, gate_allows
+        if not gate_allows(job, cwd=str(ep.ws)):       # wake-gate: condição barata falhou → não acorda o LLM
+            return "(gate: condição não bateu — agente não foi acordado)"
         task = ep.run_task(ep.cfg, ep.ws, job["prompt"], agent_home=ep.home, open_fs=ep.open_fs)
         result = task.result or task.reason or task.state.value
-        from okami.automation.scheduler import delivery_decision
         deliver, text = delivery_decision(result)      # [SILENT] → registra mas não manda pro chat
         target = job.get("target") or ep.home_chat()   # alvo explícito, senão a CASA (/sethome)
         if deliver and target:                         # entrega no chat (estilo OpenClaw cron→canal)

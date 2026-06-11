@@ -53,13 +53,15 @@ def cron_add(
     prompt: str = typer.Argument(..., help=_tr("cli.cron.add.prompt", _default="What the agent should do.")),
     agent: str = typer.Option(None, "-a", "--agent", help=_tr("cli.cron.add.agent", _default="Agent that runs it (default: global).")),
     to: str = typer.Option(None, "--to", help=_tr("cli.cron.add.to", _default="Destination chat for the result (gateway).")),
+    gate: str = typer.Option(None, "--gate", help=_tr("cli.cron.add.gate", _default="Cheap shell pre-check: exit 0 wakes the agent; non-zero skips silently (no tokens).")),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
     """Agenda uma tarefa (persistida; o gateway acorda e executa, ou use `okami cron tick`)."""
     from okami.automation.scheduler import Scheduler
 
-    job = Scheduler(workspace).add(schedule, prompt, agent=agent, target=to)
-    console.print(f"[green]✓ job[/green] {job['id']} [{job['kind']}] · {schedule} → {prompt[:50]}")
+    job = Scheduler(workspace).add(schedule, prompt, agent=agent, target=to, gate=gate)
+    extra = f" · gate=`{gate}`" if gate else ""
+    console.print(f"[green]✓ job[/green] {job['id']} [{job['kind']}] · {schedule} → {prompt[:50]}{extra}")
 
 
 @cron_app.command("list", help=_tr("cli.cron.list", _default="List scheduled jobs."))
