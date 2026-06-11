@@ -24,6 +24,8 @@ FG = "#f4f4f8"          # Bone — texto
 SOFT = "#b9bac8"        # fg-soft
 MUTE = "#6c6d80"        # fg-mute — secundário
 DIM = "#3d3e50"         # fg-dim
+DIFF_ADD = "#1f7a3d"    # verde — linha adicionada no diff
+DIFF_DEL = "#c14545"    # vermelho — linha removida no diff
 TAGLINE = "IA com soberania para PMEs"
 
 # Wordmark OKAMI em bloco (figlet ANSI Shadow, 6 linhas — maior/com profundidade). Gradiente da marca.
@@ -477,6 +479,79 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
         return Text.from_markup(f"  ⏱ [{MUTE}]{_tr('event.generation', _default='generation')} "
                                 f"{secs:.0f}s · {ti // 1000}k↑ {to // 1000}k↓[/]")
     return None
+
+
+_DIFF_MAX_LINES = 40       # diff maior que isto é capado (não despeja arquivo inteiro no log)
+
+
+def diff_block(old: str, new: str, path: str = "", context: int = 2):
+    """Diff colorido (verde +/ vermelho -) entre dois textos. Renderable do Rich. Capado em
+    _DIFF_MAX_LINES p/ não inundar o log numa reescrita grande."""
+    import difflib
+
+    from rich.console import Group
+    from rich.markup import escape
+    old_lines = (old or "").splitlines()
+    new_lines = (new or "").splitlines()
+    diff = list(difflib.unified_diff(old_lines, new_lines, lineterm="", n=context))
+    body = [ln for ln in diff if not ln.startswith(("---", "+++", "@@"))]   # tira o cabeçalho do unified
+    rows: list = []
+    if path:
+        rows.append(Text.from_markup(f"  [{MUTE}]±[/] [{SOFT}]{escape(path)}[/]"))
+    shown = body[:_DIFF_MAX_LINES]
+    for ln in shown:
+        if ln.startswith("+"):
+            rows.append(Text(f"  + {ln[1:]}", style=DIFF_ADD))
+        elif ln.startswith("-"):
+            rows.append(Text(f"  - {ln[1:]}", style=DIFF_DEL))
+        else:
+            rows.append(Text(f"    {ln[1:] if ln[:1] == ' ' else ln}", style=MUTE))
+    if len(body) > _DIFF_MAX_LINES:
+        rows.append(Text.from_markup(f"  [{MUTE}]… +{len(body) - _DIFF_MAX_LINES} linhas (diff truncado)[/]"))
+    return Group(*rows) if rows else Text("")
+
+
+def _code_preview(text: str, lang: str = "", max_lines: int = 20):
+    """Bloco de código com syntax highlight (Rich Syntax), capado em max_lines."""
+    from rich.syntax import Syntax
+    lines = (text or "").splitlines()
+    body = "\n".join(lines[:max_lines])
+    if len(lines) > max_lines:
+        body += f"\n… +{len(lines) - max_lines} linhas"
+    return Syntax(body, lang or "text", theme="ansi_dark", background_color="default", word_wrap=True)
+
+
+def _lang_for(path: str) -> str:
+    ext = (path or "").rsplit(".", 1)[-1].lower() if "." in (path or "") else ""
+    return {"py": "python", "js": "javascript", "ts": "typescript", "sh": "bash", "json": "json",
+            "yaml": "yaml", "yml": "yaml", "md": "markdown", "html": "html", "css": "css",
+            "go": "go", "rs": "rust", "sql": "sql", "toml": "toml"}.get(ext, "text")
+
+
+def tool_block(e: dict, detail: str = "collapsed"):
+    """Card de um tool-call: a linha do event_line + (edição → DIFF colorido; escrita → conteúdo com
+    syntax; leitura/shell → preview da saída no modo expanded). Eventos não-step caem no event_line."""
+    if e.get("kind") != "step":
+        return event_line(e, detail)
+    line = event_line(e, detail)
+    if line is None:                                       # detail=hidden → suprime o passo
+        return None
+    from rich.console import Group
+    from rich.markup import escape
+    args = e.get("args") or {}
+    tool = e.get("tool", "")
+    extra: list = []
+    if tool == "edit_file" and (args.get("old") or args.get("new")):
+        extra.append(diff_block(str(args.get("old", "")), str(args.get("new", "")), path=str(args.get("path", ""))))
+    elif tool == "write_file" and args.get("content"):
+        extra.append(_code_preview(str(args.get("content", "")), _lang_for(str(args.get("path", "")))))
+    elif detail == "expanded":                             # leitura/shell/etc.: preview da saída no expanded
+        out = (e.get("out") or "").strip()
+        if out:
+            preview = "\n".join(out.splitlines()[:12])
+            extra.append(Text.from_markup(
+                "\n".join(f"     [{MUTE}]{escape(ln)}[/]" for ln in preview.splitlines())))
+    return Group(line, *extra) if extra else line
 
 
 def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:

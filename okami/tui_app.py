@@ -258,9 +258,9 @@ if _HAS_TEXTUAL:
             log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
-            line = _tui.event_line(e, self._details)
-            if line is not None:
-                self.query_one("#log", RichLog).write(line)
+            block = _tui.tool_block(e, self._details)     # tool-card (edit→diff, write→código, etc.)
+            if block is not None:
+                self.query_one("#log", RichLog).write(block)
 
         def sink_note(self, text: str) -> None:
             from rich.text import Text

@@ -371,9 +371,9 @@ def chat(
             _expl["ok"] += 1 if e.get("ok") else 0
             return                                # não imprime 1 linha por leitura — acumula
         _flush_expl()                             # qualquer outro evento → descarrega o resumo antes
-        line = tui.event_line(e, getattr(ep, "_details", "collapsed"))
-        if line is not None:
-            console.print(line)
+        block = tui.tool_block(e, getattr(ep, "_details", "collapsed"))   # edit→diff, write→código
+        if block is not None:
+            console.print(block)
 
     ch = TerminalChannel(name, console=console)
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
