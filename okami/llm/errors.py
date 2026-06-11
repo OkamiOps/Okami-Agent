@@ -26,6 +26,20 @@ class ClassifiedError:
     rotate_key: bool = False      # tenta outra chave do MESMO provider
     fallback: bool = False        # troca de provider
     compress: bool = False        # contexto estourou → compacta e retenta
+    retry_after: float | None = None  # quanto o PROVIDER pediu p/ esperar (header/mensagem) — vence o TTL default
+
+
+_RETRY_AFTER = re.compile(r"(?:retry.?after|try again in|wait)\s*:?\s*(\d+(?:\.\d+)?)\s*(?:s\b|sec)", re.I)
+
+
+def _retry_after_of(exc) -> float | None:
+    """Extrai o retry-after da exceção (atributo do SDK ou frase na mensagem). None = sem dica."""
+    for attr in ("retry_after", "retry_after_secs"):
+        v = getattr(exc, attr, None)
+        if isinstance(v, (int, float)) and 0 < v < 24 * 3600:
+            return float(v)
+    m = _RETRY_AFTER.search(str(exc))
+    return float(m.group(1)) if m else None
 
 
 def _status_of(exc) -> int | None:
@@ -52,7 +66,8 @@ def classify(exc) -> ClassifiedError:
     s = _status_of(exc)
     msg = str(exc)
     if s == 429 or _RATE.search(msg):
-        return ClassifiedError("rate_limit", s, retryable=True, rotate_key=True, fallback=True)
+        return ClassifiedError("rate_limit", s, retryable=True, rotate_key=True, fallback=True,
+                               retry_after=_retry_after_of(exc))
     if s in (503, 529) or _OVERLOAD.search(msg):
         return ClassifiedError("overloaded", s, retryable=True, rotate_key=False, fallback=True)
     if s == 413 or _CTX.search(msg):

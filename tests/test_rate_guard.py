@@ -118,3 +118,38 @@ def test_success_clears_guard(tmp_path, monkeypatch):
     out = prov.complete_messages(_cfg2(), [{"role": "user", "content": "x"}], _sleep=lambda s: None)
     assert out == "ok-a"
     assert rg.blocked_for("a") == 0.0                 # voltou a funcionar → limpa a marca
+
+
+# ── retry_after: o provider sabe melhor que o TTL default ───────────────────
+
+def test_classify_extracts_retry_after_from_message():
+    from okami.llm.errors import classify
+    ce = classify(RuntimeError("429 rate limit exceeded. Please retry after 30 seconds"))
+    assert ce.reason == "rate_limit" and ce.retry_after == 30.0
+    ce2 = classify(RuntimeError("Rate limit. Try again in 2.5s"))
+    assert ce2.retry_after == 2.5
+    ce3 = classify(RuntimeError("429 too many requests"))
+    assert ce3.retry_after is None                     # sem dica → TTL default da guarda
+
+
+def test_classify_extracts_retry_after_attr():
+    from okami.llm.errors import classify
+
+    class E(Exception):
+        retry_after = 17
+
+    assert classify(E("429")).retry_after == 17.0
+
+
+def test_guard_honors_provider_retry_after(tmp_path, monkeypatch):
+    from okami.llm import providers as prov
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+
+    def fake(pc, messages, model, schema, overrides):
+        if pc.name == "a":
+            raise RuntimeError("429 rate limited; retry after 20 seconds")
+        return "ok-b"
+
+    monkeypatch.setattr(prov, "_complete_one", fake)
+    prov.complete_messages(_cfg2(), [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert rg.blocked_for("a") <= 20                   # 20s do provider, não 1h do default

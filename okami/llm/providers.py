@@ -266,7 +266,7 @@ def complete_messages_ex(
             last_exc = e
             ce = _err.classify(e)
             if ce.reason == "rate_limit":             # marca CROSS-SESSÃO: outros processos param de martelar
-                _rg.note_rate_limited(pc.name)
+                _rg.note_rate_limited(pc.name, retry_after=ce.retry_after)   # provider pediu N s → honra
             elif ce.reason == "overloaded":
                 _rg.note_overloaded(pc.name)
             if ce.rotate_key:
