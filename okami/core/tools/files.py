@@ -7,10 +7,23 @@ from okami.core.tools.base import (
 )
 
 
+def _as_int(v) -> int | None:
+    """Aceita int ou string numérica (o modelo às vezes manda "5"); senão None."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 class ReadFile(Tool):
     name = "read_file"
-    description = "Lê um arquivo de texto do workspace."
-    args_schema = {"path": "caminho relativo ao workspace"}
+    description = ("Lê um arquivo de texto do workspace. Opcional: offset (pular N linhas) + limit "
+                   "(ler só N linhas) p/ paginar arquivo/saída grande sem trazer tudo de uma vez.")
+    args_schema = {"path": "caminho relativo ao workspace",
+                   "offset": "(opcional) nº de linhas a pular do início",
+                   "limit": "(opcional) máx. de linhas a retornar"}
     required = ("path",)
 
     def run(self, args, ctx):
@@ -39,7 +52,23 @@ class ReadFile(Tool):
         except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
             return ToolResult(False, f"erro ao ler {rel}: {e}", effect=False)
         ctx.read_files.add(rel)
-        return ToolResult(True, text, effect=False)
+        # PAGINAÇÃO (offset/limit por LINHA): recupera o resto de uma saída grande persistida sem
+        # trazer o arquivo inteiro. Sem offset/limit → arquivo inteiro (back-compat).
+        off = _as_int(args.get("offset"))
+        lim = _as_int(args.get("limit"))
+        if off is None and lim is None:
+            return ToolResult(True, text, effect=False)
+        lines = text.splitlines()
+        start = max(0, off or 0)
+        if start >= len(lines) and lines:
+            return ToolResult(True, f"(offset {start} além do fim — o arquivo tem {len(lines)} linha(s))",
+                              effect=False)
+        end = start + lim if lim is not None else len(lines)
+        chunk = "\n".join(lines[start:end])
+        remaining = len(lines) - end
+        if remaining > 0:
+            chunk += f"\n\n[… +{remaining} linha(s); continue com offset={end} …]"
+        return ToolResult(True, chunk, effect=False)
 
 
 class WriteFile(Tool):

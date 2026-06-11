@@ -597,9 +597,10 @@ class Harness:
             obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
             if len(res.output) > _TOOL_RESULT_BUDGET:
                 saved = self._persist_large_output(step_n, res.output)
-                obs_res = ToolResult(res.ok, res.output[:_TOOL_RESULT_BUDGET]
-                                     + f"\n\n[… truncado: {len(res.output)} chars no total; "
-                                       f"completo em {saved} (use read_file p/ ver mais) …]", res.effect)
+                from okami.core.harness.persisted import persisted_output_wrapper
+                wrapped = persisted_output_wrapper(saved, len(res.output),
+                                                   res.output[:_TOOL_RESULT_BUDGET])
+                obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
             self.messages.append({"role": "user", "content": format_observation(step_n, action.tool, obs_res)})
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
