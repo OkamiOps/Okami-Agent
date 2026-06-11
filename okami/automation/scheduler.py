@@ -150,6 +150,19 @@ def gate_allows(job: dict, cwd: str = ".", timeout: float = 30.0) -> bool:
         return True
 
 
+def delivery_targets(target, home: str = "") -> list[str]:
+    """Alvos de entrega de um job: `target` aceita VÁRIOS chats separados por vírgula (estilo Hermes
+    deliver=\"telegram,slack\"); sem alvo cai na CASA (/sethome); sem casa → ninguém (só registro)."""
+    raw = [t.strip() for t in str(target or "").split(",") if t.strip()]
+    if not raw:
+        return [home] if home else []
+    out: list[str] = []
+    for t in raw:                                    # dedup preservando a ordem
+        if t not in out:
+            out.append(t)
+    return out
+
+
 def delivery_decision(result: str) -> tuple[bool, str]:
     """Decide se a saída de um job vai pro chat. Resultado começando com `[SILENT]` (estilo Hermes) é
     salvo/registrado mas NÃO entregue — corta o spam de cron 'sem novidade'. Devolve (entregar, texto)."""
