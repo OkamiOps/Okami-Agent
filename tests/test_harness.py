@@ -359,3 +359,22 @@ def test_system_prompt_instructs_mirror_user_language():
         sp = build_system_prompt(Task(goal=goal), reg)
         assert "<idioma>" in sp, "regra de idioma ausente do system prompt"
         assert "MESMO idioma" in sp and "inglês" in sp, "não instrui espelhar o idioma da pessoa"
+
+
+def test_need_input_with_options_renders_numbered_choices(tmp_path):
+    # clarify do Hermes: pergunta com OPÇÕES vira escolha numerada — a pessoa responde "2"
+    # em vez de digitar parágrafo (UX de Telegram)
+    r = Harness(Script([J("need_input", question="Qual formato você quer?",
+                          options=["PDF", "planilha", "texto no chat"])]),
+                Task(goal="gera o relatório"), tmp_path).run()
+    assert r.state == TaskState.NEEDS_INPUT
+    assert "Qual formato" in r.reason
+    assert "1. PDF" in r.reason and "3. texto no chat" in r.reason
+    assert "responda com o número" in r.reason.lower()
+
+
+def test_need_input_without_options_unchanged(tmp_path):
+    r = Harness(Script([J("need_input", question="Qual o nome do cliente?")]),
+                Task(goal="x"), tmp_path).run()
+    assert r.state == TaskState.NEEDS_INPUT
+    assert r.reason == "Qual o nome do cliente?"

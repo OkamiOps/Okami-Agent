@@ -33,7 +33,9 @@ class TaskBlocked(Tool):
 
 class NeedInput(Tool):
     name = "need_input"
-    description = "Pede uma informação ao usuário para poder continuar."
-    args_schema = {"question": "pergunta ao usuário"}
+    description = ("Pede uma informação ao usuário para poder continuar. Quando a resposta é uma "
+                   "ESCOLHA, passe `options` (2-4 itens) — vira lista numerada e a pessoa responde '2'.")
+    args_schema = {"question": "pergunta ao usuário",
+                   "options": "(opc) lista de 2-4 opções p/ escolha numerada"}
     required = ("question",)
     terminal = True

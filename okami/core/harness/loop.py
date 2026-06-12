@@ -674,6 +674,10 @@ class Harness:
         if action.tool == "need_input":
             t.state = TaskState.NEEDS_INPUT
             t.reason = action.args.get("question", "(sem pergunta)")
+            opts = action.args.get("options")          # clarify (Hermes): escolha numerada — a pessoa
+            if isinstance(opts, list) and opts:        # responde "2" em vez de digitar parágrafo
+                rendered = "\n".join(f"{i}. {o}" for i, o in enumerate(opts, 1))
+                t.reason = f"{t.reason}\n{rendered}\n(responda com o número ou escreva outra opção)"
             self._emit("need_input", question=t.reason)
             return t
         if action.tool == "task_complete":
