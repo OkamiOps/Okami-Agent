@@ -505,6 +505,8 @@ MESSAGES: dict[str, str] = {
     "cmd.commands": "lista TODOS os comandos por categoria",
     "cmd.status": "estado da sessão (trocas, modelo, yolo)",
     "cmd.usage": "tokens + custo acumulados da sessão",
+    "cmd.insights": "analytics de uso entre sessões (/insights [dias])",
+    "cmd.platform": "saúde das plataformas: /platform list|pause|resume",
     "cmd.tools": "lista as ferramentas que o agente tem",
     "cmd.copy": "copia a última resposta pro clipboard (/copy all = conversa inteira)",
     "cmd.details": "verbosidade dos tool-calls: hidden | collapsed | expanded",

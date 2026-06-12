@@ -150,6 +150,46 @@ def gate_allows(job: dict, cwd: str = ".", timeout: float = 30.0) -> bool:
         return True
 
 
+def next_run_at(schedule: str, *, now: float, last_run: float | None) -> float | None:
+    """Quando o job roda DE NOVO (epoch), p/ previsibilidade/debug (item 30). None se não roda mais
+    (one-shot já executado). interval: last_run+período (ou agora se nunca rodou). cron: próximo
+    minuto que casa. once: o alvo (None se já rodou)."""
+    s = parse_schedule(schedule)
+    if s["kind"] == "interval":
+        return now if last_run is None else last_run + s["seconds"]
+    if s["kind"] == "once":
+        target = _parse_iso(s["at"])
+        return None if last_run is not None else target
+    if s["kind"] == "cron":
+        # varre minuto a minuto a partir do próximo minuto cheio (cap ~366 dias).
+        start = int(now // 60 + 1) * 60
+        for k in range(0, 366 * 24 * 60):
+            t = start + k * 60
+            if _cron_match(s["expr"], datetime.fromtimestamp(t)):
+                return float(t)
+        return None
+    return None
+
+
+def run_script(cmd: str, *, cwd: str = ".", timeout: float = 120.0) -> str:
+    """Job SCRIPT (item 30): roda um comando do OPERADOR (config confiável) e devolve o stdout — sem
+    gastar LLM. exit ≠0 vira texto informativo. Env sanitizado, teto de saída."""
+    import subprocess
+    from okami.core.tools import sanitized_env
+    try:
+        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602
+                           text=True, timeout=timeout, env=sanitized_env())  # nosemgrep — script do operador
+    except subprocess.TimeoutExpired:
+        return f"[script] timeout ({timeout}s): {cmd[:80]}"
+    except Exception as e:  # noqa: BLE001
+        return f"[script] erro ao rodar: {e}"
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    out = out[:50_000]
+    if r.returncode != 0:
+        return f"[script exit={r.returncode}] {out or '(sem saída)'}"
+    return out or "(script sem saída)"
+
+
 def delivery_targets(target, home: str = "") -> list[str]:
     """Alvos de entrega de um job: `target` aceita VÁRIOS chats separados por vírgula (estilo Hermes
     deliver=\"telegram,slack\"); sem alvo cai na CASA (/sethome); sem casa → ninguém (só registro)."""
@@ -194,7 +234,7 @@ class Scheduler:
         os.replace(tmp, self.path)
 
     def add(self, schedule: str, prompt: str, agent: str | None = None, target: str | None = None,
-            action: str | None = None, gate: str | None = None) -> dict:
+            action: str | None = None, gate: str | None = None, script: str | None = None) -> dict:
         jobs = self.load()
         base = _slug(prompt)
         jid, i = base, 2
@@ -207,9 +247,43 @@ class Scheduler:
             job["action"] = action
         if gate:                                     # wake-gate: comando barato decide se ACORDA o agente
             job["gate"] = gate
+        if script:                                   # job SCRIPT: roda comando e entrega stdout (sem LLM)
+            job["script"] = script
         jobs.append(job)
         self.save(jobs)
         return job
+
+    # ----------------------------------------------------------------- histórico de output (item 30)
+    def _output_dir(self, jid: str) -> Path:
+        safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(jid)) or "job"
+        return self.path.parent / "cron" / "output" / safe
+
+    def record_output(self, jid: str, text: str, *, now_ts: float | None = None) -> None:
+        """Persiste o resultado de uma execução do job (.okami/cron/output/<id>/<ts>.md), rotativo.
+        Sem isto o resultado some após entregar — não dava p/ ver 'o que o job de ontem achou'."""
+        now = now_ts if now_ts is not None else self._clock()
+        d = self._output_dir(jid)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{int(now * 1000)}.md").write_text(str(text or ""), encoding="utf-8")
+            for old in sorted(d.glob("*.md"))[:-20]:     # mantém os 20 mais recentes
+                old.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def output_history(self, jid: str, limit: int = 10) -> list[dict]:
+        """Execuções recentes do job: [{ts, text}], mais nova primeiro."""
+        d = self._output_dir(jid)
+        if not d.exists():
+            return []
+        out = []
+        for p in sorted(d.glob("*.md"), reverse=True)[:limit]:
+            try:
+                ts = int(p.stem) / 1000.0
+            except ValueError:
+                ts = 0.0
+            out.append({"ts": ts, "text": p.read_text(encoding="utf-8", errors="ignore")})
+        return out
 
     def remove(self, jid: str) -> bool:
         jobs = self.load()

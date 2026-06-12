@@ -73,7 +73,7 @@ def test_acp_initialize_and_prompt_roundtrip():
                                           "prompt": [{"type": "text", "text": "oi"}]}}))
     out = io.BytesIO()
 
-    def fake_run_task(cfg, ws, goal):
+    def fake_run_task(cfg, ws, goal, **kw):   # ACP agora passa on_event/cancel (streaming + cancel)
         t = Task(goal=goal)
         t.state, t.result = TaskState.COMPLETE, f"feito: {goal}"
         return t

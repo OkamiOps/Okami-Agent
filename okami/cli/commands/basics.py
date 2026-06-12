@@ -111,8 +111,15 @@ def doctor(
     fix: bool = typer.Option(False, "--fix", help=_tr("cli.doctor.fix", _default="Fix what it can: orphan locks, .env perms, temp.")),
     json_out: bool = typer.Option(False, "--json", help=_tr("cli.doctor.json", _default="Structured JSON output (monitoring/CI).")),
     lint: bool = typer.Option(False, "--lint", help=_tr("cli.doctor.lint", _default="POSTURE lint (security/exposure), OpenClaw-style.")),
+    ack: str = typer.Option("", "--ack", help=_tr("cli.doctor.ack", _default="Acknowledge a supply-chain advisory by id (stops warning).")),
 ) -> None:
     """Diagnostica config, chaves e conectividade. `--fix` repara; `--json` p/ máquina; `--lint` postura."""
+    if ack:                                          # reconhece advisory de supply-chain (item 15)
+        from okami.core import advisories
+        ok = advisories.ack(ack)
+        console.print(f"[green]✓[/green] advisory {ack} reconhecido." if ok
+                      else f"[red]✗[/red] não consegui gravar o ack de {ack}.")
+        raise typer.Exit(0)
     if lint:                                        # conformance/postura (#12): pass/warn/fail
         from okami.core.lint import lint_posture, summarize
         findings = lint_posture(_load())
@@ -272,6 +279,15 @@ def doctor(
                            title=t("doctor.card.disk", _default="Disk"), accent=_ui.MAGENTA))
 
     console.print(_ui.grid(cards, width=console.width))
+
+    from okami.core import advisories            # supply-chain: pacote comprometido instalado? (item 15)
+    hits = advisories.detect_compromised(include_acked=False)
+    if hits:
+        console.print()
+        for h in hits:
+            console.print(f"[bold red]🛑 SUPPLY-CHAIN[/bold red] {h['package']}=={h['installed']} "
+                          f"[red]({h['severity']})[/red] — {h['why']}")
+            console.print(f"   [dim]reconheça com: okami doctor --ack {h['id']}[/dim]")
     console.print(_ui.footer(t("doctor.next_steps", _default="Next steps:"), [
         ("okami doctor --lint", t("doctor.step.lint", _default="security posture lint")),
         ("okami clean --deep --dry-run", t("doctor.step.clean", _default="disk cleanup preview (versioned quota)")),

@@ -64,6 +64,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("commands", "list ALL commands by category", "info"),
     CommandDef("status", "session state (turns, model, yolo)", "info", tier="essential"),
     CommandDef("usage", "tokens + accumulated cost for the session", "info"),
+    CommandDef("insights", "cross-session usage analytics (/insights [days])", "info", args="[days]"),
+    CommandDef("platform", "platform health: /platform list|pause|resume", "info", args="[sub]"),
     CommandDef("tools", "list the tools the agent has", "info"),
     CommandDef("copy", "copy the last reply to the clipboard (/copy all = whole chat)", "info",
                ("yank",), args="[all]", scope="chat", tier="essential"),

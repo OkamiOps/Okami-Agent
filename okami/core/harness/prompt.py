@@ -129,6 +129,13 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
     from okami.core.harness.style import model_family_guidance, style_block   # estilo VISÍVEL (markdown/idioma/canal)
     _fam = model_family_guidance(model)
     style = style_block(surface) + (f"\n\n{_fam}" if _fam else "")
+    try:                                             # platform_hint (item 22): formatação por canal
+        from okami.gateway.channel_registry import platform_hint
+        _ph = platform_hint(surface)
+        if _ph:
+            style += f"\n\n{_ph}"
+    except Exception:  # noqa: BLE001 — hint nunca quebra o prompt
+        pass
 
     if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
         crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria

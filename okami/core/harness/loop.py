@@ -44,7 +44,7 @@ def _looks_like_punt(text: str) -> bool:
 
 _REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
 _POLL_TOOLS = {"process_wait", "process_poll", "process_log"}   # ESPERAR processo ≠ loop inútil (é I/O)
-_BATCHABLE_READONLY = {"read_file", "list_dir", "find_files"}   # leitura pura → seguro rodar em LOTE
+_BATCHABLE_READONLY = {"read_file", "list_dir", "find_files", "search_files"}   # leitura pura → seguro rodar em LOTE
 
 
 def _is_batchable(action: Action) -> bool:
@@ -80,8 +80,9 @@ _TOOL_ALIASES = {
     "write": "write_file", "writefile": "write_file", "save": "write_file", "create_file": "write_file",
     "edit": "edit_file", "editfile": "edit_file", "patch": "edit_file", "replace": "edit_file",
     "ls": "list_dir", "listdir": "list_dir", "list": "list_dir", "dir": "list_dir",
-    "find": "find_files", "search": "find_files", "grep": "find_files", "glob": "find_files",
-    "search_files": "find_files", "find_file": "find_files",
+    "find": "find_files", "glob": "find_files", "find_file": "find_files",
+    "grep": "search_files", "search": "search_files", "rg": "search_files",   # grep = CONTEÚDO → search_files
+    "search_content": "search_files",
     "shell": "run_shell", "bash": "run_shell", "sh": "run_shell", "exec": "run_shell", "terminal": "run_shell",
     "run": "run_shell", "command": "run_shell", "execute": "run_shell",
     "complete": "task_complete", "done": "task_complete", "finish": "task_complete", "answer": "respond",
@@ -159,6 +160,7 @@ class Harness:
         allow_paths: list | None = None,
         agent_home=None,                # CASA do agente (memória/identidade) — ≠ workspace (onde mexe)
         stage_writes: bool = False,     # escrita de memória → fila de aprovação (review + write_approval)
+        cfg=None,                       # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -181,7 +183,8 @@ class Harness:
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
                                open_fs=open_fs, allow_paths=list(allow_paths or []),
                                agent_home=agent_home, stage_writes=stage_writes,
-                               registry=self.registry)   # tool_search: schema sob demanda (item 27)
+                               registry=self.registry,   # tool_search: schema sob demanda (item 27)
+                               cfg=cfg)                   # web_extract/vision_analyze: roteamento aux
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
@@ -409,6 +412,7 @@ class Harness:
                 self._shrunk_retry = False         # gerou com sucesso → libera novo encolhimento p/ falha futura
                 _u = comp.usage                     # usage POR CHAMADA no trajeto (P2 observabilidade)
                 self.events.emit("llm_call", provider=comp.provider, model=comp.model,
+                                 surface=self.surface,        # /insights: breakdown por plataforma (item 21)
                                  finish_reason=getattr(comp, "finish_reason", ""),
                                  tokens_in=getattr(_u, "input_tokens", 0),
                                  tokens_out=getattr(_u, "output_tokens", 0),

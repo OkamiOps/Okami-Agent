@@ -42,6 +42,7 @@ class SandboxPolicy:
     image: str = "python:3.11-slim"  # imagem do backend docker
     egress_allow: tuple = ()         # allowlist de egress (hosts) via proxy filtrante (#5)
     require_isolation: bool = False   # estrito (#P1.2): exposto SEM Docker → shell/process DESABILITADO (não degrada)
+    reuse_container: bool = False     # item 26: container long-lived (docker exec) — estado sobrevive entre comandos
 
     @classmethod
     def from_config(cls, d: dict | None) -> "SandboxPolicy":
@@ -61,7 +62,7 @@ class SandboxPolicy:
         if prof == "hardened-strict" or d.get("require_isolation"):
             p.require_isolation = True  # #P1.2: hardened-strict NÃO degrada p/ local em superfície exposta
         for k in ("backend", "mode", "network", "timeout", "max_output",
-                  "mem_mb", "cpu_seconds", "nproc", "fsize_mb", "image"):
+                  "mem_mb", "cpu_seconds", "nproc", "fsize_mb", "image", "reuse_container"):
             if d.get(k) is not None:
                 setattr(p, k, d[k])
         if d.get("egress_allow"):
@@ -189,6 +190,11 @@ def docker_argv(cmd: str, workspace: Path, policy: SandboxPolicy, *, name: str =
         "--cpus", "1",
         "--cap-drop", "ALL",                                      # nenhuma capability extra
         "--security-opt", "no-new-privileges",
+        # tmpfs noexec/nosuid (item 25): corta "dropa binário em /tmp e executa". Tamanho-limite
+        # p/ não virar bomba de RAM. Escrita REAL do agente vai pro workspace montado (gravável).
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
+        "--tmpfs", "/run:rw,noexec,nosuid,size=16m",
     ]
     user = _host_user()
     if user:
@@ -201,6 +207,74 @@ def docker_argv(cmd: str, workspace: Path, policy: SandboxPolicy, *, name: str =
         policy.image, "sh", "-lc", cmd,
     ]
     return argv
+
+
+def _hardening_flags(policy: SandboxPolicy) -> list[str]:
+    """Flags de endurecimento comuns aos modos efêmero e persistente (item 26)."""
+    flags = [
+        "--network", ("bridge" if policy.network_on else "none"),
+        "--memory", f"{policy.mem_mb or 1024}m",
+        "--pids-limit", str(policy.nproc or 256),
+        "--cpus", "1",
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
+        "--tmpfs", "/run:rw,noexec,nosuid,size=16m",
+    ]
+    user = _host_user()
+    if user:
+        flags += ["--user", user]
+    if policy.mode == "read-only":
+        flags += ["--read-only"]
+    return flags
+
+
+def container_name(workspace: Path, policy: SandboxPolicy) -> str:
+    """Nome DETERMINÍSTICO do container long-lived por (workspace, modo, imagem) — item 26.
+    Mesmo workspace+perfil → mesmo container (reusa); perfil diferente → container separado."""
+    import hashlib
+    key = f"{Path(workspace).resolve()}|{policy.mode}|{policy.image}"
+    return "okami-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+
+
+def docker_run_persistent_argv(workspace: Path, policy: SandboxPolicy, *, name: str) -> list[str]:
+    """argv do `docker run -d` p/ um container LONG-LIVED (sem --rm) que fica no ar (`tail -f /dev/null`)
+    — o estado sobrevive entre comandos/turnos. Mesmo endurecimento do efêmero. PURA p/ teste."""
+    ws = str(Path(workspace).resolve())
+    ro = policy.mode == "read-only"
+    argv = ["docker", "run", "-d", "--init", "--name", name]
+    argv += _hardening_flags(policy)
+    argv += [
+        "-v", f"{ws}:/workspace" + (":ro" if ro else ""),
+        "-w", "/workspace",
+        policy.image, "tail", "-f", "/dev/null",      # mantém o container vivo, ocioso
+    ]
+    return argv
+
+
+def docker_exec_argv(cmd: str, name: str) -> list[str]:
+    """argv do `docker exec` p/ rodar um comando no container reusado. PURA p/ teste."""
+    return ["docker", "exec", "-w", "/workspace", name, "sh", "-lc", cmd]
+
+
+def _ensure_container(name: str, workspace: Path, policy: SandboxPolicy) -> bool:
+    """Garante o container long-lived no ar (sobe se não existir). True se utilizável."""
+    try:
+        running = subprocess.run(["docker", "ps", "-q", "-f", f"name=^{name}$"],
+                                 capture_output=True, text=True, timeout=10).stdout.strip()
+        if running:
+            return True
+        exists = subprocess.run(["docker", "ps", "-aq", "-f", f"name=^{name}$"],
+                                capture_output=True, text=True, timeout=10).stdout.strip()
+        if exists:                                    # parado → religa (preserva o FS do container)
+            subprocess.run(["docker", "start", name], capture_output=True, timeout=20)
+            return True
+        subprocess.run(docker_run_persistent_argv(workspace, policy, name=name),
+                       capture_output=True, timeout=60)
+        return True
+    except Exception:  # noqa: BLE001 — falha ao subir → caller cai no efêmero
+        return False
 
 
 def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None,
@@ -217,7 +291,12 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
     use_docker = (eff == "docker")
     proxy = None
     try:
-        if use_docker:
+        if use_docker and policy.reuse_container and _ensure_container(
+                container_name(workspace, policy), workspace, policy):
+            # item 26: reusa o container long-lived via `docker exec` (estado sobrevive entre comandos)
+            r = subprocess.run(docker_exec_argv(cmd, container_name(workspace, policy)),
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=policy.timeout)
+        elif use_docker:
             r = subprocess.run(docker_argv(cmd, workspace, policy),
                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=policy.timeout)
         else:

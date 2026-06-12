@@ -35,6 +35,7 @@ dev = ["pytest>=8", "ruff>=0.6", "bandit>=1.7", "pip-audit>=2.7"]
 honcho = ["honcho-ai>=1.0"]
 voice = ["faster-whisper>=1.0", "edge-tts>=6.1"]
 browser = ["playwright>=1.40"]      # browser automation (§13); sem ela, browse cai p/ fetch read-only
+web = ["ddgs>=6.0"]                  # web_search zero-key (DuckDuckGo); sem ela, web_search pede o pip install
 
 [project.scripts]
 okami = "okami.cli:app"

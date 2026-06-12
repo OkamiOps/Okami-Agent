@@ -68,11 +68,17 @@ def build_report(cfg, *, ping=None) -> dict:
     sb = SandboxPolicy.from_config(getattr(cfg, "sandbox", {}) or {})
     rep["sandbox"] = {"backend": sb.backend, "mode": sb.mode,
                       "network": sb.network_on, "timeout": sb.timeout}
+
+    from okami.core import advisories          # supply-chain: pacote comprometido instalado? (item 15)
+    rep["checks"]["advisories"] = advisories.detect_compromised(include_acked=False)
     return rep
 
 
 def health_ok(report: dict) -> bool:
-    """Resumo binário p/ scripts: True se nada CRÍTICO está quebrado (default provider pronto, FTS5)."""
+    """Resumo binário p/ scripts: True se nada CRÍTICO está quebrado (default provider pronto, FTS5,
+    sem advisory de supply-chain não-reconhecido)."""
     providers = {p["name"]: p for p in report.get("providers", [])}
     dp = providers.get(report.get("default_provider"))
-    return bool(dp and dp.get("ready")) and report.get("checks", {}).get("sqlite_fts5", False)
+    return (bool(dp and dp.get("ready"))
+            and report.get("checks", {}).get("sqlite_fts5", False)
+            and not report.get("checks", {}).get("advisories"))

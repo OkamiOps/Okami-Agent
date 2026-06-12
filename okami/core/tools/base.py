@@ -125,6 +125,7 @@ class ToolContext:
     agent_home: Path | None = None  # CASA do agente (memória/identidade/genesis) — ≠ workspace (onde ele MEXE)
     stage_writes: bool = False  # escrita de memória vai pra FILA de aprovação (review/background c/ write_approval)
     registry: dict | None = None  # o registro de tools da sessão (p/ tool_search: schema sob demanda)
+    cfg: object | None = None     # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
 
     @property
     def home(self) -> Path:

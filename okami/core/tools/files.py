@@ -99,13 +99,22 @@ class WriteFile(Tool):
                 ctx.checkpoints.snapshot(rel)
             except Exception:  # noqa: BLE001 — checkpoint é best-effort, nunca bloqueia a escrita
                 pass
+        before = ""
+        if p.exists():                                  # lint-delta: erro pré-existente não nagueia
+            try:
+                from okami.core.file_safety import read_text_capped
+                before = read_text_capped(p)
+            except Exception:  # noqa: BLE001
+                before = ""
         from okami.core.file_safety import FileTooLarge, write_text_atomic
         try:
             n = write_text_atomic(p, content)   # atômico (sem arquivo meia-escrito) + teto de tamanho
         except FileTooLarge as e:
             return ToolResult(False, str(e))
         ctx.read_files.add(rel)  # acabou de escrever → conhece o conteúdo
-        return ToolResult(True, f"escrito {rel} ({n} chars)", effect=True)
+        from okami.core.code_lint import lint_delta      # item 6: avisa erro NOVO (não bloqueia)
+        warn = lint_delta(rel, before, content)
+        return ToolResult(True, f"escrito {rel} ({n} chars)" + (f"\n{warn}" if warn else ""), effect=True)
 
 
 class EditFile(Tool):
@@ -158,7 +167,10 @@ class EditFile(Tool):
         write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
         ctx.read_files.add(rel)
         n = count if replace_all else 1
-        return ToolResult(True, f"editado {rel} ({n} substituiç{'ões' if n > 1 else 'ão'})", effect=True)
+        from okami.core.code_lint import lint_delta      # item 6: erro NOVO introduzido pela edição
+        warn = lint_delta(rel, text, new_text)
+        return ToolResult(True, f"editado {rel} ({n} substituiç{'ões' if n > 1 else 'ão'})"
+                          + (f"\n{warn}" if warn else ""), effect=True)
 
 
 class ListDir(Tool):

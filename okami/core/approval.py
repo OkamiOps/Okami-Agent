@@ -114,11 +114,32 @@ _HARDLINE = [
 ]
 
 
+# sudo lendo senha do STDIN (`-S`/`--stdin`): um LLM que escreve isso está CHUTANDO senha. Bloqueio
+# INCONDICIONAL (antes do yolo) a não ser que o DONO tenha habilitado deliberadamente via SUDO_PASSWORD.
+_SUDO_STDIN = re.compile(r"(?:^|[;&|\n`]|\$\()\s*" + _WRAP + r"\s*" + _BINPREFIX +
+                         r"sudo\b[^\n;&|]*\s(?:-[A-Za-z]*S|--stdin)\b", re.I)
+
+
+def sudo_stdin_blocked(cmd: str) -> str | None:
+    """`sudo -S`/`--stdin` SEM SUDO_PASSWORD no ambiente → razão do bloqueio (pesquisa #6 item 16).
+    None se ok (sem -S, ou o dono setou SUDO_PASSWORD = uso deliberado)."""
+    import os
+    if not cmd or not _SUDO_STDIN.search(cmd):
+        return None
+    if os.environ.get("SUDO_PASSWORD"):
+        return None                                  # dono habilitou de propósito → segue pro gate normal
+    return ("sudo lendo senha do STDIN (-S/--stdin) sem SUDO_PASSWORD definido — parece chute de senha; "
+            "recusado. Se for de propósito, defina SUDO_PASSWORD no ambiente do agente.")
+
+
 def detect_hardline(cmd: str) -> str | None:
-    """Comando CATASTRÓFICO (rm -rf /, mkfs, fork bomb, shutdown…) → razão do BLOQUEIO INCONDICIONAL (nem
-    yolo passa). None se ok. Usa o mesmo strip de aspas do classify (não dispara em `grep 'mkfs'`)."""
+    """Comando CATASTRÓFICO (rm -rf /, mkfs, fork bomb, shutdown, sudo -S sem senha…) → razão do BLOQUEIO
+    INCONDICIONAL (nem yolo passa). None se ok. Usa o mesmo strip de aspas do classify."""
     if not cmd:
         return None
+    sudo = sudo_stdin_blocked(cmd)                    # checa no comando CRU (antes do strip de aspas)
+    if sudo:
+        return sudo
     if _RUNS_QUOTED.search(cmd):                      # bash -c '…'/eval: a catástrofe está DENTRO das aspas →
         return "catástrofe via sh -c/eval" if _HARDLINE_EVAL.search(cmd) else None   # checa sem âncora
     c = _strip_quoted(cmd)
@@ -213,6 +234,38 @@ def classify(tool: str, args: dict) -> Sensitive | None:
 def requires_approval(tool: str, args: dict, workspace=None) -> str | None:
     s = classify(tool, args)
     return s.reason if s else None
+
+
+_SMART_PROMPT = (
+    "Você é um JUIZ de segurança de comandos de um agente. Decida se este comando flagrado pode rodar.\n"
+    "Responda com UMA palavra: APPROVE (claramente seguro/rotineiro no contexto de dev), DENY "
+    "(claramente perigoso/destrutivo/exfiltração), ou ESCALATE (na dúvida — deixe o humano decidir).\n"
+    "Na MENOR dúvida, ESCALATE. Nunca explique; só a palavra.")
+
+
+def smart_judge(cfg, request: dict, *, complete=None) -> str:
+    """Juiz LLM auxiliar de aprovação (pesquisa #6 item 13): 'approve' | 'deny' | 'escalate'.
+
+    FAIL-CLOSED: erro do modelo, indisponibilidade, ou resposta fora do contrato → 'escalate' (o
+    humano decide; nunca auto-aprova por engano). `complete(cfg, task, messages, **kw)` injetável
+    (default: aux_complete, roteando p/ o modelo auxiliar barato na task 'approval')."""
+    if complete is None:
+        from okami.llm.aux import aux_complete as complete
+    tool = request.get("tool", "?")
+    reason = request.get("reason") or request.get("category", "")
+    cmd = str((request.get("args") or {}).get("cmd", ""))[:300]
+    msgs = [{"role": "system", "content": _SMART_PROMPT},
+            {"role": "user", "content": f"tool: {tool}\nrazão do flag: {reason}\ncomando: {cmd or '(n/a)'}"}]
+    try:
+        out = complete(cfg, "approval", msgs, max_tokens=16) or ""
+    except Exception:  # noqa: BLE001 — aux indisponível/erro → escala (fail-closed)
+        return "escalate"
+    v = out.strip().upper()
+    if v.startswith("APPROVE") or v == "APPROVE":
+        return "approve"
+    if v.startswith("DENY"):
+        return "deny"
+    return "escalate"                                # ESCALATE explícito OU qualquer lixo → humano
 
 
 # prompt_fn(request) -> "once" | "session" | "always" | "deny"

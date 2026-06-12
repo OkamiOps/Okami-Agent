@@ -121,8 +121,15 @@ _key_cooldown: dict[str, float] = {}  # chave -> epoch até quando está parada 
 
 
 def _available_pool(pc: ProviderConfig, now: float) -> list[str]:
-    """Chaves não-parqueadas; se TODAS em cooldown, devolve o pool cheio (não trava)."""
-    return [k for k in pc.key_pool() if _key_cooldown.get(k, 0.0) <= now] or pc.key_pool()
+    """Chaves não-parqueadas (cooldown in-memory + pool PERSISTENTE cross-restart/processo); se TODAS
+    em cooldown, devolve o pool cheio (não trava). O pool persistente (item 20) sobrevive ao restart."""
+    live = [k for k in pc.key_pool() if _key_cooldown.get(k, 0.0) <= now]
+    try:
+        from okami.llm import cred_pool
+        live = [k for k in live if k in set(cred_pool.available(pc.name, live, now=now))]
+    except Exception:  # noqa: BLE001 — pool persistente é otimização, nunca trava
+        pass
+    return live or pc.key_pool()
 
 
 def _rotate_key(pc: ProviderConfig, now: float | None = None) -> str | None:
@@ -138,10 +145,20 @@ def _rotate_key(pc: ProviderConfig, now: float | None = None) -> str | None:
 _PARK_TTL = {"rate_limit": 3600.0, "billing": 6 * 3600.0}   # billing dura mais: crédito não volta sozinho
 
 
-def _park_key(key: str | None, ce, now: float | None = None, ttl: float | None = None) -> None:
-    """Chave com 429/billing → parqueia (1h / 6h) p/ não distribuí-la de novo na hora."""
-    if key and ce.reason in _PARK_TTL:
+def _park_key(key: str | None, ce, now: float | None = None, ttl: float | None = None,
+              provider: str | None = None) -> None:
+    """Chave com 429/billing/auth → parqueia in-memory + no pool PERSISTENTE (item 20: cross-restart/
+    processo; status ok/exhausted/dead por classe de erro)."""
+    if not key:
+        return
+    if ce.reason in _PARK_TTL:
         _key_cooldown[key] = (time.time() if now is None else now) + (ttl or _PARK_TTL[ce.reason])
+    if provider:                                      # persistente: sobrevive ao restart, guarda só fingerprint
+        try:
+            from okami.llm import cred_pool
+            cred_pool.mark(provider, key, ce.reason, now=now)
+        except Exception:  # noqa: BLE001 — pool persistente nunca trava o turno
+            pass
 
 
 def complete(
@@ -321,6 +338,12 @@ def complete_messages_ex(
                 res.provider = pc.name
             if _was_blocked:                          # voltou a responder → limpa a marca cross-sessão
                 _rg.clear(pc.name)
+            if ov.get("_api_key"):                    # chave respondeu → tira do pool persistente (item 20)
+                try:
+                    from okami.llm import cred_pool
+                    cred_pool.clear(pc.name, ov["_api_key"])
+                except Exception:  # noqa: BLE001
+                    pass
             return res
         except Exception as e:  # noqa: BLE001
             last_exc = e
@@ -337,7 +360,7 @@ def complete_messages_ex(
             elif ce.reason == "overloaded":
                 _rg.note_overloaded(pc.name)
             if ce.rotate_key:
-                _park_key(ov.get("_api_key"), ce)     # 429/billing → parqueia a chave
+                _park_key(ov.get("_api_key"), ce, provider=pc.name)   # parqueia (in-memory + persistente)
             if ce.never_repeat:                       # content_policy: payload idêntico NUNCA re-enviado
                 do_fallback = False                   # (nem p/ outro provider — seria repetir igual)
                 break

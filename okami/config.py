@@ -33,6 +33,16 @@ def _load_env() -> None:
     legacy = Path.home() / ".okami" / ".env"        # install antigo / OKAMI_HOME mudou → ainda honra
     if legacy != g and legacy.exists():
         load_dotenv(legacy)
+    # Fontes de segredo plugáveis (item 19): DEPOIS do .env, não-destrutivo, fail-never-block. Com
+    # Bitwarden Secrets Manager, só BWS_ACCESS_TOKEN fica em texto; o resto vem do cofre.
+    try:
+        from okami.core.secret_sources import apply_configured_sources
+        res = apply_configured_sources()
+        if res.get("error"):
+            from okami import log
+            log.warn(f"secret source: {res['error']} — seguindo com o .env.")
+    except Exception:  # noqa: BLE001 — fonte de segredo NUNCA bloqueia o boot
+        pass
 
 
 # Carrega o quanto antes, para que api_key_env funcione já no import.

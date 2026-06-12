@@ -425,7 +425,9 @@ def test_tool_name_repair_fixes_hallucinated_names(tmp_path):
     from okami.core.tools import default_registry
     reg = default_registry()
     assert _repair_tool_name("read", reg) == "read_file"
-    assert _repair_tool_name("search", reg) == "find_files"
+    assert _repair_tool_name("search", reg) == "search_files"   # 'search'/'grep' = CONTEÚDO (fim do alias-trap)
+    assert _repair_tool_name("grep", reg) == "search_files"
+    assert _repair_tool_name("find", reg) == "find_files"       # 'find' = por NOME
     assert _repair_tool_name("bash", reg) == "run_shell"
     assert _repair_tool_name("raed_file", reg) == "read_file"      # typo (fuzzy)
     assert _repair_tool_name("done", reg) == "task_complete"

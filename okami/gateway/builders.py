@@ -149,12 +149,16 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
         ep = by_agent.get(job.get("agent")) or (eps[0] if eps else None)
         if ep is None:
             return "(sem endpoint p/ entregar)"
-        from okami.automation.scheduler import delivery_decision, delivery_targets, gate_allows
+        from okami.automation.scheduler import delivery_decision, delivery_targets, gate_allows, run_script
         if not gate_allows(job, cwd=str(ep.ws)):       # wake-gate: condição barata falhou → não acorda o LLM
             return "(gate: condição não bateu — agente não foi acordado)"
-        task = ep.run_task(ep.cfg, ep.ws, job["prompt"], agent_home=ep.home, open_fs=ep.open_fs)
-        result = task.result or task.reason or task.state.value
+        if job.get("script"):                          # job SCRIPT (item 30): roda comando, sem gastar LLM
+            result = run_script(job["script"], cwd=str(ep.ws))
+        else:
+            task = ep.run_task(ep.cfg, ep.ws, job["prompt"], agent_home=ep.home, open_fs=ep.open_fs)
+            result = task.result or task.reason or task.state.value
         deliver, text = delivery_decision(result)      # [SILENT] → registra mas não manda pro chat
+        sched.record_output(job["id"], text)           # item 30: histórico do output (não some após entregar)
         if deliver:                                    # multi-alvo ("123,456") ou a CASA (/sethome)
             for tg in delivery_targets(job.get("target"), home=ep.home_chat()):
                 ep.channel.send(tg, f"⏰ {job['id']}: {text}")

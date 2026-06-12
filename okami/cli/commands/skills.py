@@ -136,8 +136,29 @@ def skill(
     if action in ("list", "verify", "remove"):
         _skill_hub_action(action, name)
         return
+    if action in ("tap", "taps"):                    # gerenciar fontes confiáveis (item 11)
+        from okami.skills.sources import add_tap, list_taps, remove_tap
+        # `okami skill tap` lista; `tap <org>` / `tap github <org>` adiciona; `tap remove <org>`
+        if not name:
+            taps = list_taps()
+            if not taps:
+                console.print("[dim]nenhum tap customizado. Confiáveis embutidos: anthropics, openai, "
+                              "nousresearch, huggingface, okamiops.[/dim]")
+            for kind, lst in taps.items():
+                console.print(f"[bold]{kind}[/bold]: {', '.join(lst) or '—'}")
+            return
+        parts = name.split()
+        if parts[0] == "remove" and len(parts) > 1:
+            ok = remove_tap("github", parts[-1])
+            console.print(f"[green]✓ tap removido:[/green] {parts[-1]}" if ok else "[yellow]tap não existia.[/yellow]")
+            return
+        kind, prefix = ("github", parts[0]) if len(parts) == 1 else (parts[0], parts[1])
+        add_tap(kind, prefix)
+        console.print(f"[green]✓ fonte confiável adicionada:[/green] {kind}:{prefix} "
+                      "[dim](skills dela instalam sem confirmar, se o scan passar)[/dim]")
+        return
     if action != "new":
-        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove")
+        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove | tap")
         raise typer.Exit(2)
     if not name.strip():
         console.print("[red]informe o nome:[/red] okami skill new <nome>")
@@ -223,13 +244,27 @@ def learn(
 
     report = scan_path(quarantine)
     _print_risk_report(report)
-    if report.blocked and not force:
-        console.print("[red]✗ BLOQUEADO — risco HIGH/CRITICAL.[/red] Revise os achados acima.")
+    # MATRIZ confiança×verdict (item 11): combina o TIER da fonte com o achado do scan.
+    from okami.skills.skill_security import SEV_NAME
+    from okami.skills.sources import classify_source, install_decision
+    src_info = classify_source(source)
+    verdict = SEV_NAME[report.max_severity]
+    decision = install_decision(src_info.trust, verdict)
+    console.print(f"[dim]fonte: {src_info.kind} · confiança: [bold]{src_info.trust}[/bold] · "
+                  f"scan: {verdict} → política: [bold]{decision}[/bold][/dim]")
+    if decision == "block" and not force:
+        console.print("[red]✗ BLOQUEADO — risco HIGH/CRITICAL (segurança vence confiança).[/red]")
         console.print(f"[dim]ficou em quarentena (não instalado): {quarantine}[/dim]")
         console.print("[dim]use --force só se confiar TOTALMENTE na origem.[/dim]")
         raise typer.Exit(2)
-    if report.blocked:
+    if decision == "block":
         console.print("[red]⚠ --force: instalando apesar do risco.[/red]")
+    elif decision == "confirm" and not force:        # fonte comunidade/não-confiável → pede confirmação
+        from okami import menu
+        if not menu.confirm(f"Instalar skill de fonte '{src_info.trust}' (scan {verdict})?", default=False):
+            console.print(f"[dim]cancelado. Quarentena: {quarantine}[/dim]")
+            console.print("[dim]marque a origem como confiável: okami skill tap github <org>[/dim]")
+            raise typer.Exit(0)
 
     from okami.home import skills_dir
     dest_root = skills_dir()

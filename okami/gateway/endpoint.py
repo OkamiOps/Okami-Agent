@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from okami.core.approval import smart_judge        # juiz LLM de aprovação no modo smart (item 13)
 from okami.gateway.endpoint_commands import EndpointCommandsMixin
 from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
 from okami.gateway.sessions import TranscriptStore
@@ -91,6 +92,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._pairing = PairingStore(self.home)   # allowlist dinâmico: chat pede acesso → dono aprova (CLI)
         from okami.gateway.goals import GoalStore
         self._goals = GoalStore(self.home or self.ws)   # /goal: objetivo persistente por chat (item 41)
+        from okami.gateway.circuit import PlatformBreaker
+        self._breaker = PlatformBreaker()               # item 23: circuit breaker por plataforma
         self.sessions: dict[str, Session] = {}
         self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
         #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
@@ -268,6 +271,17 @@ class AgentEndpoint(EndpointCommandsMixin):
             _cat = req.get("category", "")
             if _cat and _cat in s.approved_cats:           # JÁ aprovado PRA SESSÃO (Hermes) → não pergunta de novo
                 return True
+            # SMART (item 13): juiz LLM auxiliar julga o comando flagrado. APPROVE auto-aprova a
+            # sessão, DENY bloqueia, ESCALATE (e qualquer erro — fail-closed) cai no prompt humano.
+            if self.approval_mode == "smart" and self.cfg is not None:
+                verdict = smart_judge(self.cfg, req)
+                if verdict == "approve":
+                    if _cat:
+                        s.approved_cats.add(_cat)
+                    return True
+                if verdict == "deny":
+                    return False
+                # escalate → segue pro fluxo humano abaixo
             if self.approval_mode == "off":                # "off" = não pergunta → NEGA sensível (fail-closed)
                 return False
             import secrets
@@ -607,6 +621,36 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if low == "/usage":
             self.channel.send(chat_id, self._usage_text(chat_id))
+            return
+        if low.startswith("/platform"):              # circuit breaker por plataforma (item 23)
+            parts = text.split()
+            sub = parts[1].lower() if len(parts) > 1 else "list"
+            who = parts[2] if len(parts) > 2 else self.surface
+            if sub in ("pause", "pausar"):
+                self._breaker.pause(who)
+                self.channel.send(chat_id, f"⏸ plataforma '{who}' pausada (não vou pollar até /platform resume).")
+            elif sub in ("resume", "retomar"):
+                self._breaker.resume(who)
+                self.channel.send(chat_id, f"▶ plataforma '{who}' retomada.")
+            else:                                    # list (default)
+                st = self._breaker.status()
+                if not st:
+                    self.channel.send(chat_id, f"📡 plataforma atual: {self.surface} · ok (nenhuma falha).")
+                else:
+                    icon = {"ok": "✓", "backoff": "⚠", "paused": "⏸"}
+                    lines = [f"{icon.get(s['state'], '?')} {s['name']}: {s['state']}"
+                             + (f" (retry {s['retry_in']}s, {s['fails']} falhas)" if s["state"] == "backoff" else "")
+                             for s in st]
+                    self.channel.send(chat_id, "📡 plataformas:\n" + "\n".join(lines))
+            return
+        if low.startswith("/insights"):              # analytics histórico cross-sessão (item 21)
+            arg = text[len("/insights"):].strip()
+            try:
+                days = int(arg) if arg else 30
+            except ValueError:
+                days = 30
+            from okami.observability import insights
+            self.channel.send(chat_id, insights.render(insights.collect(self.ws, days=days)))
             return
         if low == "/tools":
             self.channel.send(chat_id, self._tools_text())
@@ -1341,9 +1385,14 @@ class AgentEndpoint(EndpointCommandsMixin):
                     ok, msg = self.reload_config()
                     from okami import log
                     (log.dbg if ok else log.warn)(f"SIGHUP reload: {'ok ' if ok else 'falhou '}{msg}")
+                if not self._breaker.should_poll(self.surface):   # item 23: canal em backoff/pausa → pula
+                    time.sleep(1)
+                    continue
                 self.poll_once()
+                self._breaker.record_success(self.surface)        # poll ok → zera o backoff
                 pace = getattr(self.channel, "poll_interval", 0)   # Telegram long-polla (0); REST espera
                 if pace:
                     time.sleep(pace)
             except Exception:  # noqa: BLE001 — rede instável não derruba o bot
-                time.sleep(3)
+                secs = self._breaker.record_failure(self.surface)  # falha → backoff exponencial (não martela)
+                time.sleep(min(secs, 3))

@@ -42,6 +42,14 @@ class EndpointCommandsMixin:
             line += "   " + t("gw.usage_cost", _default="cost {label}", label=cr.label)
         if e.get("served_by"):
             line += "\n" + t("gw.usage_served_by", _default="served by: {by}", by=e["served_by"])
+        # Janelas da ASSINATURA (item 14): "quanto sobrou do plano". Best-effort — rede pode falhar.
+        try:
+            from okami.llm.account_usage import account_usage, render_usage_lines
+            wins = render_usage_lines(account_usage(self.cfg))
+            if wins:
+                line += "\n\n📅 " + t("gw.usage_plan", _default="plan:") + "\n" + "\n".join(wins)
+        except Exception:  # noqa: BLE001 — janelas de plano nunca quebram o /usage
+            pass
         return line
 
     def _tools_text(self) -> str:

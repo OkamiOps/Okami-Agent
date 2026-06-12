@@ -243,6 +243,7 @@ def run_task(
                       sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
                       model=model or pc.model, allow_paths=allow_paths,
                       agent_home=home,              # memória/identidade escrevem na CASA, não no CWD
+                      cfg=cfg,                       # tools que roteiam ao modelo auxiliar (web_extract/vision)
                       # write_approval: escrita AUTOMÁTICA (review em background) vai pra fila do dono
                       stage_writes=(surface == "review" and bool((cfg.memory or {}).get("write_approval"))))
     try:

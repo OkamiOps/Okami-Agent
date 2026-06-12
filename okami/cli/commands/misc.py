@@ -11,6 +11,45 @@ from okami.cli._shared import _load
 from okami.i18n import t
 
 
+@app.command(help=_tr("cli.insights", _default="Cross-session usage analytics (tokens by day/model/platform)."))
+def insights(
+    days: int = typer.Option(30, "--days", "-d", help=_tr("cli.insights.days", _default="Window in days (default 30).")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.insights.json", _default="Structured JSON (scripts/monitoring).")),
+) -> None:
+    """Analytics de uso entre sessões: tokens por dia/modelo/plataforma, dos últimos N dias."""
+    from okami.observability import insights as _ins
+    rep = _ins.collect(workspace, days=days)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps(rep, ensure_ascii=False))
+        return
+    console.print(_ins.render(rep))
+
+
+@app.command("serve-mcp", help=_tr("cli.serve_mcp", _default="Serve Okami as an MCP server (sessions/history/memory) over stdio."))
+def serve_mcp(
+    agent: str = typer.Option("okami", "-a", "--agent", help=_tr("cli.serve_mcp.agent", _default="Agent whose home/sessions to expose.")),
+) -> None:
+    """Serve o Okami como servidor MCP (sessões/histórico/memória) via stdio — p/ Claude Code/Cursor."""
+    from okami.home import okami_home
+    from okami.integrations.mcp_serve import OkamiMcpServer
+    cfg = None
+    try:
+        cfg = _load()
+    except Exception:  # noqa: BLE001 — serve mesmo sem config completa
+        pass
+    home = okami_home()                              # default: casa global (onde moram as sessões)
+    try:
+        from okami.agents import load_agents
+        spec = load_agents().get(agent)
+        if spec:
+            home = spec.dir
+    except Exception:  # noqa: BLE001 — sem spec → usa a casa global
+        pass
+    OkamiMcpServer(home, cfg=cfg).serve_stdio()
+
+
 @app.command(help=_tr("cli.clean", _default="Disk cleanup: orphan locks + temp + audio + finished processes."))
 def clean(
     workspace: str = typer.Option(".", "-w", "--workspace"),
