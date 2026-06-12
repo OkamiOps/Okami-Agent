@@ -33,6 +33,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("move_path", "arquivo", danger="sensitive"),
     ToolSpec("copy_path", "arquivo", danger="sensitive"),
     ToolSpec("delete_path", "arquivo", danger="sensitive"),
+    ToolSpec("schedule_job", "automação", danger="sensitive"),
     ToolSpec("run_shell", "shell", tier="essential", danger="dangerous"),
     ToolSpec("process_start", "processo", tier="power", danger="dangerous"),
     ToolSpec("process_poll", "processo"),

@@ -9,6 +9,7 @@ from okami.core.tools.files import (
     RunShell, WriteFile,
 )
 from okami.core.tools.memory import FinishSetup, RecallMemory, RememberFact, RememberUser
+from okami.core.tools.schedule import ScheduleJob
 from okami.core.tools.process import (
     ProcessKill, ProcessList, ProcessLog, ProcessPoll, ProcessSignal, ProcessStart,
     ProcessWait, ProcessWrite,
@@ -20,6 +21,7 @@ def default_registry() -> dict[str, Tool]:
              MakeDir(), MovePath(), CopyPath(), DeletePath(), RunShell(),
              ProcessStart(), ProcessPoll(), ProcessWait(), ProcessLog(), ProcessKill(), ProcessList(),
              ProcessWrite(), ProcessSignal(),
+             ScheduleJob(),
              RememberFact(), RecallMemory(), RememberUser(), UseSkill(), ManageSkill(), Spawn(),
              Browse(), GenerateImage(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
