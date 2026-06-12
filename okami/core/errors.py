@@ -73,6 +73,14 @@ _PROVIDER_MAP: dict[str, FailureKind] = {
     "bad_request": FailureKind.BAD_REQUEST,
     "server_error": FailureKind.TRANSIENT,
     "unknown": FailureKind.UNKNOWN,
+    # razões expandidas (pesquisa #5 item 54) — o provider-layer já rotacionou/failover; aqui é o
+    # que sobra quando TUDO falhou: billing/suspenso/região precisam de humano, rede é transitório.
+    "billing": FailureKind.AUTH_PERMANENT,
+    "account_suspended": FailureKind.AUTH_PERMANENT,
+    "region_blocked": FailureKind.AUTH_PERMANENT,
+    "model_retired": FailureKind.NOT_FOUND,
+    "network": FailureKind.TRANSIENT,
+    "empty_response": FailureKind.TRANSIENT,
 }
 
 _SANDBOX = re.compile(r"sandbox|read-only|fora do workspace|path.?escape|bloquead|permission denied|operation not permitted", re.I)
@@ -112,6 +120,13 @@ _FRIENDLY = {
     "timeout": ("o modelo demorou demais p/ responder (e o fallback também). Tente de novo, ou use um "
                 "modelo mais rápido com /model."),
     "server_error": "o provedor teve um erro interno (e o fallback também). Tente de novo em instantes.",
+    "billing": ("a conta do provedor está sem crédito/cota (billing). Verifique o plano/saldo, "
+                "ou troque de modelo com /model."),
+    "network": "a conexão com o provedor caiu (rede). Verifique a internet e tente de novo.",
+    "model_retired": "esse modelo foi descontinuado pelo provedor. Escolha outro com /model.",
+    "account_suspended": "a conta no provedor está suspensa — resolva com o provedor antes de tentar de novo.",
+    "region_blocked": "o provedor não atende sua região p/ esse modelo. Escolha outro com /model.",
+    "empty_response": "o modelo devolveu resposta vazia repetidamente. Tente de novo ou troque com /model.",
 }
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tarfile
 import time
@@ -36,11 +37,10 @@ def record_skill_use(skills_dir, name: str, *, now: float | None = None) -> None
     e = data.setdefault(name, {"count": 0, "last_used": 0.0})
     e["count"] = int(e.get("count", 0)) + 1
     e["last_used"] = now if now is not None else time.time()
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(data), encoding="utf-8")
-    except OSError:
-        pass
+    e.setdefault("state", "active")          # usar revive: nunca fica 'stale' enquanto é usada
+    if e.get("state") == "stale":
+        e["state"] = "active"
+    _write_usage_atomic(p, data)
 
 
 def _usage(skills_dir) -> dict:
@@ -157,6 +157,60 @@ def archive_unused(skills_dir, *, archive_days: int = 90, now: float | None = No
     return done
 
 
+def _write_usage_atomic(p: Path, data: dict) -> None:
+    """Escrita ATÔMICA do .usage.json (tmp + os.replace): um crash no meio não trunca o arquivo
+    (era write_text cru — bug do review #8). Best-effort."""
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def _set_state(skills_dir, name: str, state: str) -> None:
+    """Persiste o estado de lifecycle no .usage.json (best-effort, escrita atômica)."""
+    p = Path(skills_dir) / USAGE_FILE
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault(name, {"count": 0, "last_used": 0.0})["state"] = state
+    _write_usage_atomic(p, data)
+
+
+def lifecycle_pass(skills_dir, *, stale_days: int = 30, archive_days: int = 90,
+                   now: float | None = None) -> dict:
+    """Passada de LIFECYCLE pura (sem LLM, pesquisa #5 item 44 — tier semanal do Hermes):
+    30d sem uso → STALE (persistido no .usage.json; skill usada de novo volta a active),
+    90d → ARCHIVE (move p/ .archive/, reversível). Só toca skill auto-criada e não-pinada.
+    Retorna {"active": [...], "stale": [...], "archived": [...]}."""
+    from okami.skills import load_skills
+    now = now if now is not None else time.time()
+    usage = _usage(skills_dir)
+    out: dict[str, list[str]] = {"active": [], "stale": [], "archived": []}
+    for sk in load_skills(Path(skills_dir)):
+        if not is_curatable(sk):
+            continue
+        last = float((usage.get(sk.name) or {}).get("last_used") or 0.0)
+        if not last:
+            try:
+                last = sk.path.stat().st_mtime           # nunca usada → idade do arquivo
+            except OSError:
+                last = now
+        idle = now - last
+        if idle > archive_days * _DAY:
+            if _archive_skill(skills_dir, sk.name):
+                _set_state(skills_dir, sk.name, "archived")
+                out["archived"].append(sk.name)
+            continue
+        state = "stale" if idle > stale_days * _DAY else "active"
+        _set_state(skills_dir, sk.name, state)
+        out[state].append(sk.name)
+    return out
+
+
 # ---------------------------------------------------------------- pin (intocável pelo curator)
 def set_pinned(skills_dir, name: str, pinned: bool) -> bool:
     import yaml as _yaml
@@ -202,6 +256,131 @@ def agent_skill_digest(skills_dir) -> str:
         if is_curatable(sk):
             lines.append(f"- {sk.name}: {(sk.description or '')[:80]}")
     return "\n".join(lines) or "(nenhuma)"
+
+
+# ---------------------------------------------------------------- merge com CONTRATO YAML (item 44)
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,47}$")   # mesmo contrato do manage_skill
+_YAML_FENCE = re.compile(r"```(?:ya?ml)?\s*(.*?)```", re.DOTALL)
+
+_PLAN_PROMPT = """Você é o CURATOR das skills auto-criadas. Proponha um PLANO de consolidação:
+funda skills estreitas/duplicadas numa umbrella de CLASSE e arquive narrativa de sessão única.
+"Centenas de skills estreitas = FRACASSO da biblioteca." "Nada a consolidar" é resposta válida
+(devolva merges: [] e archive: []).
+
+Responda APENAS com YAML neste contrato (nada fora do YAML):
+
+merges:
+  - umbrella: <nome-kebab-de-classe>
+    description: <1 linha>
+    absorb: [<skill-existente>, ...]
+    body: |
+      ## Quando usar
+      ...
+      ## Como
+      ...
+archive: [<skill-de-narrativa-unica>, ...]
+
+--- SKILLS AUTO-CRIADAS ---
+{skills}
+--- FIM ---"""
+
+
+def validate_plan(plan, skills_dir) -> tuple[dict, list[str]]:
+    """Valida o plano contra o CONTRATO antes de aplicar (fail-closed). Retorna (plano_normalizado,
+    erros). Erros ≠ [] → NÃO aplique. Regras: umbrella kebab nível-classe; absorb/archive só skills
+    EXISTENTES e curáveis (auto-criadas, não-pinadas); body de umbrella com substância (≥20 chars)."""
+    from okami.skills import load_skills
+    errors: list[str] = []
+    if not isinstance(plan, dict):
+        return {"merges": [], "archive": []}, ["plano não é um mapeamento YAML"]
+    all_skills = load_skills(Path(skills_dir))
+    curatable = {sk.name for sk in all_skills if is_curatable(sk)}
+    protected = {sk.name for sk in all_skills if not is_curatable(sk)}   # pinada/curada/instalada
+    norm: dict = {"merges": [], "archive": []}
+    for i, m in enumerate(plan.get("merges") or []):
+        if not isinstance(m, dict):
+            errors.append(f"merges[{i}]: não é um mapeamento")
+            continue
+        umb = str(m.get("umbrella", "")).strip()
+        if not _NAME_RE.match(umb) or umb.count("-") > 3:
+            errors.append(f"merges[{i}]: umbrella inválida ({umb!r}) — kebab-case curto, nível de classe")
+        elif umb in protected:                         # umbrella não pode sobrescrever skill protegida (#9)
+            errors.append(f"merges[{i}]: umbrella '{umb}' colide com skill protegida (pinada/curada) — "
+                          "escolha outro nome")
+        absorb = [str(a).strip() for a in (m.get("absorb") or [])]
+        if not absorb:
+            errors.append(f"merges[{i}]: absorb vazio — umbrella sem skills a fundir")
+        for a in absorb:
+            if a not in curatable:
+                errors.append(f"merges[{i}]: '{a}' não existe ou não é curável (pinada/curada)")
+        body = str(m.get("body", "")).strip()
+        if len(body) < 20:
+            errors.append(f"merges[{i}]: body curto demais — escreva o procedimento da umbrella")
+        norm["merges"].append({"umbrella": umb, "description": str(m.get("description", umb))[:120],
+                               "absorb": absorb, "body": body})
+    for a in (plan.get("archive") or []):
+        a = str(a).strip()
+        if a not in curatable:
+            errors.append(f"archive: '{a}' não existe ou não é curável (pinada/curada)")
+        norm["archive"].append(a)
+    return norm, errors
+
+
+def apply_plan(skills_dir, plan, *, dry_run: bool = False) -> dict:
+    """Aplica um plano JÁ VALIDADO: snapshot → escreve umbrellas (origin: agent) → arquiva absorvidas
+    + archive (reversível). dry_run = só reporta. Retorna {"created": [...], "archived": [...]}."""
+    import yaml as _yaml
+    summary = {"created": [m["umbrella"] for m in plan.get("merges") or []],
+               "archived": sorted({a for m in (plan.get("merges") or []) for a in m["absorb"]}
+                                  | set(plan.get("archive") or []))}
+    if dry_run:
+        return summary
+    snapshot(skills_dir)
+    root = Path(skills_dir)
+    for m in plan.get("merges") or []:
+        d = root / m["umbrella"]
+        d.mkdir(parents=True, exist_ok=True)
+        meta = {"name": m["umbrella"], "description": m["description"], "origin": "agent",
+                "merged_from": list(m["absorb"])}      # proveniência do merge (auditável)
+        (d / "SKILL.md").write_text("---\n" + _yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
+                                    + "---\n" + m["body"].rstrip() + "\n", encoding="utf-8", newline="\n")
+    for name in summary["archived"]:
+        if _archive_skill(skills_dir, name):
+            _set_state(skills_dir, name, "archived")
+    return summary
+
+
+def consolidate_with_contract(cfg, skills_dir, *, dry_run: bool = False, emit=lambda m: None) -> dict:
+    """Merge model-driven FAIL-CLOSED: pede o PLANO (YAML) ao modelo auxiliar (task 'curator'),
+    valida contra o contrato e só aplica se passar. Plano inválido/YAML quebrado → nada muda.
+    Retorna {"applied": bool, "errors": [...], "summary": {...}}."""
+    import yaml as _yaml
+    digest = agent_skill_digest(skills_dir)
+    if digest == "(nenhuma)":
+        return {"applied": False, "errors": [], "summary": {}}
+    from okami.llm.aux import aux_complete
+    try:
+        out = aux_complete(cfg, "curator", [{"role": "user", "content": _PLAN_PROMPT.format(skills=digest)}])
+    except Exception as e:  # noqa: BLE001 — LLM indisponível → passada pulada, nada muda
+        emit(f"(consolidação pulada: {e})")
+        return {"applied": False, "errors": [str(e)], "summary": {}}
+    raw = (out or "").strip()
+    fence = _YAML_FENCE.search(raw)
+    if fence:
+        raw = fence.group(1)
+    try:
+        plan = _yaml.safe_load(raw) or {}
+    except _yaml.YAMLError as e:
+        emit(f"(plano YAML inválido: {e})")
+        return {"applied": False, "errors": [f"YAML inválido: {e}"], "summary": {}}
+    norm, errors = validate_plan(plan, skills_dir)
+    if errors:
+        emit("(plano reprovado no contrato: " + "; ".join(errors[:3]) + ")")
+        return {"applied": False, "errors": errors, "summary": {}}
+    if not norm["merges"] and not norm["archive"]:
+        return {"applied": False, "errors": [], "summary": {}}      # "nada a consolidar" é válido
+    summary = apply_plan(skills_dir, norm, dry_run=dry_run)
+    return {"applied": not dry_run, "errors": [], "summary": summary}
 
 
 def run_consolidation(cfg, workspace, skills_dir, *, model=None, provider=None, emit=lambda m: None) -> None:

@@ -15,7 +15,7 @@ from okami.core import approval
 from okami.core.harness.models import Budget, Generate, Step, Task, TaskState
 from okami.core.harness.parsing import (
     FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, _actions_from_tool_calls, action_schema,
-    parse_action, parse_actions, prose_outside_action,
+    detect_malformed, parse_action, parse_actions, prose_outside_action, truncated_action_name,
 )
 from okami.core.harness.prompt import (
     _TOOL_RESULT_BUDGET, _user_start, build_system_prompt, check_exit, format_observation,
@@ -180,7 +180,8 @@ class Harness:
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
                                open_fs=open_fs, allow_paths=list(allow_paths or []),
-                               agent_home=agent_home, stage_writes=stage_writes)
+                               agent_home=agent_home, stage_writes=stage_writes,
+                               registry=self.registry)   # tool_search: schema sob demanda (item 27)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
@@ -209,10 +210,32 @@ class Harness:
         self._batch: list[Action] = []                 # leituras restantes da MESMA geração (batch — Hermes)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
+        self._truncated_action_reemits = 0             # teto de re-emissões de AÇÃO truncada (review #2b)
         from okami.core.harness.loopguard import ProgressTracker
         self._progress = ProgressTracker()             # não-progresso por OUTPUT (OpenClaw): poll/read que não muda
         self._stall_nudged: set[str] = set()           # já avisei que ESTA tool não anda? (1x por tool)
         self._MAX_SAME_OUTPUT = 2                       # 3ª saída idêntica seguida da mesma tool → nudge
+        self._low_gain_compactions = 0                 # anti-thrashing: compactações seguidas com <10% de ganho
+        self._obs_chars = 0                            # teto AGREGADO de tool-output do turno (Hermes: 200K)
+
+    def _note_compact_gain(self, before: int, after: int) -> bool:
+        """Anti-thrashing de compactação (pesquisa #5 item 2): compactação PESADA que rende <10% não
+        está resolvendo — o contexto está saturado de conteúdo incompressível (tail gigante). Duas
+        seguidas = thrash; True = pare de insistir e encerre honesto sugerindo /new."""
+        if before <= 0 or (before - after) >= 0.10 * before:
+            self._low_gain_compactions = 0
+            return False
+        self._low_gain_compactions += 1
+        return self._low_gain_compactions >= 2
+
+    def _append_user_note(self, note: str) -> None:
+        """Nota do harness como mensagem 'user', FUNDIDA na última se ela já for user — Anthropic
+        exige alternância user/assistant (duas 'user' seguidas = erro de API)."""
+        if self.messages and self.messages[-1].get("role") == "user":
+            last = self.messages[-1]
+            self.messages[-1] = {**last, "content": (last.get("content") or "") + "\n\n" + note}
+        else:
+            self.messages.append({"role": "user", "content": note})
 
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
@@ -333,9 +356,18 @@ class Harness:
                 self.messages, _saved = _compaction.prune_observations(self.messages)
                 if _saved:
                     self._emit("compact", promoted=0, pruned_chars=_saved)
-                if _compaction.estimate_chars(self.messages) > self.budget.max_context_chars:
+                _before = _compaction.estimate_chars(self.messages)
+                if _before > self.budget.max_context_chars:
                     self.messages, promoted = _compaction.compact(self.messages, self.memory)
                     self._emit("compact", promoted=promoted)
+                    # Anti-thrashing (pesquisa #5 item 2): 2 compactações seguidas rendendo <10% =
+                    # contexto saturado — compactar a cada turno é thrash. Encerra honesto (com
+                    # salvage de entrega parcial via _fail) sugerindo /new.
+                    if self._note_compact_gain(_before, _compaction.estimate_chars(self.messages)):
+                        self._emit("compact_thrash", before=_before)
+                        return self._fail(t, "a compactação não reduz mais o contexto (<10% de ganho "
+                                             "2x seguidas) — contexto saturado. Conclua aqui e abra "
+                                             "uma sessão nova com /new.")
             # LOTE (batch — Hermes roda VÁRIAS por turno): se sobraram LEITURAS da mesma geração, roda a
             # próxima SEM nova chamada ao modelo — corta os round-trips (o gargalo de velocidade vs Hermes).
             # Só leitura entra no lote; ação que muta/encerra/pede aprovação segue 1-por-turno.
@@ -361,6 +393,12 @@ class Harness:
                         self.messages, promoted = _compaction.compact(self.messages, self.memory, keep_tail=3)
                         if _compaction.estimate_chars(self.messages) < before:
                             self._emit("compact", promoted=promoted)
+                            # Continuação distinta p/ QUEDA NO MEIO (pesquisa #5 item 3): sem isto o
+                            # modelo re-gerado tende a recomeçar do zero e repetir trabalho já feito.
+                            self._append_user_note(
+                                "[A geração anterior FALHOU no meio (rede/provider) e foi descartada. "
+                                "Retome do estado atual — NÃO recomece do zero nem repita trabalho já "
+                                "concluído nos passos anteriores.]")
                             continue              # re-gera com contexto MENOR (mais rápido, sem trocar modelo)
                     # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
                     if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
@@ -382,13 +420,36 @@ class Harness:
                 # LENGTH-CONTINUATION (Hermes): resposta CORTADA pelo limite (finish_reason='length') →
                 # continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar a entrega pela metade.
                 if getattr(comp, "finish_reason", "") == "length" and len(self._truncated_parts) < self._MAX_LENGTH_CONT:
+                    # Continuação DISTINTA por tipo de corte (pesquisa #5 item 3): TOOL de args grandes
+                    # (write_file etc.) truncada não pode ser "continuada do meio" (concatenar JSON
+                    # cortado é loteria) — descarta o parcial e RE-EMITE menor. Já respond/task_complete
+                    # truncado é um RELATÓRIO longo: continuar preserva o conteúdo (re-emitir perderia).
+                    _tname = truncated_action_name(comp.text)
+                    if _tname and _tname not in _REPORT_META:
+                        # TETO próprio (review #2b): re-emitir não acumula em _truncated_parts, então o
+                        # cap de length não protegeria aqui — sem isto o modelo teimoso spinava até o
+                        # backstop de turnos. Esgotou as tentativas → deixa cair no fluxo normal (a ação
+                        # truncada não parseia → detect_malformed ENSINA / vira violação).
+                        self._truncated_action_reemits += 1
+                        if self._truncated_action_reemits <= self._MAX_LENGTH_CONT:
+                            self._emit("length_continue", part=0, truncated_action=True)
+                            self.messages.append({"role": "user", "content":
+                                "[Sua AÇÃO (json) foi CORTADA pelo limite de tamanho — o JSON não fechou. "
+                                "NÃO repita igual nem tente continuar do meio: re-emita a ação COMPLETA com "
+                                "args menores — quebre conteúdo grande em pedaços de <8K chars (ex.: "
+                                "write_file da primeira parte, depois edit_file p/ anexar o resto).]"})
+                            continue
                     self._truncated_parts.append(comp.text)
                     self._emit("length_continue", part=len(self._truncated_parts))
                     self.messages.append({"role": "user", "content":
                         "[Sua resposta foi CORTADA pelo limite de tamanho. Continue EXATAMENTE de onde parou, "
-                        "SEM repetir o que já escreveu, e TERMINE a entrega. Se estava no meio do bloco json de "
-                        "ação, complete-o.]"})
+                        "SEM repetir o que já escreveu, e TERMINE a entrega. Se estava no meio do bloco json "
+                        "de ação, complete-o.]"})
                     continue
+                if self._truncated_parts and parse_actions(comp.text):
+                    # pediu "continue" mas veio uma ação COMPLETA standalone → o modelo re-emitiu do
+                    # zero; concatenar duplicaria/quebraria o JSON — usa a fresca e descarta o parcial.
+                    self._truncated_parts = []
                 text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
                 self._truncated_parts = []             # episódio de truncamento fechado → texto completo
                 _acts = _actions_from_tool_calls(comp.tool_calls) or parse_actions(text)
@@ -417,7 +478,10 @@ class Harness:
                 self._consecutive_violations += 1
                 self._stats["violations"] += 1
                 hint = ""
-                if action is None and FUTURE_INTENT.search(text):
+                _diag = detect_malformed(text) if action is None else None
+                if _diag:                                  # JSON inválido/truncado → erro sintético que ENSINA
+                    hint = f" {_diag}"
+                elif action is None and FUTURE_INTENT.search(text):
                     hint = " Você descreveu intenção em vez de agir."
                 elif action is not None:                   # nome de tool ALUCINADO e sem reparo → diz quais existem
                     hint = (f" '{action.tool}' não existe. Ferramentas REAIS: "
@@ -597,6 +661,10 @@ class Harness:
             _empty = res.output.lstrip().startswith(("(nada", "(vazio"))
             _explored = res.ok and not _empty and (action.tool in _BATCHABLE_READONLY
                                                     or (action.tool == "run_shell" and not res.effect))
+            if res.effect or _explored:                # PROGRESSO real → zera o contador de anti-thrash de
+                self._low_gain_compactions = 0         # compactação (senão 2 compactações de baixo ganho
+                #                                        DISTANTES, num trabalho longo legítimo, matavam o
+                #                                        turno — review #1: o thrash só vale SEM progresso).
             self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
             if self._steps_without_effect >= self.budget.stall_limit:
                 self._emit("stall", steps=self._steps_without_effect)
@@ -608,14 +676,20 @@ class Harness:
                 self._steps_without_effect = 0
 
             obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
-            if len(res.output) > _TOOL_RESULT_BUDGET:
+            # Teto AGREGADO do turno (pesquisa #5 item 15): estourou → até output médio (>2K) é
+            # persistido, com preview curto (1K). O teto por-resultado sozinho deixava N resultados
+            # médios inundarem o contexto.
+            _over_turn = self._obs_chars > self.budget.max_turn_tool_chars
+            _limit = 2000 if _over_turn else _TOOL_RESULT_BUDGET
+            if len(res.output) > _limit:
                 saved = self._persist_large_output(step_n, res.output)
                 from okami.core.harness.persisted import persisted_output_wrapper
                 wrapped = persisted_output_wrapper(saved, len(res.output),
-                                                   res.output[:_TOOL_RESULT_BUDGET])
+                                                   res.output[:1000 if _over_turn else _TOOL_RESULT_BUDGET])
                 obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
-            self.messages.append({"role": "user", "content": format_observation(
-                step_n, action.tool, obs_res, workspace=self.ctx.workspace)})
+            _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
+            self._obs_chars += len(_obs)
+            self.messages.append({"role": "user", "content": _obs})
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
 

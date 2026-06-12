@@ -48,6 +48,10 @@ class Budget:
     #                              cobrar como loop — esperar um build/teste lento NÃO é loop inútil, é I/O
     max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos
     max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
+    # Teto AGREGADO de tool-output do turno (Hermes: 200K chars). O teto por-resultado (8K) não
+    # impede N resultados médios de inundar o contexto; estourou o agregado → outputs passam a ser
+    # persistidos com preview CURTO mesmo abaixo do teto individual.
+    max_turn_tool_chars: int = 200_000
     # NÃO é teto de relógio do turno (isso matava trabalho longo legítimo — review de 1M linhas, pytest de 10min).
     # É um detector de TRAVAMENTO: tempo MÁXIMO sem CONCLUIR um passo. Reseta a cada passo executado, então
     # durante atividade nunca dispara — só quando a agente fica de fato parada (provider pendurado/spinning).

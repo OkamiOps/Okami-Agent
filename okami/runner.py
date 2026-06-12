@@ -187,9 +187,10 @@ def run_task(
                       embedder=embedder, config=cfg.memory)
     core_block = memfiles.core_block(home, cfg.memory.get("files", {}))
 
-    from okami.core.tool_policy import filter_registry
+    from okami.core.tool_policy import filter_registry, prune_unavailable
     registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
                                sandbox=getattr(cfg, "sandbox", None))   # #P1: gate de isolamento no worker
+    registry = prune_unavailable(registry, emit=emit)   # check_fn (item 27): dep/credencial faltando → sai
     mcp_clients = []
     servers = (cfg.mcp or {}).get("servers")
     if servers:

@@ -141,6 +141,13 @@ class GenerateImage(Tool):
     args_schema = {"prompt": "o que gerar", "path": "saída (.png)", "references": "(opc) lista de imagens base"}
     required = ("prompt", "path")
 
+    def check(self):
+        """Depende da assinatura Codex — sem login, a tool sai do registro (check_fn, item 27)."""
+        from okami.llm import oauth
+        if not oauth.codex_access_token():
+            return "sem login Codex (rode: okami login codex)"
+        return None
+
     def run(self, args, ctx):
         try:
             p = _safe_path(ctx, args["path"])

@@ -13,7 +13,8 @@ from okami.core.tool_registry import spec
 # Repertório que NENHUM canal remoto deve ter por padrão: shell e gestão de processo + spawn.
 # (process_start/run_shell já caem pelo teto 'dangerous', mas listamos explícito p/ clareza + cobrir
 #  process_write/signal/kill, que são 'sensitive' e passariam pelo teto.)
-_REMOTE_DENY = {"run_shell", "process_start", "process_write", "process_signal", "process_kill", "spawn"}
+_REMOTE_DENY = {"run_shell", "execute_code", "process_start", "process_write", "process_signal",
+                "process_kill", "spawn"}
 # Worker (Paperclip): EXECUTA (run_shell/process_start sob sandbox+defer), mas não GERENCIA processo
 # de terceiro nem recursiona (process_write/signal/kill, spawn fora). #P1.
 _WORKER_DENY = {"process_write", "process_signal", "process_kill", "spawn"}
@@ -121,6 +122,23 @@ def denied(surface: str, name: str, *, config=None, sandbox=None) -> bool:
     if cap and s and _DANGER_RANK.get(s.danger, 0) > _DANGER_RANK[cap]:
         return True
     return False
+
+
+def prune_unavailable(registry: dict, *, emit=lambda m: None) -> dict:
+    """check_fn de disponibilidade (pesquisa #5 item 27): tool cujo `check()` devolve uma razão
+    (dep/credencial faltando) SAI do registro — o modelo nem a vê, em vez de chamá-la e falhar.
+    check() que estoura = indisponível (fail-closed do check, fail-open da sessão: o resto segue)."""
+    out: dict = {}
+    for name, tool in registry.items():
+        try:
+            reason = tool.check() if hasattr(tool, "check") else None
+        except Exception as e:  # noqa: BLE001 — um check quebrado não derruba a sessão
+            reason = f"check falhou: {e}"
+        if reason:
+            emit(f"🔌 tool '{name}' indisponível: {reason}")
+            continue
+        out[name] = tool
+    return out
 
 
 def filter_registry(registry: dict, surface: str = "cli", *, config=None, sandbox=None) -> dict:

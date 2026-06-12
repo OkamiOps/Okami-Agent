@@ -75,6 +75,8 @@ def _actions_from_tool_calls(tool_calls) -> list[Action]:
         try:
             args = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except json.JSONDecodeError:
+            if raw.rstrip() and not raw.rstrip().endswith(("}", "]")):
+                continue                             # args TRUNCADOS (stream cortou) → NÃO executa parcial
             args = {}
         out.append(Action(name, args if isinstance(args, dict) else {}))
     return out
@@ -117,6 +119,61 @@ def parse_actions(text: str) -> list[Action]:
             elif isinstance(d.get("tool"), str):
                 out.append(Action(d["tool"], d.get("args") or {}))
     return out
+
+
+def _unclosed_tail(text: str) -> str:
+    """O trecho do texto a partir do primeiro `{` que NÃO fecha (candidato a JSON truncado). '' se
+    todos os braces fecham."""
+    s = text or ""
+    for obj in _balanced_json_objects(s):            # remove os objetos COMPLETOS; sobra o truncado
+        s = s.replace(obj, " ", 1)
+    i = s.find("{")
+    return s[i:] if i >= 0 else ""
+
+
+def truncated_action_tail(text: str) -> bool:
+    """O texto termina no MEIO de um JSON de ação (cortado por limite/queda)? Detecta `{` aberto sem
+    fechar com cara de ação no rabo do texto — caso em que executar/continuar o parcial seria loteria.
+    O harness NUNCA executa um JSON truncado (ele nem parseia); isto serve p/ ENSINAR em vez de só
+    rejeitar genérico, e p/ o prompt de continuação certo ("re-emita menor", não "continue do meio")."""
+    tail = _unclosed_tail(text)
+    return bool(tail) and ('"tool"' in tail or tail.lstrip().startswith('{"'))
+
+
+_TOOL_NAME = re.compile(r'"tool"\s*:\s*"([^"]*)')
+
+
+def truncated_action_name(text: str) -> str | None:
+    """Nome da tool no JSON TRUNCADO do fim do texto (None se não termina truncado, ou se o corte
+    veio antes do nome). Decide a continuação certa: respond/task_complete truncado → CONTINUAR
+    (preserva o relatório longo); write_file gigante → re-emitir com args MENORES."""
+    tail = _unclosed_tail(text)
+    if not tail or not ('"tool"' in tail or tail.lstrip().startswith('{"')):
+        return None
+    m = _TOOL_NAME.search(tail)
+    return (m.group(1) or None) if m else None
+
+
+def detect_malformed(text: str) -> str | None:
+    """Diagnóstico que ENSINA (pesquisa #5 item 8, Hermes _repair_tool_call) quando nenhuma ação
+    parseou mas o modelo claramente TENTOU emitir uma: JSON truncado → re-emitir menor (sem executar
+    o parcial); JSON inválido → erro sintético com o motivo exato. None = não parece tentativa de ação."""
+    if truncated_action_tail(text):
+        return ("Seu JSON de ação foi TRUNCADO (abre '{' e não fecha). NÃO re-emita igual: reduza os "
+                "args (quebre conteúdo grande em pedaços menores) e reenvie a ação COMPLETA.")
+    candidates: list[str] = []
+    for blk in _FENCE.findall(text or ""):
+        candidates += _balanced_json_objects(blk) or [blk.strip()]
+    for raw in candidates:
+        if not raw or '"tool"' not in raw:
+            continue
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError as e:
+            return (f"Seu bloco json de ação é INVÁLIDO ({e.msg}, linha {e.lineno}, coluna {e.colno}). "
+                    "Regras: aspas DUPLAS em chaves e strings, sem comentários, sem vírgula sobrando — "
+                    'um objeto {"tool": "...", "args": {...}}. Reenvie corrigido.')
+    return None
 
 
 def prose_outside_action(text: str) -> str:

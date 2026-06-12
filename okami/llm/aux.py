@@ -6,7 +6,7 @@ fundo roteando essas tarefas p/ um modelo barato. Config (okami.yaml):
 
   auxiliary:
     default: {provider: lmstudio}                  # fallback p/ toda tarefa de fundo
-    distill: {provider: lmstudio, model: qwen-7b}  # por tarefa: distill | review | moderator | approval
+    distill: {provider: lmstudio, model: qwen-7b}  # por tarefa: distill | review | compress | moderator | approval
 
 Resolução: auxiliary.<task> → auxiliary.default → (None, None) = segue no modelo principal.
 Config errada (provider inexistente) NUNCA quebra o fluxo — só cai no principal.
@@ -23,3 +23,11 @@ def aux_for(cfg, task: str) -> tuple[str | None, str | None]:
         return None, None                       # provider inexistente → fail-open pro principal
     model = entry.get("model")
     return (provider or None), (model or None)
+
+
+def aux_complete(cfg, task: str, messages: list[dict], **kw) -> str:
+    """Chamada de FUNDO já roteada: resolve o auxiliar da `task` e completa. É o helper único p/
+    compress (resumo de conversa), moderator (grupo), etc. — fail-open pro modelo principal."""
+    from okami.llm import providers as prov
+    provider, model = aux_for(cfg, task)
+    return prov.complete_messages(cfg, messages, provider=provider, model=model, **kw)

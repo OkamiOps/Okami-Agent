@@ -40,7 +40,8 @@ def prune_observations(messages: list[dict], *, keep_tail: int = 6,
         if not c.startswith(_OBS_PREFIX) or len(c) < min_chars:
             continue
         header, _, body = c.partition("\n")
-        h = hashlib.md5(body.encode("utf-8", "ignore")).hexdigest()
+        # MD5 só p/ DEDUP de saídas idênticas (não é contexto de segurança) → usedforsecurity=False
+        h = hashlib.md5(body.encode("utf-8", "ignore"), usedforsecurity=False).hexdigest()
         if h in newest:
             dup[i] = newest[h]
         else:
@@ -89,12 +90,20 @@ def compact(messages: list[dict], memory: Memory | None, *,
                 continue
             memory.write(item)
             distilled += 1
-        note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas saíram do contexto; "
-                f"{distilled} fato(s) durável(is) foram DESTILADOS à memória (recall_memory). "
-                "O histórico bruto continua na sessão — nada foi perdido. Continue.")
+        body = (f"{len(head)} mensagens antigas saíram do contexto; {distilled} fato(s) durável(is) "
+                "foram DESTILADOS à memória (recall_memory). O histórico bruto continua na sessão — "
+                "nada foi perdido.")
     else:
-        note = (f"RESUMO (auto-compaction): {len(head)} mensagens antigas saíram do contexto "
-                "(sem backend de memória ativo; histórico segue na sessão). Continue.")
+        body = (f"{len(head)} mensagens antigas saíram do contexto (sem backend de memória ativo; "
+                "histórico segue na sessão).")
+    # ANTI-SEQUESTRO (Hermes context_compressor): o resumo NÃO pode ler como instrução/TODO ativo —
+    # um snapshot que diz "continue implementando X" sequestrava o turno depois de um "para" do usuário.
+    # Título de snapshot + regra explícita de precedência + marcador de fim.
+    note = ("[COMPACTAÇÃO DE CONTEXTO (auto-compaction) — SNAPSHOT HISTÓRICO, REFERÊNCIA APENAS]\n"
+            f"{body}\n"
+            "Este snapshot NÃO é instrução nem lista de pendências: a última mensagem do usuário "
+            'VENCE sempre; um "para"/"desfaz" dele encerra qualquer trabalho descrito aqui.\n'
+            "[FIM DO SNAPSHOT — siga a conversa atual]")
     # A nota é 'user'. Se tail[0] também for 'user', sairiam DUAS 'user' seguidas — OpenAI tolera, mas
     # Anthropic/Claude EXIGE alternância (erro de API). Funde a nota no 1º do tail nesse caso.
     if tail and tail[0].get("role") == "user":

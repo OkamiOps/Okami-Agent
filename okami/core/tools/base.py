@@ -124,6 +124,7 @@ class ToolContext:
     allow_paths: list = field(default_factory=list)  # pastas extras liberadas além do workspace (config tools.allow_paths)
     agent_home: Path | None = None  # CASA do agente (memória/identidade/genesis) — ≠ workspace (onde ele MEXE)
     stage_writes: bool = False  # escrita de memória vai pra FILA de aprovação (review/background c/ write_approval)
+    registry: dict | None = None  # o registro de tools da sessão (p/ tool_search: schema sob demanda)
 
     @property
     def home(self) -> Path:
@@ -159,6 +160,12 @@ class Tool:
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:  # pragma: no cover
         raise NotImplementedError
+
+    def check(self) -> str | None:
+        """Disponibilidade (check_fn — pesquisa #5 item 27): None = utilizável; string = RAZÃO de
+        estar indisponível (dep/credencial faltando) → a tool sai do registro ANTES do turno, em
+        vez de falhar na cara do modelo. Default: sempre disponível."""
+        return None
 
     def to_openai_schema(self) -> dict:
         """Schema function-calling (OpenAI) desta tool — p/ tool-calls NATIVO (§3.5). O protocolo

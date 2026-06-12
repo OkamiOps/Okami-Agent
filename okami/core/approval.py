@@ -178,6 +178,16 @@ def classify(tool: str, args: dict) -> Sensitive | None:
         from okami.core.tools.base import _SENSITIVE_PATH   # MESMA cobertura do shell p/ ESCRITA: id_rsa,
         if _SENSITIVE_PATH.search(path):                    # .ssh, .aws, history, gitconfig… (audit: write/edit
             return Sensitive(f"escrever em caminho sensível: {path}", "secret_file", "high")  # ignorava-os)
+    if tool == "apply_patch":                            # patch multi-arquivo: CADA path passa na trava de escrita
+        from okami.core.tools.base import _SENSITIVE_PATH
+        from okami.core.tools.patch import patch_paths
+        for path in patch_paths(str(args.get("patch", ""))):
+            path = path.replace("\\", "/")
+            for rx, cat, risk in _FILE_RULES:
+                if rx.search(path):
+                    return Sensitive(f"patch toca {cat}: {path}", cat, risk)
+            if _SENSITIVE_PATH.search(path):
+                return Sensitive(f"patch toca caminho sensível: {path}", "secret_file", "high")
     if tool in ("run_shell", "process_start"):           # process_start = shell em background → mesma trava
         cmd_raw = str(args.get("cmd", ""))
         if _RUNS_QUOTED.search(cmd_raw):                 # sh -c '…' / eval: aspas escondem COMANDO → checa cru
@@ -191,6 +201,12 @@ def classify(tool: str, args: dict) -> Sensitive | None:
                 return Sensitive(f"{cat}: {cmd_raw[:100]}", cat, risk)
     if tool == "manage_skill":                           # cria/edita skill que ENTRA no prompt → sensível
         return Sensitive(f"criar/editar skill: {args.get('name', '?')}", "skill_write", "medium")
+    if tool == "execute_code":                           # código com rede/processo/deleção → go/no-go
+        from okami.core.tools.execute_code import code_is_dangerous
+        code = str(args.get("code", ""))
+        if code_is_dangerous(code):
+            return Sensitive(f"código com padrão perigoso (rede/processo/deleção): {code[:90]}",
+                             "execute_code_risk", "high")
     return None
 
 

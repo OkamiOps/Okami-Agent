@@ -20,6 +20,7 @@ def curator_main(
     yes: bool = typer.Option(False, "--yes", "-y", help=_tr("cli.curator.yes", _default="Don't ask.")),
     no_llm: bool = typer.Option(False, "--no-llm", help=_tr("cli.curator.no_llm", _default="Deterministic archival only (no model-driven consolidation).")),
     archive_days: int = typer.Option(90, "--archive-days", help=_tr("cli.curator.archive_days", _default="Archive auto-created skill unused for > N days.")),
+    stale_days: int = typer.Option(30, "--stale-days", help=_tr("cli.curator.stale_days", _default="Mark auto-created skill unused for > N days as STALE (persisted state).")),
 ) -> None:
     """Roda o curator (sem subcomando). Use `okami curator rollback` p/ desfazer a última passada."""
     if ctx.invoked_subcommand is not None:
@@ -48,13 +49,22 @@ def curator_main(
     snap = cur.snapshot(root)
     if snap:
         console.print(f"[dim]📸 snapshot: {snap.name} (rollback: okami curator rollback)[/dim]")
-    archived = cur.archive_unused(root, archive_days=archive_days)
-    if archived:
-        console.print(f"[green]📦 arquivadas {len(archived)}:[/green] {', '.join(archived)}")
+    # Lifecycle SEM LLM (pesquisa #5 item 44): 30d→STALE (persistido no .usage.json), 90d→archive.
+    life = cur.lifecycle_pass(root, stale_days=stale_days, archive_days=archive_days)
+    if life["stale"]:
+        console.print(f"[yellow]💤 stale ({stale_days}d sem uso):[/yellow] {', '.join(life['stale'])}")
+    if life["archived"]:
+        console.print(f"[green]📦 arquivadas {len(life['archived'])}:[/green] {', '.join(life['archived'])}")
     if not no_llm and n_agent:
-        console.print("[dim]🧠 consolidação model-driven (funde estreitas em umbrellas)…[/dim]")
+        console.print("[dim]🧠 consolidação model-driven (plano YAML validado por contrato)…[/dim]")
         cfg = _load()
-        cur.run_consolidation(cfg, ".", root, emit=lambda m: console.print(f"[dim]{m}[/dim]"))
+        out = cur.consolidate_with_contract(cfg, root, emit=lambda m: console.print(f"[dim]{m}[/dim]"))
+        if out["applied"]:
+            s = out["summary"]
+            console.print(f"[green]🧩 umbrellas: {', '.join(s['created']) or '—'} · "
+                          f"absorvidas/arquivadas: {len(s['archived'])}[/green]")
+        elif out["errors"]:
+            console.print("[yellow]plano reprovado no contrato — nada mudou (fail-closed).[/yellow]")
     console.print("[green]✓ curator concluído.[/green]")
 
 

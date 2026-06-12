@@ -124,7 +124,12 @@ def llm_moderator(cfg, provider: str | None = None) -> Callable:
         schema = {"type": "object",
                   "properties": {"speaker": {"type": "string", "enum": [m.id for m in candidates] + ["none"]}},
                   "required": ["speaker"]}
-        out = prov.complete_messages(cfg, msgs, provider=provider, response_schema=schema).strip()
+        # moderar é trabalho de FUNDO → modelo auxiliar barato (pesquisa #5 item 57); provider
+        # explícito do chamador vence a config auxiliar.
+        from okami.llm.aux import aux_for
+        aux_p, aux_m = (provider, None) if provider else aux_for(cfg, "moderator")
+        out = prov.complete_messages(cfg, msgs, provider=aux_p, model=aux_m,
+                                     response_schema=schema).strip()
         try:
             speaker = str(json.loads(out).get("speaker", "")).lower()
         except (json.JSONDecodeError, AttributeError):

@@ -89,6 +89,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self.approvals = ApprovalStore(ws)   # aprovação como objeto persistente single-use (#7)
         from okami.gateway.pairing import PairingStore
         self._pairing = PairingStore(self.home)   # allowlist dinâmico: chat pede acesso → dono aprova (CLI)
+        from okami.gateway.goals import GoalStore
+        self._goals = GoalStore(self.home or self.ws)   # /goal: objetivo persistente por chat (item 41)
         self.sessions: dict[str, Session] = {}
         self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
         #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
@@ -228,10 +230,10 @@ class AgentEndpoint(EndpointCommandsMixin):
         n = int(self.store.entry(chat_id).get("node_count", 0))
         if n < 60 or n % 40 != 0:
             return
-        from okami.llm import providers as prov
+        from okami.llm.aux import aux_complete   # compressão é FUNDO → modelo auxiliar barato (item 57)
         try:
             convo = "\n".join(f"{r}: {t}" for r, t in self.store.history(chat_id, limit=40))
-            summary = prov.complete_messages(self.cfg, [
+            summary = aux_complete(self.cfg, "compress", [
                 {"role": "system", "content": "Resuma a conversa em 1 parágrafo, preservando decisões, "
                  "fatos e pendências (o que importa p/ continuar)."},
                 {"role": "user", "content": convo}]).strip()
@@ -483,6 +485,35 @@ class AgentEndpoint(EndpointCommandsMixin):
                     self.channel.send(chat_id, "Escritas de memória aguardando aprovação:\n" +
                                       "\n".join(lines) +
                                       "\n\n/memory approve <id|all> · /memory reject <id|all>")
+            return
+        if low.startswith("/goal"):                    # objetivo PERSISTENTE do chat (item 41)
+            arg = text[len("/goal"):].strip()
+            if not arg:
+                self.channel.send(chat_id, "🎯 " + self._goals.status_text(chat_id))
+            elif arg.lower() in ("clear", "off", "limpar"):
+                self._goals.clear(chat_id)
+                self.channel.send(chat_id, "🎯 " + _tr("gw.goal_cleared", _default="goal cleared."))
+            elif arg.lower() in ("done", "concluido", "concluído"):
+                self._goals.mark_done(chat_id)
+                self.channel.send(chat_id, "🎯 ✅ " + _tr("gw.goal_done", _default="goal marked as done."))
+            else:
+                self._goals.set_goal(chat_id, arg)
+                self.channel.send(chat_id, "🎯 " + _tr(
+                    "gw.goal_set",
+                    _default="goal set: {goal}. It persists across turns; add steps with /subgoal "
+                             "<text>; /goal shows status.", goal=arg))
+            return
+        if low.startswith("/subgoal"):
+            arg = text[len("/subgoal"):].strip()
+            if not arg:
+                self.channel.send(chat_id, "🎯 " + self._goals.status_text(chat_id))
+                return
+            if self._goals.add_subgoal(chat_id, arg) is None:
+                self.channel.send(chat_id, _tr(
+                    "gw.subgoal_no_goal", _default="no active goal — set one first: /goal <text>"))
+            else:
+                self.channel.send(chat_id, "🎯 ◻ " + _tr(
+                    "gw.subgoal_added", _default="subgoal added: {sub}", sub=arg))
             return
         if low == "/stop":
             s.cancel = True
@@ -955,6 +986,31 @@ class AgentEndpoint(EndpointCommandsMixin):
 
         self._spawn(_bgrun)
 
+    def _goal_after_turn(self, chat_id, reply: str) -> None:
+        """Pós-turno do objetivo persistente (item 41): conta o turno, roda o juiz auxiliar (fail-open)
+        e avisa o chat de subgoal fechado / objetivo concluído / orçamento esgotado. Best-effort."""
+        try:
+            g = self._goals.get(chat_id)
+            if not g or g.get("done"):
+                return
+            self._goals.bump_turn(chat_id)
+            from okami.gateway.goals import judge_turn
+            verdict = judge_turn(self.cfg, self._goals, chat_id, reply)
+            for idx in verdict["completed"]:
+                sub = self._goals.get(chat_id)["subgoals"][idx]
+                self.channel.send(chat_id, f"🎯 ✅ subgoal concluído: {sub['text']} — {sub['evidence'][:120]}")
+            if verdict["goal_done"]:
+                self.channel.send(chat_id, "🎯 🏁 objetivo CONCLUÍDO (todos os subgoals fechados). /goal clear remove.")
+                return
+            fresh = self._goals.get(chat_id)
+            if fresh and not fresh.get("done") and fresh["turns_used"] >= fresh["turn_budget"]:
+                self.channel.send(chat_id, "🎯 ⏸ orçamento de turnos do objetivo ESGOTADO "
+                                           f"({fresh['turn_budget']}). Ele para de entrar no contexto — "
+                                           "renove com /goal <texto> ou encerre com /goal clear.")
+        except Exception:  # noqa: BLE001 — objetivo nunca quebra o turno
+            from okami import log
+            log.dbg("goal_after_turn falhou", exc_info=True)
+
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None) -> None:
         if resume:                                        # retomada: o USER já está no transcript
             ctx = _history_block(s.history[:-1], max_chars=self.max_history_chars)
@@ -963,6 +1019,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             self._append_turn(chat_id, s, "USER", text)   # grava a fala EM ANDAMENTO (detecta interrupção)
         if s.persona_overlay:                              # overlay de sessão prevalece sobre o tom padrão
             ctx = s.persona_overlay + ("\n\n" + ctx if ctx else "")
+        _goal_block = self._goals.context_block(chat_id)   # objetivo persistente (item 41) — referência
+        if _goal_block:
+            ctx = _goal_block + ("\n\n" + ctx if ctx else "")
         genesis = genesis_pending(self.ws)                 # 1ª config (§8.2): onboarding de primeiro contato
         if genesis:
             ctx = GENESIS_BLOCK + ("\n\n" + ctx if ctx else "")
@@ -1055,6 +1114,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                     pass
             reply = task.result or task.reason or f"({task.state.value})"
             self._append_turn(chat_id, s, "AGENTE", reply)  # fecha o par → não é mais "interrompida"
+            self._goal_after_turn(chat_id, reply)           # juiz do objetivo (fail-open, item 41)
             s.resume_attempts = 0                          # concluiu → zera a guarda de resume
             self._save_meta(chat_id, s)
             # Papo casual (respond puro, sem critério nem ação com efeito) NÃO leva prefixo robótico —

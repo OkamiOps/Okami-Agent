@@ -484,6 +484,8 @@ MESSAGES: dict[str, str] = {
     "cmd.export": "exporta a conversa atual em Markdown (/export [arquivo])",
     "cmd.topic": "conversas paralelas no mesmo chat (tópicos do Telegram = sessões separadas)",
     "cmd.background": "roda uma tarefa em paralelo e avisa quando terminar",
+    "cmd.goal": "objetivo persistente deste chat (juiz acompanha; /goal clear|done)",
+    "cmd.subgoal": "adiciona um passo ao objetivo ativo (só fecha com evidência concreta)",
     "cmd.process": "supervisão de processos OS (servidor/build): status·log·kill imediato",
     "cmd.title": "dá um nome à conversa atual (/title <nome>)",
     "cmd.exit": "sai do chat",

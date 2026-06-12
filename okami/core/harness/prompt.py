@@ -38,8 +38,16 @@ def _workspace_orientation(workspace) -> str:
 def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
                         surface: str = "cli", model: str = "", allow_paths=None,
                         open_fs: bool = False) -> str:
+    # Disclosure PROGRESSIVO (pesquisa #5 item 27): MCP numeroso (>8) vira 1 linha por tool — o
+    # schema completo vem sob demanda via tool_search. Poucas tools MCP → descrição inteira (sem custo).
+    _mcp = [t for t in registry.values() if getattr(t, "mcp", False)]
+    _compact_mcp = len(_mcp) > 8
     lines = []
     for t in registry.values():
+        if _compact_mcp and getattr(t, "mcp", False):
+            first = (t.description or "").split(". ", 1)[0][:80]
+            lines.append(f'- {t.name} (MCP): {first} — schema completo: tool_search("{t.name}")')
+            continue
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
         lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
     tools_block = "\n".join(lines)

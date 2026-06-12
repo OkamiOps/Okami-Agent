@@ -135,10 +135,13 @@ def _rotate_key(pc: ProviderConfig, now: float | None = None) -> str | None:
     return pool[i]
 
 
-def _park_key(key: str | None, ce, now: float | None = None, ttl: float = 3600.0) -> None:
-    """429 numa chave → parqueia por `ttl` (default 1h) p/ não distribuí-la de novo na hora."""
-    if key and ce.reason == "rate_limit":
-        _key_cooldown[key] = (time.time() if now is None else now) + ttl
+_PARK_TTL = {"rate_limit": 3600.0, "billing": 6 * 3600.0}   # billing dura mais: crédito não volta sozinho
+
+
+def _park_key(key: str | None, ce, now: float | None = None, ttl: float | None = None) -> None:
+    """Chave com 429/billing → parqueia (1h / 6h) p/ não distribuí-la de novo na hora."""
+    if key and ce.reason in _PARK_TTL:
+        _key_cooldown[key] = (time.time() if now is None else now) + (ttl or _PARK_TTL[ce.reason])
 
 
 def complete(
@@ -180,6 +183,35 @@ def _message_text(message) -> str:
     return txt
 
 
+_ANTHROPIC_MODEL = re.compile(r"(^|/)(anthropic/|claude\b|claude-)", re.I)
+
+
+def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
+    """Prompt caching EXPLÍCITO da Anthropic (pesquisa #5 item 58): marca system + as 3 últimas
+    mensagens com `cache_control: ephemeral` (máx. 4 breakpoints da API) — ~75% de economia de
+    input em conversa longa. Só p/ modelos Claude via litellm; outros providers não conhecem o
+    formato (devolve a lista ORIGINAL, sem custo). Transports CLI/OAuth não passam por aqui."""
+    if not _ANTHROPIC_MODEL.search(model or ""):
+        return messages
+    out = [dict(m) for m in messages]
+    targets = {0} if out and out[0].get("role") == "system" else set()
+    targets |= set(range(max(len(out) - 3, 0), len(out)))
+    for i in targets:
+        c = out[i].get("content")
+        if isinstance(c, str):
+            out[i]["content"] = [{"type": "text", "text": c, "cache_control": {"type": "ephemeral"}}]
+        elif isinstance(c, list) and c:
+            parts = [dict(p) for p in c]
+            # marca o último bloco de TEXTO (não uma imagem — colar cache_control num image_url é
+            # frágil e pode dar 400 / cache ignorado em turnos com vision; review #5).
+            ti = next((j for j in range(len(parts) - 1, -1, -1)
+                       if isinstance(parts[j], dict) and parts[j].get("type") == "text"), None)
+            if ti is not None:
+                parts[ti] = {**parts[ti], "cache_control": {"type": "ephemeral"}}
+                out[i]["content"] = parts
+    return out
+
+
 def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict | None:
     """Constrained decoding (§3.5): força JSON válido em modelos json_constrained."""
     if response_schema and pc.effective_tool_mode() == "json_constrained":
@@ -205,6 +237,7 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
     via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
         return as_completion(via)
+    messages = apply_prompt_caching(messages, _effective_model(pc, model))   # Claude → cache explícito
     rf = _response_format(pc, response_schema)
     if rf is not None:
         overrides.setdefault("response_format", rf)
@@ -220,6 +253,29 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
                       finish_reason=getattr(choice, "finish_reason", "") or "stop",
                       usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
                       provider=pc.name, model=_effective_model(pc, model))
+
+
+_EMPTY_NUDGE = ("[ATENÇÃO: sua última resposta veio VAZIA (sem conteúdo). Responda AGORA de verdade — "
+                "o texto da resposta ou o bloco ```json de ação. Não devolva vazio de novo.]")
+
+
+def _with_empty_nudge(messages: list[dict]) -> list[dict]:
+    """Escada de resposta vazia (pesquisa #5 item 7), nível "nudge": cópia das mensagens com um
+    empurrão FUNDIDO na última 'user' (alternância preservada p/ Anthropic). É scaffolding
+    SINTÉTICO e local — o histórico durável do chamador nunca vê isto."""
+    out = [dict(m) for m in messages]
+    for i in range(len(out) - 1, -1, -1):
+        if out[i].get("role") != "user":
+            continue
+        c = out[i].get("content")
+        if isinstance(c, str):
+            out[i]["content"] = (c or "") + "\n\n" + _EMPTY_NUDGE
+            return out
+        if isinstance(c, list):                          # multimodal (vision): anexa como bloco de texto
+            out[i]["content"] = [*c, {"type": "text", "text": _EMPTY_NUDGE}]   # (não cria 2ª user → alternância)
+            return out
+    out.append({"role": "user", "content": _EMPTY_NUDGE})
+    return out
 
 
 def complete_messages_ex(
@@ -249,13 +305,17 @@ def complete_messages_ex(
         attempts = 1
     last_exc: Exception | None = None
     do_fallback = True
-    for attempt in range(1, attempts + 1):
+    send = messages                                   # cópia local recebe o nudge; `messages` fica intacta
+    nudged = False
+    attempt = 0
+    while attempt < attempts:
+        attempt += 1
         ov = dict(overrides)
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            res = as_completion(_complete_one(pc, messages, model, response_schema, ov))
-            if not res.text.strip():                  # vazio = falha de provider, entra no retry/failover
+            res = as_completion(_complete_one(pc, send, model, response_schema, ov))
+            if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada
                 raise EmptyResponse("resposta vazia do provider")
             if not res.provider:                      # garante served-by mesmo no caminho legado/teste
                 res.provider = pc.name
@@ -265,13 +325,23 @@ def complete_messages_ex(
         except Exception as e:  # noqa: BLE001
             last_exc = e
             ce = _err.classify(e)
+            # Escada de resposta VAZIA, nível "nudge" (pesquisa #5 item 7): antes de queimar chave/
+            # backoff, UMA re-tentativa imediata com o empurrão — não consome tentativa do pool.
+            if ce.reason == "empty_response" and not nudged:
+                nudged = True
+                send = _with_empty_nudge(send)
+                attempt -= 1
+                continue
             if ce.reason == "rate_limit":             # marca CROSS-SESSÃO: outros processos param de martelar
                 _rg.note_rate_limited(pc.name, retry_after=ce.retry_after)   # provider pediu N s → honra
             elif ce.reason == "overloaded":
                 _rg.note_overloaded(pc.name)
             if ce.rotate_key:
-                _park_key(ov.get("_api_key"), ce)     # 429 → parqueia a chave
-            if not ce.retryable:                      # 400/content-policy/auth-perm → não insiste
+                _park_key(ov.get("_api_key"), ce)     # 429/billing → parqueia a chave
+            if ce.never_repeat:                       # content_policy: payload idêntico NUNCA re-enviado
+                do_fallback = False                   # (nem p/ outro provider — seria repetir igual)
+                break
+            if not ce.retryable:                      # 400/auth-perm/model-retired → não insiste
                 do_fallback = ce.fallback
                 break
             do_fallback = do_fallback or ce.fallback

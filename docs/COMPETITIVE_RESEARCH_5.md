@@ -139,13 +139,21 @@ atual do Okami. Tamanhos S/M/L. ⭐ = recomendado próximo.
 
 ## Ordem de implementação recomendada
 
-ONDA A (S, dor imediata): 46+47 (rate guard cross-sessão + jitter) → 1+2+3 (compactação
-anti-sequestro/anti-thrash/continuação) → 49+50 (ordem hardline/yolo + freeze no import) →
-51 (untrusted delimiter) → 34 (prompts do review) → 4 (surrogates LMStudio)
+ONDA A (S, dor imediata) — ✅ CONCLUÍDA (jun/2026): 46+47 (rate guard cross-sessão + jitter) →
+1+2+3 (compactação anti-sequestro/anti-thrash/continuação) → 49+50 (ordem hardline/yolo + freeze
+no import; yolo do Okami é flag de sessão, não env — vetor nem existe) → 51 (untrusted delimiter)
+→ 34 (prompts do review) → 4 (surrogates LMStudio)
 
-ONDA B (M, qualidade do loop): 54 (classificador de erros) → 7+8 (escadas de recuperação) →
-9 (poda de tool-results) → 15 (spill-to-file) → 39 (fila de aprovação de memória/skill) →
-57 (modelo auxiliar) → 58 (prompt caching)
+ONDA B (M, qualidade do loop) — ✅ CONCLUÍDA (jun/2026): 54 (classificador → 17 razões +
+never_repeat consultado pelo retry) → 7 (escada de vazio: reasoning-fallback + nudge in-call sem
+sujar histórico + retry/failover; prefill de thinking ficou de fora — transport-dependent) →
+8 (erro sintético que ensina + truncamento não executa) → 9 (poda de tool-results) → 15
+(spill-to-file + teto agregado 200K/turno) → 39 (fila de aprovação de memória/skill) → 57
+(aux: review/distill/compress/moderator) → 58 (cache_control Anthropic via litellm)
 
-ONDA C (M/L, produto): 30 (execute_code) → 41 (/goal) → 44 (curator completo) → 22 (PTY) →
-20 (patch multi-arquivo) → 27 (toolsets por canal)
+ONDA C (M/L, produto) — ✅ CONCLUÍDA (jun/2026): 30 (execute_code: subprocesso + RPC read-only,
+intermediários fora do contexto) → 41 (/goal + /subgoal: GoalStore por chat, juiz auxiliar
+fail-open, gate determinístico de evidência, orçamento de turnos) → 44 (curator: lifecycle_pass
+30d→stale persistido + merge com contrato YAML validado fail-closed) → 22 (PTY ✅ já existia) →
+20 (apply_patch V4A multi-arquivo, fuzzy 3 níveis, atômico entre arquivos) → 27 (check_fn de
+disponibilidade + tool_search + disclosure progressivo de MCP no prompt)

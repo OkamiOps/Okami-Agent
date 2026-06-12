@@ -249,6 +249,8 @@ class McpStdioClient:
 class McpTool(Tool):
     """Embrulha uma tool de um servidor MCP como Tool nativa do harness."""
 
+    mcp = True            # marker p/ disclosure progressivo no prompt (item 27: schema sob demanda)
+
     def __init__(self, client: McpStdioClient, spec: dict, prefix: str = "", *,
                  capabilities=None, trusted: bool = False, approval_policy: str = "auto",
                  unverified: bool = False):

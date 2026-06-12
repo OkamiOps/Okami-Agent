@@ -168,10 +168,10 @@ class EndpointCommandsMixin:
         from okami.i18n import t as _i18n
         if len(s.history) < 4:
             return "🗜 " + _i18n("gw.compact_nothing", _default="nothing relevant to compact yet.")
-        from okami.llm import providers as prov
+        from okami.llm.aux import aux_complete   # compressão é FUNDO → modelo auxiliar barato (item 57)
         try:
             convo = "\n".join(f"{r}: {t}" for r, t in s.history[-40:])
-            summary = prov.complete_messages(self.cfg, [
+            summary = aux_complete(self.cfg, "compress", [
                 {"role": "system", "content": "Resuma em 1 parágrafo, preservando decisões, fatos e pendências."},
                 {"role": "user", "content": convo}]).strip()
             if not summary:
