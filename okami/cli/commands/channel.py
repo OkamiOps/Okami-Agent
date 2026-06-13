@@ -23,6 +23,23 @@ def _agent_spec(agent_id: str):
     return (yaml.safe_load(af.read_text(encoding="utf-8")) or {}), af
 
 
+def _warn_agent_divergence(agent_id: str) -> None:
+    """Alerta quando você gravou num lugar mas o gateway (rodado da home/serviço) lê outro — a config
+    'some' da vista. Mostra os dois caminhos pra resolver na hora (causa do 'não está salvando')."""
+    from okami.home import agent_locations
+    loc = agent_locations()
+    if not loc["diverges"]:
+        return
+    console.print(f"[yellow]⚠ ATENÇÃO: você tem agentes em DOIS lugares.[/yellow] Este comando gravou em "
+                  f"[bold]{loc['effective']}[/bold] (agentes: {', '.join(loc['effective_agents'])}), mas "
+                  f"o gateway rodado da sua HOME/serviço lê [bold]{loc['global']}[/bold] "
+                  f"(agentes: {', '.join(loc['global_agents'])}).")
+    if agent_id not in loc["global_agents"]:
+        console.print(f"[yellow]→ o agente '{agent_id}' que você configurou NÃO está onde o gateway lê.[/yellow] "
+                      "Rode este comando de FORA do projeto (ex.: do seu ~), ou copie o agent.yaml pra "
+                      f"{loc['global']}/{agent_id}/, ou suba o gateway de dentro do projeto.")
+
+
 @app.command("channel", help=_tr("cli.channel", _default="Connect a channel the easy way: okami channel add telegram <token> [--allow ids|--allow-all]."))
 def channel(
     action: str = typer.Argument(..., help=_tr("cli.channel.action", _default="add | list | remove.")),
@@ -72,7 +89,10 @@ def channel(
         from okami.cli.commands.setup import _parse_chat_ids
         ids = _parse_chat_ids(allow) if allow.strip() else None
         _ensure_agent(agent, telegram_token=token.strip(), telegram_allow=ids, telegram_allow_all=allow_all)
+        from okami.home import agents_dir
         console.print(f"[green]✓ Telegram conectado ao agente '{agent}'.[/green]")
+        console.print(f"[dim]gravado em:[/dim] {agents_dir() / agent / 'agent.yaml'}")
+        _warn_agent_divergence(agent)
         if allow_all:
             console.print("[yellow]⚠ allow_all: QUALQUER pessoa pode falar com o bot. Use só p/ teste.[/yellow]")
         elif ids:

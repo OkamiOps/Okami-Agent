@@ -48,6 +48,27 @@ def agents_dir() -> Path:
     return base_dir() / "agents"
 
 
+def agent_locations() -> dict:
+    """Diagnóstico de DIVERGÊNCIA de config de agente. `effective` = base_dir()/agents (onde os comandos
+    de config gravam AGORA, dependente do CWD); `global` = ~/.okami/agents (o que o gateway lê quando
+    rodado de fora de um projeto, ex.: serviço/home). `diverges`=True quando as duas existem, são
+    DIFERENTES, e a global tem agentes que a efetiva não tem → a config 'some' da vista do usuário
+    (escreveu numa, o gateway lê a outra). Causa do 'sistema não está salvando'."""
+    eff = agents_dir()
+    glob = okami_home() / "agents"
+
+    def _agents(d: Path) -> list[str]:
+        if not d.exists():
+            return []
+        return sorted(p.name for p in d.iterdir() if (p / "agent.yaml").exists())
+
+    ea, ga = _agents(eff), _agents(glob)
+    diverges = eff != glob and bool(ga) and set(ea) != set(ga)
+    # str (não Path) → o dict é JSON-serializável (entra no `okami doctor --json`).
+    return {"effective": str(eff), "global": str(glob), "diverges": diverges,
+            "effective_agents": ea, "global_agents": ga}
+
+
 # ── caminhos GLOBAIS (segredos/credenciais) — sempre dentro da casa, nunca Path.home()/".okami" cru ──
 def home_path(*parts: str) -> Path:
     """Caminho dentro da casa do Okami (okami_home()/...). Use SEMPRE isto — é a fonte única."""

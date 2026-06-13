@@ -71,6 +71,9 @@ def build_report(cfg, *, ping=None) -> dict:
 
     from okami.core import advisories          # supply-chain: pacote comprometido instalado? (item 15)
     rep["checks"]["advisories"] = advisories.detect_compromised(include_acked=False)
+
+    from okami.home import agent_locations      # config de agente divergente (projeto vs ~/.okami)?
+    rep["agents"] = agent_locations()
     return rep
 
 

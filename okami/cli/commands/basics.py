@@ -288,6 +288,18 @@ def doctor(
             console.print(f"[bold red]🛑 SUPPLY-CHAIN[/bold red] {h['package']}=={h['installed']} "
                           f"[red]({h['severity']})[/red] — {h['why']}")
             console.print(f"   [dim]reconheça com: okami doctor --ack {h['id']}[/dim]")
+    from okami.home import agent_locations       # config de agente em dois lugares → "não está salvando"
+    _al = agent_locations()
+    if _al["diverges"]:
+        console.print()
+        console.print("[bold yellow]⚠ CONFIG DE AGENTE EM DOIS LUGARES[/bold yellow] — fonte de "
+                      "\"o sistema não salva\":")
+        console.print(f"   comandos de config (deste diretório) gravam em [bold]{_al['effective']}[/bold] "
+                      f"({', '.join(_al['effective_agents']) or '—'})")
+        console.print(f"   o gateway rodado da HOME/serviço lê [bold]{_al['global']}[/bold] "
+                      f"({', '.join(_al['global_agents']) or '—'})")
+        console.print("   [dim]→ configure de FORA do projeto (do seu ~) p/ acertar o que o gateway lê, "
+                      "ou suba o gateway de dentro do projeto.[/dim]")
     console.print(_ui.footer(t("doctor.next_steps", _default="Next steps:"), [
         ("okami doctor --lint", t("doctor.step.lint", _default="security posture lint")),
         ("okami clean --deep --dry-run", t("doctor.step.clean", _default="disk cleanup preview (versioned quota)")),
