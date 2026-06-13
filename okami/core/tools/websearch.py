@@ -13,6 +13,14 @@ class WebSearch(Tool):
     args_schema = {"query": "o que pesquisar", "limit": "(opc) nº de resultados (default 5, máx 20)"}
     required = ("query",)
 
+    def check(self):
+        """check_fn (item 27): sem o pacote `ddgs` a tool é PODADA do registro (não aparece quebrada
+        na cara do modelo). Instale com: pip install -e \".[web]\" (ou: pip install ddgs)."""
+        import importlib.util
+        if importlib.util.find_spec("ddgs") is None:
+            return "pacote 'ddgs' não instalado — pip install -e \".[web]\" (ou: pip install ddgs)"
+        return None
+
     def run(self, args, ctx):
         from okami.integrations.web import SearchUnavailable, web_search
         q = args.get("query")

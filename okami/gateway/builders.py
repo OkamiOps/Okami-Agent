@@ -18,7 +18,12 @@ def fs_access_from_tools(tools: dict) -> dict:
       tools.fs: home                 → TUDO embaixo de ~/ (Documents, Pictures, Desktop, Downloads…)
       tools.fs: full                 → o filesystem inteiro (= open_fs)
     `tools.open_fs: true` segue valendo (alias de full). `tools.allow_paths` adiciona extras fora da
-    home (ex.: /Volumes/x). Segredo (.env/.ssh/.aws) continua bloqueado pelo _SENSITIVE_PATH nos 3."""
+    home (ex.: /Volumes/x). Segredo (.env/.ssh/.aws) continua bloqueado pelo _SENSITIVE_PATH nos 3.
+
+    NOTA: isto resolve só o ACESSO A ARQUIVOS. Shell/processo numa superfície REMOTA (Telegram) é
+    deny-by-default por segurança — o dono libera com `tools.shell: true` (run_shell/execute_code/
+    process_*) ou `tools.process`/`tools.spawn` (ver tool_policy._CAPABILITY_GRANTS). Aprovação/
+    hardline/sandbox seguem valendo por cima."""
     from pathlib import Path
     tools = tools or {}
     mode = str(tools.get("fs", "workspace")).strip().lower()
@@ -118,6 +123,7 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
                                                         allow_all=bool(tg.get("allow_all", False)))
             eps.append(_mk_endpoint(aid, spec, cfg, channel))
             emit(f"agente '{aid}' no ar (canal {channel.name})")
+            _warn_capability_grants(cfg, channel, bool(tg.get("allow_all", False)), aid, emit)
         from okami.gateway.channel_registry import rest_channel_types
         for ctype in rest_channel_types():                   # #15: canais REST do registry (sem if/elif)
             cc = chans.get(ctype) or {}
@@ -133,7 +139,16 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
             cfg = cfg or effective_config(global_raw, spec)
             eps.append(_mk_endpoint(aid, spec, cfg, channel))
             emit(f"agente '{aid}' no ar (canal {channel.name})")
+            _warn_capability_grants(cfg, channel, bool(cc.get("allow_all", False)), aid, emit)
     return eps
+
+
+def _warn_capability_grants(cfg, channel, allow_all: bool, aid: str, emit) -> None:
+    """Alerta de boot quando o dono libera shell/processo (tools.shell/process/spawn) numa superfície
+    remota — defesa-em-profundidade + consentimento informado (fix do bug ao vivo)."""
+    from okami.core.tool_policy import capability_warnings, surface_of
+    for w in capability_warnings(surface_of(channel), getattr(cfg, "tools", None) or {}, allow_all=allow_all):
+        emit(f"[{aid}] {w}")
 
 
 def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 30.0) -> None:

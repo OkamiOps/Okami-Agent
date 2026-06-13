@@ -68,7 +68,8 @@ def test_invalid_regex_teaches(tmp_path):
 
 
 def test_secret_in_match_redacted(tmp_path):
-    (tmp_path / "s.txt").write_text("api_key=sk-ABCDEF1234567890SECRETVALUE find_me\n", encoding="utf-8")
+    secret_line = "api_key=sk-ABCDEF1234567890SECRETVALUE find_me\n"  # pragma: allowlist secret  (FAKE)
+    (tmp_path / "s.txt").write_text(secret_line, encoding="utf-8")
     res = SearchFiles().run({"query": "find_me"}, ToolContext(workspace=tmp_path))
     assert res.ok
     assert "SECRETVALUE" not in res.output            # redigido no output

@@ -45,6 +45,45 @@ _MAX_DANGER: dict[str, str] = {"telegram": "sensitive", "group": "safe", "api": 
                                "paperclip-external": "safe"}
 _DANGER_RANK = {"safe": 0, "sensitive": 1, "dangerous": 2}
 
+# CAPABILITY GRANTS (opt-in do DONO): o default remoto é deny-by-default (sem shell/processo). Mas o
+# dono que roda o PRÓPRIO agente no Telegram precisa de um jeito ERGONÔMICO de liberar — antes só via
+# `tools.surfaces.<s>.allow:[…]` (indescobrível). `tools.shell: true` (ou process/spawn) concede a
+# família inteira na superfície. É EXPLÍCITO (sem a chave, o default seguro fica). Aprovação/hardline/
+# sandbox continuam valendo por cima — liberar a tool ≠ pular o go/no-go.
+_CAPABILITY_GRANTS: dict[str, set[str]] = {
+    "shell": {"run_shell", "execute_code", "process_start", "process_write", "process_signal",
+              "process_kill"},
+    "process": {"process_start", "process_write", "process_signal", "process_kill"},
+    "spawn": {"spawn"},
+}
+# Superfícies onde liberar shell merece ALARME (remoto/exposto). CLI é do dono → sem alarme.
+_REMOTE_FOR_WARN = frozenset({"telegram", "group", "slack", "discord", "mattermost", "api",
+                              "paperclip", "paperclip-worker"})
+
+
+def _granted_tools(config) -> set[str]:
+    """Conjunto de tools liberadas por capability grant (`tools.shell/process/spawn: true`)."""
+    out: set[str] = set()
+    for cap, tools in _CAPABILITY_GRANTS.items():
+        if (config or {}).get(cap):
+            out |= tools
+    return out
+
+
+def capability_warnings(surface: str, config, *, allow_all: bool = False) -> list[str]:
+    """Avisos de boot quando o dono libera shell/processo numa superfície REMOTA (defesa-em-profundidade
+    + consentimento informado). Vazio se não há grant, ou se a superfície é CLI (já é do dono)."""
+    granted = _granted_tools(config)
+    if not granted or surface not in _REMOTE_FOR_WARN:
+        return []
+    caps = ", ".join(c for c in _CAPABILITY_GRANTS if (config or {}).get(c))
+    out = [f"⚠ shell/processo LIBERADO (tools.{caps}) na superfície remota '{surface}' — o agente pode "
+           "rodar comando do sistema por mensagem. Aprovação/hardline/sandbox seguem valendo."]
+    if allow_all:
+        out.append("‼ allow_all=true + shell: QUALQUER pessoa que mandar mensagem pode pedir comando. "
+                   "Restrinja com allow_chats: [<ids>] ou tire o grant se não for de propósito.")
+    return out
+
 # Papel do Paperclip (me['role'] do control plane) → superfície. Default = worker (papel desconhecido).
 _PAPERCLIP_ROLE_SURFACE = {"worker": "paperclip-worker", "manager": "paperclip-manager",
                            "reviewer": "paperclip-reviewer", "external": "paperclip-external",
@@ -115,6 +154,10 @@ def denied(surface: str, name: str, *, config=None, sandbox=None) -> bool:
         if not _isolation_override(sandbox, cfg):
             return True
     if name in set(cfg.get("allow") or []):          # allow vence o DENYLIST normal (mas não o gate acima)
+        return False
+    # CAPABILITY GRANT do dono (tools.shell/process/spawn): vence o DENY-BY-DEFAULT da superfície, mas
+    # NÃO o deny EXPLÍCITO que o dono escreveu (intenção mais específica) nem o gate de isolamento acima.
+    if name in _granted_tools(config) and name not in set(cfg.get("deny") or []):
         return False
     if name in (set(_DENY_BY_SURFACE.get(surface, set())) | set(cfg.get("deny") or [])):
         return True
