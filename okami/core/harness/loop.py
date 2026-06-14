@@ -13,6 +13,7 @@ from typing import Callable
 
 from okami.core import approval
 from okami.core.harness.models import Budget, Generate, Step, Task, TaskState
+from okami.core.harness.parallel import paths_collide, run_parallel
 from okami.core.harness.parsing import (
     FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, _actions_from_tool_calls, action_schema,
     detect_malformed, parse_action, parse_actions, prose_outside_action, truncated_action_name,
@@ -161,6 +162,7 @@ class Harness:
         agent_home=None,                # CASA do agente (memória/identidade) — ≠ workspace (onde mexe)
         stage_writes: bool = False,     # escrita de memória → fila de aprovação (review + write_approval)
         cfg=None,                       # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
+        notify=None,                    # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -184,7 +186,8 @@ class Harness:
                                open_fs=open_fs, allow_paths=list(allow_paths or []),
                                agent_home=agent_home, stage_writes=stage_writes,
                                registry=self.registry,   # tool_search: schema sob demanda (item 27)
-                               cfg=cfg)                   # web_extract/vision_analyze: roteamento aux
+                               cfg=cfg,                   # web_extract/vision_analyze: roteamento aux
+                               notify=notify)             # mensagem-ao-dono fora do turno (item 3)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])
@@ -192,7 +195,17 @@ class Harness:
         import secrets
         from okami.observability.events import EventLog
         # trace_id por turno (P2): amarra todos os eventos desta execução no timeline (replay/debug)
-        self.events = EventLog(workspace, trace_id=secrets.token_hex(4))
+        self._trace_id = secrets.token_hex(4)
+        self.events = EventLog(workspace, trace_id=self._trace_id)
+        # CHECKPOINTS por-TURNO (item 17): se o backend de checkpoints suporta begin_turn, marca o início
+        # deste turno (reuso do MESMO trace_id) p/ permitir rollback do turno inteiro. Guard getattr — o
+        # agente de checkpoints adiciona begin_turn/rollback_turn; se ausente, no-op (fail-open, aditivo).
+        _begin = getattr(checkpoints, "begin_turn", None)
+        if callable(_begin):
+            try:
+                _begin(self._trace_id)
+            except Exception:  # noqa: BLE001 — checkpoint é best-effort, nunca derruba o boot do turno
+                pass
         self.messages: list[dict] = []
         self._action_schema = action_schema(self.registry)
         self._fingerprints: deque[str] = deque(maxlen=12)
@@ -244,17 +257,56 @@ class Harness:
         self.on_event({"kind": kind, **data})
         self.events.emit(kind, **data)      # persiste o timeline (start/step/loop/compact/complete/…)
 
+    def _pending_todos(self) -> str:
+        """Bloco de reinjeção da CHECKLIST operacional (item 9) — só os itens em aberto. "" se não há
+        TODOs ou se a render falha (fail-open: a compactação nunca quebra por causa do checklist)."""
+        try:
+            from okami.core.tools.todo import render_pending
+            return render_pending(self.ctx.todos)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _compact(self, *, keep_tail: int = 6) -> int:
+        """Compacta self.messages reinjetando a CHECKLIST operacional em aberto (item 9). Devolve o nº
+        de fatos destilados. FAIL-OPEN com o kwarg pending_todos: uma implementação de compact que ainda
+        não conhece o parâmetro (stub de teste antigo / fork) é chamada sem ele — nunca quebra o turno."""
+        try:
+            self.messages, promoted = _compaction.compact(
+                self.messages, self.memory, keep_tail=keep_tail,
+                pending_todos=self._pending_todos())
+        except TypeError:                              # compact sem suporte a pending_todos → modo legado
+            self.messages, promoted = _compaction.compact(
+                self.messages, self.memory, keep_tail=keep_tail)
+        return promoted
+
     # --- audit + budget de resultado de tool (Sprint 2) ---------------------
     def _audit(self, **fields) -> None:
-        """Trilha append-only de TODA tool + decisão de aprovação (.okami/audit.jsonl). Best-effort."""
+        """Trilha append-only de TODA tool + decisão de aprovação (.okami/audit.jsonl), com HMAC ENCADEADO
+        (item 5): cada linha leva um `mac` = HMAC(key, tail_anterior + payload-menos-mac), espelhando os
+        checkpoints. Adulterar/inserir/reordenar uma linha quebra a cadeia dali em diante → a trilha vira
+        tamper-evident. Campos FLAT preservados (leitores existentes seguem lendo). Best-effort: qualquer
+        falha (chave, redact, I/O) cai no append simples sem mac em vez de derrubar o turno."""
         try:
             import time as _t
+            from okami.core import machain
             from okami.core.redact import redact
             d = self.ctx.workspace / ".okami"
             d.mkdir(parents=True, exist_ok=True)
-            line = json.dumps({"ts": _t.time(), **fields}, ensure_ascii=False, default=str)
-            with (d / "audit.jsonl").open("a", encoding="utf-8") as f:
-                f.write(redact(line) + "\n")        # mascara segredos na trilha de auditoria
+            audit = d / "audit.jsonl"
+            # payload = campos FLAT redigidos (segredo mascarado ANTES do mac → o mac cobre o que é gravado)
+            payload = json.loads(redact(json.dumps({"ts": _t.time(), **fields},
+                                                   ensure_ascii=False, default=str)))
+            key = machain.key_for(self.ctx.workspace)
+            # cache do último mac (item 30): tail_mac relê o arquivo INTEIRO a cada append → O(n²) numa
+            # sessão com muitas tools. Lê do disco só na 1ª vez deste harness; depois encadeia em memória.
+            prev = getattr(self, "_audit_last_mac", None)
+            if prev is None:
+                prev = machain.tail_mac(audit)
+            mac = machain.mac(key, prev, payload)
+            entry = {**payload, "mac": mac}
+            with audit.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self._audit_last_mac = mac
         except Exception:  # noqa: BLE001 — auditoria nunca derruba o turno
             pass
 
@@ -334,7 +386,7 @@ class Harness:
                 # contexto grande), então COMPACTA forte e tenta UMA vez entregar o que já levantou. Best-
                 # effort com timeout por-chamada: se pendurar/falhar de novo, fica só o BLOCKED seco.
                 try:
-                    self.messages, _pr = _compaction.compact(self.messages, self.memory, keep_tail=4)
+                    self._compact(keep_tail=4)
                 except Exception:  # noqa: BLE001
                     pass
                 _sv = self._salvage(t, t.reason)
@@ -361,7 +413,7 @@ class Harness:
                     self._emit("compact", promoted=0, pruned_chars=_saved)
                 _before = _compaction.estimate_chars(self.messages)
                 if _before > self.budget.max_context_chars:
-                    self.messages, promoted = _compaction.compact(self.messages, self.memory)
+                    promoted = self._compact()
                     self._emit("compact", promoted=promoted)
                     # Anti-thrashing (pesquisa #5 item 2): 2 compactações seguidas rendendo <10% =
                     # contexto saturado — compactar a cada turno é thrash. Encerra honesto (com
@@ -393,7 +445,7 @@ class Harness:
                     if fail.action in (_Act.RETRY, _Act.ESCALATE) and not self._shrunk_retry:
                         self._shrunk_retry = True
                         before = _compaction.estimate_chars(self.messages)
-                        self.messages, promoted = _compaction.compact(self.messages, self.memory, keep_tail=3)
+                        promoted = self._compact(keep_tail=3)
                         if _compaction.estimate_chars(self.messages) < before:
                             self._emit("compact", promoted=promoted)
                             # Continuação distinta p/ QUEDA NO MEIO (pesquisa #5 item 3): sem isto o
@@ -612,90 +664,135 @@ class Harness:
                 continue
 
             # --- Tool normal ---
+            # PARALELO (item 20): se ESTA ação é leitura segura e ainda há um LOTE líder de leituras da
+            # MESMA geração, roda o GRUPO em paralelo (ThreadPool) — N reads em ~1 read de wall-clock.
+            # Os resultados voltam na ORDEM DE ENTRADA e cada step/_audit/observação é emitido SERIAL na
+            # thread principal (determinístico). Mutação/aprovação NUNCA entram aqui (segue 1-por-turno).
+            if self._batch and _is_batchable(action) and not paths_collide([action, *self._batch]):
+                group = [action, *self._batch]
+                self._batch = []                          # consumido inteiro no paralelo
+                self._emit("parallel", n=len(group), tools=[a.tool for a in group])
+                results = run_parallel(group, self.registry, self.ctx)
+                for ga, gres in zip(group, results):      # emite em ordem de ENTRADA (determinístico)
+                    self._fingerprints.append(self._fingerprint(ga))
+                    step_n = self._handle_tool_result(t, step_n, ga, gres)
+                _last_progress = _wt.monotonic()          # grupo executado = ATIVIDADE → reseta o anti-travamento
+                continue
             self._fingerprints.append(fp)
             try:
                 res = tool.run(action.args, self.ctx)
             except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
                 res = ToolResult(False, f"erro na tool {action.tool}: {e}")
-            step_n += 1
+            step_n = self._handle_tool_result(t, step_n, action, res)
             _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
-            t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
-            self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
-                       out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
-            if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
-                self._poll_waits = 0
-            # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
-            # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
-            if res.ok and not res.effect:
-                _same = self._progress.stalled_count(action.tool, res.output)
-                if _same >= self._MAX_SAME_OUTPUT and action.tool not in self._stall_nudged:
-                    self._stall_nudged.add(action.tool)
-                    self._emit("no_progress", tool=action.tool, repeats=_same + 1)
-                    self.messages.append({"role": "user", "content":
-                        f"'{action.tool}' devolveu a MESMA saída {_same + 1} vezes seguidas — repetir não vai "
-                        "mudar o resultado. Faça algo DIFERENTE (outra abordagem/tool), ou ENTREGUE o que já "
-                        "tem, ou declare task_blocked. Se era espera de processo, mate (process_kill) e siga."})
-            self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
-                        ok=res.ok, effect=res.effect, out_chars=len(res.output))
-            if self.hooks is not None:
-                self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
-
-            # circuit breaker de falha repetida
-            if not res.ok:
-                from okami.core.errors import FailureKind, classify_tool
-                fail = classify_tool(res)
-                self.events.emit("failure", scope="tool", tool=action.tool, kind=fail.kind.value,
-                                 action=fail.action.value, reason=fail.reason)
-                key = f"{action.tool}:{res.output[:60]}"
-                self._failures[key] = self._failures.get(key, 0) + 1
-                # determinístico (sandbox/bad_request) NÃO melhora repetindo → corta logo; senão, 3x.
-                deterministic = fail.kind in (FailureKind.SANDBOX_DENY, FailureKind.BAD_REQUEST)
-                if deterministic or self._failures[key] >= 3:
-                    why = ("BLOQUEADO (determinístico/sandbox): repetir não resolve."
-                           if deterministic else
-                           "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro.")
-                    self.messages.append({"role": "user", "content":
-                        f"{why} Mude de estratégia ou declare task_blocked."})
-
-            # watchdog / stall (§3.3). PROGRESSO ≠ só efeito colateral: uma leitura/busca que DEU CERTO é
-            # progresso (o agente aprendeu algo) — senão TODA análise/exploração (read/list/find/grep, que
-            # têm effect=False) era nagueada com "escreva algo", e o modelo thrashava chutando caminho.
-            # ...mas uma busca/listagem que NÃO ACHOU NADA ("(nada casou…", "(vazio") NÃO é progresso —
-            # senão o modelo find-spammava com queries diferentes (loop só pega args idênticos) sem o nag.
-            _empty = res.output.lstrip().startswith(("(nada", "(vazio"))
-            _explored = res.ok and not _empty and (action.tool in _BATCHABLE_READONLY
-                                                    or (action.tool == "run_shell" and not res.effect))
-            if res.effect or _explored:                # PROGRESSO real → zera o contador de anti-thrash de
-                self._low_gain_compactions = 0         # compactação (senão 2 compactações de baixo ganho
-                #                                        DISTANTES, num trabalho longo legítimo, matavam o
-                #                                        turno — review #1: o thrash só vale SEM progresso).
-            self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
-            if self._steps_without_effect >= self.budget.stall_limit:
-                self._emit("stall", steps=self._steps_without_effect)
-                self.messages.append({"role": "user", "content":
-                    "SEM PROGRESSO: vários passos SEM RESULTADO (reads falhando / chutando caminho). Se está "
-                    "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
-                    "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
-                    "Ou task_blocked."})
-                self._steps_without_effect = 0
-
-            obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
-            # Teto AGREGADO do turno (pesquisa #5 item 15): estourou → até output médio (>2K) é
-            # persistido, com preview curto (1K). O teto por-resultado sozinho deixava N resultados
-            # médios inundarem o contexto.
-            _over_turn = self._obs_chars > self.budget.max_turn_tool_chars
-            _limit = 2000 if _over_turn else _TOOL_RESULT_BUDGET
-            if len(res.output) > _limit:
-                saved = self._persist_large_output(step_n, res.output)
-                from okami.core.harness.persisted import persisted_output_wrapper
-                wrapped = persisted_output_wrapper(saved, len(res.output),
-                                                   res.output[:1000 if _over_turn else _TOOL_RESULT_BUDGET])
-                obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
-            _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
-            self._obs_chars += len(_obs)
-            self.messages.append({"role": "user", "content": _obs})
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+
+    def _handle_tool_result(self, t: Task, step_n: int, action: Action, res: ToolResult) -> int:
+        """Pós-dispatch de UMA tool: conta o passo, emite eventos, audita, roda o circuit-breaker e o
+        watchdog, e anexa a observação. Devolve o novo step_n. Compartilhado pelo caminho SERIAL e pelo
+        PARALELO (item 20) — assim o lote read-only emite step/_audit/observação idêntico ao serial."""
+        step_n += 1
+        t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
+        self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
+                   out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
+        if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
+            self._poll_waits = 0
+        # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
+        # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
+        if res.ok and not res.effect:
+            _same = self._progress.stalled_count(action.tool, res.output)
+            if _same >= self._MAX_SAME_OUTPUT and action.tool not in self._stall_nudged:
+                self._stall_nudged.add(action.tool)
+                self._emit("no_progress", tool=action.tool, repeats=_same + 1)
+                self.messages.append({"role": "user", "content":
+                    f"'{action.tool}' devolveu a MESMA saída {_same + 1} vezes seguidas — repetir não vai "
+                    "mudar o resultado. Faça algo DIFERENTE (outra abordagem/tool), ou ENTREGUE o que já "
+                    "tem, ou declare task_blocked. Se era espera de processo, mate (process_kill) e siga."})
+        self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
+                    ok=res.ok, effect=res.effect, out_chars=len(res.output))
+        if self.hooks is not None:
+            self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
+
+        # circuit breaker de falha repetida
+        if not res.ok:
+            from okami.core.errors import FailureKind, classify_tool
+            fail = classify_tool(res)
+            self.events.emit("failure", scope="tool", tool=action.tool, kind=fail.kind.value,
+                             action=fail.action.value, reason=fail.reason)
+            key = f"{action.tool}:{res.output[:60]}"
+            self._failures[key] = self._failures.get(key, 0) + 1
+            # determinístico (sandbox/bad_request) NÃO melhora repetindo → corta logo; senão, 3x.
+            deterministic = fail.kind in (FailureKind.SANDBOX_DENY, FailureKind.BAD_REQUEST)
+            if deterministic or self._failures[key] >= 3:
+                why = ("BLOQUEADO (determinístico/sandbox): repetir não resolve."
+                       if deterministic else
+                       "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro.")
+                self.messages.append({"role": "user", "content":
+                    f"{why} Mude de estratégia ou declare task_blocked."})
+
+        # watchdog / stall (§3.3). PROGRESSO ≠ só efeito colateral: uma leitura/busca que DEU CERTO é
+        # progresso (o agente aprendeu algo) — senão TODA análise/exploração (read/list/find/grep, que
+        # têm effect=False) era nagueada com "escreva algo", e o modelo thrashava chutando caminho.
+        # ...mas uma busca/listagem que NÃO ACHOU NADA ("(nada casou…", "(vazio") NÃO é progresso —
+        # senão o modelo find-spammava com queries diferentes (loop só pega args idênticos) sem o nag.
+        _empty = res.output.lstrip().startswith(("(nada", "(vazio"))
+        _explored = res.ok and not _empty and (action.tool in _BATCHABLE_READONLY
+                                                or (action.tool == "run_shell" and not res.effect))
+        if res.effect or _explored:                # PROGRESSO real → zera o contador de anti-thrash de
+            self._low_gain_compactions = 0         # compactação (senão 2 compactações de baixo ganho
+            #                                        DISTANTES, num trabalho longo legítimo, matavam o
+            #                                        turno — review #1: o thrash só vale SEM progresso).
+        self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
+        if self._steps_without_effect >= self.budget.stall_limit:
+            self._emit("stall", steps=self._steps_without_effect)
+            self.messages.append({"role": "user", "content":
+                "SEM PROGRESSO: vários passos SEM RESULTADO (reads falhando / chutando caminho). Se está "
+                "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
+                "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
+                "Ou task_blocked."})
+            self._steps_without_effect = 0
+
+        self._append_observation(step_n, action, res)
+        return step_n
+
+    def _append_observation(self, step_n: int, action: Action, res: ToolResult) -> None:
+        """Anexa a OBSERVAÇÃO da tool ao histórico. Multimodal (item 6): se a tool devolveu blocos
+        nativos em res.content (ex.: vision com imagem), anexa-os DIRETO como mensagem 'user' — sem
+        passar pelo corte por orçamento de chars (que é p/ texto; truncar bloco de imagem o corromperia).
+        Caso normal (texto): aplica o budget (teto por-resultado + teto AGREGADO do turno)."""
+        if res.content is not None:                  # tool-result MULTIMODAL → blocos nativos, sem truncar
+            # Bloco de imagem NÃO é truncável, mas CONTA no orçamento agregado do turno (item 6/14):
+            # se o turno já estourou o teto, não enfia mais uma imagem nativa (blowup de contexto) —
+            # vira placeholder textual. Estima bytes pelo data-URL (onde mora o peso da imagem).
+            def _approx(blocks):
+                try:
+                    return sum(len(b.get("image_url", {}).get("url", "")) + len(b.get("text", ""))
+                               if isinstance(b, dict) else len(str(b)) for b in blocks)
+                except Exception:  # noqa: BLE001
+                    return 0
+            if self._obs_chars > self.budget.max_turn_tool_chars:
+                self.messages.append({"role": "user", "content":
+                    "[imagem omitida — teto de contexto do turno atingido; abra novo turno p/ analisá-la]"})
+                return
+            self._obs_chars += _approx(res.content)
+            self.messages.append({"role": "user", "content": res.content})
+            return
+        obs_res = res                                # budget de contexto: trunca output gigante (persiste o completo)
+        # Teto AGREGADO do turno (pesquisa #5 item 15): estourou → até output médio (>2K) é
+        # persistido, com preview curto (1K). O teto por-resultado sozinho deixava N resultados
+        # médios inundarem o contexto.
+        _over_turn = self._obs_chars > self.budget.max_turn_tool_chars
+        _limit = 2000 if _over_turn else _TOOL_RESULT_BUDGET
+        if len(res.output) > _limit:
+            saved = self._persist_large_output(step_n, res.output)
+            from okami.core.harness.persisted import persisted_output_wrapper
+            wrapped = persisted_output_wrapper(saved, len(res.output),
+                                               res.output[:1000 if _over_turn else _TOOL_RESULT_BUDGET])
+            obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
+        _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
+        self._obs_chars += len(_obs)
+        self.messages.append({"role": "user", "content": _obs})
 
     def _handle_terminal(self, t: Task, action: Action) -> Task | None:
         if action.tool == "respond":                     # FALA com o usuário (ReAct: ramo "texto")

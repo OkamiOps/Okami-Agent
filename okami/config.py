@@ -110,6 +110,21 @@ class ProviderConfig(BaseModel):
     # chamar uma tool — como respond/task_complete SÃO tools, isto força ação sem deixar o modelo fraco
     # "só conversar"; substitui a função forçadora do json_constrained). Vazio = não envia (default do provider).
     tool_choice: str = ""
+    # Quirks DECLARATIVOS por provider (pesquisa #7 item 12) — opt-in, consumidos em providers._kwargs.
+    # Default = comportamento de hoje. Cada provider tem manias diferentes; em vez de if-else espalhado,
+    # o provider DECLARA o jeito que aceita e o _kwargs molda a chamada.
+    # reasoning_style: como ESTE provider quer receber o esforço de raciocínio:
+    #   "" / "reasoning_effort" → manda reasoning_effort (default — OpenAI/codex/litellm).
+    #   "thinking"              → manda thinking={"type":"enabled","budget_tokens":N} (estilo Anthropic);
+    #                             o reasoning_effort vira budget de tokens e é removido.
+    #   "none"                  → não manda nenhum dos dois (modelo que recusa ambos / não-reasoning).
+    reasoning_style: str = ""
+    # vision_tool_messages: False remove blocos image_url de mensagens role=="tool" antes do envio —
+    # alguns providers dão 400 com imagem dentro de resultado de tool (só aceitam vision em user/assistant).
+    vision_tool_messages: bool = True
+    # omit_temperature: True tira `temperature` do payload (de params E de override) — modelos de
+    # reasoning (o-series/gpt-5) que SÓ aceitam o default e dão 400 se a temperature vier setada.
+    omit_temperature: bool = False
     notes: str | None = None
 
     def effective_tool_mode(self) -> str:
@@ -250,6 +265,78 @@ def load_raw(path: Path | None = None) -> tuple[dict, Path]:
             raw = _deep_merge(raw, read_yaml_resilient(local, default={}))
             break
     return raw, cfg_path
+
+
+def _resolve_secret(raw: dict, *keys: str) -> str:
+    """Resolve um segredo de config: valor em TEXTO direto OU `<chave>_env` apontando p/ uma env-var
+    (que o `_load_env`/secret_sources já injetou). Aceita hífen e underscore (host/app-password do YAML).
+    Casa com o hard-constraint do Okami "secrets nunca em texto": o YAML pode só nomear a env-var."""
+    for k in keys:
+        for variant in (k, k.replace("_", "-")):
+            if raw.get(variant):
+                return str(raw[variant])
+    for k in keys:
+        for variant in (f"{k}_env", f"{k.replace('_', '-')}-env"):
+            env_name = raw.get(variant)
+            if env_name and os.getenv(str(env_name)):
+                return str(os.getenv(str(env_name)))
+    return ""
+
+
+def _pick(raw: dict, *keys, default=None):
+    """1º valor não-vazio entre `keys` (aceita hífen↔underscore). Vazio/ausente → default."""
+    for k in keys:
+        for variant in (k, k.replace("_", "-"), k.replace("-", "_")):
+            v = raw.get(variant)
+            if v not in (None, ""):
+                return v
+    return default
+
+
+def parse_email_channel(raw: dict) -> dict:
+    """Parseia channels.email (item 19) → kwargs do EmailChannel. NÃO instancia (o builders chama
+    build_channel com isto). app-password resolve de texto OU env-var (secret_sources). Allowlist de
+    remetentes DENY-BY-DEFAULT (e-mail é porta aberta). Host/port com default Gmail. Aditivo: dict
+    vazio → user/app_password '' (o builders pula o canal por faltar credencial)."""
+    raw = raw or {}
+    user = str(_pick(raw, "user", default="") or "")
+    app_password = _resolve_secret(raw, "app_password", "password")
+    allow = _pick(raw, "allow", "allow_chats", "allow_senders", default=None)
+    out = {
+        "user": user,
+        "app_password": app_password,
+        "imap_host": str(_pick(raw, "imap_host", "host", default="imap.gmail.com")),
+        "imap_port": int(_pick(raw, "imap_port", "port", default=993)),
+        "smtp_host": str(_pick(raw, "smtp_host", default="smtp.gmail.com")),
+        "smtp_port": int(_pick(raw, "smtp_port", default=465)),
+        "mailbox": str(_pick(raw, "mailbox", default="INBOX")),
+        "allow_chats": list(allow) if allow else None,
+        "allow_all": bool(_pick(raw, "allow_all", default=False)),
+    }
+    pi = _pick(raw, "poll_interval", default=None)
+    if pi is not None:
+        out["poll_interval"] = float(pi)
+    return out
+
+
+def parse_webhook(raw: dict) -> dict:
+    """Parseia gateway.webhook (item 14) → config normalizada do receptor HTTP. Cada ROTA tem um
+    `secret` (resolvido de texto OU env-var). `deliver_only` DEFAULT True: a porta aberta só ENTREGA
+    no chat (não roda o agente) sem opt-in explícito — postura segura p/ superfície exposta. Aditivo:
+    dict vazio → bind localhost / sem rotas / deliver_only True."""
+    raw = raw or {}
+    routes_raw = raw.get("routes") or {}
+    routes: dict[str, dict] = {}
+    for name, rt in (routes_raw.items() if isinstance(routes_raw, dict) else []):
+        rt = rt or {}
+        routes[str(name)] = {"secret": _resolve_secret(rt, "secret")}
+    return {
+        "bind": str(_pick(raw, "bind", "host", default="127.0.0.1")),
+        "port": int(_pick(raw, "port", default=8099)),
+        "routes": routes,
+        # default fail-SAFE: webhook não acorda o agente (só entrega) até o dono pôr deliver_only: false.
+        "deliver_only": bool(_pick(raw, "deliver_only", default=True)),
+    }
 
 
 def build_config(raw: dict) -> OkamiConfig:

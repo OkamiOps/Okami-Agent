@@ -90,6 +90,56 @@ def _build_messages(prompt: str, system: str | None) -> list[dict[str, str]]:
     return messages
 
 
+# Conversão effort → orçamento de tokens p/ providers no estilo "thinking" (Anthropic). Escada
+# conservadora: o budget cresce com o esforço pedido (item 12). minimal fica de fora — esse estilo
+# começa em low; se vier minimal tratamos como low (menor budget útil).
+_EFFORT_BUDGET = {"minimal": 1024, "low": 4096, "medium": 8192, "high": 16384}
+
+
+def _effort_to_budget(effort: str) -> int:
+    return _EFFORT_BUDGET.get((effort or "").strip().lower(), 8192)
+
+
+def _apply_reasoning(kw: dict, pc: ProviderConfig) -> None:
+    """Molda o esforço de raciocínio conforme o `reasoning_style` declarado do provider (item 12).
+
+    Lê o effort JÁ resolvido em kw["reasoning_effort"] (default de pc + override + clamp já aplicados) e:
+      - "thinking": vira kw["thinking"]={"type":"enabled","budget_tokens":N}; remove reasoning_effort.
+                    Sem effort declarado → não inventa budget (remove os dois).
+      - "none":     remove reasoning_effort E thinking (modelo que recusa ambos).
+      - "" / "reasoning_effort": mantém reasoning_effort (estilo OpenAI/litellm); remove thinking se
+                    algum override o injetou (reasoning XOR thinking — nunca os dois juntos)."""
+    style = (pc.reasoning_style or "").strip().lower()
+    effort = kw.get("reasoning_effort", "")
+    if style == "none":
+        kw.pop("reasoning_effort", None)
+        kw.pop("thinking", None)
+        return
+    if style == "thinking":
+        kw.pop("reasoning_effort", None)
+        if effort:                                   # sem effort → não inventa budget (sem thinking)
+            kw["thinking"] = {"type": "enabled", "budget_tokens": _effort_to_budget(effort)}
+        else:
+            kw.pop("thinking", None)
+        return
+    # "" / "reasoning_effort": estilo padrão — reasoning_effort manda, thinking nunca acompanha.
+    kw.pop("thinking", None)
+
+
+def _strip_tool_images(messages: list[dict]) -> list[dict]:
+    """Remove blocos image_url de mensagens role=="tool" (item 12, vision_tool_messages=False) — alguns
+    providers dão 400 com imagem dentro de resultado de tool. Só toca role=="tool"; user/assistant
+    (vision normal) ficam intactos. Lista NOVA (não muta o histórico do chamador)."""
+    out = []
+    for m in messages:
+        c = m.get("content")
+        if m.get("role") == "tool" and isinstance(c, list):
+            kept = [b for b in c if not (isinstance(b, dict) and b.get("type") == "image_url")]
+            m = {**m, "content": kept}
+        out.append(m)
+    return out
+
+
 def _kwargs(
     pc: ProviderConfig,
     messages: list[dict[str, str]],
@@ -98,6 +148,8 @@ def _kwargs(
     model: str | None,
     **overrides,
 ) -> dict:
+    if not pc.vision_tool_messages:                  # provider recusa imagem em msg de tool (item 12)
+        messages = _strip_tool_images(messages)
     kw: dict = {
         "model": _effective_model(pc, model),
         "messages": messages,
@@ -109,9 +161,17 @@ def _kwargs(
     if key:
         kw["api_key"] = key
     kw.update(pc.params)
-    if pc.reasoning_effort:                          # esforço de raciocínio (litellm normaliza por provider)
+    if pc.omit_temperature:                          # modelo que SÓ aceita o default → tira de params
+        kw.pop("temperature", None)
+    if pc.reasoning_effort:                          # default do provider (override /think ainda vem abaixo)
         kw["reasoning_effort"] = pc.reasoning_effort
     kw.update(overrides)                             # override por chamada (/think) vence o default
+    if pc.omit_temperature:                          # de novo: um override não pode REINTRODUZIR temp
+        kw.pop("temperature", None)
+    if kw.get("reasoning_effort"):                   # CLAMP do effort RESOLVIDO (default ou override) ao
+        from okami.llm.model_catalog import clamp_effort   # teto do modelo — cost-safe (item 15a): high→medium
+        kw["reasoning_effort"] = clamp_effort(_effective_model(pc, model), kw["reasoning_effort"])
+    _apply_reasoning(kw, pc)                          # reasoning_style: thinking XOR reasoning_effort (item 12)
     kw.setdefault("timeout", 150)                    # FALHA RÁPIDO (era 600s) → harness encolhe+failover
     return kw
 

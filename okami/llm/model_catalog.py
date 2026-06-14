@@ -14,6 +14,10 @@ from dataclasses import dataclass
 class ModelInfo:
     context_window: int
     vision: bool = False
+    # Níveis de reasoning_effort que ESTE modelo aceita, do menor p/ o maior (item 15a). Vazio = sem
+    # tabela conhecida → clamp_effort passa direto (fail-open). Preenchido só p/ modelos onde mandar
+    # um effort acima do teto dá 400 OU cobra reasoning que o modelo não usa direito (cost-safe).
+    supported_efforts: tuple[str, ...] = ()
 
 
 # Chave = nome NORMALIZADO (sem prefixo de provider, sem :tag, lowercase). O lookup casa por
@@ -78,3 +82,59 @@ def model_vision(model: str) -> bool:
     """True só p/ modelo CONHECIDO como multimodal (fail-closed: desconhecido = False)."""
     info = model_info(model)
     return bool(info and info.vision)
+
+
+# Ordem CANÔNICA dos níveis de reasoning_effort, do menor p/ o maior. clamp_effort usa isto p/
+# comparar "<= pedido". Effort fora desta escala (provider exótico) → passa direto (fail-open).
+_EFFORT_ORDER: tuple[str, ...] = ("minimal", "low", "medium", "high")
+
+# Tabela de efforts SUPORTADOS por modelo (item 15a, cost-safe). Chave = nome NORMALIZADO (mesma
+# regra do _SNAPSHOT: "começa com" da chave mais longa). Preenchido SÓ onde mandar um effort acima
+# do teto dá 400 ou COBRA reasoning que o modelo não usa direito. Modelo ausente aqui → passa direto.
+# Editável em runtime por testes/plugins (é um dict de módulo, não frozen).
+_EFFORTS: dict[str, tuple[str, ...]] = {
+    # família mini/spark: reasoning leve, sem o teto "high" do flagship (cobra caro à toa).
+    "o4-mini": ("minimal", "low", "medium"),
+    "o3-mini": ("minimal", "low", "medium"),
+    "gpt-5.4-mini": ("minimal", "low", "medium"),
+    "gpt-5.3-codex-spark": ("minimal", "low", "medium"),
+    "gpt-5-mini": ("minimal", "low", "medium"),
+}
+_EFFORT_KEYS = sorted(_EFFORTS, key=len, reverse=True)
+
+
+def supported_efforts(model: str) -> tuple[str, ...]:
+    """Níveis de reasoning_effort que ESTE modelo aceita (menor→maior). Vazio = sem tabela conhecida
+    (clamp passa direto). Consulta o _EFFORTS override primeiro, depois ModelInfo.supported_efforts."""
+    m = _normalize(model)
+    if not m:
+        return ()
+    for key in sorted(_EFFORTS, key=len, reverse=True):   # re-sort: testes injetam chaves em runtime
+        if m.startswith(key):
+            return _EFFORTS[key]
+    info = model_info(model)
+    return info.supported_efforts if info else ()
+
+
+def clamp_effort(model: str, effort: str) -> str:
+    """Rebaixa `effort` p/ o maior nível que o modelo suporta <= o pedido (cost-safe, item 15a).
+
+    - Modelo desconhecido / sem tabela de efforts → passa direto (fail-open, comportamento antigo).
+    - Effort vazio → vazio (sem reasoning declarado, nada a clampar).
+    - Effort fora da escala canônica → passa direto (não inventamos rebaixamento p/ provider exótico).
+    - Pedido abaixo de TODOS os suportados → menor suportado (nunca devolve vazio aqui)."""
+    effort = (effort or "").strip().lower()       # item 31: "High"/" high " normalizam — senão escapavam crus
+    if not effort:
+        return effort
+    sup = supported_efforts(model)
+    if not sup or effort in sup:                  # sem tabela ou já é suportado → não mexe
+        return effort
+    if effort not in _EFFORT_ORDER:               # escala desconhecida → não sabemos rebaixar
+        return effort
+    want = _EFFORT_ORDER.index(effort)
+    # maior suportado <= pedido (na ordem canônica); se nada <= pedido, cai no menor suportado.
+    ranked = [s for s in sup if s in _EFFORT_ORDER]
+    below = [s for s in ranked if _EFFORT_ORDER.index(s) <= want]
+    if below:
+        return max(below, key=lambda s: _EFFORT_ORDER.index(s))
+    return min(ranked, key=lambda s: _EFFORT_ORDER.index(s)) if ranked else effort

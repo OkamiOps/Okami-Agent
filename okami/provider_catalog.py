@@ -33,8 +33,11 @@ class Preset:
 
 # Ordenado por relevância p/ o usuário (assinaturas primeiro, depois locais e APIs comuns).
 PRESETS: list[Preset] = [
+    # COST-SAFE (item 15c): o modelo BASE é o tier mais barato (mini), não o flagship. Sem uma escolha
+    # explícita (auto-detecção pega `base` direto), um provider não deve cair no modelo mais caro à toa —
+    # os flagships (gpt-5.5/gpt-5.4) seguem disponíveis em `models`, opt-in no momento do add.
     Preset("codex", "OpenAI Codex / ChatGPT", "assinatura (device flow, NÃO pay-as-you-go)",
-           base={"model": "openai-codex/gpt-5.4", "auth": "oauth_subscription",
+           base={"model": "openai-codex/gpt-5.4-mini", "auth": "oauth_subscription",
                  "transport": "codex_oauth", "tier": "strong", "context_window": 256000},
            model_prefix="openai-codex/",
            models=["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"],

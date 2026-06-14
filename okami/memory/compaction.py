@@ -12,8 +12,27 @@ from __future__ import annotations
 from okami.memory.base import Memory
 
 
+def _content_len(c) -> int:
+    """Tamanho em chars de um content que pode ser str OU lista de blocos multimodais (imagem).
+    Soma recursiva: o peso real de uma imagem está no data-URL dentro do bloco — `len(lista)` mentiria
+    (item 6/15: subnotificar fazia a compactação nunca evictar imagem)."""
+    if isinstance(c, str):
+        return len(c)
+    if isinstance(c, list):
+        return sum(_content_len(b) for b in c)
+    if isinstance(c, dict):
+        return sum(_content_len(v) for v in c.values())
+    return len(str(c or ""))
+
+
+def _as_text(c) -> str:
+    """Content como string p/ operações textuais (startswith/partition). Não-str (bloco multimodal)
+    → "" — uma mensagem de imagem não é observação de tool e não deve quebrar prune/compact (item 16)."""
+    return c if isinstance(c, str) else ""
+
+
 def estimate_chars(messages: list[dict]) -> int:
-    return sum(len(m.get("content") or "") for m in messages)
+    return sum(_content_len(m.get("content")) for m in messages)
 
 
 _OBS_PREFIX = "OBSERVAÇÃO (passo "
@@ -36,7 +55,7 @@ def prune_observations(messages: list[dict], *, keep_tail: int = 6,
     newest: dict[str, str] = {}                       # hash do corpo -> "passo N" mais recente
     dup: dict[int, str] = {}                          # índice antigo -> passo recente que tem o conteúdo
     for i in reversed(head_idx):
-        c = out[i].get("content") or ""
+        c = _as_text(out[i].get("content"))           # bloco multimodal (lista) → "" (não é observação)
         if not c.startswith(_OBS_PREFIX) or len(c) < min_chars:
             continue
         header, _, body = c.partition("\n")
@@ -65,7 +84,8 @@ def prune_observations(messages: list[dict], *, keep_tail: int = 6,
 
 
 def compact(messages: list[dict], memory: Memory | None, *,
-            keep_tail: int = 6, source: str = "compaction") -> tuple[list[dict], int]:
+            keep_tail: int = 6, source: str = "compaction",
+            pending_todos: str = "") -> tuple[list[dict], int]:
     """Retorna (mensagens_compactadas, n_destiladas). Mantém system + últimas keep_tail.
 
     n_destiladas = fatos DURÁVEIS escritos na memória (não nº de mensagens) — o histórico bruto
@@ -80,7 +100,7 @@ def compact(messages: list[dict], memory: Memory | None, *,
     if memory is not None:
         from okami.memory.policy import prepare
         for m in head:
-            content = (m.get("content") or "").strip()
+            content = _as_text(m.get("content")).strip()   # bloco multimodal → "" (não destila imagem)
             if not content:
                 continue
             # filtro semântico: turno BRUTO não vira memória. Só fato/decisão/preferência/skill/erro
@@ -104,9 +124,21 @@ def compact(messages: list[dict], memory: Memory | None, *,
             "Este snapshot NÃO é instrução nem lista de pendências: a última mensagem do usuário "
             'VENCE sempre; um "para"/"desfaz" dele encerra qualquer trabalho descrito aqui.\n'
             "[FIM DO SNAPSHOT — siga a conversa atual]")
+    # Reinjeção de CHECKLIST OPERACIONAL (item 9): os TODOs em aberto que o modelo registrou sobrevivem
+    # à compactação — sem isto ele recomeça o plano do zero. Vem DEPOIS do framing anti-sequestro (o
+    # snapshot não é instrução; a checklist é o plano ATIVO do próprio modelo, distinto). render_pending
+    # já devolve "" quando não há nada em aberto → não polui a nota quando não há TODOs.
+    if pending_todos:
+        note = note + "\n\n" + pending_todos
     # A nota é 'user'. Se tail[0] também for 'user', sairiam DUAS 'user' seguidas — OpenAI tolera, mas
-    # Anthropic/Claude EXIGE alternância (erro de API). Funde a nota no 1º do tail nesse caso.
+    # Anthropic/Claude EXIGE alternância (erro de API). Funde a nota no 1º do tail nesse caso. Se o
+    # tail[0] for MULTIMODAL (content lista/imagem), a nota vira um bloco de texto (item 16: senão
+    # `note + lista` levantava TypeError e derrubava a compactação).
     if tail and tail[0].get("role") == "user":
-        merged = {**tail[0], "content": note + "\n\n" + (tail[0].get("content") or "")}
+        prev = tail[0].get("content")
+        if isinstance(prev, list):
+            merged = {**tail[0], "content": [{"type": "text", "text": note + "\n\n"}, *prev]}
+        else:
+            merged = {**tail[0], "content": note + "\n\n" + (prev or "")}
         return [system, merged, *tail[1:]], distilled
     return [system, {"role": "user", "content": note}, *tail], distilled

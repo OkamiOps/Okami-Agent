@@ -117,8 +117,13 @@ class Spawn(Tool):
 
 class Browse(Tool):
     name = "browse"
-    description = "Abre uma URL e lê o texto. Com Playwright também: action=click|fill|screenshot."
-    args_schema = {"url": "URL", "action": "read|click|fill|screenshot", "selector": "(opc)", "text": "(opc)"}
+    description = ("Abre uma URL e lê o texto. Com Playwright também: action=snapshot|click|fill|screenshot. "
+                   "snapshot numera os elementos interativos como [N] (mapa de acessibilidade); depois "
+                   "click/fill aceitam esse [N] como selector (resolvido por papel+nome) — bem mais "
+                   "confiável que adivinhar CSS. Mantém sessão LOGADA entre chamadas (perfil persistente).")
+    args_schema = {"url": "URL", "action": "read|snapshot|click|fill|screenshot",
+                   "selector": "(opc) ref [N] de uma snapshot OU seletor CSS de fallback",
+                   "text": "(opc) texto p/ fill"}
     required = ("url",)
 
     def run(self, args, ctx):

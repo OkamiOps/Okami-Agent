@@ -34,6 +34,7 @@ class Checkpoints:
         self.journal = self.dir / "journal.jsonl"
         self.keyfile = self.dir / ".hmac.key"
         self._key: bytes | None = None
+        self._turn: str | None = None       # trace do turno corrente (carimba os snapshots — item 17)
 
     _MAX_SNAP = 2_000_000          # não captura arquivo gigante no journal (cap por entrada)
     _MAX_JOURNAL = 5_000_000       # cap TOTAL: acima disso, poda o mais antigo e re-encadeia
@@ -56,9 +57,15 @@ class Checkpoints:
 
     @staticmethod
     def _payload(entry: dict) -> dict:
-        """Só os campos cobertos pelo MAC (sem o próprio mac), em ordem estável."""
+        """Só os campos cobertos pelo MAC (sem o próprio mac), em ordem estável.
+
+        `trace` (item 17) entra na cobertura do MAC com default None → entradas novas encadeiam
+        consistente (writer e verifier carimbam None quando não há turno corrente). Journals ANTIGOS
+        em disco (escritos sem `trace`) tiveram o mac calculado sobre um payload sem este campo →
+        o mac não bate mais e a entrada degrada GRACIOSO (pulada, igual a uma entrada adulterada)."""
         return {"path": entry.get("path"), "before": entry.get("before"),
-                "existed": entry.get("existed"), "ts": entry.get("ts")}
+                "existed": entry.get("existed"), "ts": entry.get("ts"),
+                "trace": entry.get("trace")}
 
     def _mac(self, prev: str, payload: dict) -> str:
         msg = (prev + json.dumps(payload, sort_keys=True, ensure_ascii=False)).encode("utf-8")
@@ -93,6 +100,14 @@ class Checkpoints:
             return None
         return p
 
+    # ----------------------------------------------------------------- turno corrente (item 17)
+    def begin_turn(self, trace_id: str | None) -> None:
+        """Seta o turno corrente — todo snapshot daqui em diante leva este `trace` (undo por turno).
+
+        Chamado pelo harness via getattr guard no início de cada execução; trace vazio/None volta a
+        carimbar None (compat com snapshots avulsos)."""
+        self._turn = trace_id or None
+
     # ----------------------------------------------------------------- append / read
     def snapshot(self, rel: str) -> None:
         """Grava o estado ATUAL de `rel` (antes de uma escrita) — jailed + sem segredo + cap + HMAC."""
@@ -111,7 +126,7 @@ class Checkpoints:
         with _FileLock(self.journal):                   # serializa append (multi-processo/turno)
             prev = self._tail_mac()
             payload = {"path": rel, "before": before, "existed": before is not None,
-                       "ts": round(time.time(), 3)}
+                       "ts": round(time.time(), 3), "trace": self._turn}
             entry = {**payload, "mac": self._mac(prev, payload)}
             with self.journal.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -157,6 +172,20 @@ class Checkpoints:
         self._rewrite(ents)
 
     # ----------------------------------------------------------------- rollback
+    def _revert_one(self, e: dict, ok: bool) -> str | None:
+        """Restaura UMA entrada (estado `before`) se o HMAC bate e o path é seguro. Retorna o path revertido."""
+        if not ok:
+            return None                                 # entrada adulterada (HMAC não bate) → ignora
+        p = self._safe(e.get("path", ""))
+        if p is None:
+            return None                                 # aponta p/ fora do ws / sensível → ignora
+        if e.get("existed"):
+            from okami.core.file_safety import write_text_atomic
+            write_text_atomic(p, e.get("before") or "")
+        elif p.exists():
+            p.unlink()
+        return e.get("path")
+
     def rollback(self, n: int = 1) -> list[str]:
         """Reverte as últimas n escritas (sob lock); pula entradas adulteradas (cadeia HMAC quebrada)."""
         with _FileLock(self.journal):
@@ -167,17 +196,58 @@ class Checkpoints:
             undone, undone_ok = ents[-n:], oks[-n:]
             reverted = []
             for e, ok in zip(reversed(undone), reversed(undone_ok)):
-                if not ok:
-                    continue                            # entrada adulterada (HMAC não bate) → ignora
-                p = self._safe(e.get("path", ""))
-                if p is None:
-                    continue                            # aponta p/ fora do ws / sensível → ignora
-                if e.get("existed"):
-                    from okami.core.file_safety import write_text_atomic
-                    write_text_atomic(p, e.get("before") or "")
-                elif p.exists():
-                    p.unlink()
-                reverted.append(e["path"])
+                path = self._revert_one(e, ok)
+                if path is not None:
+                    reverted.append(path)
             keep = ents[: len(ents) - len(undone)]
             self._rewrite(keep) if keep else (self.journal.unlink() if self.journal.exists() else None)
             return reverted
+
+    # ----------------------------------------------------------------- undo por turno (item 17)
+    def rollback_turn(self, trace: str) -> list[str]:
+        """Desfaz TODAS as escritas do turno `trace` em ordem REVERSA (sob lock).
+
+        Reusa o caminho verify/safe/write_text_atomic do rollback comum: entradas com cadeia HMAC
+        quebrada (forjadas) são puladas. As entradas verificadas e revertidas saem do journal, que
+        é re-encadeado limpo (mantendo os outros turnos íntegros)."""
+        if not trace:
+            return []
+        with _FileLock(self.journal):
+            ents = self.entries()
+            if not ents:
+                return []
+            oks = self._verify(ents)
+            reverted, keep = [], []
+            # ordem reversa só p/ os do turno: desfaz a última escrita primeiro (volta ao estado pré-turno)
+            for e, ok in zip(reversed(ents), reversed(oks)):
+                if ok and e.get("trace") == trace:
+                    path = self._revert_one(e, ok)
+                    if path is not None:
+                        reverted.append(path)
+                else:
+                    keep.append(e)                      # outro turno / forjada → preserva no journal
+            keep.reverse()                              # restaura a ordem cronológica original
+            self._rewrite(keep) if keep else (self.journal.unlink() if self.journal.exists() else None)
+            return reverted
+
+    def turns(self) -> list[tuple[str | None, int, float | None]]:
+        """Lista os turnos (trace, nº de escritas, ts da última) — só entradas com HMAC válido.
+
+        Ordena pelo ts mais recente de cada turno (mais novo por último). Entradas sem trace ficam
+        agrupadas sob None; entradas forjadas (cadeia quebrada) não contam."""
+        ents = self.entries()
+        oks = self._verify(ents)
+        seen: dict[str | None, list] = {}
+        order: list[str | None] = []
+        for e, ok in zip(ents, oks):
+            if not ok:
+                continue
+            tr = e.get("trace")
+            if tr not in seen:
+                seen[tr] = [0, None]
+                order.append(tr)
+            seen[tr][0] += 1
+            ts = e.get("ts")
+            if isinstance(ts, (int, float)):
+                seen[tr][1] = ts
+        return [(tr, seen[tr][0], seen[tr][1]) for tr in order]

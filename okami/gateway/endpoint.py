@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from okami.core.approval import smart_judge        # juiz LLM de aprovação no modo smart (item 13)
+from okami.core.redact import redact               # DLP de saída (#7 item 2): mascara segredo antes do send
 from okami.gateway.endpoint_commands import EndpointCommandsMixin
 from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
 from okami.gateway.sessions import TranscriptStore
@@ -158,6 +159,39 @@ class AgentEndpoint(EndpointCommandsMixin):
         p = self._home_file()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(str(chat_id), encoding="utf-8")
+
+    def _notify_owner(self, chat_id, msg: str) -> bool:
+        """Entrega FORA-DO-TURNO ao dono (#7 item 3) — usada por tarefas de longa duração (vigia/loop/
+        lembrete, itens 10/14/19) p/ "tocar" o dono sem esperar o fim do turno. Vai pro home_chat (alvo
+        canônico de lembretes) ou, na falta dele, pro chat de origem. Redige segredo SEMPRE (#7 item 2).
+        Com a flag notifications.desktop ligada, também dispara notificação desktop (#7 item 4), best-effort.
+        Devolve True se conseguiu entregar pelo canal; False se o send falhou."""
+        safe = redact(msg or "")
+        target = self.home_chat() or chat_id
+        ok = False
+        try:
+            self.channel.send(target, "[notify] " + safe)
+            ok = True
+        except Exception:  # noqa: BLE001 — canal caiu? não deixa a notificação derrubar a tarefa
+            ok = False
+        # item 4 — sink desktop (best-effort, atrás da flag): "toca" o dono na máquina dele também.
+        if self._desktop_enabled():
+            try:
+                from okami.core.desktop import desktop_notify
+                desktop_notify("Okami", safe)
+            except Exception:  # noqa: BLE001 — desktop é aviso, não operação crítica
+                pass
+        return ok
+
+    def _desktop_enabled(self) -> bool:
+        """True se notifications.desktop está ligado na config (fail-open p/ cfg dict/objeto/None)."""
+        cfg = self.cfg
+        notif = getattr(cfg, "notifications", None)
+        if notif is None and isinstance(cfg, dict):       # cfg pode chegar como dict cru (compat)
+            notif = cfg.get("notifications")
+        if isinstance(notif, dict):
+            return bool(notif.get("desktop"))
+        return bool(getattr(notif, "desktop", False))
 
     def _emit_pairing_prompt(self, chat_id) -> None:
         """Chat não-autorizado: gera/reusa um código de pareamento e instrui o usuário a pedir ao dono
@@ -341,7 +375,11 @@ class AgentEndpoint(EndpointCommandsMixin):
             return ok
         return approve
 
-    def handle(self, chat_id, text: str) -> None:
+    def handle(self, chat_id, text: str, surface_override: str | None = None) -> None:
+        # `surface_override` (#13): força a tool policy de uma superfície ESPECÍFICA neste turno, em vez
+        # de herdar a do canal-base (self.surface). É per-chamada (NÃO muta self.surface → thread-safe vs.
+        # o poll concorrente do canal-base) e propaga no spawn do _run. Usado pelo webhook: o evento roda
+        # sob 'webhook' (deny-by-default de shell), não sob 'telegram' com os grants do dono.
         # DENY-BY-DEFAULT + PAREAMENTO: o allowlist do canal (agent.yaml) OU a aprovação dinâmica
         # (PairingStore) abrem o chat. Não-autorizado recebe um CÓDIGO p/ o dono aprovar pelo CLI —
         # em vez do "🚫 não autorizado" seco que deixava o bot mudo até editar config na mão.
@@ -758,7 +796,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             else:
                 s.busy, s.cancel, decision = True, False, "start"
         if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
-            self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None)))
+            self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None),
+                                          surface_override=surface_override))
         elif decision == "interrupt":
             self.channel.send(chat_id, "⏹ " + _tr(
                 "gw.interrupting", _default="interrupting the current one — starting your new message now."))
@@ -1055,7 +1094,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             from okami import log
             log.dbg("goal_after_turn falhou", exc_info=True)
 
-    def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None) -> None:
+    def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None,
+             surface_override: str | None = None) -> None:
         if resume:                                        # retomada: o USER já está no transcript
             ctx = _history_block(s.history[:-1], max_chars=self.max_history_chars)
         else:
@@ -1135,10 +1175,14 @@ class AgentEndpoint(EndpointCommandsMixin):
                 kw["model"] = s.model_override
             if images:                                    # vision (§6) só quando veio foto (compat c/ runners simples)
                 kw["images"] = images
-            kw.setdefault("surface", self.surface)        # tool policy por superfície (P1.4)
+            kw.setdefault("surface", surface_override or self.surface)  # tool policy por superfície (P1.4);
+            #                                              #13: surface_override força a da chamada (ex.: webhook)
             kw.setdefault("agent_home", self.home)         # casa isolada (memória/identidade ≠ projeto)
             kw.setdefault("open_fs", self.open_fs)         # acesso amplo no CLI; gateway confinado
             kw.setdefault("allow_paths", self.allow_paths) # pastas extras liberadas (config tools.allow_paths)
+            # Entrega FORA-DO-TURNO (#7 item 3, usada por 10/14/19): o harness pode "tocar" o dono no meio
+            # da tarefa (vigia/loop/lembrete) — entrega ao home_chat, redige segredo e (item 4) avisa o desktop.
+            kw["notify"] = lambda m: self._notify_owner(chat_id, m)
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             task = self.run_task(self.cfg, self.ws, text, **kw)
             _elapsed = time.time() - _t0
@@ -1173,6 +1217,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             if getattr(self.channel, "supports_media", False):   # MEDIA:<path> na resposta → anexo nativo
                 from okami.channels.media import extract_media
                 reply_text, reply_media = extract_media(reply)
+            reply_text = redact(reply_text)                 # DLP de saída (#7 item 2): mascara segredo que o
+            #                                                 modelo possa ter cuspido ANTES de qualquer send
             if reply_text.strip() or not reply_media:       # resposta só-anexo não manda texto vazio
                 self.channel.send(chat_id, prefix + reply_text)
             for m in reply_media:
@@ -1196,7 +1242,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
         except Exception as e:  # noqa: BLE001 — USER já está no transcript → detectável como interrompido
-            self.channel.send(chat_id, "❌ " + _tr("gw.run_error", _default="error: {e}", e=e))
+            # DLP de saída (#7 item 2): a mensagem de erro pode carregar um segredo (chave numa stacktrace,
+            # token num traceback) → redige ANTES de mandar pro canal.
+            self.channel.send(chat_id, "❌ " + redact(_tr("gw.run_error", _default="error: {e}", e=e)))
             self._react(chat_id, "👎")
         finally:
             with self._sess_lock:                        # reset+drain ATÔMICO vs. o check-then-set do dispatch
@@ -1207,7 +1255,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                     s.busy = True
             if nxt is not None:                          # spawn FORA do lock (não segura a trava no trabalho)
                 nxt_text, nxt_img = nxt
-                self._spawn(lambda t=nxt_text, im=nxt_img: self._run(chat_id, t, s, images=im))
+                self._spawn(lambda t=nxt_text, im=nxt_img: self._run(  # #13: continuação herda a surface
+                    chat_id, t, s, images=im, surface_override=surface_override))
 
     def _status_on_event(self, chat_id, status_id, header: str, base):
         """on_event que EDITA a msg de status ao vivo com o progresso (tool-calls), com throttle. Encadeia
@@ -1308,8 +1357,36 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.handle(msg.chat_id, f"{text}\n\n{note}" if text else note)
                 continue
             if text:
+                # Compreensão de links (#7 item 11): mensagem que é SÓ uma URL (não-comando) → resume na
+                # hora SEM gastar um turno LLM (sem run_task). Idempotente via _seen_msgs (dedup no topo).
+                if self._link_understanding_enabled() and self._maybe_summarize_link(msg.chat_id, text):
+                    continue
                 self.handle(msg.chat_id, text)
         self._notify_completed_processes()
+
+    def _link_understanding_enabled(self) -> bool:
+        """True se channels.link_understanding está ligado na config (fail-open p/ dict/objeto/None)."""
+        cfg = getattr(self, "cfg", None)              # paths sem init completo (testes/bare) não têm cfg
+        ch = getattr(cfg, "channels", None)
+        if ch is None and isinstance(cfg, dict):
+            ch = cfg.get("channels")
+        if isinstance(ch, dict):
+            return bool(ch.get("link_understanding"))
+        return bool(getattr(ch, "link_understanding", False))
+
+    def _maybe_summarize_link(self, chat_id, text: str) -> bool:
+        """Se `text` é só uma URL, abre + resume (modelo auxiliar, SSRF guardado no web_extract) e entrega
+        direto — SEM run_task (sem turno LLM). Devolve True se tratou como link; False = não era URL pura."""
+        from okami.gateway import link_understanding as lu
+        if not lu.is_pure_url(text):
+            return False
+        url = lu.detect_urls(text)[0]
+        try:
+            summary = lu.summarize_link(self.cfg, url)
+        except Exception as e:  # noqa: BLE001 — best-effort: nunca derruba o poll por causa de um link
+            summary = f"(não consegui abrir o link: {e})"
+        self.channel.send(chat_id, "🔗 " + redact(summary))   # redige antes do send (#7 item 2)
+        return True
 
     def apply_config(self, cfg) -> list[str]:
         """Re-aplica em quente SÓ os campos seguros da nova config (#12). Devolve o que mudou."""

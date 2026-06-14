@@ -192,6 +192,10 @@ class ApplyPatch(Tool):
                 if op.path not in ctx.read_files:      # grounding: igual edit_file
                     return ToolResult(False, f"'{op.path}' existe mas você não o leu — use read_file "
                                       "antes de aplicar patch (grounding).")
+                from okami.core.tools.file_state import check_stale
+                stale = check_stale(ctx, op.path, src)  # item 7: mudou no disco depois da leitura? bloqueia
+                if stale:
+                    return ToolResult(False, stale, effect=False)
                 # Move sobre destino EXISTENTE não-lido = sobrescrita destrutiva às cegas → recusa
                 # (mesma postura do write_file; era o gap #9 do review).
                 if op.move_to and dst != src and dst.exists() and op.move_to not in ctx.read_files:

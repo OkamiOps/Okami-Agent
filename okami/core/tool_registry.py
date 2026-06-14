@@ -58,6 +58,9 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("web_extract", "web"),
     ToolSpec("generate_image", "mídia", tier="power"),
     ToolSpec("vision_analyze", "mídia"),
+    ToolSpec("audio_analyze", "mídia"),                       # #7: transcreve áudio (whisper local)
+    ToolSpec("notify", "controle"),                           # #7: mensagem ao dono fora do turno
+    ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)
     ToolSpec("tool_search", "controle"),
     ToolSpec("finish_setup", "controle"),
     ToolSpec("task_complete", "controle", tier="essential", terminal=True),

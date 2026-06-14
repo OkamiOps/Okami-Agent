@@ -36,15 +36,17 @@ def _load() -> OkamiConfig:
         raise typer.Exit(1)
 
 
-def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str]:
+def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str, list[str]]:
+    """Pinga /models. Devolve (ok, msg, ids) — os `ids` deixam o doctor (item 15b) distinguir
+    "endpoint off" de "modelo errado/typo" via model_present. Lista vazia quando não há ids/no erro."""
     url = api_base.rstrip("/") + "/models"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:  # noqa: S310
             data = json.loads(r.read().decode("utf-8"))
         ids = [m.get("id") for m in data.get("data", [])]
-        return True, f"{len(ids)} modelos" + (f" (ex.: {ids[0]})" if ids else "")
+        return True, f"{len(ids)} modelos" + (f" (ex.: {ids[0]})" if ids else ""), ids
     except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        return False, str(e)
+        return False, str(e), []
 
 
 def _collect_channels():

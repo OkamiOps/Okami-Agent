@@ -30,6 +30,8 @@ _DENY_BY_SURFACE: dict[str, set[str]] = {
     "slack": set(_REMOTE_DENY),                      # #P1: canal REST remoto ≠ CLI local
     "discord": set(_REMOTE_DENY),
     "mattermost": set(_REMOTE_DENY),
+    "email": set(_REMOTE_DENY),                      # #7: e-mail é porta ABERTA (qualquer um manda) → como telegram
+    "webhook": set(_REMOTE_DENY),                    # #7: webhook entrega/dispara via HTTP externo → idem
     # Paperclip POR PAPEL (#P1): antes 'paperclip' era surface COMPLETA (porta larga). Agora o default
     # já é o worker (executa, mas não gerencia processo/recursiona), e cada papel tem repertório próprio.
     "paperclip": set(_WORKER_DENY),                  # default = worker
@@ -41,6 +43,7 @@ _DENY_BY_SURFACE: dict[str, set[str]] = {
 # Teto de sensibilidade por superfície (defesa extra): remoto não roda 'dangerous' sem opt-in.
 _MAX_DANGER: dict[str, str] = {"telegram": "sensitive", "group": "safe", "api": "sensitive",
                                "slack": "sensitive", "discord": "sensitive", "mattermost": "sensitive",
+                               "email": "sensitive", "webhook": "sensitive",
                                "paperclip-manager": "sensitive", "paperclip-reviewer": "safe",
                                "paperclip-external": "safe"}
 _DANGER_RANK = {"safe": 0, "sensitive": 1, "dangerous": 2}
@@ -58,7 +61,7 @@ _CAPABILITY_GRANTS: dict[str, set[str]] = {
 }
 # Superfícies onde liberar shell merece ALARME (remoto/exposto). CLI é do dono → sem alarme.
 _REMOTE_FOR_WARN = frozenset({"telegram", "group", "slack", "discord", "mattermost", "api",
-                              "paperclip", "paperclip-worker"})
+                              "email", "webhook", "paperclip", "paperclip-worker"})
 
 
 def _granted_tools(config) -> set[str]:
@@ -124,7 +127,8 @@ def paperclip_surface(role) -> str:
 
 # nome do canal (channel.name) → superfície. Mais confiável que o nome da CLASSE.
 _NAME_TO_SURFACE = {"telegram": "telegram", "telegram-group": "group", "slack": "slack",
-                    "discord": "discord", "mattermost": "mattermost", "paperclip": "paperclip"}
+                    "discord": "discord", "mattermost": "mattermost", "email": "email",
+                    "webhook": "webhook", "paperclip": "paperclip"}
 
 
 def surface_of(channel) -> str:

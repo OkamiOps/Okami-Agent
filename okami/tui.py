@@ -497,7 +497,11 @@ def diff_block(old: str, new: str, path: str = "", context: int = 2):
     body = [ln for ln in diff if not ln.startswith(("---", "+++", "@@"))]   # tira o cabeçalho do unified
     rows: list = []
     if path:
-        rows.append(Text.from_markup(f"  [{MUTE}]±[/] [{SOFT}]{escape(path)}[/]"))
+        import os
+        uri = "file://" + os.path.abspath(path)      # item 8: path clicável (OSC-8 via Rich; degrada s/ TTY)
+        label = (f"[link={uri}]{escape(path)}[/link]" if "[" not in uri and "]" not in uri
+                 else escape(path))
+        rows.append(Text.from_markup(f"  [{MUTE}]±[/] [{SOFT}]{label}[/]"))
     shown = body[:_DIFF_MAX_LINES]
     for ln in shown:
         if ln.startswith("+"):

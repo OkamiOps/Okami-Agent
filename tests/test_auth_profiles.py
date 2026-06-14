@@ -19,7 +19,12 @@ def _cfg(providers, default="codex"):
     return SimpleNamespace(providers=providers, default_provider=default)
 
 
-def test_codex_is_oauth_subscription():
+def test_codex_is_oauth_subscription(monkeypatch, tmp_path):
+    # isolamento: _oauth_expiry lê ~/.codex/auth.json e credentials reais — sem isto o teste depende
+    # do estado de credencial do dev (token expirado → status 'expired', falso-negativo). HOME+OKAMI_HOME
+    # p/ tmp → sem arquivo de auth → expiry None → status 'ready' (a config sintética tem ready=True).
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("OKAMI_HOME", str(tmp_path))
     cfg = _cfg({"codex": _pc(transport="codex_oauth", ready=True)})
     p = build_auth_profiles(cfg)[0]
     assert p["kind"] == "oauth" and p["subscription"] is True and p["default"] is True

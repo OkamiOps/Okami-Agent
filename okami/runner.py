@@ -81,6 +81,9 @@ def run_task(
     skills_dir: str | None = None,           # None → casa central (okami.home.skills_dir): não espalha
     extra_context: str = "",
     cancel: Callable[[], bool] | None = None,
+    notify: Callable[[str], object] | None = None,   # entrega FORA-DO-TURNO ao dono (#7 item 3): o gateway
+                                                     # injeta; o harness "toca" o dono no meio da tarefa
+                                                     # (vigia/loop/lembrete). None = sem canal (CLI puro).
     depth: int = 0,
     images: list[str] | None = None,
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
@@ -234,18 +237,27 @@ def run_task(
         return t
     from okami.core.sandbox import effective_sandbox
     sandbox = effective_sandbox(cfg.sandbox, surface)   # #P1.1: superfície exposta endurece por padrão
-    harness = Harness(generate, t, ws, budget=budget,
-                      on_event=on_event, escalate=escalate, system_extra=system_extra,
-                      memory=mem, core_block=core_block, approve=approve,
-                      skills=skills_map, registry=registry, cancel=cancel,
-                      checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
-                      images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
-                      sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
-                      model=model or pc.model, allow_paths=allow_paths,
-                      agent_home=home,              # memória/identidade escrevem na CASA, não no CWD
-                      cfg=cfg,                       # tools que roteiam ao modelo auxiliar (web_extract/vision)
-                      # write_approval: escrita AUTOMÁTICA (review em background) vai pra fila do dono
-                      stage_writes=(surface == "review" and bool((cfg.memory or {}).get("write_approval"))))
+    _hkw = dict(
+        budget=budget,
+        on_event=on_event, escalate=escalate, system_extra=system_extra,
+        memory=mem, core_block=core_block, approve=approve,
+        skills=skills_map, registry=registry, cancel=cancel,
+        checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
+        images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
+        sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
+        model=model or pc.model, allow_paths=allow_paths,
+        agent_home=home,              # memória/identidade escrevem na CASA, não no CWD
+        cfg=cfg,                      # tools que roteiam ao modelo auxiliar (web_extract/vision)
+        # write_approval: escrita AUTOMÁTICA (review em background) vai pra fila do dono
+        stage_writes=(surface == "review" and bool((cfg.memory or {}).get("write_approval"))),
+    )
+    if notify is not None:            # entrega FORA-DO-TURNO ao dono (#7 item 3) — só passa quando há canal
+        _hkw["notify"] = notify
+    try:
+        harness = Harness(generate, t, ws, **_hkw)
+    except TypeError:                 # ctor ainda sem `notify` (landing paralelo do loop-owner) → fail-open
+        _hkw.pop("notify", None)
+        harness = Harness(generate, t, ws, **_hkw)
     try:
         harness.run()
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)

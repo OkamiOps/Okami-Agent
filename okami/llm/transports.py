@@ -242,6 +242,9 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
         payload["tool_choice"] = "auto"
     effort = (overrides or {}).get("reasoning_effort") or pc.reasoning_effort  # /think > default do provider
     if effort:
+        from okami.llm.model_catalog import clamp_effort   # item 21: clampa TAMBÉM aqui (era furo no
+        effort = clamp_effort(payload.get("model") or pc.model, effort)  # caminho codex — modelos mini)
+    if effort:
         payload["reasoning"] = {"effort": effort}   # think effort (gpt-5/codex): minimal|low|medium|high
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(CODEX_URL, data=body, method="POST")

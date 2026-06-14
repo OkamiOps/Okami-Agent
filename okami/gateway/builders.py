@@ -77,6 +77,18 @@ def _build_channel(ctype: str, cc: dict):
     return build_channel(ctype, cc)
 
 
+def _parse_email_cc(cc: dict) -> dict:
+    """#19: normaliza channels.email (resolve app-password via env/secret_sources, default Gmail de
+    host/port) ANTES do build_channel — o EmailChannel é keyword-only (user/app_password, sem token).
+    Fail-graceful: se o parser ainda não existir em runtime (spec a meio de chegar), devolve a config
+    crua — o build_channel/required_keys cuida do que faltar."""
+    try:
+        from okami.config import parse_email_channel
+    except ImportError:
+        return cc or {}
+    return parse_email_channel(cc or {})
+
+
 def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] = lambda m: None,
                     make_channel=None, run_task=None) -> list[AgentEndpoint]:
     from okami.agents import effective_config
@@ -127,7 +139,11 @@ def build_endpoints(global_raw: dict, agents: dict, emit: Callable[[str], None] 
         from okami.gateway.channel_registry import rest_channel_types
         for ctype in rest_channel_types():                   # #15: canais REST do registry (sem if/elif)
             cc = chans.get(ctype) or {}
-            if not cc.get("token"):
+            if ctype == "email":                             # #19: e-mail é keyword-only (user/app_password,
+                cc = _parse_email_cc(cc)                     # sem token) → parseia (resolve segredo/host) antes
+                if not cc.get("user") or not cc.get("app_password"):
+                    continue                                 # sem credencial → pula (não há token p/ gatear)
+            elif not cc.get("token"):
                 continue
             try:
                 channel = _build_channel(ctype, cc)
@@ -151,14 +167,35 @@ def _warn_capability_grants(cfg, channel, allow_all: bool, aid: str, emit) -> No
         emit(f"[{aid}] {w}")
 
 
-def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 30.0) -> None:
-    """Sobe o scheduler (§11): a cada `interval`s roda jobs vencidos e ENTREGA o resultado no chat."""
+def _make_desktop_notifier(global_raw: dict) -> Callable[[str, str], None]:
+    """#4: devolve um notificador de DESKTOP (toast) honrando `notifications.desktop`. Se a flag não
+    está ligada, devolve um no-op (zero custo). É best-effort: qualquer falha do sink é engolida — uma
+    notificação nunca derruba a entrega (mesma doutrina do okami.core.desktop)."""
+    on = bool(((global_raw or {}).get("notifications") or {}).get("desktop", False))
+    if not on:
+        return lambda title, body: None                # desligado → no-op silencioso
+
+    def _notify(title: str, body: str) -> None:
+        try:
+            from okami.core.desktop import desktop_notify
+            desktop_notify(title, body)
+        except Exception:  # noqa: BLE001 — best-effort: sink quebrou/sumiu, segue a vida
+            pass
+
+    return _notify
+
+
+def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 30.0,
+                     desktop_notify=None) -> None:
+    """Sobe o scheduler (§11): a cada `interval`s roda jobs vencidos e ENTREGA o resultado no chat.
+    Quando `desktop_notify` está ligado (#4), também solta um toast de desktop na entrega."""
     from okami.automation.scheduler import Scheduler
 
     sched = Scheduler(".")
     if not sched.load():
         return
     by_agent = {ep.agent_id: ep for ep in eps}
+    toast = desktop_notify or (lambda title, body: None)
 
     def execute(job):
         ep = by_agent.get(job.get("agent")) or (eps[0] if eps else None)
@@ -177,6 +214,7 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
         if deliver:                                    # multi-alvo ("123,456") ou a CASA (/sethome)
             for tg in delivery_targets(job.get("target"), home=ep.home_chat()):
                 ep.channel.send(tg, f"⏰ {job['id']}: {text}")
+            toast(f"⏰ {ep.agent_id}", f"{job['id']}: {text}")   # #4: toast desktop (best-effort)
         return text
 
     def loop():
@@ -191,15 +229,144 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
     emit(f"⏰ scheduler no ar ({len(sched.load())} job(s)).")
 
 
-def _warn_unisolated_exposure(global_raw: dict, endpoints: list, emit: Callable[[str], None]) -> bool:
+def _commitment_tick_once(eps: list, now_ts: float | None = None,
+                          emit: Callable[[str], None] = lambda m: None) -> None:
+    """#10: UMA volta do tick de compromissos INFERIDOS. Para cada endpoint: expira os velhos, pega os
+    vencidos do CommitmentStore (raiz = home do agente) e ENTREGA na casa via `safe_delivery_text`
+    (NUNCA texto cru do turno — guard de injeção persistida), marcando cada um como 'sent'.
+
+    Fail-open: qualquer erro num endpoint é engolido — esta camada de fundo nunca derruba o gateway.
+    A EXTRAÇÃO em si (que popula o store) é gatilhada no endpoint por outro caminho; aqui só o TICK
+    de entrega."""
+    from okami.automation.commitments import CommitmentStore, safe_delivery_text
+
+    now = now_ts if now_ts is not None else time.time()
+    for ep in eps:
+        try:
+            store = CommitmentStore(getattr(ep, "home", None) or getattr(ep, "ws", "."))
+            store.expire(now)                          # ciclo: pending velho demais → expired (não entrega)
+            home = ep.home_chat()
+            if not home:
+                continue                               # sem casa (/sethome) → não há p/ onde entregar
+            from okami.core.redact import redact
+            for c in store.due(now):
+                # redact: o summary vem de um modelo aux que LEU os turnos (onde pode haver segredo
+                # colado) — entrega ao chat NUNCA vai crua (safe_delivery_text só barra replay, não segredo).
+                ep.channel.send(home, "💭 " + redact(safe_delivery_text(c)))
+                store.mark(c["id"], "sent")            # marca como entregue → não reentrega
+        except Exception:  # noqa: BLE001 — fundo: um endpoint torto não derruba o tick
+            continue
+
+
+def _start_commitment_tick(eps: list, emit: Callable[[str], None], interval: float = 300.0) -> None:
+    """#10: sobe a thread do tick de compromissos (irmão do _start_scheduler). A cada `interval`s
+    entrega os compromissos vencidos. Sem endpoints → não sobe nada."""
+    if not eps:
+        return
+
+    def loop():
+        while True:
+            try:
+                _commitment_tick_once(eps, emit=emit)
+            except Exception:  # noqa: BLE001 — nunca derruba o gateway
+                pass
+            time.sleep(interval)
+
+    threading.Thread(target=loop, daemon=True).start()
+    emit("💭 tick de compromissos no ar.")
+
+
+def _start_webhook(global_raw: dict, eps: list, emit: Callable[[str], None],
+                   serve: bool = False, desktop_notify=None):
+    """#14: monta (e opcionalmente sobe) um WebhookServer a partir de `gateway.webhook`. Leitura
+    DEFENSIVA da config: sem bloco ou sem rotas → devolve None (nada exposto, fail-graceful).
+
+    Rotas `deliver_only` → entregam o payload (redigido) DIRETO no chat-casa via channel.send, SEM
+    rodar o agente (zero LLM). Rotas de evento → `server.handle(prompt, route)` acorda ep.handle(home,
+    prompt sintetizado). `serve=True` abre o socket na própria thread (junto ao scheduler); o default
+    `serve=False` só guarda a config (testes / inspeção). A superfície é alimentada no aviso unisolated
+    pelo run_gateway. `desktop_notify` (#4): toast best-effort também nas notificações deliver_only."""
+    from okami.channels.webhook import WebhookRoute, WebhookServer
+
+    gw = (global_raw or {}).get("gateway") or {}
+    wcfg = gw.get("webhook") or {}
+    raw_routes = wcfg.get("routes") or {}
+    if not raw_routes:
+        return None                                    # sem rotas → nada a expor
+
+    ep0 = eps[0] if eps else None                      # casa/destino: 1º endpoint (DM principal)
+    toast = desktop_notify or (lambda title, body: None)
+    # postura fail-SAFE (igual config.parse_webhook): default no nível do webhook é DELIVER_ONLY True —
+    # uma porta exposta só ENTREGA (não acorda o agente) até o dono pôr deliver_only: false na rota.
+    default_deliver_only = bool(wcfg.get("deliver_only", True))
+
+    def _make_deliver(ep):
+        def _deliver(body: bytes, route: "WebhookRoute") -> None:
+            """deliver_only: repassa o payload (REDIGIDO) ao chat-casa SEM acordar o agente."""
+            if ep is None:
+                return
+            from okami.core.redact import redact
+            target = route.chat_id or ep.home_chat()
+            if not target:
+                return
+            text = redact(body.decode("utf-8", "replace"))[:2000]
+            ep.channel.send(target, f"🔔 {route.provider}: {text}")
+            toast(f"🔔 {route.provider}", text)        # #4: toast desktop best-effort
+        return _deliver
+
+    routes: dict[str, WebhookRoute] = {}
+    for path, rc in raw_routes.items():
+        rc = rc or {}
+        deliver_only = bool(rc.get("deliver_only", default_deliver_only))   # rota herda o default do webhook
+        routes[path] = WebhookRoute(
+            provider=str(rc.get("provider", "generic")),
+            secret=str(rc.get("secret", "")),
+            chat_id=str(rc.get("chat_id", "")),
+            deliver_only=deliver_only,
+            deliver=_make_deliver(ep0) if deliver_only else None,
+            header=str(rc.get("header", "X-Signature")),
+            tolerance=int(rc.get("tolerance", 300)),
+            prompt_prefix=str(rc.get("prompt_prefix", "")),
+        )
+
+    def _handle(prompt: str, route: "WebhookRoute") -> None:
+        """rota de evento: acorda o agente com o prompt sintetizado, na casa (ou chat_id da rota).
+
+        #13: roteia sob surface='webhook' (per-chamada, sem mutar ep0.surface → thread-safe vs. o poll
+        concorrente do canal-base). O evento é só HMAC-autenticado → NÃO deve herdar a surface do
+        canal-base (telegram/email) nem os capability grants de shell do dono; cai na _DENY_BY_SURFACE
+        ['webhook'] (run_shell/execute_code negados por padrão)."""
+        if ep0 is None:
+            return
+        target = route.chat_id or ep0.home_chat()
+        if not target:
+            return
+        ep0.handle(target, prompt, surface_override="webhook")
+
+    srv = WebhookServer(host=str(wcfg.get("host", "127.0.0.1")), port=int(wcfg.get("port", 8788)),
+                        routes=routes, handle=_handle, serve=serve)
+    if serve:                                          # socket real → loop na própria thread (não bloqueia)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    emit(f"🪝 webhook no ar ({len(routes)} rota(s)) em {srv.host}:{srv.port}.")
+    return srv
+
+
+def _warn_unisolated_exposure(global_raw: dict, endpoints: list, emit: Callable[[str], None],
+                              extra_surfaces: list | None = None) -> bool:
     """#2: ao EXPOR canal (gateway público) SEM isolamento real, avisa GRITANTE. CLI/dev seguem sem
-    atrito — isto só dispara no gateway. Retorna True se avisou (exposto + sem Docker + sem strict)."""
+    atrito — isto só dispara no gateway. `extra_surfaces` (#14): superfícies não-canal já expostas
+    (ex.: WebhookServer) entram na lista de nomes avisados. Retorna True se avisou (exposto + sem
+    Docker + sem strict)."""
     from okami.core.sandbox import SandboxPolicy
     sb = SandboxPolicy.from_config((global_raw or {}).get("sandbox") or {})
     if bool(sb.require_isolation) or sb.effective_backend() == "docker":
         return False                                  # isolamento real (Docker/strict) → ok, sem aviso
-    names = ", ".join(sorted({getattr(ep, "channel", None) and getattr(ep.channel, "name", "") or ""
-                              for ep in endpoints} - {""})) or "canais"
+    surface_names = {getattr(ep, "channel", None) and getattr(ep.channel, "name", "") or ""
+                     for ep in endpoints}
+    for s in (extra_surfaces or []):                   # #14: webhook (sem .channel, mas é superfície exposta)
+        if s is not None:
+            surface_names.add("webhook")
+    names = ", ".join(sorted(surface_names - {""})) or "canais"
     emit("⚠️  ATENÇÃO — SUPERFÍCIE EXPOSTA SEM ISOLAMENTO REAL")
     emit(f"    Você está expondo {names} mas o sandbox não tem isolamento (Docker ausente / "
          "require_isolation desligado).")
@@ -218,7 +385,14 @@ def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = pr
     if not everyone:
         emit("nada a rodar (nenhum agente com channels.telegram.token, nem grupo).")
         return everyone
-    _warn_unisolated_exposure(global_raw, everyone, emit)   # #2: aviso forte se expõe canal SEM isolamento real
+    toast = _make_desktop_notifier(global_raw)         # #4: toast desktop (no-op se notifications.desktop off)
+    try:                                               # porta ocupada/bind falho NÃO derruba o gateway
+        webhook = _start_webhook(global_raw, eps, emit, serve=True, desktop_notify=toast)  # #14
+    except Exception as e:  # noqa: BLE001 — mesma doutrina dos outros _start_* (best-effort)
+        emit(f"⚠ webhook não subiu ({e}) — gateway segue sem webhook.")
+        webhook = None
+    _warn_unisolated_exposure(global_raw, everyone, emit,   # #2: aviso forte se expõe SEM isolamento real
+                              extra_surfaces=[webhook] if webhook else None)
     for ep in eps:                                     # boot: limpa sessões velhas + retoma interrompidas
         try:
             n = ep.prune_sessions(max_sessions=ep.max_sessions)
@@ -229,7 +403,8 @@ def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = pr
             pass
     for ep in everyone:
         threading.Thread(target=ep.loop, daemon=True).start()
-    _start_scheduler(eps, emit)                        # §11: jobs agendados entregam no chat
+    _start_scheduler(eps, emit, desktop_notify=toast)  # §11: jobs agendados entregam no chat (+ toast #4)
+    _start_commitment_tick(eps, emit)                  # #10: compromissos inferidos entregam na casa
     try:                                               # watchdog de memória (grep [MEMORY] → vazamento lento)
         from okami.observability.memwatch import start_memory_watch
         start_memory_watch(emit)

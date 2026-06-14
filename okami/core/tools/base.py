@@ -11,6 +11,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 # Variáveis de ambiente sensíveis são REMOVIDAS dos subprocessos do agente (run_shell,
 # shell_ok), para que prompt injection / código gerado não consiga exfiltrar credenciais
@@ -126,6 +127,9 @@ class ToolContext:
     stage_writes: bool = False  # escrita de memória vai pra FILA de aprovação (review/background c/ write_approval)
     registry: dict | None = None  # o registro de tools da sessão (p/ tool_search: schema sob demanda)
     cfg: object | None = None     # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
+    notify: Callable[[str], bool] | None = None  # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
+    read_mtimes: dict[str, float] = field(default_factory=dict)  # mtime no momento da leitura (item 7) — base anti-stale
+    todos: list = field(default_factory=list)  # checklist operacional do turno (item 9)
 
     @property
     def home(self) -> Path:
@@ -150,6 +154,7 @@ class ToolResult:
     ok: bool
     output: str
     effect: bool = False  # houve efeito colateral observável? (alimenta o watchdog §3.3)
+    content: list | None = None  # blocos multimodais opcionais p/ tool-result de visão nativa (item 6); None = só texto
 
 
 class Tool:

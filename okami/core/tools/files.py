@@ -17,6 +17,36 @@ def _as_int(v) -> int | None:
         return None
 
 
+def _first_changed_line(text: str, old: str, new: str) -> int:
+    """Nº (1-based) da 1ª linha que de fato mudou (item 8): linha onde `old` começa + offset da
+    1ª divergência dentro do bloco. Sem casar → 1 (fallback inofensivo)."""
+    idx = text.find(old)
+    if idx < 0:
+        return 1
+    start = text[:idx].count("\n") + 1
+    for i, (a, b) in enumerate(zip(old.splitlines(), new.splitlines())):
+        if a != b:
+            return start + i
+    return start
+
+
+def _short_diff(before: str, after: str) -> str:
+    """Diff unified curto e CAPADO (item 8) — o modelo vê o que mudou sem reler o arquivo. Tira os
+    cabeçalhos '--- '/'+++ ' (ruído) e corta em _DIFF_MAX_LINES p/ não despejar arquivo gigante."""
+    import difflib
+    try:
+        from okami.tui import _DIFF_MAX_LINES
+    except Exception:  # noqa: BLE001 — tui pode não importar (sem rich); usa um teto sensato
+        _DIFF_MAX_LINES = 40
+    ud = list(difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=2))
+    body = ud[2:] if len(ud) >= 2 else ud            # remove os 2 headers de arquivo ('--- '/'+++ ')
+    if not body:
+        return ""
+    if len(body) > _DIFF_MAX_LINES:
+        body = body[:_DIFF_MAX_LINES] + ["… (diff truncado)"]
+    return "\n".join(body)
+
+
 class ReadFile(Tool):
     name = "read_file"
     description = ("Lê um arquivo de texto do workspace. Opcional: offset (pular N linhas) + limit "
@@ -51,7 +81,8 @@ class ReadFile(Tool):
             text = read_text_capped(p)        # teto de tamanho → não estoura memória
         except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
             return ToolResult(False, f"erro ao ler {rel}: {e}", effect=False)
-        ctx.read_files.add(rel)
+        from okami.core.tools.file_state import record_read
+        record_read(ctx, rel, p)              # grounding + baseline de mtime p/ o anti-stale (item 7)
         # PAGINAÇÃO (offset/limit por LINHA): recupera o resto de uma saída grande persistida sem
         # trazer o arquivo inteiro. Sem offset/limit → arquivo inteiro (back-compat).
         off = _as_int(args.get("offset"))
@@ -94,6 +125,10 @@ class WriteFile(Tool):
                 False,
                 f"'{rel}' já existe e você não o leu. Use read_file antes de sobrescrever (grounding).",
             )
+        from okami.core.tools.file_state import check_stale, record_read
+        stale = check_stale(ctx, rel, p)               # item 7: mudou no disco depois da leitura? bloqueia
+        if stale:
+            return ToolResult(False, stale, effect=False)
         if ctx.checkpoints is not None:                # snapshot do estado ANTERIOR (rede de segurança)
             try:
                 ctx.checkpoints.snapshot(rel)
@@ -111,10 +146,12 @@ class WriteFile(Tool):
             n = write_text_atomic(p, content)   # atômico (sem arquivo meia-escrito) + teto de tamanho
         except FileTooLarge as e:
             return ToolResult(False, str(e))
-        ctx.read_files.add(rel)  # acabou de escrever → conhece o conteúdo
-        from okami.core.code_lint import lint_delta      # item 6: avisa erro NOVO (não bloqueia)
+        record_read(ctx, rel, p)  # acabou de escrever → conhece o conteúdo + atualiza baseline anti-stale
+        from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: avisa erro NOVO (não bloqueia)
         warn = lint_delta(rel, before, content)
-        return ToolResult(True, f"escrito {rel} ({n} chars)" + (f"\n{warn}" if warn else ""), effect=True)
+        sem = semantic_delta(ctx.workspace, rel, before, content)    # item 16: diagnóstico semântico (pyright)
+        extra = "".join(f"\n{w}" for w in (warn, sem) if w)
+        return ToolResult(True, f"escrito {rel} ({n} chars)" + extra, effect=True)
 
 
 class EditFile(Tool):
@@ -143,6 +180,10 @@ class EditFile(Tool):
         if rel not in ctx.read_files:
             return ToolResult(False, f"'{rel}' existe mas você não o leu — use read_file antes de "
                                      "editar (grounding; edição cega por trecho adivinhado é recusada).")
+        from okami.core.tools.file_state import check_stale, record_read
+        stale = check_stale(ctx, rel, p)               # item 7: mudou no disco depois da leitura? bloqueia
+        if stale:
+            return ToolResult(False, stale, effect=False)
         from okami.core.file_safety import MAX_WRITE_BYTES, read_text_capped, write_text_atomic
         try:
             # P1 do audit 2026-06-07: EditFile usava MAX_READ_BYTES (5MB) e quebrava com
@@ -165,12 +206,16 @@ class EditFile(Tool):
                 pass
         new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
-        ctx.read_files.add(rel)
+        record_read(ctx, rel, p)              # conhece o conteúdo + atualiza baseline anti-stale
         n = count if replace_all else 1
-        from okami.core.code_lint import lint_delta      # item 6: erro NOVO introduzido pela edição
+        from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: erro NOVO pela edição
         warn = lint_delta(rel, text, new_text)
-        return ToolResult(True, f"editado {rel} ({n} substituiç{'ões' if n > 1 else 'ão'})"
-                          + (f"\n{warn}" if warn else ""), effect=True)
+        sem = semantic_delta(ctx.workspace, rel, text, new_text)     # item 16: diagnóstico semântico (pyright)
+        line_no = _first_changed_line(text, old, new)                # item 8: nº da 1ª linha mudada
+        diff = _short_diff(text, new_text)                           # item 8: diff unified curto (capado)
+        head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'})"
+        extra = "".join(f"\n{w}" for w in (warn, sem) if w)
+        return ToolResult(True, head + (f"\n{diff}" if diff else "") + extra, effect=True)
 
 
 class ListDir(Tool):

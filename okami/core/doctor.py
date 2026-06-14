@@ -13,6 +13,23 @@ import stat
 from pathlib import Path
 
 
+def _model_present(model: str, ids) -> bool:
+    """O `model` configurado (normalizado, sem prefixo de provider) está entre os ids que o endpoint
+    devolveu? Casa pelo id BRUTO (provider sem prefixo, ex.: LMStudio) e pelo normalizado dos dois
+    lados, p/ tolerar quem prefixa de jeitos diferentes."""
+    from okami.llm.model_catalog import _normalize
+    want = _normalize(model)
+    if not want:
+        return False
+    pool = set()
+    for i in ids or []:
+        if not i:
+            continue
+        pool.add(str(i))                              # id bruto, como veio do /models
+        pool.add(_normalize(str(i)))                  # normalizado (sem prefixo/tag)
+    return want in pool or model in pool
+
+
 def build_report(cfg, *, ping=None) -> dict:
     """Coleta o diagnóstico num dict (sem imprimir). `ping(api_base) -> (ok, msg)` injetável."""
     from okami import __version__
@@ -31,8 +48,14 @@ def build_report(cfg, *, ping=None) -> dict:
         p = {"name": name, "tier": pc.tier, "model": pc.model, "transport": pc.transport,
              "ready": bool(pc.ready), "api_base": pc.api_base or ""}
         if pc.api_base and ping is not None:
-            ok, msg = ping(pc.api_base)
-            p["endpoint"] = {"ok": bool(ok), "msg": msg}
+            res = ping(pc.api_base)
+            ok, msg = res[0], res[1]
+            ids = res[2] if len(res) > 2 else None     # ping 3-tupla expõe ids do /models (item 15b)
+            ep = {"ok": bool(ok), "msg": msg}
+            # model_present distingue "endpoint off" (ok False → None, não dá p/ saber) de "modelo
+            # errado" (ok True mas o pc.model não está na lista → typo no nome). None = indeterminado.
+            ep["model_present"] = _model_present(pc.model, ids) if (ok and ids is not None) else None
+            p["endpoint"] = ep
         rep["providers"].append(p)
 
     mem = cfg.memory or {}

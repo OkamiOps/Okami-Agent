@@ -74,6 +74,40 @@ def test_make_stt_make_tts_disabled_by_default():
     assert make_tts(None) is None
 
 
+def test_make_tts_piper_returns_piper_instance():
+    """backend=piper só constrói (sem baixar modelo)."""
+    from okami.voice import make_tts
+    from okami.voice.tts_local import PiperTTS
+    tts = make_tts({"enabled": True, "backend": "piper", "model": "pt_BR-faber-medium"})
+    assert isinstance(tts, PiperTTS)
+    assert tts.model == "pt_BR-faber-medium"
+
+
+def test_make_tts_unknown_backend_still_raises():
+    from okami.voice import make_tts
+    with pytest.raises(ValueError):
+        make_tts({"enabled": True, "backend": "naoexiste"})
+
+
+def test_piper_synthesize_missing_dep_raises_clear_error(monkeypatch):
+    """Sem o pacote `piper`, synthesize levanta RuntimeError com a dica de instalação."""
+    import builtins
+    from okami.voice.tts_local import PiperTTS
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kw):
+        if name == "piper" or name.startswith("piper."):
+            raise ImportError("No module named 'piper'")
+        return real_import(name, *args, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    tts = PiperTTS(model="pt_BR-faber-medium")
+    with pytest.raises(RuntimeError) as exc:
+        tts.synthesize("olá mundo", "/tmp/okami_piper_test.wav")
+    assert "piper-tts" in str(exc.value)
+
+
 @pytest.fixture(autouse=True)
 def _i18n_pt_locale():
     """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o

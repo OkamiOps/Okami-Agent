@@ -18,6 +18,10 @@ class ChannelSpec:
     arg_keys: tuple[str, ...]       # campos de config POSICIONAIS, na ordem do construtor
     rest: bool = True               # REST-polling (entra no loop do builders); Telegram=False (especial)
     hint: str = ""                  # dica de formatação injetada no system prompt (item 22)
+    # Campos de config KEYWORD-ONLY (alguns canais — ex.: e-mail — têm construtor `*, user, app_password`):
+    # a chave do dict de config já É o nome do kwarg. Quando vazio (default), o canal é posicional (arg_keys).
+    kwarg_keys: tuple[str, ...] = ()
+    required_keys: tuple[str, ...] = ()   # subconjunto OBRIGATÓRIO dos kwargs (build_channel valida)
 
 
 REGISTRY: dict[str, ChannelSpec] = {
@@ -37,6 +41,16 @@ REGISTRY: dict[str, ChannelSpec] = {
     "mattermost": ChannelSpec("mattermost", "mattermost", "okami.channels.mattermost", "MattermostChannel",
                               ("base_url", "token", "channel_id"),
                               hint="Você está no Mattermost (markdown): **negrito**, `código`, tabelas ok."),
+    # E-mail (item 19): construtor KEYWORD-ONLY (`*, user, app_password, imap_host, …`) → passa por
+    # kwarg_keys, não por arg_keys. O builders parseia channels.email com config.parse_email_channel
+    # (resolve app-password via env/secret_sources, normaliza host/port) ANTES de chamar build_channel.
+    "email": ChannelSpec("email", "email", "okami.channels.email", "EmailChannel",
+                         arg_keys=(),
+                         kwarg_keys=("user", "app_password", "imap_host", "imap_port",
+                                     "smtp_host", "smtp_port", "mailbox", "poll_interval"),
+                         required_keys=("user", "app_password"),
+                         hint="Você está no e-mail (texto puro): sem markdown/HTML — escreva em "
+                              "texto corrido, parágrafos curtos; nada de tabela ou ** asterisco **."),
 }
 
 # Telegram em GRUPO é a mesma plataforma (superfície 'group') → herda o hint do telegram.
@@ -63,8 +77,19 @@ def build_channel(ctype: str, cc: dict):
         if k not in cc or cc[k] in (None, ""):
             raise KeyError(k)
         args.append(cc[k])
+    # Canal KEYWORD-ONLY (ex.: e-mail): só passa os kwargs PRESENTES (o resto cai no default do
+    # construtor); valida os obrigatórios (required_keys) com a mesma KeyError(<campo>) que o
+    # builders captura p/ pular só esse canal.
+    kwargs = {}
+    for k in spec.kwarg_keys:
+        if k in cc and cc[k] not in (None, ""):
+            kwargs[k] = cc[k]
+    for k in spec.required_keys:
+        if k not in kwargs:
+            raise KeyError(k)
     cls = getattr(importlib.import_module(spec.module), spec.cls)
-    return cls(*args, allow_chats=cc.get("allow_chats"), allow_all=bool(cc.get("allow_all", False)))
+    return cls(*args, allow_chats=cc.get("allow_chats"), allow_all=bool(cc.get("allow_all", False)),
+               **kwargs)
 
 
 def rest_channel_types() -> list[str]:

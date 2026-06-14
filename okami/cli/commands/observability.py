@@ -13,16 +13,62 @@ def rollback(
     n: int = typer.Argument(1, help=_tr("cli.rollback.n", _default="How many file writes to revert (from the most recent).")),
     agent: str = typer.Option(None, "-a", "--agent"),
     workspace: str = typer.Option(".", "-w", "--workspace"),
+    turn: str = typer.Option(None, "--turn", help=_tr("cli.rollback.turn", _default="Revert ALL writes of one turn (trace_id) instead of the last N.")),
 ) -> None:
-    """Desfaz as últimas N escritas de arquivo (checkpoints — rede de segurança estilo Hermes)."""
+    """Desfaz as últimas N escritas de arquivo (checkpoints — rede de segurança estilo Hermes).
+
+    `--turn <trace>` reverte o TURNO inteiro (todas as escritas daquele trace), em vez das últimas N."""
     from okami.gateway.checkpoints import Checkpoints
 
-    reverted = Checkpoints(_persona_ws(agent, workspace)).rollback(n)
+    cp = Checkpoints(_persona_ws(agent, workspace))
+    reverted = cp.rollback_turn(turn) if turn else cp.rollback(n)
     if not reverted:
         console.print("[dim]nada para reverter.[/dim]")
         return
     for p in reverted:
         console.print(f"[yellow]revertido[/yellow] {p}")
+
+
+@app.command(help=_tr("cli.undo", _default="Group undo by TURN: `okami undo` lists turns; `okami undo <trace>` reverts a whole turn."))
+def undo(
+    trace: str = typer.Argument(None, help=_tr("cli.undo.trace", _default="Turn trace_id to revert (no arg = list turns with pending checkpoints).")),
+    agent: str = typer.Option(None, "-a", "--agent"),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+) -> None:
+    """Undo agrupado por TURNO (item 17): `okami undo` lista os turnos; `okami undo <trace>` reverte um inteiro."""
+    import datetime as _dt
+
+    from okami.gateway.checkpoints import Checkpoints
+    cp = Checkpoints(_persona_ws(agent, workspace))
+    if not trace:                                     # sem trace → lista os turnos com escritas pendentes
+        turns = cp.turns()
+        from okami.cli import _ui
+        console.print()
+        console.print(_ui.header("undo", "turnos com escritas reversíveis"))
+        console.print()
+        if not turns:
+            console.print(_ui.hint("nenhuma escrita pendente nos checkpoints"))
+            console.print()
+            return
+        tbl = _ui.data_table(
+            ("turno", {"style": f"bold {_ui.CYAN}", "no_wrap": True}),
+            ("quando", {"style": _ui.MUTE, "no_wrap": True}),
+            ("escritas", {"justify": "right", "no_wrap": True}),
+        )
+        for tr, count, ts in turns:
+            when = (_dt.datetime.fromtimestamp(ts).strftime("%m-%d %H:%M") if ts else "—")
+            tbl.add_row(tr or "[sem turno]", when, str(count))
+        console.print(tbl)
+        console.print(_ui.hint("okami undo <turno> — reverte o turno inteiro"))
+        console.print()
+        return
+    reverted = cp.rollback_turn(trace)
+    if not reverted:
+        console.print(f"[dim]nada para reverter no turno '{trace}'.[/dim]")
+        return
+    for p in reverted:
+        console.print(f"[yellow]revertido[/yellow] {p}")
+    console.print(f"[dim]── {len(reverted)} escrita(s) do turno {trace} desfeita(s) ──[/dim]")
 
 
 @app.command(help=_tr("cli.events", _default="Timeline of the last task (replay/debug) — .okami/events.jsonl."))

@@ -195,7 +195,7 @@ def doctor(
         # só pinga quem DEVERIA estar pronto (default ou autenticado) — não alarma com 401 de opcional.
         ep = Text("—", style=_ui.DIM)
         if pc.api_base and (is_default or pc.ready):
-            ok, _msg = _ping_models(pc.api_base)
+            ok, _msg, *_ = _ping_models(pc.api_base)    # tolera a 3-tupla (ok, msg, ids); só usa ok aqui
             host = pc.api_base.replace("https://", "").replace("http://", "")
             ep = Text()
             # default falhando = erro (vermelho); opcional falhando (auth ruim/401) = aviso (amber), não alarme.

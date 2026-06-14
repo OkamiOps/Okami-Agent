@@ -79,3 +79,18 @@ def lint_delta(path: str, before: str, after: str) -> str:
     if err_before == err_after:                        # mesmo erro de antes → não é NOVO
         return ""
     return f"⚠ lint: {path}: {err_after}"
+
+
+def semantic_delta(workspace, rel: str, before: str, after: str) -> str:
+    """Hook FINO p/ o delta SEMÂNTICO (pesquisa #7 item 16, LSP via pyright) — camada acima do
+    delta de sintaxe acima. Onde `lint_delta` pega SyntaxError, este pega nome indefinido/import
+    quebrado, mas só quando há um projeto git + pyright instalado (senão "" silencioso).
+
+    Import PREGUIÇOSO de propósito: `code_lint` é puro-stdlib (não puxa o módulo lsp no topo);
+    pyright só entra em cena se este hook for chamado. Fail-open: qualquer falha → "".
+    """
+    try:
+        from okami.core.lsp.diagnostics import lsp_delta
+    except Exception:  # noqa: BLE001 — módulo ausente/quebrado nunca derruba o lint stdlib
+        return ""
+    return lsp_delta(workspace, rel, before, after)

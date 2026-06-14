@@ -14,7 +14,10 @@ def make_stt(cfg: dict | None):
 
 
 def make_tts(cfg: dict | None):
-    """Constrói o TTS a partir de voice.tts (None = desativado). backend: edge | minimax."""
+    """Constrói o TTS a partir de voice.tts (None = desativado).
+
+    backend: edge | minimax | piper (local) | neutts (clone local).
+    """
     cfg = cfg or {}
     if not cfg.get("enabled"):
         return None
@@ -26,4 +29,10 @@ def make_tts(cfg: dict | None):
         from okami.voice.tts import MiniMaxTTS
         return MiniMaxTTS(api_key=cfg.get("api_key"), base_url=cfg.get("api_base", "https://api.minimax.io"),
                           model=cfg.get("model", "speech-02-hd"), voice=cfg.get("voice", "male-qn-qingse"))
+    if backend == "piper":
+        from okami.voice.tts_local import PiperTTS
+        return PiperTTS(model=cfg.get("model"), voice=cfg.get("voice"))
+    if backend == "neutts":
+        from okami.voice.tts_local import NeuTTS
+        return NeuTTS(ref_audio=cfg.get("ref_audio"), model=cfg.get("model"))
     raise ValueError(f"backend de TTS desconhecido: {backend}")
