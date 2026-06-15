@@ -258,6 +258,17 @@ def _serve_ws_or_http(serve_ws, port, token, run_ws, host):
     return serve_ws(port, token, run_ws, host=host)
 
 
+@app.command(help=_tr("cli.dump", _default="One-screen, paste-able status for a bug report (secrets redacted)."))
+def dump() -> None:
+    """Imprime uma tela humano-colável (home/commit/providers/canais/skills) — segredo redigido."""
+    from okami.core.dump import build_dump
+    try:
+        cfg = _load()
+    except Exception:  # noqa: BLE001 — dump tem que funcionar mesmo com config quebrada
+        cfg = None
+    console.print(build_dump(cfg), markup=False, highlight=False)   # verbatim (colável, sem comer [..])
+
+
 @app.command(help=_tr("cli.backup", _default="Snapshot the whole ~/.okami HOME (config/memory/skills/cron) to a zip (consistent SQLite)."))
 def backup(dest: str = typer.Option(".", "--dest", "-d", help=_tr("cli.backup.dest", _default="Directory for the backup zip."))) -> None:
     """Snapshot zipado do HOME inteiro (config/memória/skills/cron) — portátil entre máquinas."""
