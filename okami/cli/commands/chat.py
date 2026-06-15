@@ -175,7 +175,8 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             console.print(f"[#00dfe8]❯[/] [dim]{line.strip()}[/]")
         else:                                           # fala do usuário → moldura ciano
             console.print(_user_panel(line.strip()))
-        decision = _route_repl_line(line, busy=_busy(), pending_approval=cid in ep._pending)
+        decision = _route_repl_line(line, busy=_busy(), pending_approval=cid in ep._pending,
+                                    pending_clarify=cid in getattr(ep, "_clarify_pending", {}))
         if decision == "exit":
             break
         if decision == "help":
@@ -209,8 +210,15 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
             console.print(f"[dim]🎨 {_tr('chat.tui_only', _default='{cmd} only works in the full-screen TUI (run `okami chat` without --no-tui).', cmd=decision)}[/dim]")
             continue
-        if decision == "copy":                          # no REPL o terminal NÃO captura o mouse → seleção nativa
-            console.print(f"[dim]📋 {_tr('chat.copy_hint', _default='in --no-tui mode you select with the mouse and copy normally (Cmd/Ctrl+C). /copy belongs to the full-screen TUI.')}[/dim]")
+        if decision == "copy":                          # OSC-52: copia pro clipboard do terminal (passa por SSH/tmux)
+            from okami.core.clipboard import copy_to_terminal, repl_copy_text
+            arg = line.split(maxsplit=1)[1].strip() if " " in line else ""
+            text, label = repl_copy_text(ep.session(cid).history, arg)
+            if not text.strip():
+                console.print(f"[dim]📋 {_tr('chat.copy_empty', _default='nothing to copy yet.')}[/dim]")
+            else:
+                copy_to_terminal(text)                   # emite a sequência OSC-52 no stdout
+                console.print(f"[dim]📋 {_tr('chat.copied', _default='copied: {label} ({n} chars) — paste anywhere (works over SSH). /copy all = whole chat.', label=label, n=len(text))}[/dim]")
             continue
         if decision in ("handle", "queue"):             # toda fala vai pra fila → 1 só produtor (sem corrida)
             inflight.append(line)

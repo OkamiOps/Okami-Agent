@@ -83,6 +83,35 @@ def test_summarize_turn_is_compact():
     assert "PEDIDO: crie o app" in s and "write_file" in s and "task_complete" not in s
 
 
+def test_summarize_turn_includes_args_and_observations():
+    # O sinal de aprendizado mora no COMO: o review precisa ver o comando exato (args) e o ERRO
+    # (observação), não só o nome da tool. (Hermes passa o histórico inteiro do turno ao fork.)
+    from okami.core import Step
+    from okami.learning.review import summarize_turn
+    t = Task(goal="rode o build")
+    t.state, t.result = TaskState.COMPLETE, "consertei o package.json"
+    t.steps = [
+        Step(1, "run_shell", {"cmd": "npm run build"}, "Error: ENOENT package.json não encontrado", False),
+        Step(2, "task_complete", {}, "", False),
+    ]
+    s = summarize_turn(t)
+    assert "npm run build" in s          # vê o comando exato (args)
+    assert "ENOENT" in s                  # vê a observação/erro (o "porquê")
+    assert "task_complete" not in s       # terminais continuam fora
+
+
+def test_summarize_turn_redacts_secrets_in_observations():
+    # Observação re-alimentada ao modelo aux do review NÃO pode carregar segredo cru.
+    from okami.core import Step
+    from okami.learning.review import summarize_turn
+    secret = "sk-" + "abcdef0123456789abcdef0123"   # montado por concatenação → não vira literal pro secret-scan
+    t = Task(goal="liste env")
+    t.state, t.result = TaskState.COMPLETE, "ok"
+    t.steps = [Step(1, "run_shell", {"cmd": "echo $X"}, f"OPENAI_API_KEY={secret}", False)]
+    s = summarize_turn(t)
+    assert secret not in s
+
+
 def test_run_review_forks_with_restricted_tools(tmp_path, monkeypatch):
     # run_review delega a run_task com o conjunto SEGURO, auto-aprovação desse conjunto, e learn=False
     # (sem recursão). Monkeypatcha run_task p/ capturar os kwargs.

@@ -93,12 +93,18 @@ class ReadFile(Tool):
             return ToolResult(False, f"erro ao ler {rel}: {e}", effect=False)
         from okami.core.tools.file_state import record_read
         record_read(ctx, rel, p)              # grounding + baseline de mtime p/ o anti-stale (item 7)
+        hint = ""                             # #8 item 7: convenção da subpasta (1× por pasta/turno)
+        try:
+            from okami.core.subdir_hints import subdir_hint
+            hint = subdir_hint(ctx.workspace, p, ctx.hinted_dirs)
+        except Exception:  # noqa: BLE001 — hint é best-effort, nunca derruba o read
+            hint = ""
         # PAGINAÇÃO (offset/limit por LINHA): recupera o resto de uma saída grande persistida sem
         # trazer o arquivo inteiro. Sem offset/limit → arquivo inteiro (back-compat).
         off = _as_int(args.get("offset"))
         lim = _as_int(args.get("limit"))
         if off is None and lim is None:
-            return ToolResult(True, text, effect=False)
+            return ToolResult(True, text + hint, effect=False)
         lines = text.splitlines()
         start = max(0, off or 0)
         if start >= len(lines) and lines:
@@ -109,7 +115,7 @@ class ReadFile(Tool):
         remaining = len(lines) - end
         if remaining > 0:
             chunk += f"\n\n[… +{remaining} linha(s); continue com offset={end} …]"
-        return ToolResult(True, chunk, effect=False)
+        return ToolResult(True, chunk + hint, effect=False)
 
 
 class WriteFile(Tool):

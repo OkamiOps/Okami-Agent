@@ -84,6 +84,8 @@ def run_task(
     notify: Callable[[str], object] | None = None,   # entrega FORA-DO-TURNO ao dono (#7 item 3): o gateway
                                                      # injeta; o harness "toca" o dono no meio da tarefa
                                                      # (vigia/loop/lembrete). None = sem canal (CLI puro).
+    clarify: Callable[[str, list], object] | None = None,  # PERGUNTA bloqueante ao dono (#8 item 1); o gateway
+                                                     # injeta. None = sem dono interativo → tool falha em paz.
     depth: int = 0,
     images: list[str] | None = None,
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
@@ -255,14 +257,17 @@ def run_task(
     )
     if notify is not None:            # entrega FORA-DO-TURNO ao dono (#7 item 3) — só passa quando há canal
         _hkw["notify"] = notify
+    if clarify is not None:           # PERGUNTA bloqueante ao dono (#8 item 1) — só passa quando há dono interativo
+        _hkw["clarify"] = clarify
     if remote is not None:            # ambiente remoto (SSH/Tailscale): FS/shell rodam no host
         _hkw["remote"] = remote
     if set_remote is not None:        # persiste o alvo na sessão (sobrevive ao turno)
         _hkw["set_remote"] = set_remote
     try:
         harness = Harness(generate, t, ws, **_hkw)
-    except TypeError:                 # ctor ainda sem `notify` (landing paralelo do loop-owner) → fail-open
+    except TypeError:                 # ctor ainda sem `notify`/`clarify` (landing paralelo) → fail-open
         _hkw.pop("notify", None)
+        _hkw.pop("clarify", None)
         harness = Harness(generate, t, ws, **_hkw)
     try:
         harness.run()

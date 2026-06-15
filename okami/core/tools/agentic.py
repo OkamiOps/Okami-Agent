@@ -9,22 +9,52 @@ from okami.core.tools.base import (
 
 class UseSkill(Tool):
     name = "use_skill"
-    description = "Carrega o procedimento de uma skill do CATÁLOGO (siga-o à risca). Use quando a tarefa casar com uma skill."
-    args_schema = {"name": "nome da skill no catálogo"}
+    description = ("Carrega o procedimento de uma skill do CATÁLOGO (siga-o à risca). Use quando a tarefa "
+                   "casar com uma skill. Opcional `path`: lê um arquivo de apoio da skill sob demanda.")
+    args_schema = {"name": "nome da skill no catálogo",
+                   "path": "(opc) arquivo de apoio dentro da skill (references/…, scripts/…)"}
     required = ("name",)
 
     def run(self, args, ctx):
-        body = ctx.skills.get(args["name"])
+        name = args["name"]
+        rel = str(args.get("path") or "").strip()
+        if rel:                                       # tier-3: lê um arquivo DENTRO da skill sob demanda
+            return self._read_file(name, rel, ctx)
+        body = ctx.skills.get(name)
         if not body:
             disp = ", ".join(ctx.skills) or "(nenhuma)"
-            return ToolResult(False, f"skill '{args['name']}' não está no catálogo. Disponíveis: {disp}")
+            return ToolResult(False, f"skill '{name}' não está no catálogo. Disponíveis: {disp}")
         if getattr(ctx, "skills_dir", None):         # LRU p/ o curator: registra que esta skill foi usada
             try:
                 from okami.learning.curator import record_skill_use
-                record_skill_use(ctx.skills_dir, args["name"])
+                record_skill_use(ctx.skills_dir, name)
             except Exception:  # noqa: BLE001 — telemetria nunca derruba a tool
                 pass
-        return ToolResult(True, f"SKILL '{args['name']}' (siga este procedimento):\n{body}")
+        return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}")
+
+    def _read_file(self, name, rel, ctx):
+        """Lê um arquivo de apoio DENTRO da skill (jailed na pasta da skill). Disclosure tier-3."""
+        from pathlib import Path
+        root = getattr(ctx, "skills_dir", None)
+        if not root:
+            return ToolResult(False, "leitura de arquivo de skill indisponível neste contexto (sem skills_dir).")
+        skill_dir = Path(root) / name
+        if not (skill_dir / "SKILL.md").exists():
+            disp = ", ".join(ctx.skills) or "(nenhuma)"
+            return ToolResult(False, f"skill '{name}' não está no catálogo. Disponíveis: {disp}")
+        try:                                          # jail: o arquivo TEM que ficar dentro da skill
+            from okami.core.file_safety import safe_path
+            p = safe_path(skill_dir, rel, open_fs=False)
+        except ValueError:
+            return ToolResult(False, "path inválido: tem que ficar DENTRO da pasta da skill (sem escapar via ../).")
+        if not p.exists() or not p.is_file():
+            return ToolResult(False, f"arquivo '{rel}' não existe na skill '{name}'.")
+        try:
+            from okami.core.file_safety import read_text_capped
+            content = read_text_capped(p)
+        except OSError as e:
+            return ToolResult(False, f"falha ao ler arquivo da skill: {e}")
+        return ToolResult(True, f"SKILL '{name}' / {rel}:\n{content}")
 
 
 class ManageSkill(Tool):

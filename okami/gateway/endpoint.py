@@ -100,6 +100,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
         #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
         self._pending: dict[str, queue.Queue] = {}
+        self._clarify_pending: dict[str, tuple] = {}   # #8 item 1: pergunta do agente esperando resposta do dono
+        self.clarify_timeout = max(approval_timeout, 300.0)   # clarify pode esperar mais que uma aprovação
         self._img: dict[str, str] = {}       # imagem pendente por chat (vision §6)
         from collections import OrderedDict
         self._seen_msgs: OrderedDict = OrderedDict()   # idempotência por turno (#3): msg_id já processado
@@ -297,6 +299,30 @@ class AgentEndpoint(EndpointCommandsMixin):
             from okami import log
             log.dbg("persona.observe_llm falhou", exc_info=True)
 
+    def _ask_clarify(self, chat_id, question, options) -> str | None:
+        """Pergunta BLOQUEANTE ao dono (#8 item 1): entrega a pergunta (+ menu numerado se houver
+        opções) e espera a resposta, que chega por handle() de OUTRA thread. Mesma mecânica da
+        aprovação — roda na thread do TURNO, destrava quando o dono responde, ou None no timeout."""
+        cid = str(chat_id)
+        cq: queue.Queue = queue.Queue()
+        opts = [str(o) for o in (options or [])]
+        self._clarify_pending[cid] = (cq, opts)
+        msg = "❓ " + str(question)
+        if opts:
+            msg += "\n" + "\n".join(f"  {i + 1}. {o}" for i, o in enumerate(opts))
+            msg += "\n" + _tr("gw.clarify_hint", _default="(reply with the number or the text)")
+        try:
+            self.channel.send(chat_id, msg)
+        except Exception:  # noqa: BLE001 — falha de entrega não trava o turno (cai no timeout/None)
+            pass
+        try:
+            ans = cq.get(timeout=self.clarify_timeout)
+        except queue.Empty:
+            ans = None
+        finally:
+            self._clarify_pending.pop(cid, None)
+        return ans
+
     def _approve(self, chat_id, s: Session) -> Callable[[dict], bool]:
         def approve(req: dict) -> bool:
             if s.yolo or self.approval_mode == "yolo":     # YOLO explícito → autoaprova
@@ -416,6 +442,15 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if text.partition(":")[0].lower() in ("/yes", "/no", "/always", "/sempre"):   # aprovação sem nada pendente
             self.channel.send(chat_id, _tr("gw.nothing_to_approve", _default="nothing pending to approve right now."))
+            return
+        if cid in self._clarify_pending:               # resposta a um clarify pendente (#8 item 1)
+            cq, copts = self._clarify_pending[cid]
+            ans = text.strip()
+            if copts and ans.isdigit():                # número → mapeia p/ a opção do menu
+                i = int(ans) - 1
+                if 0 <= i < len(copts):
+                    ans = copts[i]
+            cq.put(ans)
             return
         s = self.session(chat_id)
         low = text.lower()
@@ -1184,6 +1219,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             # Entrega FORA-DO-TURNO (#7 item 3, usada por 10/14/19): o harness pode "tocar" o dono no meio
             # da tarefa (vigia/loop/lembrete) — entrega ao home_chat, redige segredo e (item 4) avisa o desktop.
             kw["notify"] = lambda m: self._notify_owner(chat_id, m)
+            # PERGUNTA do agente ao dono (#8 item 1): bloqueia o turno até a resposta (vinda por handle()).
+            kw["clarify"] = lambda q, opts, _cid=chat_id: self._ask_clarify(_cid, q, opts)
             # AMBIENTE REMOTO (SSH/Tailscale): rehidrata o alvo da sessão (multi-turno) + persiste mudanças.
             if s.remote_spec:
                 from okami.integrations.remote import resolve_remote

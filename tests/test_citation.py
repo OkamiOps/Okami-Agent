@@ -30,6 +30,19 @@ def test_inject_carries_citation(tmp_path):
     assert "TypeScript" in block and "preference" in block and "cli" in block   # texto + origem
 
 
+def test_inject_frames_recall_as_reference_not_instruction(tmp_path):
+    # Defesa de injeção (estilo Hermes memory_manager): a memória recuperada vem MARCADA como dado
+    # de referência, NÃO como nova instrução/entrada do usuário — conteúdo recuperado nunca é comando.
+    m = open_memory(tmp_path)
+    m.write(MemoryItem(text="prefere respostas curtas", kind="preference", source="user"))
+    block = m.inject("como responder")
+    m.close()
+    up = block.upper()
+    assert "REFERÊNCIA" in up                         # é dado de referência…
+    assert "INSTRUÇÃO" in up                          # …NÃO instrução
+    assert "prefere respostas curtas" in block        # e ainda injeta o conteúdo
+
+
 def test_preference_kind_is_injected(tmp_path):
     """Regressão p/ #10+#11: a categoria 'preference' (nova) PRECISA aparecer na injeção."""
     m = open_memory(tmp_path)

@@ -201,8 +201,9 @@ def gateway(
 def serve(
     port: int = typer.Option(8765, "-p", "--port"),
     host: str = typer.Option("127.0.0.1", "--host", help=_tr("cli.serve.host", _default="127.0.0.1 (local) by default; 0.0.0.0 exposes to the network.")),
+    ws: bool = typer.Option(False, "--ws", help=_tr("cli.serve.ws", _default="WebSocket attach mode (talk from `okami attach`, multi-turn) instead of one-shot POST /chat.")),
 ) -> None:
-    """Sobe a API HTTP (POST /chat com Bearer token). Requer OKAMI_API_TOKEN no .env (fail-closed)."""
+    """Sobe a API HTTP (POST /chat) ou, com --ws, o attach por WebSocket. Requer OKAMI_API_TOKEN (fail-closed)."""
     import os
     from okami.agents import effective_config, load_agents
     from okami.api import serve as _serve
@@ -218,18 +219,82 @@ def serve(
     def run(agent_id: str, message: str):
         graw, _ = load_raw()
         spec = load_agents().get(agent_id)
-        c, ws = (effective_config(graw, spec), spec.dir) if spec else (cfg, Path("workspaces/default"))
-        ws.mkdir(parents=True, exist_ok=True)
-        return _rt(c, ws, message)
+        c, ws_dir = (effective_config(graw, spec), spec.dir) if spec else (cfg, Path("workspaces/default"))
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        return _rt(c, ws_dir, message)
 
-    srv = _serve(port, token, run, host=host)
-    console.print(f"[green]🌐 API no ar[/green] http://{host}:{port}  "
-                  f"[dim](POST /chat · Authorization: Bearer …)[/dim]")
+    if ws:                                          # ATTACH por WebSocket (multi-turno, casa com tailscale)
+        from collections import defaultdict
+        from okami.gateway.wsattach import serve_ws
+        hist: dict = defaultdict(list)              # session -> [(papel, texto)] p/ continuidade da conversa
+        wdir = Path("workspaces/default")
+        wdir.mkdir(parents=True, exist_ok=True)
+
+        def run_ws(message: str, session: str = "") -> str:
+            prior = hist[session][-12:]
+            ctx = "Conversa até aqui:\n" + "\n".join(f"{r}: {t}" for r, t in prior) if prior else ""
+            t = _rt(cfg, wdir, message, extra_context=ctx)
+            reply = t.result or t.reason or t.state.value
+            hist[session].extend([("você", message), ("okami", reply)])
+            return reply
+
+        srv = _serve_ws_or_http(serve_ws, port, token, run_ws, host)
+        console.print(f"[green]🛰  attach por WS no ar[/green] ws://{host}:{port}/attach  "
+                      f"[dim](conecte com: okami attach ws://{host}:{port}/attach)[/dim]")
+        if host == "127.0.0.1":
+            console.print("[dim]p/ alcançar de outra máquina (tailscale): --host <ip-da-tailnet> ou 0.0.0.0[/dim]")
+    else:
+        srv = _serve(port, token, run, host=host)
+        console.print(f"[green]🌐 API no ar[/green] http://{host}:{port}  "
+                      f"[dim](POST /chat · Authorization: Bearer …)[/dim]")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         srv.shutdown()
-        console.print("[dim]API parada.[/dim]")
+        console.print("[dim]servidor parado.[/dim]")
+
+
+def _serve_ws_or_http(serve_ws, port, token, run_ws, host):
+    return serve_ws(port, token, run_ws, host=host)
+
+
+@app.command(help=_tr("cli.attach", _default="Attach to a remote okami gateway over WebSocket (start it with `okami serve --ws`)."))
+def attach(
+    url: str = typer.Argument(..., help=_tr("cli.attach.url", _default="ws://<host>:<port>/attach (e.g. a tailscale host)")),
+    token: str = typer.Option(None, "--token", help=_tr("cli.attach.token", _default="token (default: $OKAMI_API_TOKEN)")),
+) -> None:
+    """Conecta a um gateway remoto por WebSocket e conversa (multi-turno). Casa com ssh/tailscale."""
+    import os
+
+    from okami.gateway.wsattach import WSClient
+    tok = token or os.getenv("OKAMI_API_TOKEN") or ""
+    client = WSClient()
+    try:
+        client.connect(url, token=tok)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]✗ não conectei a {url}:[/red] {e}")
+        raise typer.Exit(1)
+    console.print(f"[green]🛰  conectado[/green] {url}  [dim](Ctrl-D ou /exit p/ sair)[/dim]")
+    try:
+        from rich.markdown import Markdown
+        while True:
+            try:
+                line = console.input("[bold #ff7527]›[/bold #ff7527] ")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not line.strip():
+                continue
+            if line.strip().lower() in ("/exit", "/quit", "exit", "quit"):
+                break
+            client.send(line)
+            reply = client.recv()
+            if reply is None:
+                console.print("[dim]conexão encerrada pelo servidor.[/dim]")
+                break
+            console.print(Markdown(reply))
+    finally:
+        client.close()
+        console.print("[dim]desconectado.[/dim]")
 
 
 @app.command(help=_tr("cli.room", _default="Multi-agent brainstorm: the moderator decides who speaks (or nobody), no stampede."))

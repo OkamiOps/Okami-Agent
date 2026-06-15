@@ -38,6 +38,15 @@ def test_route_message_while_busy_queues_else_handles():
     assert _route_repl_line("faz isso", busy=False, pending_approval=False) == "handle"
 
 
+def test_route_pending_clarify_goes_direct_not_queued():
+    # Com um clarify pendente (turno bloqueado esperando resposta), a próxima linha responde a pergunta
+    # DIRETO (não vai pra fila de "ocupado", senão o turno nunca destrava).
+    assert _route_repl_line("a segunda opção", busy=True, pending_clarify=True) == "clarify"
+    assert _route_repl_line("2", busy=True, pending_clarify=True) == "clarify"
+    # aprovação ainda tem prioridade sobre clarify (segurança antes de pergunta)
+    assert _route_repl_line("x", busy=True, pending_approval=True, pending_clarify=True) == "approval"
+
+
 # ----------------------------------------------------------- (2) `okami config` sem subcomando
 def test_bare_config_shows_panel_without_args(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

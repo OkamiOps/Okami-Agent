@@ -378,7 +378,8 @@ if _HAS_TEXTUAL:
                     line = None
                 if line is not None:
                     d = _route_repl_line(line, busy=self._busy(),
-                                         pending_approval=self._cid in self.ep._pending)
+                                         pending_approval=self._cid in self.ep._pending,
+                                         pending_clarify=self._cid in getattr(self.ep, "_clarify_pending", {}))
                     if d == "exit":
                         self.call_from_thread(self.action_quit_app)
                         break
@@ -394,7 +395,7 @@ if _HAS_TEXTUAL:
                         self.call_from_thread(self._cmd_mouse, line)
                     elif d == "copy":
                         self.call_from_thread(self._cmd_copy, line)
-                    elif d in ("approval", "stop"):
+                    elif d in ("approval", "stop", "clarify"):   # clarify: responde a pergunta direto (turno bloqueado)
                         self._safe_handle(line)
                     else:                                  # handle | queue → fila (1 só produtor)
                         self.inflight.append(line)

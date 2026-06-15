@@ -131,8 +131,10 @@ class ToolContext:
     registry: dict | None = None  # o registro de tools da sessão (p/ tool_search: schema sob demanda)
     cfg: object | None = None     # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
     notify: Callable[[str], bool] | None = None  # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
+    clarify: Callable[[str, list], object] | None = None  # hook BLOQUEANTE: pergunta ao dono e devolve a resposta (#8 item 1); None = sem dono interativo
     read_mtimes: dict[str, float] = field(default_factory=dict)  # mtime no momento da leitura (item 7) — base anti-stale
     todos: list = field(default_factory=list)  # checklist operacional do turno (item 9)
+    hinted_dirs: set = field(default_factory=set)  # subpastas cuja convenção (AGENTS.md/…) já foi anunciada no turno (#8 item 7)
     remote: object | None = None  # alvo de execução REMOTO (RemoteTarget); None = local. FS/shell roteiam pra cá quando setado
     surface: str = "cli"  # superfície da sessão (cli/telegram/…) — regra de allowlist do remote_connect
     set_remote: Callable | None = None  # hook p/ PERSISTIR o alvo remoto na sessão (sobrevive ao turno); None = só este turno

@@ -184,12 +184,14 @@ def _skill_category(s) -> str:
     return "geral"
 
 
-def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
+def _route_repl_line(line: str, *, busy: bool, pending_approval: bool = False,
+                     pending_clarify: bool = False) -> str:
     """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
 
-    Retorna: exit · help · details · agents · skin · mouse · copy · approval · stop · queue · handle.
+    Retorna: exit · help · details · agents · skin · mouse · copy · approval · clarify · stop · queue · handle.
     - comandos de DISPLAY (help/details/agents) são CLIENTE — não vão pro endpoint;
     - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
+    - clarify pendente (turno bloqueado esperando resposta) → a linha responde DIRETO (não vai pra fila);
     - /stop sempre passa direto (cancela mesmo ocupado);
     - digitou enquanto ocupado → `queue` (vai pra fila FIFO, processa quando terminar)."""
     low = line.strip().lower()
@@ -212,6 +214,8 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool) -> str:
         return "copy"
     if pending_approval:
         return "approval"
+    if pending_clarify:                                 # turno bloqueado numa pergunta → responde direto
+        return "clarify"
     if low in ("/stop", "/cancel", "/parar"):
         return "stop"
     if busy:

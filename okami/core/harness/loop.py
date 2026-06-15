@@ -163,6 +163,7 @@ class Harness:
         stage_writes: bool = False,     # escrita de memória → fila de aprovação (review + write_approval)
         cfg=None,                       # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
         notify=None,                    # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
+        clarify=None,                   # hook BLOQUEANTE: pergunta ao dono e devolve a resposta (#8 item 1)
         remote=None,                    # alvo de execução remoto (RemoteTarget) — FS/shell rodam LÁ
         set_remote=None,                # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
     ):
@@ -190,6 +191,7 @@ class Harness:
                                registry=self.registry,   # tool_search: schema sob demanda (item 27)
                                cfg=cfg,                   # web_extract/vision_analyze: roteamento aux
                                notify=notify,             # mensagem-ao-dono fora do turno (item 3)
+                               clarify=clarify,           # pergunta ao dono antes de agir (#8 item 1)
                                surface=surface,           # superfície real → allowlist do remote_connect
                                remote=remote, set_remote=set_remote)  # ambiente remoto (SSH/Tailscale)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem

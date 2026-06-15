@@ -165,6 +165,32 @@ def test_use_skill_tool_loads_body():
     assert not UseSkill().run({"name": "inexistente"}, ctx).ok
 
 
+def test_use_skill_reads_bundled_file_on_demand(tmp_path):
+    # Tier-3 de disclosure progressiva: o SKILL.md fica curto e o detalhe pesado (references/scripts)
+    # carrega só quando o modelo PEDE, via `path`. (Já escrevíamos esses arquivos; faltava lê-los.)
+    from okami.core.tools import ToolContext, UseSkill
+    sk = tmp_path / "skills" / "deploy-docker"
+    (sk / "references").mkdir(parents=True)
+    (sk / "SKILL.md").write_text("---\nname: deploy-docker\n---\n## Como\nveja references/api.md", encoding="utf-8")
+    (sk / "references" / "api.md").write_text("DETALHE: use --build-arg FOO", encoding="utf-8")
+    ctx = ToolContext(workspace=tmp_path, skills={"deploy-docker": "## Como\n..."},
+                      skills_dir=tmp_path / "skills")
+    r = UseSkill().run({"name": "deploy-docker", "path": "references/api.md"}, ctx)
+    assert r.ok and "use --build-arg FOO" in r.output
+
+
+def test_use_skill_path_cannot_escape_skill_dir(tmp_path):
+    # Jail: `path` tem que ficar DENTRO da pasta da skill — não pode ler segredo de fora via ../
+    from okami.core.tools import ToolContext, UseSkill
+    sk = tmp_path / "skills" / "deploy-docker"
+    sk.mkdir(parents=True)
+    (sk / "SKILL.md").write_text("---\nname: deploy-docker\n---\nx", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("SEGREDO", encoding="utf-8")
+    ctx = ToolContext(workspace=tmp_path, skills={"deploy-docker": "x"}, skills_dir=tmp_path / "skills")
+    r = UseSkill().run({"name": "deploy-docker", "path": "../../secret.txt"}, ctx)
+    assert not r.ok and "SEGREDO" not in r.output
+
+
 def test_render_block_marks_mandatory(tmp_path):
     _write(tmp_path, "frontend-shadcn", ["shadcn"])
     block = skillmod.render_block(skillmod.load_skills(tmp_path))

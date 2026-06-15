@@ -58,16 +58,40 @@ def build_review_goal(turn_context: str) -> str:
     return _REVIEW_PROMPT.format(do_not=_DO_NOT_CAPTURE, turn=turn_context.strip()[:6000])
 
 
+_TERMINAL_TOOLS = ("task_complete", "task_blocked", "need_input", "respond")
+
+
 def summarize_turn(task) -> str:
-    """Compacta o turno p/ o review: pedido + sequência de tools (com efeito) + resultado. Sem dumps."""
-    tools = " → ".join(s.tool for s in task.steps
-                       if s.tool not in ("task_complete", "task_blocked", "need_input", "respond"))
+    """Compacta o turno p/ o review COM o 'porquê': pedido + cada passo (tool + args + observação) +
+    resultado. O sinal de aprendizado mora no COMO — por que uma tool falhou, o comando exato que
+    rodou — então incluímos args e a observação de cada passo, não só os nomes (Hermes passa o
+    histórico INTEIRO do turno ao fork; aqui é o equivalente dentro do nosso modelo de Steps). Cada
+    passo é capado p/ não estourar o orçamento; o todo passa por `redact` antes de re-alimentar o
+    modelo aux do review (observação pode conter segredo — não pode vazar de volta ao provider)."""
+    import json as _json
+
+    from okami.core.redact import redact
     parts = [f"PEDIDO: {task.goal[:1500]}"]
-    if tools:
-        parts.append(f"AÇÕES: {tools}")
+    lines = []
+    for s in task.steps:
+        if s.tool in _TERMINAL_TOOLS:                 # terminais não ensinam nada — fora
+            continue
+        seg = f"[{s.n}] {s.tool}"
+        if s.args:
+            try:
+                a = _json.dumps(s.args, ensure_ascii=False, sort_keys=True)
+            except (TypeError, ValueError):
+                a = str(s.args)
+            seg += f" {a[:200]}"
+        out = (s.output or "").strip()
+        if out:
+            seg += f" → {out[:600]}"                   # a observação: o erro, a saída, o porquê
+        lines.append(seg)
+    if lines:
+        parts.append("AÇÕES:\n" + "\n".join(lines))
     if task.result:
         parts.append(f"RESPOSTA: {task.result[:1500]}")
-    return "\n".join(parts)
+    return redact("\n".join(parts))                    # segredo na observação não volta ao modelo
 
 
 def run_review(cfg, workspace, turn_context: str, *, skills_dir, model=None, provider=None,

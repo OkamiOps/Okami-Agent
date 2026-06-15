@@ -60,6 +60,8 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("vision_analyze", "mídia"),
     ToolSpec("audio_analyze", "mídia"),                       # #7: transcreve áudio (whisper local)
     ToolSpec("notify", "controle"),                           # #7: mensagem ao dono fora do turno
+    ToolSpec("clarify", "controle"),                          # #8: pergunta ao dono antes de agir (ambiguidade)
+    ToolSpec("suggest_automation", "automação"),              # #8: propõe automação consent-first (dono aceita)
     ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)
     ToolSpec("store_secret", "controle", danger="sensitive"),  # guarda credencial no cofre (.env 0600)
     ToolSpec("remote_connect", "shell", tier="power", danger="sensitive"),   # entra numa máquina remota (SSH/Tailscale)

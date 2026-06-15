@@ -126,7 +126,7 @@ def test_long_active_work_never_stalls(tmp_path, monkeypatch):
         return '{"tool": "task_complete", "args": {"summary": "feito"}}'
 
     h = Harness(generate=gen, task=Task(goal="crie 30 arquivos"), workspace=tmp_path,
-                budget=Budget(max_stall_seconds=300, max_steps=90))
+                budget=Budget(max_stall_seconds=300, max_steps=90, max_context_chars=500_000))
     res = h.run()
     assert res.state.name == "COMPLETE", f"trabalho longo foi morto indevidamente: {res.reason!r}"
     assert n[0] >= 31 and (tmp_path / "f30.txt").exists()
@@ -308,7 +308,10 @@ def test_thin_report_is_reprompted_for_full_version(tmp_path):
         return ('{"tool": "respond", "args": {"message": '
                 '"| aspecto | Okami | Hermes |\\n|--|--|--|\\n| sandbox | sim | sim |"}}')   # agora com tabela
 
-    h = Harness(generate=gen, task=Task(goal="compara o okami com o hermes e acha bugs"), workspace=tmp_path)
+    # max_context_chars alto: este teste é sobre o re-pedido de relatório COMPLETO, não sobre compactação
+    # (com o budget default pequeno, a lista de tools grande dispara compaction espúria e mascara o teste).
+    h = Harness(generate=gen, task=Task(goal="compara o okami com o hermes e acha bugs"), workspace=tmp_path,
+                budget=Budget(max_context_chars=500_000))
     res = h.run()
     assert calls["n"] == 10                           # foi re-pedido 1x
     assert res.state.name == "COMPLETE" and "|" in (res.result or "")   # entrega final tem TABELA
@@ -326,7 +329,8 @@ def test_thin_nudge_fires_only_once(tmp_path):
             return f'{{"tool": "read_file", "args": {{"path": "f{calls["n"]-1}.txt"}}}}'
         return '{"tool": "respond", "args": {"message": "curto"}}'   # sempre raso
 
-    h = Harness(generate=gen, task=Task(goal="analisa tudo e acha bugs"), workspace=tmp_path)
+    h = Harness(generate=gen, task=Task(goal="analisa tudo e acha bugs"), workspace=tmp_path,
+                budget=Budget(max_context_chars=500_000))   # teste é sobre o nudge, não sobre compactação
     res = h.run()
     assert res.state.name == "COMPLETE" and calls["n"] <= 16   # nudga 1x, aceita o 2º (sem loop)
 
@@ -351,7 +355,8 @@ def test_process_wait_loop_does_not_kill_turn(tmp_path, monkeypatch):
         return ('{"tool": "respond", "args": {"message": "| item | Okami | Hermes | OpenClaw |\\n|--|--|--|--|\\n'
                 '| testes | ok | ok | nao concluiu no tempo |"}}')
 
-    h = Harness(generate=gen, task=Task(goal="rode os testes e compare"), workspace=tmp_path)
+    h = Harness(generate=gen, task=Task(goal="rode os testes e compare"), workspace=tmp_path,
+                budget=Budget(max_context_chars=500_000))   # teste é sobre esperar processo, não compactação
     res = h.run()
     assert res.state.name == "COMPLETE", f"esperar processo matou o turno: {res.reason!r}"
     assert "nao concluiu" in (res.result or "")           # entregou (não morreu em 'loop persistente')

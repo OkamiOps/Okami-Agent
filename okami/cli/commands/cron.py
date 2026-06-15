@@ -120,6 +120,55 @@ def cron_tick(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
         console.print("[dim]nada vencido agora.[/dim]")
 
 
+suggestions_app = typer.Typer(invoke_without_command=True, help=_tr(
+    "cli.suggestions", _default="Proactive automation suggestions (consent-first): list · accept · dismiss."))
+app.add_typer(suggestions_app, name="suggestions")
+
+
+@suggestions_app.callback(invoke_without_command=True)
+def suggestions_main(ctx: typer.Context) -> None:
+    """`okami suggestions` SEM subcomando → lista as sugestões pendentes."""
+    if ctx.invoked_subcommand is None:
+        suggestions_list(workspace=".")
+
+
+@suggestions_app.command("list", help=_tr("cli.suggestions.list", _default="List pending automation suggestions."))
+def suggestions_list(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
+    """Lista as sugestões de automação pendentes (o agente propôs; você decide)."""
+    from okami.automation.suggestions import SuggestionStore
+    pend = SuggestionStore(workspace).pending()
+    if not pend:
+        console.print("[dim]nenhuma sugestão pendente.[/dim]")
+        return
+    for it in pend:
+        console.print(f"[#ff7527]•[/] [bold]{it['id']}[/]  {it['text']}\n"
+                      f"   [dim]{it['schedule']} → {it['prompt'][:70]}[/dim]")
+    console.print("[dim]aceitar: okami suggestions accept <id>  ·  dispensar: okami suggestions dismiss <id>[/dim]")
+
+
+@suggestions_app.command("accept", help=_tr("cli.suggestions.accept", _default="Accept a suggestion → schedules it as a cron job."))
+def suggestions_accept(sid: str = typer.Argument(...),
+                       workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
+    """Aceita uma sugestão → vira um cron job de verdade."""
+    from okami.automation.scheduler import Scheduler
+    from okami.automation.suggestions import SuggestionStore
+    job = SuggestionStore(workspace).accept(sid, Scheduler(workspace))
+    if not job:
+        console.print(f"[red]sugestão '{sid}' não encontrada[/red] (veja: okami suggestions list)")
+        raise typer.Exit(1)
+    console.print(f"[green]✓ agendado[/green] {job['id']} · {job['schedule']} → {job['prompt'][:50]}")
+
+
+@suggestions_app.command("dismiss", help=_tr("cli.suggestions.dismiss", _default="Dismiss a suggestion (won't be offered again)."))
+def suggestions_dismiss(sid: str = typer.Argument(...),
+                        workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
+    """Dispensa uma sugestão (não te ofereço de novo — latched)."""
+    from okami.automation.suggestions import SuggestionStore
+    ok = SuggestionStore(workspace).dismiss(sid)
+    console.print(f"[dim]dispensada: {sid} — não te ofereço de novo.[/dim]" if ok
+                  else f"[red]sugestão '{sid}' não encontrada[/red]")
+
+
 @app.command("hooks", help=_tr("cli.hooks", _default="List the configured event hooks (§11)."))
 def hooks_cmd(workspace: str = typer.Option(".", "-w", "--workspace")) -> None:
     """Lista os event hooks configurados (§11)."""
