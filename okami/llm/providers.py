@@ -263,6 +263,17 @@ def _message_text(message) -> str:
 _ANTHROPIC_MODEL = re.compile(r"(^|/)(anthropic/|claude\b|claude-)", re.I)
 
 
+def _cache_marker() -> dict:
+    """Marcador cache_control. Default 5min; OKAMI_CACHE_TTL=1h habilita o TTL estendido de 1h (#9) —
+    daemon/gateway ocioso entre mensagens sobrevive ao cache em vez de re-pagar o prefixo. Opt-in
+    (default = comportamento atual) p/ não arriscar a rota Claude principal."""
+    import os
+    m = {"type": "ephemeral"}
+    if os.getenv("OKAMI_CACHE_TTL", "").strip().lower() in ("1h", "60m", "3600"):
+        m["ttl"] = "1h"
+    return m
+
+
 def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
     """Prompt caching EXPLÍCITO da Anthropic (pesquisa #5 item 58): marca system + as 3 últimas
     mensagens com `cache_control: ephemeral` (máx. 4 breakpoints da API) — ~75% de economia de
@@ -276,7 +287,7 @@ def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
     for i in targets:
         c = out[i].get("content")
         if isinstance(c, str):
-            out[i]["content"] = [{"type": "text", "text": c, "cache_control": {"type": "ephemeral"}}]
+            out[i]["content"] = [{"type": "text", "text": c, "cache_control": _cache_marker()}]
         elif isinstance(c, list) and c:
             parts = [dict(p) for p in c]
             # marca o último bloco de TEXTO (não uma imagem — colar cache_control num image_url é
@@ -284,7 +295,7 @@ def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
             ti = next((j for j in range(len(parts) - 1, -1, -1)
                        if isinstance(parts[j], dict) and parts[j].get("type") == "text"), None)
             if ti is not None:
-                parts[ti] = {**parts[ti], "cache_control": {"type": "ephemeral"}}
+                parts[ti] = {**parts[ti], "cache_control": _cache_marker()}
                 out[i]["content"] = parts
     return out
 

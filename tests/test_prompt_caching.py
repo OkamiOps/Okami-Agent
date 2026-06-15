@@ -49,3 +49,17 @@ def test_original_list_not_mutated():
 def test_short_conversation_no_crash():
     out = apply_prompt_caching([{"role": "user", "content": "oi"}], "anthropic/claude-haiku-4-5")
     assert _has_cache(out[0])
+
+
+def test_cache_marker_default_is_5min(monkeypatch):
+    # #9: default mantém o comportamento atual (sem ttl explícito = 5min da API).
+    monkeypatch.delenv("OKAMI_CACHE_TTL", raising=False)
+    from okami.llm.providers import _cache_marker
+    assert _cache_marker() == {"type": "ephemeral"}
+
+
+def test_cache_marker_1h_optin(monkeypatch):
+    # OKAMI_CACHE_TTL=1h liga o TTL estendido (daemon ocioso sobrevive ao cache).
+    monkeypatch.setenv("OKAMI_CACHE_TTL", "1h")
+    from okami.llm.providers import _cache_marker
+    assert _cache_marker().get("ttl") == "1h"
