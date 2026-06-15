@@ -23,9 +23,12 @@ _SENSITIVE_ENV = re.compile(
 )
 
 
-def sanitized_env() -> dict[str, str]:
-    """Cópia do ambiente sem variáveis sensíveis (chaves/segredos/tokens)."""
-    return {k: v for k, v in os.environ.items() if not _SENSITIVE_ENV.search(k)}
+def sanitized_env(passthrough=None) -> dict[str, str]:
+    """Cópia do ambiente sem variáveis sensíveis (chaves/segredos/tokens). `passthrough` (opt-in) MANTÉM
+    as vars nomeadas mesmo que casem o padrão sensível — p/ `git push`/`gh` LOCAL funcionarem com
+    GH_TOKEN/SSH_AUTH_SOCK quando o dono libera explicitamente (config sandbox.env_passthrough)."""
+    keep = set(passthrough or ())
+    return {k: v for k, v in os.environ.items() if k in keep or not _SENSITIVE_ENV.search(k)}
 
 
 # #2 do self-review do Okami: shell read-only NÃO conta como progresso (não engana o watchdog §3.3).

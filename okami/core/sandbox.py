@@ -41,6 +41,7 @@ class SandboxPolicy:
     fsize_mb: int = 0                # rlimit FSIZE                 (0 = não setar)
     image: str = "python:3.11-slim"  # imagem do backend docker
     egress_allow: tuple = ()         # allowlist de egress (hosts) via proxy filtrante (#5)
+    env_passthrough: tuple = ()      # vars de env mantidas mesmo sendo sensíveis (opt-in: GH_TOKEN/SSH_AUTH_SOCK p/ git push)
     require_isolation: bool = False   # estrito (#P1.2): exposto SEM Docker → shell/process DESABILITADO (não degrada)
     reuse_container: bool = False     # item 26: container long-lived (docker exec) — estado sobrevive entre comandos
 
@@ -68,6 +69,8 @@ class SandboxPolicy:
         if d.get("egress_allow"):
             p.egress_allow = tuple(d["egress_allow"])
             p.network = True            # allowlist de egress implica rede (mas FILTRADA pelo proxy)
+        if d.get("env_passthrough"):
+            p.env_passthrough = tuple(d["env_passthrough"])   # GH_TOKEN/SSH_AUTH_SOCK p/ git push local
         if p.mode == "yolo":
             p.network = True            # yolo = sem freios → rede liberada também
         return p
@@ -302,7 +305,7 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
         else:
             if env is None:
                 from okami.core.tools import sanitized_env
-                env = sanitized_env()
+                env = sanitized_env(passthrough=policy.env_passthrough)   # opt-in GH_TOKEN/SSH_AUTH_SOCK
             if policy.egress_allow:                 # #5: egress só p/ a allowlist, via proxy filtrante
                 from okami.core.egress_proxy import EgressProxy
                 proxy = EgressProxy(policy.egress_allow)
