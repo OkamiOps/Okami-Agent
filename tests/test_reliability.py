@@ -213,3 +213,38 @@ def test_native_tools_sends_schemas_and_tool_choice(monkeypatch):
     assert seen.get("tools") and len(seen["tools"]) > 0           # schemas das tools enviados (paralelo possível)
     assert seen.get("tool_choice") == "required"                  # força chamar tool (sem bail pra prosa)
     assert "response_format" not in seen                          # json_text: nada forçando objeto único
+
+
+def test_image_too_large_shrinks_and_retries_same_provider(monkeypatch):
+    # #10: 400 'imagem grande' → encolhe e re-tenta O MESMO provider (não pula pro fallback/perde turno).
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
+    calls = []
+
+    def fake_one(pc, messages, model, schema, overrides):
+        calls.append(pc.name)
+        if len(calls) == 1:
+            raise _exc("image exceeds 5 MB maximum", 400)
+        return "ok-shrunk"
+
+    monkeypatch.setattr(prov, "_complete_one", fake_one)
+    out = prov.complete_messages(cfg, [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert out == "ok-shrunk" and calls == ["a", "a"]     # re-tentou o MESMO provider
+
+
+def test_auth_401_force_refresh_and_retries_same_provider(monkeypatch):
+    # #10: 401 (token revogado/relógio) → força refresh OAuth e re-tenta o MESMO provider, sem failover.
+    from okami.llm import recovery
+    cfg = build_config({"default_provider": "a", "providers": {"a": {"model": "ma"}}})
+    refreshed = []
+    monkeypatch.setattr(recovery, "refresh_oauth", lambda pc: (refreshed.append(pc.name), True)[1])
+    calls = []
+
+    def fake_one(pc, messages, model, schema, overrides):
+        calls.append(pc.name)
+        if len(calls) == 1:
+            raise _exc("unauthorized", 401)
+        return "ok-refreshed"
+
+    monkeypatch.setattr(prov, "_complete_one", fake_one)
+    out = prov.complete_messages(cfg, [{"role": "user", "content": "x"}], _sleep=lambda s: None)
+    assert out == "ok-refreshed" and calls == ["a", "a"] and refreshed == ["a"]

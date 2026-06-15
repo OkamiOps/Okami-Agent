@@ -3,25 +3,32 @@
 A dor: o `rate_guard` é REATIVO — só age depois que o provider devolveu 429/529. Mas a maioria
 dos providers (Anthropic, OpenAI…) já manda em CADA resposta quanto sobrou da quota nos headers
 `x-ratelimit-remaining-{requests,tokens}`. Ler isso deixa a gente perceber "estou em 99% da cota
-de requests, reset em 30s" e segurar/avisar ANTES de estourar — não depois.
+de requests, reset em 30s" e segurar/avisar ANTES de estourar — não depois. Lemos as DUAS janelas:
+minuto e hora (sufixo `-1h`), pra também pegar "99% da cota HORÁRIA, reset em 40m" e segurar a tempo.
 
 Best-effort por princípio: header ausente, valor não-numérico, entrada None → nunca levanta,
 no pior caso devolve dict vazio / None (a observação otimiza, jamais pode derrubar a chamada).
 """
 from __future__ import annotations
 
-# Os dois buckets que os providers reportam separadamente (cota de chamadas vs. de tokens).
-_BUCKETS = ("requests", "tokens")
+# Buckets que os providers reportam separadamente. Além da janela de MINUTO (requests, tokens),
+# o schema Nous/OpenRouter/OpenAI-compat também emite a janela de HORA com sufixo `-1h`
+# (requests-1h, tokens-1h) — `x-ratelimit-{field}-{bucket}` casa direto: bucket `requests-1h`
+# → header `x-ratelimit-limit-requests-1h`. Assim a sessão percebe "99% da cota HORÁRIA, reset em
+# 40m" e segura ANTES — não só a do minuto. usage_warning() varre TODOS, pega o mais perto do muro.
+_BUCKETS = ("requests", "tokens", "requests-1h", "tokens-1h")
 _FIELDS = ("limit", "remaining", "reset")
 
 
 def parse_rate_headers(headers) -> dict:
-    """Extrai os headers x-ratelimit-{limit,remaining,reset}-{requests,tokens} em buckets.
+    """Extrai os headers x-ratelimit-{limit,remaining,reset}-{requests,tokens[-1h]} em buckets.
 
-    Case-insensitive (provider varia entre `x-ratelimit-...` e `X-RateLimit-...`). `limit`/`remaining`
-    viram float (são contagens); `reset` fica como veio (string tipo "30" ou "1m30s" — formato varia,
-    não interpretamos aqui). Header ausente simplesmente não aparece no bucket. Devolve só os buckets
-    que tiveram ALGUM campo presente: `{}` se nada de rate-limit veio.
+    Cobre as DUAS janelas: minuto (`requests`, `tokens`) e hora (`requests-1h`, `tokens-1h`, sufixo
+    `-1h` do schema Nous/OpenRouter/OpenAI-compat). Case-insensitive até no sufixo (provider varia
+    entre `x-ratelimit-...-1h` e `X-RateLimit-...-1H`). `limit`/`remaining` viram float (são contagens);
+    `reset` fica como veio (string tipo "30"/"2400" ou "1m30s" — formato varia, não interpretamos aqui).
+    Header ausente simplesmente não aparece no bucket. Devolve só os buckets que tiveram ALGUM campo
+    presente: `{}` se nada de rate-limit veio.
     """
     out: dict[str, dict] = {}
     try:

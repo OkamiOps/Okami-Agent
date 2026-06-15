@@ -189,9 +189,18 @@ def run_task(
     # read-only — a identidade inteira segue indo via core_block. Vazio quando não há sinal.
     from okami.learning.compiler import compile_turn
     turn_steer = compile_turn(goal, exit_criteria, contracts=cfg.contracts)
+    # #10 env_probe: avisa o MODELO se o ambiente Python local está torto (pip/PEP-668) — silencioso
+    # quando saudável; só local (no remoto o python é outro, roda lá).
+    env_hint = ""
+    if remote is None:
+        try:
+            from okami.core.env_probe import probe_python_env
+            env_hint = probe_python_env()
+        except Exception:  # noqa: BLE001 — sonda é best-effort
+            env_hint = ""
     # turn_steer primeiro (direção base); extra_context (com overlay de sessão) pode sobrepor depois.
     system_extra = "\n\n".join(x for x in (turn_steer, extra_context, taste_block,
-                                           skillmod.render_block(routed), catalog) if x)
+                                           skillmod.render_block(routed), catalog, env_hint) if x)
     skills_map = {}
     for s in safe:                                    # nome canônico + aliases antigos → use_skill resolve os dois
         skills_map[s.name] = s.body

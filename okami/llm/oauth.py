@@ -151,6 +151,25 @@ def get_valid_token(provider: str, oauth: dict | None, now: Callable[[], float] 
     return data.get("access_token")  # expirado, melhor-esforço
 
 
+def force_refresh(provider: str, oauth: dict | None, now: Callable[[], float] = time.time) -> str | None:
+    """Força o refresh_token grant IGNORANDO a expiração (#10) — p/ um 401 com token NÃO-expirado
+    (revogado/relógio-torto): em vez de pular pro fallback e perder a assinatura, renova e re-tenta.
+    Salva e devolve o novo access_token, ou None se não houver refresh_token/config ou o grant falhar."""
+    data = load_tokens(provider)
+    rt = (data or {}).get("refresh_token")
+    if not (oauth and rt):
+        return None
+    tok = _post_form(oauth["token_url"], {
+        "client_id": oauth["client_id"], "grant_type": "refresh_token", "refresh_token": rt,
+    })
+    if "access_token" in tok:
+        new = _normalize(tok, now())
+        new["refresh_token"] = new.get("refresh_token") or rt
+        save_tokens(provider, new)
+        return new["access_token"]
+    return None
+
+
 def cli_delegate_login(cmd: list[str]) -> int:
     """Delega para um CLI oficial (ex.: codex login --device-auth). Fallback opcional."""
     return subprocess.call(cmd)
@@ -268,6 +287,15 @@ def codex_access_token(now: Callable[[], float] = time.time) -> str | None:
             if new := _codex_refresh(rt, now):
                 return new["access_token"]
         return at
+    return None
+
+
+def force_refresh_codex(now: Callable[[], float] = time.time) -> str | None:
+    """Força refresh do token Codex IGNORANDO a expiração (#10) — p/ um 401 (token revogado/relógio).
+    Devolve o novo access_token (já salvo no store), ou None se não houver refresh_token / falhar."""
+    rt = (load_tokens("codex") or {}).get("refresh_token")
+    if rt and (new := _codex_refresh(rt, now)):
+        return new["access_token"]
     return None
 
 

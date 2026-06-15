@@ -76,3 +76,54 @@ def test_usage_warning_opaque_reset_no_double_s():
     from okami.llm.rate_tracker import usage_warning
     w = usage_warning({"requests": {"limit": 100.0, "remaining": 1.0, "reset": "1m30s"}})
     assert w and "1m30ss" not in w and "1m30s" in w
+
+
+# --- janela de HORA (sufixo -1h): Nous/OpenRouter/OpenAI-compat mandam buckets x-ratelimit-*-1h ---
+
+def test_parse_extrai_buckets_hora_1h():
+    # além do minuto, o schema emite as 4 variantes de hora (requests-1h, tokens-1h)
+    headers = {
+        "x-ratelimit-limit-requests-1h": "1000",
+        "x-ratelimit-remaining-requests-1h": "10",
+        "x-ratelimit-reset-requests-1h": "2400",          # 40min em segundos
+        "x-ratelimit-limit-tokens-1h": "2000000",
+        "x-ratelimit-remaining-tokens-1h": "1500000",
+        "x-ratelimit-reset-tokens-1h": "2400",
+    }
+    b = parse_rate_headers(headers)
+    assert b["requests-1h"] == {"limit": 1000.0, "remaining": 10.0, "reset": "2400"}
+    assert b["tokens-1h"] == {"limit": 2000000.0, "remaining": 1500000.0, "reset": "2400"}
+
+
+def test_parse_minuto_e_hora_coexistem_sem_colidir():
+    # minuto e hora juntos: cada header exato cai no seu bucket, sem um vazar pro outro
+    headers = {
+        "x-ratelimit-remaining-requests": "90",
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests-1h": "10",
+        "x-ratelimit-limit-requests-1h": "1000",
+    }
+    b = parse_rate_headers(headers)
+    assert b["requests"] == {"limit": 100.0, "remaining": 90.0}
+    assert b["requests-1h"] == {"limit": 1000.0, "remaining": 10.0}
+
+
+def test_parse_1h_e_case_insensitive():
+    # provider varia o caixa até no sufixo (-1H) — lower() normaliza tudo
+    b = parse_rate_headers({"X-RateLimit-Limit-Requests-1H": "1000",
+                            "X-RateLimit-Remaining-Requests-1H": "5"})
+    assert b["requests-1h"]["limit"] == 1000.0 and b["requests-1h"]["remaining"] == 5.0
+
+
+def test_warning_considera_janela_hora_mesmo_com_minuto_folgado():
+    # minuto folgado (90/100 = 10%) mas hora quase no teto (10/1000 = 99%) → avisa pela HORA
+    headers = {
+        "x-ratelimit-remaining-requests": "90",
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests-1h": "10",
+        "x-ratelimit-limit-requests-1h": "1000",
+        "x-ratelimit-reset-requests-1h": "2400",
+    }
+    w = usage_warning(parse_rate_headers(headers))
+    assert w is not None
+    assert "requests-1h" in w and "99%" in w and "2400" in w
