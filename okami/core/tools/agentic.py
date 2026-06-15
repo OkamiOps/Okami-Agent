@@ -24,12 +24,19 @@ class UseSkill(Tool):
         if not body:
             disp = ", ".join(ctx.skills) or "(nenhuma)"
             return ToolResult(False, f"skill '{name}' não está no catálogo. Disponíveis: {disp}")
-        if getattr(ctx, "skills_dir", None):         # LRU p/ o curator: registra que esta skill foi usada
+        root = getattr(ctx, "skills_dir", None)
+        if root:                                     # LRU p/ o curator: registra que esta skill foi usada
             try:
                 from okami.learning.curator import record_skill_use
-                record_skill_use(ctx.skills_dir, name)
+                record_skill_use(root, name)
             except Exception:  # noqa: BLE001 — telemetria nunca derruba a tool
                 pass
+        try:                                          # #9: expande ${OKAMI_SKILL_DIR/SESSION_ID/DATE} (sem shell)
+            from pathlib import Path as _P
+            from okami.skills.preprocess import expand_skill_body
+            body = expand_skill_body(body, skill_dir=str(_P(root) / name) if root else "")
+        except Exception:  # noqa: BLE001
+            pass
         return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}")
 
     def _read_file(self, name, rel, ctx):

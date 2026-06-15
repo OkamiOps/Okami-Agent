@@ -303,6 +303,12 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
                            "how it talks."), style=MUTE)
     tips.append("\n" + _tr("welcome.copy", _default="🖱 drag to select and copy NORMALLY (Cmd/Ctrl+C — native "
                            "terminal selection) · /copy copies the whole last reply."), style=MUTE)
+    try:                                          # #9: dica do dia (corpus rotativo de descoberta)
+        from datetime import date
+        from okami.core.tips import get_tip
+        tips.append("\n💡 " + get_tip(seed=date.today().toordinal()), style=MUTE)
+    except Exception:  # noqa: BLE001 — dica é cosmética
+        pass
     return Group(header, Text(""), panel, tips)
 
 
