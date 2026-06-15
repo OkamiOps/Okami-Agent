@@ -23,6 +23,47 @@ def global_env_path() -> Path:
     return env_path()
 
 
+def set_env_secret(name: str, value: str, *, path: str | None = None) -> Path:
+    """Grava/atualiza `name=value` num .env — escrita ATÔMICA + 0600 (segredo só p/ o dono). Faz UPSERT
+    (atualiza a linha se a chave já existir, senão acrescenta). Devolve o caminho escrito.
+
+    path=None → .env GLOBAL ($OKAMI_HOME/.env). Fonte ÚNICA do segredo no disco — usada tanto pelo
+    `okami config set` quanto pela tool store_secret (o agente recebe credencial e guarda AQUI)."""
+    import os
+    import tempfile
+    p = Path(path) if path else global_env_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+    out, done = [], False
+    for ln in lines:
+        if ln.strip().startswith(f"{name}=") or ln.strip().startswith(f"{name} ="):
+            out.append(f"{name}={value}")
+            done = True
+        else:
+            out.append(ln)
+    if not done:
+        out.append(f"{name}={value}")
+    data = "\n".join(out) + "\n"
+    # tmp no mesmo diretório → os.replace é atômico (sem janela de arquivo meia-escrito/world-readable).
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent if str(p.parent) else "."), prefix=".env.", suffix=".tmp")
+    try:
+        try:
+            os.fchmod(fd, 0o600)                       # 0600 ANTES de escrever o segredo
+        except (AttributeError, OSError):              # Windows/sem suporte → segue
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp, p)
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+    return p
+
+
 def _load_env() -> None:
     """Carrega segredos com precedência: ambiente real > .env do PROJETO (CWD) > .env GLOBAL ($OKAMI_HOME)
     > .env LEGADO (~/.okami, se OKAMI_HOME for custom). (load_dotenv não sobrescreve quem já existe.)"""

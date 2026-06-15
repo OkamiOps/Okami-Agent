@@ -73,7 +73,7 @@ def test_notify_falls_back_to_chat_when_no_home():
 def test_notify_redacts_secret():
     def _runner(cfg, ws, goal, *, notify=None, **kw):
         if notify:
-            notify("token vazou: sk-ABCDEF0123456789abcdef0123456789 cuidado")
+            notify("token vazou: sk-ABCDEF0123456789abcdef0123456789 cuidado")  # pragma: allowlist secret
         t = Task(goal=goal)
         t.state, t.result = TaskState.COMPLETE, "ok"
         return t
@@ -81,7 +81,7 @@ def test_notify_redacts_secret():
     ep = _ep(_runner)
     ep.handle("7", "roda")
     body = "\n".join(t for _, t in ep.channel.sent)
-    assert "sk-ABCDEF0123456789abcdef0123456789" not in body   # notify redige antes de enviar
+    assert "sk-ABCDEF0123456789abcdef0123456789" not in body   # notify redige  # pragma: allowlist secret
     assert "«redacted»" in body
 
 

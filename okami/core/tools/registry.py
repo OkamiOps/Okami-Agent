@@ -20,6 +20,7 @@ from okami.core.tools.vision import VisionAnalyze
 from okami.core.tools.audio import AudioAnalyze
 from okami.core.tools.notify import Notify
 from okami.core.tools.todo import TodoWrite
+from okami.core.tools.secrets import StoreSecret
 from okami.core.tools.schedule import ScheduleJob
 from okami.core.tools.process import (
     ProcessKill, ProcessList, ProcessLog, ProcessPoll, ProcessSignal, ProcessStart,
@@ -36,6 +37,6 @@ def default_registry() -> dict[str, Tool]:
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
              UseSkill(), ManageSkill(), Spawn(),
              Browse(), WebSearch(), WebExtract(), GenerateImage(), VisionAnalyze(), AudioAnalyze(),
-             ToolSearch(), Notify(), TodoWrite(),
+             ToolSearch(), Notify(), TodoWrite(), StoreSecret(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

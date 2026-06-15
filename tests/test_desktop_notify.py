@@ -121,10 +121,10 @@ def test_body_redacted_before_send(monkeypatch):
         return _R()
 
     monkeypatch.setattr(desktop.subprocess, "run", fake_run)
-    ok = desktop.desktop_notify("Build", "API_KEY=sk-abcdef0123456789abcd terminou")
+    ok = desktop.desktop_notify("Build", "API_KEY=sk-abcdef0123456789abcd terminou")  # pragma: allowlist secret
     assert ok is True
     msg = captured["argv"][captured["argv"].index("-message") + 1]
-    assert "sk-abcdef0123456789abcd" not in msg
+    assert "sk-abcdef0123456789abcd" not in msg  # pragma: allowlist secret
     assert "«redacted»" in msg
 
 

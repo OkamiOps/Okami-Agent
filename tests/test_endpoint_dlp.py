@@ -44,7 +44,7 @@ def _runner_returning(reply):
 
 
 def test_reply_with_openai_key_is_redacted_before_send():
-    secret = "sk-ABCDEF0123456789abcdef0123456789"
+    secret = "sk-ABCDEF0123456789abcdef0123456789"  # pragma: allowlist secret
     ep = _ep(_runner_returning(f"a chave é {secret} pronto"))
     ep.handle("7", "qual a chave?")
     body = "\n".join(t for _, t in ep.channel.sent)
@@ -68,7 +68,7 @@ def test_normal_reply_is_unchanged():
 
 
 def test_error_path_reply_is_redacted():
-    secret = "sk-DEADBEEF0123456789cafebabe012345"
+    secret = "sk-DEADBEEF0123456789cafebabe012345"  # pragma: allowlist secret
 
     def _boom(cfg, ws, goal, *, approve=None, extra_context="", cancel=None, **kw):
         raise RuntimeError(f"falhou com a chave {secret}")   # erro carrega segredo

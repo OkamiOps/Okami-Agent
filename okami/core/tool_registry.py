@@ -61,6 +61,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("audio_analyze", "mídia"),                       # #7: transcreve áudio (whisper local)
     ToolSpec("notify", "controle"),                           # #7: mensagem ao dono fora do turno
     ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)
+    ToolSpec("store_secret", "controle", danger="sensitive"),  # guarda credencial no cofre (.env 0600)
     ToolSpec("tool_search", "controle"),
     ToolSpec("finish_setup", "controle"),
     ToolSpec("task_complete", "controle", tier="essential", terminal=True),

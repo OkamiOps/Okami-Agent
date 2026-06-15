@@ -314,12 +314,21 @@ def _args_preview(args: dict) -> str:
     return ""
 
 
+# args cujo VALOR é segredo (store_secret, etc.) — nunca mostrar no /details expanded (vaza credencial).
+_SECRET_ARG_KEYS = frozenset({"value", "secret", "password", "passwd", "pwd", "token",
+                              "api_key", "apikey", "credential", "app_password"})
+
+
 def _args_full(args: dict) -> str:
-    """Todos os args numa linha (k=v) p/ o modo /details expanded — sem truncar tão cedo."""
+    """Todos os args numa linha (k=v) p/ o modo /details expanded — sem truncar tão cedo.
+    Args de credencial (value/token/password/…) saem MASCARADOS: o expanded não pode vazar segredo."""
     if not isinstance(args, dict) or not args:
         return ""
     parts = []
     for k, v in args.items():
+        if str(k).lower() in _SECRET_ARG_KEYS:
+            parts.append(f"{k}=«oculto»")
+            continue
         sv = str(v).replace("\n", " ")
         parts.append(f"{k}={sv[:120] + ('…' if len(sv) > 120 else '')}")
     return " · ".join(parts)[:240]
