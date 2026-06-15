@@ -13,8 +13,20 @@ from __future__ import annotations
 
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 logger = logging.getLogger("okami")
+
+_LOG_MAX_BYTES = 5 * 1024 * 1024   # #9: teto por arquivo (gateway 24/7 não enche o disco)
+_LOG_BACKUPS = 3                   # mantém okami.log.1..3
+
+
+def _file_handler(path: str, fmt: logging.Formatter) -> RotatingFileHandler:
+    """Handler de arquivo que ROTACIONA por tamanho (em vez de crescer sem teto)."""
+    h = RotatingFileHandler(path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUPS, encoding="utf-8")
+    h.setFormatter(fmt)
+    return h
+
 
 if not logger.handlers:
     _fmt = logging.Formatter("%(asctime)s okami %(levelname)s %(message)s", "%H:%M:%S")
@@ -24,9 +36,7 @@ if not logger.handlers:
     _file = os.getenv("OKAMI_LOG_FILE")
     if _file:
         try:
-            _fh = logging.FileHandler(_file, encoding="utf-8")
-            _fh.setFormatter(_fmt)
-            logger.addHandler(_fh)
+            logger.addHandler(_file_handler(_file, _fmt))   # #9: rotação por tamanho
         except OSError:
             pass
     logger.setLevel(os.getenv("OKAMI_LOG", "WARNING").upper())

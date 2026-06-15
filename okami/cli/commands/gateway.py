@@ -258,6 +258,28 @@ def _serve_ws_or_http(serve_ws, port, token, run_ws, host):
     return serve_ws(port, token, run_ws, host=host)
 
 
+@app.command(help=_tr("cli.backup", _default="Snapshot the whole ~/.okami HOME (config/memory/skills/cron) to a zip (consistent SQLite)."))
+def backup(dest: str = typer.Option(".", "--dest", "-d", help=_tr("cli.backup.dest", _default="Directory for the backup zip."))) -> None:
+    """Snapshot zipado do HOME inteiro (config/memória/skills/cron) — portátil entre máquinas."""
+    from okami.core.backup import create_backup
+    from okami.home import okami_home
+    p = create_backup(okami_home(), dest)
+    console.print(f"[green]✓ backup[/green] {p}  [dim]({p.stat().st_size // 1024} KB)[/dim]")
+    console.print(f"[dim]restaure noutra máquina com: okami import {p.name}[/dim]")
+
+
+@app.command("import", help=_tr("cli.import", _default="Restore a ~/.okami backup zip (anti zip-slip; re-chmods secrets to 0600)."))
+def import_backup(
+    zip_path: str = typer.Argument(..., help=_tr("cli.import.zip", _default="Path to the okami-backup-*.zip")),
+    home: str = typer.Option(None, "--home", help=_tr("cli.import.home", _default="Target HOME (default: ~/.okami)")),
+) -> None:
+    """Restaura um backup do HOME (guarda anti zip-slip + re-chmod 0600 nos segredos)."""
+    from okami.core.backup import restore_backup
+    from okami.home import okami_home
+    n = restore_backup(zip_path, home or okami_home())
+    console.print(f"[green]✓ restaurados[/green] {n} arquivo(s) em {home or okami_home()}")
+
+
 @app.command(help=_tr("cli.attach", _default="Attach to a remote okami gateway over WebSocket (start it with `okami serve --ws`)."))
 def attach(
     url: str = typer.Argument(..., help=_tr("cli.attach.url", _default="ws://<host>:<port>/attach (e.g. a tailscale host)")),
