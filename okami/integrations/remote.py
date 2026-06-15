@@ -103,12 +103,13 @@ class RemoteTarget:
                 env["SSH_AUTH_SOCK"] = sock
         return env
 
-    def run(self, cmd: str, *, timeout: int | None = None) -> RemoteResult:
-        """Roda `cmd` no host remoto. Devolve RemoteResult(returncode, output). Nunca levanta."""
+    def run(self, cmd: str, *, timeout: int | None = None, stdin: str | None = None) -> RemoteResult:
+        """Roda `cmd` no host remoto. `stdin` (opc) vai pro processo (conteúdo de write não entra no argv).
+        Devolve RemoteResult(returncode, output). Nunca levanta."""
         to = timeout or self.timeout
         argv = self.build_argv(cmd)
         try:
-            r = self._run_fn(argv, capture_output=True, text=True, timeout=to, env=self._env())
+            r = self._run_fn(argv, capture_output=True, text=True, timeout=to, env=self._env(), input=stdin)
         except subprocess.TimeoutExpired:
             return RemoteResult(124, f"[remoto: comando passou de {to}s e foi cortado]")
         except FileNotFoundError as e:                  # tailscale/ssh não instalado
@@ -117,6 +118,25 @@ class RemoteTarget:
         if len(out) > _MAX_OUTPUT:               # comando remoto cuspindo GB não inunda RAM/contexto
             out = out[:_MAX_OUTPUT] + f"\n[… saída remota truncada em {_MAX_OUTPUT} chars]"
         return RemoteResult(getattr(r, "returncode", 1), out)
+
+    # ── primitivos de ARQUIVO (Phase 2): as tools de FS roteiam pra cá quando conectado ──
+    def read(self, path: str) -> RemoteResult:
+        """Lê um arquivo remoto (cat). returncode != 0 = não existe / sem permissão."""
+        return self.run(f"cat -- {shlex.quote(path)}")
+
+    def write(self, path: str, content: str) -> RemoteResult:
+        """Escreve um arquivo remoto de forma ATÔMICA (tmp + mv). Conteúdo via STDIN — nunca no argv
+        (sem limite de tamanho, sem quoting/injeção)."""
+        q = shlex.quote(path)
+        return self.run(f't=$(mktemp) && cat > "$t" && mv -- "$t" {q}', stdin=content)
+
+    def list(self, path: str) -> RemoteResult:
+        """Lista um diretório remoto (ls -1Ap: um por linha, oculta '.'/'..', marca '/' em dir)."""
+        return self.run(f"ls -1Ap -- {shlex.quote(path)}")
+
+    def exists(self, path: str) -> bool:
+        r = self.run(f"test -e {shlex.quote(path)} && echo OKAMI_Y || echo OKAMI_N")
+        return "OKAMI_Y" in r.output
 
     def health_check(self) -> RemoteResult:
         """Testa a conexão (echo) — usado no connect p/ falhar cedo se host/config estiver errado."""

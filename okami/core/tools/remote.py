@@ -27,11 +27,11 @@ def _remote_cfg(ctx) -> dict:
 class RemoteConnect(Tool):
     name = "remote_connect"
     description = (
-        "Conecta a uma MÁQUINA REMOTA (via Tailscale SSH ou ssh) — depois disso seu run_shell roda NESSA "
-        "máquina (configurar, ajustar, deploy, etc.). Para mexer em ARQUIVO remoto use shell (cat/tee/sed); "
-        "as tools read_file/edit_file ainda operam no LOCAL por enquanto. Passe um alias de remote.hosts ou "
-        "um host (só no terminal do dono). NO TELEGRAM só aliases liberados funcionam. remote_disconnect volta "
-        "ao local. Os mesmos freios de segurança (rm catastrófico, .env/.ssh) valem no host remoto."
+        "Conecta a uma MÁQUINA REMOTA (via Tailscale SSH ou ssh) — depois disso suas tools de arquivo e "
+        "shell (read_file/write_file/edit_file/list_dir/run_shell) operam NESSA máquina (configurar, ajustar, "
+        "deploy, etc.). Passe um alias de remote.hosts ou um host (só no terminal do dono). NO TELEGRAM só "
+        "aliases liberados funcionam. remote_disconnect volta ao local. Os mesmos freios de segurança (rm "
+        "catastrófico, .env/.ssh) valem no host remoto."
     )
     args_schema = {"host": "alias de remote.hosts (ex.: prod) OU host cru (ex.: user@maquina) — só no terminal"}
     required = ("host",)
@@ -55,9 +55,8 @@ class RemoteConnect(Tool):
         fn = getattr(ctx, "set_remote", None)
         if fn is not None:
             fn(rt)                                        # persiste na sessão (sobrevive ao turno)
-        return ToolResult(True, f"📡 conectado a '{rt.alias}' ({rt.host}, via {rt.via}). Seu run_shell agora "
-                          "roda NESSA máquina; p/ arquivo remoto use shell (cat/tee/sed) — read_file/edit_file "
-                          "seguem locais. remote_disconnect volta ao local.", effect=True)
+        return ToolResult(True, f"📡 conectado a '{rt.alias}' ({rt.host}, via {rt.via}). Suas tools de arquivo "
+                          "e shell agora operam NESSA máquina. remote_disconnect volta ao local.", effect=True)
 
 
 class RemoteDisconnect(Tool):

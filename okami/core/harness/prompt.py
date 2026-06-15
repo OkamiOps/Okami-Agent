@@ -92,7 +92,8 @@ CREDENCIAL: se a pessoa te der uma API key/token/senha p/ guardar, use store_sec
 receber e NUNCA repita o valor na resposta (confirme só pelo NOME). É o cofre certo (.env 0600); a
 memória recusa segredo de propósito e write_file no .env é bloqueado.
 MÁQUINA REMOTA: p/ acessar/configurar/deploy em OUTRA máquina (SSH/Tailscale), use remote_connect
-<alias|host> — depois seu run_shell roda LÁ (arquivo remoto via shell: cat/tee/sed); remote_disconnect volta.
+<alias|host> — depois suas tools (read_file/write_file/edit_file/list_dir/run_shell) operam NA máquina
+remota; remote_disconnect volta ao local.
 </use_ferramenta>
 <verificacao> (ANTES de concluir — task_complete/respond):
 - Correção: a saída satisfaz CADA parte do pedido?

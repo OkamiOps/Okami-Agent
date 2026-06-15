@@ -65,6 +65,16 @@ class ReadFile(Tool):
             return ToolResult(False, "sandbox: arquivo sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
                               f"bloqueado p/ não vazar segredo. Use o perfil yolo se for de propósito. ({rel})",
                               effect=False)
+        remote = getattr(ctx, "remote", None)            # AMBIENTE REMOTO: lê na máquina remota (cat)
+        if remote is not None:
+            rr = remote.read(rel)
+            if rr.returncode != 0:
+                from okami.core.redact import redact
+                return ToolResult(False, f"[📡 {remote.alias}] não consegui ler '{rel}': "
+                                  f"{redact(rr.output).strip()[:300] or 'arquivo não existe / sem permissão'}",
+                                  effect=False)
+            ctx.read_files.add(rel)                       # grounding p/ um edit_file remoto depois
+            return ToolResult(True, rr.output, effect=False)
         from okami.core.file_safety import read_text_capped
         try:
             p = _safe_path(ctx, rel)
@@ -115,6 +125,18 @@ class WriteFile(Tool):
         content = args.get("content", "")
         if not isinstance(content, str):                  # None/bytes/num → coage p/ texto (não crasha o .encode)
             content = "" if content is None else str(content)
+        remote = getattr(ctx, "remote", None)            # AMBIENTE REMOTO: escreve na máquina remota (tee atômico)
+        if remote is not None:
+            if getattr(ctx.sandbox, "mode", "") != "yolo" and _SENSITIVE_PATH.search(rel):
+                return ToolResult(False, f"arquivo sensível (.env/.ssh/.aws/credenciais) bloqueado mesmo no "
+                                  f"remoto: {rel}. Use o perfil yolo se for de propósito.", effect=False)
+            rr = remote.write(rel, content)
+            if rr.returncode != 0:
+                from okami.core.redact import redact
+                return ToolResult(False, f"[📡 {remote.alias}] erro ao escrever '{rel}': "
+                                  f"{redact(rr.output).strip()[:300]}", effect=False)
+            ctx.read_files.add(rel)
+            return ToolResult(True, f"[📡 {remote.alias}] escrito {rel} ({len(content)} chars)", effect=True)
         try:
             p = _safe_path(ctx, rel)
         except ValueError as e:
@@ -167,12 +189,37 @@ class EditFile(Tool):
         old = args.get("old", "")
         new = args.get("new", "")
         replace_all = bool(args.get("replace_all", False))
+        if not old:
+            return ToolResult(False, "edit_file exige 'old' (trecho a substituir) não-vazio.")
+        remote = getattr(ctx, "remote", None)            # AMBIENTE REMOTO: lê→substitui→escreve na remota
+        if remote is not None:
+            if getattr(ctx.sandbox, "mode", "") != "yolo" and _SENSITIVE_PATH.search(rel):
+                return ToolResult(False, f"arquivo sensível bloqueado mesmo no remoto: {rel}.", effect=False)
+            from okami.core.redact import redact
+            rr = remote.read(rel)
+            if rr.returncode != 0:
+                return ToolResult(False, f"[📡 {remote.alias}] não consegui ler '{rel}' p/ editar: "
+                                  f"{redact(rr.output).strip()[:200] or 'não existe?'}", effect=False)
+            text = rr.output
+            count = text.count(old)
+            if count == 0:
+                return ToolResult(False, f"[📡 {remote.alias}] trecho não encontrado em {rel} — precisa ser "
+                                  "EXATO (incl. espaços).", effect=False)
+            if count > 1 and not replace_all:
+                return ToolResult(False, f"[📡 {remote.alias}] 'old' aparece {count}× em {rel} — torne-o único "
+                                  "ou passe replace_all=true.", effect=False)
+            new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+            wr = remote.write(rel, new_text)
+            if wr.returncode != 0:
+                return ToolResult(False, f"[📡 {remote.alias}] erro ao escrever '{rel}': "
+                                  f"{redact(wr.output).strip()[:200]}", effect=False)
+            n = count if replace_all else 1
+            return ToolResult(True, f"[📡 {remote.alias}] editado {rel} ({n} substituiç"
+                              f"{'ões' if n > 1 else 'ão'})", effect=True)
         try:
             p = _safe_path(ctx, rel)
         except ValueError as e:
             return ToolResult(False, str(e))
-        if not old:
-            return ToolResult(False, "edit_file exige 'old' (trecho a substituir) não-vazio.")
         if not p.exists():
             return ToolResult(False, f"'{rel}' não existe — use write_file para criar.")
         # Grounding anti-alucinação (§3.7), igual ao write_file: não edita às cegas um arquivo não-lido
@@ -225,6 +272,14 @@ class ListDir(Tool):
 
     def run(self, args, ctx):
         rel = args.get("path", ".")
+        remote = getattr(ctx, "remote", None)            # AMBIENTE REMOTO: lista o diretório remoto (ls)
+        if remote is not None:
+            rr = remote.list(rel)
+            if rr.returncode != 0:
+                from okami.core.redact import redact
+                return ToolResult(False, f"[📡 {remote.alias}] erro ao listar '{rel}': "
+                                  f"{redact(rr.output).strip()[:200]}", effect=False)
+            return ToolResult(True, f"[📡 {remote.alias}]\n{rr.output.strip() or '(vazio)'}", effect=False)
         try:
             p = _safe_path(ctx, rel)
             entries = sorted(e.name + ("/" if e.is_dir() else "") for e in p.iterdir())
