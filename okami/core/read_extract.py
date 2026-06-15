@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from json import JSONDecodeError
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -35,15 +36,20 @@ def extract_text(path) -> str | None:
             return _extract_docx(p)
         if ext == ".xlsx":
             return _extract_xlsx(p)
-    except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError, KeyError, TypeError):
+    except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError, KeyError, TypeError,
+            AttributeError, JSONDecodeError):                # #9 review: .ipynb com JSON-lista/cells-string
         return None
     return None
 
 
 def _extract_ipynb(p: Path) -> str:
     nb = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
+    if not isinstance(nb, dict):                             # .ipynb malformado (lista/escalar no topo)
+        return ""
     out = []
-    for cell in nb.get("cells", []):
+    for cell in (nb.get("cells") or []):
+        if not isinstance(cell, dict):
+            continue
         src = cell.get("source", "")
         text = "".join(src) if isinstance(src, list) else str(src)
         kind = cell.get("cell_type", "")

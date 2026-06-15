@@ -67,6 +67,17 @@ def test_corrupt_office_returns_none(tmp_path):
     assert extract_text(p) is None                       # corrompido → None (não crasha)
 
 
+def test_malformed_ipynb_does_not_crash(tmp_path):
+    # achado da review #9: .ipynb com JSON-lista no topo NÃO pode levantar AttributeError (crashava o turno).
+    from okami.core.read_extract import extract_text
+    from okami.core.tools import ReadFile, ToolContext
+    p = tmp_path / "weird.ipynb"
+    p.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert extract_text(p) in ("", None)                 # sem crash
+    r = ReadFile().run({"path": "weird.ipynb"}, ToolContext(workspace=tmp_path))
+    assert r.ok or "extrair" in r.output.lower()         # tool devolve resultado limpo, não exceção
+
+
 def test_read_file_tool_extracts_docx(tmp_path):
     from okami.core.tools import ReadFile, ToolContext
     p = tmp_path / "carta.docx"

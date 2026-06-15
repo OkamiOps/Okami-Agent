@@ -38,6 +38,27 @@ def test_normal_url_with_query_passes(monkeypatch):
     validate_public_url("https://example.com/page?q=hello+world&n=5")   # não levanta (sem segredo)
 
 
+@pytest.mark.parametrize("url", [
+    "https://example.com/search?q=task-management-software-list-2024",   # 'sk' em taSK
+    "https://example.com/risk-assessment-framework-guide-complete",      # 'sk' em riSK
+    "https://blog.example.com/whisk-recipe-collection-for-beginners",    # 'sk' em whiSK
+    "https://example.com/task-ant-eater-care-guide-for-pet-owners",      # nem sk-ant- casa em palavra
+    "https://example.com/sk-management-software-comparison-chart",       # path com 'sk-' + slug hifenizado
+])
+def test_hyphenated_slug_url_not_blocked(monkeypatch, url):
+    # achado da review #9: 'sk-' DENTRO de palavra (task/risk/desk) + slug NÃO pode ser tratado como segredo.
+    monkeypatch.setattr(net_guard.socket, "getaddrinfo", _fake_dns({
+        "example.com": ["93.184.216.34"], "blog.example.com": ["93.184.216.34"]}))
+    validate_public_url(url)                                # não levanta — URL legítima passa
+
+
+def test_real_key_in_url_still_blocked(monkeypatch):
+    from okami.core.net_guard import url_carries_secret
+    assert url_carries_secret("https://e.com/x?k=sk-" + "a" * 40)        # chave contígua real → bloqueia
+    assert url_carries_secret("https://e.com/x?k=sk-proj-" + "b" * 30)
+    assert not url_carries_secret("https://e.com/task-list-app")         # palavra comum → não
+
+
 @pytest.mark.parametrize("ip", [
     "127.0.0.1", "0.0.0.0", "10.1.2.3", "172.16.0.5", "192.168.1.1",
     "169.254.169.254",                      # metadata de nuvem (AWS/GCP)

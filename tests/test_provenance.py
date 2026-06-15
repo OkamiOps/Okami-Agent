@@ -41,3 +41,10 @@ def test_verify_checksum_hash_errado_false(tmp_path):
 def test_verify_checksum_arquivo_inexistente_false(tmp_path):
     ausente = tmp_path / "nao_existe"
     assert provenance.verify_checksum(ausente, "00" * 32) is False
+
+
+def test_verify_checksum_non_path_returns_false():
+    # achado da review #9: path None/não-path-like → False (não levanta), contrato fail-safe.
+    from okami.core.provenance import sha256_file, verify_checksum
+    assert sha256_file(None) == ""
+    assert verify_checksum(None, "a" * 64) is False

@@ -73,5 +73,10 @@ def usage_warning(buckets, *, threshold: float = 0.8) -> str | None:
     if worst is None:
         return None
     used, name, reset = worst
-    tail = f" — reset em {reset}s" if reset not in (None, "") else ""
+    if reset in (None, ""):                               # #9 review: 's' só p/ nº puro de segundos;
+        tail = ""                                          # formato opaco (1m30s / timestamp RFC3339) vai cru
+    elif str(reset).strip().isdigit():
+        tail = f" — reset em {reset}s"
+    else:
+        tail = f" — reset: {reset}"
     return f"⚠ quota de {name} ~{round(used * 100)}%{tail}"

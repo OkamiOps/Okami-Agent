@@ -69,3 +69,10 @@ def test_warning_none_com_buckets_vazios_ou_invalidos():
     assert usage_warning(None) is None
     # limit=0 não pode virar divisão por zero
     assert usage_warning({"requests": {"limit": 0.0, "remaining": 0.0, "reset": None}}) is None
+
+
+def test_usage_warning_opaque_reset_no_double_s():
+    # achado da review #9: reset não-numérico (1m30s / timestamp) não vira "...ss".
+    from okami.llm.rate_tracker import usage_warning
+    w = usage_warning({"requests": {"limit": 100.0, "remaining": 1.0, "reset": "1m30s"}})
+    assert w and "1m30ss" not in w and "1m30s" in w

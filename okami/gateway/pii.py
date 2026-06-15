@@ -22,8 +22,13 @@ PII_SAFE_PLATFORMS: set[str] = {"telegram", "whatsapp", "signal", "bluebubbles"}
 
 # Telefone internacional: opcional "+", DDI/DDD e grupos de dígitos separados por espaço/-/(),
 # com pelo menos um separador (senão colide com qualquer número longo — esse caso vai pro id).
+# Telefone — ESTREITO (achado da review #9: o regex frouxo comia data/CEP/decimal/IP). Exige um sinal
+# REAL de telefone: '+' internacional, DDD entre parênteses, ou 3 grupos no formato de telefone.
 _PHONE = re.compile(
-    r"\+?\d{1,3}[\s.\-]?\(?\d{1,4}\)?(?:[\s.\-]\d{2,5}){1,4}\b"
+    r"\+\d[\d\s().\-]{7,}\d"                      # internacional: +55 11 99999-8888
+    r"|\(\d{2,3}\)\s?\d[\d\s.\-]{6,}\d"           # (11) 99999-8888
+    r"|\b\d{3}[\s.\-]\d{3}[\s.\-]\d{4}\b"         # 555-123-4567 (US)
+    r"|\b\d{2}[\s.\-]\d{4,5}[\s.\-]\d{4}\b"       # 11 99999-8888 (BR sem +)
 )
 
 # Id numérico longo (>=7 dígitos contíguos) — user-id, chat-id etc. Trocado por hash curto.

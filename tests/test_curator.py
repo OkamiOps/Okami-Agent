@@ -158,7 +158,8 @@ def test_cron_execute_routes_curator_action(tmp_path, monkeypatch):
     monkeypatch.setattr("okami.home.skills_dir", lambda: tmp_path)
     monkeypatch.setattr(cur, "snapshot", lambda root, **k: calls.setdefault("snap", True))
     monkeypatch.setattr(cur, "archive_unused", lambda root, **k: ["a", "b"])
-    monkeypatch.setattr(cur, "run_consolidation", lambda *a, **k: calls.setdefault("consol", True))
+    # #9 review: o cron passou a usar o caminho contract-driven (preserva aliases na umbrella).
+    monkeypatch.setattr(cur, "consolidate_with_contract", lambda *a, **k: calls.setdefault("consol", True))
     monkeypatch.setattr(cronmod, "_load", lambda: object())
     out = cronmod._cron_execute({"action": "curator", "prompt": "x"}, str(tmp_path))
     assert calls.get("snap") and calls.get("consol") and "arquivadas 2" in out

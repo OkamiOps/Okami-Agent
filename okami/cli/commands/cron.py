@@ -41,7 +41,9 @@ def _cron_execute(job: dict, workspace: str):
         root = skills_dir()
         cur.snapshot(root)                           # reversível: snapshot antes de arquivar/consolidar
         archived = cur.archive_unused(root)
-        cur.run_consolidation(cfg, str(ws), root, emit=lambda m: None)
+        # #9 review: usa o caminho CONTRACT-driven (apply_plan) — ele PRESERVA aliases na umbrella
+        # (use_skill <nome-fundido> ainda resolve); o run_consolidation model-driven não gravava alias.
+        cur.consolidate_with_contract(cfg, root, emit=lambda m: None)
         return f"curator: arquivadas {len(archived)} skills sem uso + consolidação rodada"
     t = run_task(cfg, ws, job["prompt"], emit=lambda m: None)
     return t.result or t.reason or t.state.value

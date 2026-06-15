@@ -23,8 +23,8 @@ def sha256_file(path) -> str:
             for bloco in iter(lambda: f.read(_CHUNK), b""):
                 h.update(bloco)
         return h.hexdigest()
-    except OSError:
-        # arquivo sumiu/sem permissão/é diretório — sem hash, sem confiança
+    except (OSError, TypeError, ValueError):
+        # arquivo sumiu/sem permissão/é diretório, OU `path` não-path-like (None/int) — sem hash (#9 review)
         return ""
 
 

@@ -190,3 +190,12 @@ def test_consolidation_invalid_plan_changes_nothing(tmp_path, monkeypatch):
     out = cur.consolidate_with_contract(None, tmp_path)
     assert not out["applied"] and out["errors"]
     assert (tmp_path / "debug-stripe").exists()         # nada mudou (fail-closed)
+
+
+def test_apply_plan_never_archives_the_umbrella(tmp_path):
+    # achado da review #9 (edge pré-existente): plano com umbrella==absorb não pode sumir a umbrella.
+    _mk_skill(tmp_path, "foo")
+    plan = {"merges": [{"umbrella": "foo", "description": "x", "absorb": ["foo"],
+                        "body": "## Quando usar\nx\n## Como\ny"}], "archive": []}
+    cur.apply_plan(tmp_path, plan)
+    assert (tmp_path / "foo" / "SKILL.md").exists()        # umbrella sobreviveu (não foi arquivada)

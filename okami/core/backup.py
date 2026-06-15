@@ -26,17 +26,23 @@ def _snapshot_db(p: Path) -> str | None:
     """Cópia consistente de um SQLite via API (não cópia de bytes ao vivo). None se não for SQLite."""
     fd, tmp = tempfile.mkstemp(suffix=".db")
     os.close(fd)
+    src = dst = None
     try:
         src = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
         dst = sqlite3.connect(tmp)
         with dst:
             src.backup(dst)
-        dst.close()
-        src.close()
         return tmp
     except sqlite3.Error:
         Path(tmp).unlink(missing_ok=True)
         return None
+    finally:                                              # #9 review: fecha conexões mesmo em erro (sem leak de fd)
+        for c in (dst, src):
+            if c is not None:
+                try:
+                    c.close()
+                except sqlite3.Error:
+                    pass
 
 
 def create_backup(home, dest_dir, *, stamp: str | None = None) -> Path:

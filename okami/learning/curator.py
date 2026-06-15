@@ -344,9 +344,11 @@ def apply_plan(skills_dir, plan, *, dry_run: bool = False) -> dict:
     """Aplica um plano JÁ VALIDADO: snapshot → escreve umbrellas (origin: agent) → arquiva absorvidas
     + archive (reversível). dry_run = só reporta. Retorna {"created": [...], "archived": [...]}."""
     import yaml as _yaml
+    _umbrellas = {m["umbrella"] for m in (plan.get("merges") or [])}
     summary = {"created": [m["umbrella"] for m in plan.get("merges") or []],
-               "archived": sorted({a for m in (plan.get("merges") or []) for a in m["absorb"]}
-                                  | set(plan.get("archive") or []))}
+               # #9 review: NUNCA arquiva a própria umbrella (plano com umbrella==absorb sumia a umbrella).
+               "archived": sorted(({a for m in (plan.get("merges") or []) for a in m["absorb"]}
+                                  | set(plan.get("archive") or [])) - _umbrellas)}
     if dry_run:
         return summary
     snapshot(skills_dir)

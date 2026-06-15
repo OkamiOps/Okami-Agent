@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from okami.gateway.pii import PII_SAFE_PLATFORMS, hash_id, redact_pii
 
 
@@ -52,3 +54,22 @@ def test_failsafe_on_bad_input():
     assert redact_pii("", "telegram") == ""
     assert redact_pii(None, "telegram") is None
     assert redact_pii("texto", "") == "texto"
+
+
+@pytest.mark.parametrize("txt", [
+    "reunião de 10-15 de junho",            # data
+    "CEP 01310-100 em SP",                  # CEP
+    "saldo de 100.000,00 reais",            # decimal/milhar
+    "servidor no IP 192.168.1.1 ativo",     # IP
+    "pedido 2024-00123 enviado",            # id com hífen
+])
+def test_pii_does_not_eat_dates_cep_decimal_ip(txt):
+    # achado da review #9: o regex de telefone NÃO pode comer data/CEP/decimal/IP.
+    from okami.gateway.pii import redact_pii
+    assert redact_pii(txt, "telegram") == txt
+
+
+def test_pii_still_masks_real_phone():
+    from okami.gateway.pii import redact_pii
+    for phone in ("+55 11 99999-8888", "(11) 99999-8888", "11 99999-8888"):
+        assert "9999" not in redact_pii(f"meu número é {phone} ok", "telegram")
