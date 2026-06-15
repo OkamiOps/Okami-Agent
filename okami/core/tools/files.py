@@ -87,6 +87,14 @@ class ReadFile(Tool):
         if not p.exists():
             return ToolResult(False, f"arquivo não existe: {rel} — NÃO chute o caminho; use list_dir p/ navegar "
                               "ou find_files p/ achar pelo nome.", effect=False)
+        from okami.core.read_extract import extract_text, is_extractable
+        if is_extractable(rel):               # #9: .docx/.xlsx/.ipynb → extrai texto (senão vem binário/lixo)
+            text = extract_text(p)
+            if text is None:
+                return ToolResult(False, f"não consegui extrair texto de {rel} (arquivo corrompido ou vazio?).",
+                                  effect=False)
+            ctx.read_files.add(rel)
+            return ToolResult(True, text, effect=False)
         try:
             text = read_text_capped(p)        # teto de tamanho → não estoura memória
         except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
@@ -176,9 +184,11 @@ class WriteFile(Tool):
             return ToolResult(False, str(e))
         record_read(ctx, rel, p)  # acabou de escrever → conhece o conteúdo + atualiza baseline anti-stale
         from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: avisa erro NOVO (não bloqueia)
+        from okami.core.code_security import security_warn            # #9: padrão perigoso no que o agente grava
         warn = lint_delta(rel, before, content)
         sem = semantic_delta(ctx.workspace, rel, before, content)    # item 16: diagnóstico semântico (pyright)
-        extra = "".join(f"\n{w}" for w in (warn, sem) if w)
+        sec = security_warn(rel, content)
+        extra = "".join(f"\n{w}" for w in (warn, sem, sec) if w)
         return ToolResult(True, f"escrito {rel} ({n} chars)" + extra, effect=True)
 
 
@@ -262,12 +272,14 @@ class EditFile(Tool):
         record_read(ctx, rel, p)              # conhece o conteúdo + atualiza baseline anti-stale
         n = count if replace_all else 1
         from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: erro NOVO pela edição
+        from okami.core.code_security import security_warn            # #9: padrão perigoso introduzido
         warn = lint_delta(rel, text, new_text)
         sem = semantic_delta(ctx.workspace, rel, text, new_text)     # item 16: diagnóstico semântico (pyright)
+        sec = security_warn(rel, new_text)
         line_no = _first_changed_line(text, old, new)                # item 8: nº da 1ª linha mudada
         diff = _short_diff(text, new_text)                           # item 8: diff unified curto (capado)
         head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'})"
-        extra = "".join(f"\n{w}" for w in (warn, sem) if w)
+        extra = "".join(f"\n{w}" for w in (warn, sem, sec) if w)
         return ToolResult(True, head + (f"\n{diff}" if diff else "") + extra, effect=True)
 
 

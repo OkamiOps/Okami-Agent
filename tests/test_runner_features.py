@@ -71,6 +71,27 @@ def test_spawn_unavailable_when_no_spawn():
     assert not r.ok and "indisponível" in r.output
 
 
+def test_spawn_parallel_tasks_fan_out():
+    # #9 Tier 1: `tasks` roda N subagentes em PARALELO (fan-out) e junta os resultados rotulados.
+    seen = []
+    ctx = ToolContext(workspace=Path("."),
+                      spawn=lambda goal, agent, model: (seen.append(goal), f"feito: {goal}")[1])
+    r = Spawn().run({"tasks": [{"goal": "pesquisa A"}, {"goal": "pesquisa B"}, {"goal": "refatora C"}]}, ctx)
+    assert r.ok
+    assert "feito: pesquisa A" in r.output and "feito: pesquisa B" in r.output and "feito: refatora C" in r.output
+    assert set(seen) == {"pesquisa A", "pesquisa B", "refatora C"}
+
+
+def test_spawn_parallel_one_failure_does_not_sink_others():
+    def _sp(goal, agent, model):
+        if "ruim" in goal:
+            raise RuntimeError("boom")
+        return f"ok: {goal}"
+    ctx = ToolContext(workspace=Path("."), spawn=_sp)
+    r = Spawn().run({"tasks": [{"goal": "bom"}, {"goal": "ruim"}]}, ctx)
+    assert r.ok and "ok: bom" in r.output and "falhou" in r.output    # o que falhou não derruba o resto
+
+
 def test_expand_references_file_url_and_missing(tmp_path):
     (tmp_path / "notes.md").write_text("conteudo importante", encoding="utf-8")
     text, block = expand_references("considere @notes.md ao fazer", tmp_path)

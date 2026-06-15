@@ -131,18 +131,45 @@ class ManageSkill(Tool):
 class Spawn(Tool):
     name = "spawn"
     description = ("Delega um SUBTASK a um subagente ISOLADO (contexto próprio) e recebe o resultado. "
-                   "Use p/ paralelizar/especializar (ex.: 'agent: ui' p/ frontend). Não abuse — tem custo.")
-    args_schema = {"goal": "o subtask", "agent": "(opcional) id do agente", "model": "(opcional) modelo"}
-    required = ("goal",)
+                   "Use p/ paralelizar/especializar (ex.: 'agent: ui'). Para FAN-OUT, passe `tasks` (lista "
+                   "de {goal, agent?, model?}) → roda N subagentes EM PARALELO e junta. Não abuse — tem custo.")
+    args_schema = {"goal": "o subtask (1 só)", "agent": "(opcional) id do agente", "model": "(opcional) modelo",
+                   "tasks": "(opcional) lista de {goal, agent?, model?} p/ rodar em PARALELO"}
+    required = ()
+    _MAX_PARALLEL = 6
 
     def run(self, args, ctx):
         if ctx.spawn is None:
             return ToolResult(False, "spawn indisponível neste contexto.")
+        if args.get("tasks"):
+            return self._parallel(args["tasks"], ctx)
+        goal = args.get("goal")
+        if not goal:
+            return ToolResult(False, "spawn exige 'goal' (ou 'tasks' p/ fan-out paralelo).")
         try:
-            out = ctx.spawn(args["goal"], args.get("agent"), args.get("model"))
+            out = ctx.spawn(goal, args.get("agent"), args.get("model"))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"subagente falhou: {e}")
         return ToolResult(True, f"SUBAGENTE devolveu:\n{out}", effect=True)
+
+    def _parallel(self, tasks, ctx):
+        """Fan-out: roda os subtasks EM PARALELO (cap de concorrência) e junta os resultados rotulados.
+        Um subtask que falha vira '(falhou: …)' sem derrubar os outros."""
+        from concurrent.futures import ThreadPoolExecutor
+        items = [t for t in tasks if isinstance(t, dict) and str(t.get("goal", "")).strip()]
+        if not items:
+            return ToolResult(False, "tasks vazio/sem goal — cada item precisa de {goal, agent?, model?}.")
+        items = items[:self._MAX_PARALLEL]
+
+        def _one(t):
+            try:
+                return t["goal"], str(ctx.spawn(t["goal"], t.get("agent"), t.get("model")))
+            except Exception as e:  # noqa: BLE001 — falha de um não derruba o fan-out
+                return t["goal"], f"(falhou: {e})"
+        with ThreadPoolExecutor(max_workers=min(self._MAX_PARALLEL, len(items))) as ex:
+            results = list(ex.map(_one, items))
+        blocks = [f"### subagente {i + 1} — {g}\n{out}" for i, (g, out) in enumerate(results)]
+        return ToolResult(True, "SUBAGENTES (paralelo) devolveram:\n\n" + "\n\n".join(blocks), effect=True)
 
 
 class Browse(Tool):

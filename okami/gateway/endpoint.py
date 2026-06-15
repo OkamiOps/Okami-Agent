@@ -1248,6 +1248,9 @@ class AgentEndpoint(EndpointCommandsMixin):
                 except Exception:  # noqa: BLE001 — contabilidade nunca quebra o turno
                     pass
             reply = task.result or task.reason or f"({task.state.value})"
+            if not task.result and task.state.name == "FAILED":   # #9: razão crua de erro de provider →
+                from okami.gateway.response_filters import sanitize_provider_error   # categoria curta segura
+                reply = sanitize_provider_error(reply)            # (não vaza HTTP body/request-id no chat)
             self._append_turn(chat_id, s, "AGENTE", reply)  # fecha o par → não é mais "interrompida"
             self._goal_after_turn(chat_id, reply)           # juiz do objetivo (fail-open, item 41)
             s.resume_attempts = 0                          # concluiu → zera a guarda de resume
