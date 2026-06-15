@@ -47,6 +47,14 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
     return out
 
 
+def _is_connect_error(e: Exception) -> bool:
+    """True se o erro significa que a conexão NUNCA foi estabelecida (recusada/DNS) — então retransmitir
+    é seguro mesmo em método não-idempotente. Read-timeout/OSError genérico NÃO contam (ambíguos)."""
+    import socket
+    reason = getattr(e, "reason", e)
+    return isinstance(reason, (ConnectionRefusedError, socket.gaierror))
+
+
 class TelegramClient:
     def __init__(self, token: str, api_base: str = "https://api.telegram.org"):
         self.api_base = api_base
@@ -54,8 +62,14 @@ class TelegramClient:
         self.base = f"{api_base}/bot{token}"
 
     def _call(self, method: str, params: dict, timeout: float = 35.0, *, _sleep=time.sleep) -> dict:
-        """POST com RETRY/BACKOFF: 429 respeita retry_after; 5xx/rede instável → backoff; 4xx → erro."""
+        """POST com RETRY/BACKOFF: 429 respeita retry_after; 5xx/rede instável → backoff; 4xx → erro.
+
+        Dedupe (bug #9): em método NÃO-idempotente (sendMessage/edit/…), NÃO retransmite num erro de
+        rede AMBÍGUO (read-timeout, OSError genérico) — o Telegram pode JÁ ter recebido → retransmitir
+        duplicaria a mensagem. Só retransmite quando a conexão claramente NÃO foi estabelecida
+        (recusada/DNS). Métodos `get*` são idempotentes → retransmitem livremente."""
         data = json.dumps(params).encode("utf-8")
+        idempotent = method.startswith("get")
         last: Exception | None = None
         for attempt in range(1, 4):
             req = urllib.request.Request(f"{self.base}/{method}", data=data, method="POST")
@@ -78,6 +92,8 @@ class TelegramClient:
                     _sleep(wait)
             except (urllib.error.URLError, TimeoutError, OSError) as e:   # rede instável
                 last = e
+                if not idempotent and not _is_connect_error(e):   # ambíguo num send → não retransmite (anti-dupe)
+                    raise
                 if attempt < 3:
                     _sleep(min(8.0, 2 ** attempt))
         if last:

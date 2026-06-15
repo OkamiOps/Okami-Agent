@@ -134,6 +134,17 @@ def test_apply_plan_merges_and_archives(tmp_path):
     assert snaps, "apply_plan tem que snapshotar antes de mutar"
 
 
+def test_merge_records_absorbed_names_as_aliases(tmp_path):
+    # bug #9: o nome absorvido vira ALIAS na umbrella → `use_skill <nome-antigo>` ainda resolve.
+    # Sem isto, um uso/job que cita a skill fundida roda sem as instruções (degradação silenciosa).
+    _mk_skill(tmp_path, "debug-stripe")
+    _mk_skill(tmp_path, "debug-github")
+    cur.apply_plan(tmp_path, _plan())
+    from okami.skills import parse_skill
+    sk = parse_skill(tmp_path / "api-debugging" / "SKILL.md")
+    assert "debug-stripe" in sk.aliases and "debug-github" in sk.aliases
+
+
 def test_apply_plan_dry_run_mutates_nothing(tmp_path):
     _mk_skill(tmp_path, "debug-stripe")
     _mk_skill(tmp_path, "debug-github")

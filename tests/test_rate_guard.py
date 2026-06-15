@@ -48,6 +48,22 @@ def test_overloaded_uses_short_ttl(tmp_path, monkeypatch):
     assert 0 < left <= 60
 
 
+def test_429_without_retry_after_is_transient_not_1h(tmp_path, monkeypatch):
+    # bug #9: 429 SEM retry-after num provider multiplexado (OpenRouter/Nous) NÃO pode travar o
+    # provider INTEIRO por 1h cross-sessão — trata como transitório (pausa curta anti-stampede).
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_rate_limited("openrouter")               # sem retry_after, sem ttl explícito, sem genuine
+    left = rg.blocked_for("openrouter")
+    assert 0 < left <= 60                             # curto, NÃO ~3600
+
+
+def test_429_genuine_blocks_long(tmp_path, monkeypatch):
+    # quando o caller SABE que é a quota da conta que esgotou → bloqueio longo (1h) é correto.
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
+    rg.note_rate_limited("codex", genuine=True)
+    assert rg.blocked_for("codex") > 600
+
+
 def test_corrupt_file_fails_open(tmp_path, monkeypatch):
     monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
     f = tmp_path / "rate_limits" / "x.json"

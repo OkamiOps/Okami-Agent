@@ -41,10 +41,20 @@ def _write(provider: str, until: float) -> None:
         pass                                          # guarda é best-effort
 
 
-def note_rate_limited(provider: str, *, ttl: float = _TTL_RATE_LIMIT,
-                      retry_after: float | None = None) -> None:
-    """Registra um 429: provider parado até agora+ttl (retry-after do provider vence o default)."""
-    wait = float(retry_after) if retry_after and retry_after > 0 else float(ttl)
+def note_rate_limited(provider: str, *, ttl: float | None = None,
+                      retry_after: float | None = None, genuine: bool | None = None) -> None:
+    """Registra um 429. Precedência (bug #9): retry-after do provider > ttl explícito do caller >
+    `genuine` (quota da CONTA esgotou → 1h) > default TRANSITÓRIO curto. Sem retry-after e sem sinal
+    de exaustão genuína, um 429 num gateway multiplexado é tratado como transitório (upstream sem
+    capacidade) — pausa curta anti-stampede, NÃO trava o provider inteiro por 1h."""
+    if retry_after and retry_after > 0:
+        wait = float(retry_after)                 # o provider disse explicitamente quanto esperar
+    elif ttl is not None:
+        wait = float(ttl)                          # caller explicitou o ttl → honra
+    elif genuine:
+        wait = _TTL_RATE_LIMIT                      # quota da conta esgotou de verdade → 1h
+    else:
+        wait = _TTL_OVERLOADED                      # 429 ambíguo/transitório → pausa curta (anti-1h-lockout)
     _write(provider, time.time() + wait)
 
 

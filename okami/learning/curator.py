@@ -341,7 +341,10 @@ def apply_plan(skills_dir, plan, *, dry_run: bool = False) -> dict:
         d = root / m["umbrella"]
         d.mkdir(parents=True, exist_ok=True)
         meta = {"name": m["umbrella"], "description": m["description"], "origin": "agent",
-                "merged_from": list(m["absorb"])}      # proveniência do merge (auditável)
+                "merged_from": list(m["absorb"]),      # proveniência do merge (auditável)
+                # bug #9: o nome absorvido vira ALIAS → `use_skill <nome-antigo>` ainda resolve p/ a
+                # umbrella (senão um uso/job que cita a skill fundida roda sem as instruções).
+                "aliases": list(m["absorb"])}
         (d / "SKILL.md").write_text("---\n" + _yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
                                     + "---\n" + m["body"].rstrip() + "\n", encoding="utf-8", newline="\n")
     for name in summary["archived"]:

@@ -43,6 +43,51 @@ def test_call_retries_on_429(monkeypatch):
     assert res["result"] == 7 and calls["n"] == 2                  # tentou de novo após o 429
 
 
+def test_call_no_retry_on_timeout_for_send(monkeypatch):
+    # BUG #9: retry de read-timeout em sendMessage DUPLICA (o Telegram pode já ter recebido).
+    import pytest
+    c = TelegramClient("tok")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        raise TimeoutError("read timed out")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(Exception):
+        c._call("sendMessage", {"chat_id": "1", "text": "x"}, _sleep=lambda s: None)
+    assert calls["n"] == 1                       # NÃO retransmite (1 tentativa) → não duplica
+
+
+def test_call_retries_timeout_for_idempotent(monkeypatch):
+    # getUpdates é idempotente → pode retransmitir em timeout sem efeito colateral.
+    c = TelegramClient("tok")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise TimeoutError("read timed out")
+        return io.BytesIO(json.dumps({"ok": True, "result": []}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    res = c._call("getUpdates", {"offset": 0}, _sleep=lambda s: None)
+    assert calls["n"] == 2 and res["ok"]         # retransmitiu (sem efeito colateral)
+
+
+def test_call_retries_connect_refused_for_send(monkeypatch):
+    # Conexão recusada = NUNCA chegou ao Telegram → retransmitir sendMessage é seguro (não duplica).
+    c = TelegramClient("tok")
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=0):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise urllib.error.URLError(ConnectionRefusedError("refused"))
+        return io.BytesIO(json.dumps({"ok": True, "result": 1}).encode())
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    res = c._call("sendMessage", {"chat_id": "1", "text": "x"}, _sleep=lambda s: None)
+    assert calls["n"] == 2 and res["ok"]
+
+
 def test_channel_send_typing(monkeypatch):
     ch = TelegramChannel("tok")
     actions: list[tuple] = []
