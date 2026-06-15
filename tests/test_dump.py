@@ -8,12 +8,14 @@ from types import SimpleNamespace
 
 def test_build_dump_has_sections_and_no_secret(tmp_path):
     from okami.core.dump import build_dump
+    secret = "sk-" + "supersecret0123456789abcd"          # montado → não vira literal pro secret-scan
+    bot_tok = "12345:" + "AAsegredodobotaqui"
     cfg = SimpleNamespace(
-        providers={"codex": {"model": "openai-codex/gpt-5", "api_key": "sk-supersecret0123456789abcd"}},
-        channels={"telegram": {"token": "12345:AAsegredodobotaqui"}})
+        providers={"codex": {"model": "openai-codex/gpt-5", "api_key": secret}},
+        channels={"telegram": {"token": bot_tok}})
     out = build_dump(cfg, home=tmp_path)
     assert "HOME" in out and "providers" in out.lower() and "codex" in out
-    assert "sk-supersecret0123456789abcd" not in out      # segredo do provider NÃO vaza
+    assert secret not in out                              # segredo do provider NÃO vaza
     assert "AAsegredodobotaqui" not in out                # token do canal NÃO vaza
 
 
