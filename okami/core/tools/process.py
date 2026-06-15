@@ -21,6 +21,10 @@ class ProcessStart(Tool):
         from okami.core.processes import ProcessManager
         from okami.core.sandbox import default_policy
         cmd = args["cmd"]
+        if getattr(ctx, "remote", None) is not None:             # conectado a host remoto → process_start
+            return ToolResult(False, "process_start roda em BACKGROUND LOCAL (sobe na máquina do dono, não "
+                              "na remota). Estando conectado a um host, use run_shell com 'nohup … &' no "
+                              "próprio remoto, ou remote_disconnect antes.", effect=False)
         policy = ctx.sandbox or default_policy()                 # #5: MESMA política do run_shell
         mode = getattr(policy, "mode", "")
         from okami.core import approval as _ap

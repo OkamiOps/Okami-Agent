@@ -52,6 +52,7 @@ class Session:
         self.voice_off = False           # /voice off → não responde em áudio (TTS) nesta sessão
         self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
         self.queued: list = []           # mensagens em fila (runtime; não persiste)
+        self.remote_spec: str | None = None  # alias/host do ambiente remoto ATIVO (SSH/Tailscale) — multi-turno
         self.approved_cats: set[str] = set()  # categorias aprovadas PRA SESSÃO (Hermes): não pergunta de
         #                                       novo (ex.: aprovou 'destructive_shell' uma vez → libera o resto)
 
@@ -1183,6 +1184,15 @@ class AgentEndpoint(EndpointCommandsMixin):
             # Entrega FORA-DO-TURNO (#7 item 3, usada por 10/14/19): o harness pode "tocar" o dono no meio
             # da tarefa (vigia/loop/lembrete) — entrega ao home_chat, redige segredo e (item 4) avisa o desktop.
             kw["notify"] = lambda m: self._notify_owner(chat_id, m)
+            # AMBIENTE REMOTO (SSH/Tailscale): rehidrata o alvo da sessão (multi-turno) + persiste mudanças.
+            if s.remote_spec:
+                from okami.integrations.remote import resolve_remote
+                try:                                       # is_terminal=open_fs (fail-safe): gateway=False → allowlist
+                    kw["remote"] = resolve_remote(getattr(self.cfg, "remote", None), s.remote_spec,
+                                                  is_terminal=self.open_fs)
+                except Exception:  # noqa: BLE001 — spec inválido (host saiu da allowlist) → volta ao local
+                    s.remote_spec = None
+            kw["set_remote"] = lambda rt, _s=s: setattr(_s, "remote_spec", getattr(rt, "alias", None) if rt else None)
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             task = self.run_task(self.cfg, self.ws, text, **kw)
             _elapsed = time.time() - _t0

@@ -97,6 +97,8 @@ def run_task(
     open_fs: bool = False,                        # DONO no CLI: agente alcança TODO o FS (relativo no CWD,
                                                  # absoluto livre). Telegram/grupo = False (jail do workspace).
     allow_paths: list | None = None,             # pastas extras liberadas além do workspace (config tools.allow_paths)
+    remote=None,                                 # alvo de execução REMOTO (RemoteTarget) — FS/shell rodam LÁ
+    set_remote=None,                             # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)                          # operacional: jail de arquivos, shell, find, @refs
@@ -253,6 +255,10 @@ def run_task(
     )
     if notify is not None:            # entrega FORA-DO-TURNO ao dono (#7 item 3) — só passa quando há canal
         _hkw["notify"] = notify
+    if remote is not None:            # ambiente remoto (SSH/Tailscale): FS/shell rodam no host
+        _hkw["remote"] = remote
+    if set_remote is not None:        # persiste o alvo na sessão (sobrevive ao turno)
+        _hkw["set_remote"] = set_remote
     try:
         harness = Harness(generate, t, ws, **_hkw)
     except TypeError:                 # ctor ainda sem `notify` (landing paralelo do loop-owner) → fail-open

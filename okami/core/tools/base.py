@@ -130,6 +130,9 @@ class ToolContext:
     notify: Callable[[str], bool] | None = None  # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
     read_mtimes: dict[str, float] = field(default_factory=dict)  # mtime no momento da leitura (item 7) — base anti-stale
     todos: list = field(default_factory=list)  # checklist operacional do turno (item 9)
+    remote: object | None = None  # alvo de execução REMOTO (RemoteTarget); None = local. FS/shell roteiam pra cá quando setado
+    surface: str = "cli"  # superfície da sessão (cli/telegram/…) — regra de allowlist do remote_connect
+    set_remote: Callable | None = None  # hook p/ PERSISTIR o alvo remoto na sessão (sobrevive ao turno); None = só este turno
 
     @property
     def home(self) -> Path:

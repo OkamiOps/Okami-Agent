@@ -163,6 +163,8 @@ class Harness:
         stage_writes: bool = False,     # escrita de memória → fila de aprovação (review + write_approval)
         cfg=None,                       # config (p/ tools que roteiam ao modelo auxiliar: web_extract/vision)
         notify=None,                    # hook de mensagem-ao-dono FORA do turno (item 3); None = sem canal
+        remote=None,                    # alvo de execução remoto (RemoteTarget) — FS/shell rodam LÁ
+        set_remote=None,                # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
     ):
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
@@ -187,7 +189,9 @@ class Harness:
                                agent_home=agent_home, stage_writes=stage_writes,
                                registry=self.registry,   # tool_search: schema sob demanda (item 27)
                                cfg=cfg,                   # web_extract/vision_analyze: roteamento aux
-                               notify=notify)             # mensagem-ao-dono fora do turno (item 3)
+                               notify=notify,             # mensagem-ao-dono fora do turno (item 3)
+                               surface=surface,           # superfície real → allowlist do remote_connect
+                               remote=remote, set_remote=set_remote)  # ambiente remoto (SSH/Tailscale)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
         self.ctx.read_files.update(prelearned_files or [])

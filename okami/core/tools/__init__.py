@@ -17,6 +17,7 @@ from okami.core.tools.audio import AudioAnalyze
 from okami.core.tools.notify import Notify
 from okami.core.tools.todo import TodoWrite, render_pending
 from okami.core.tools.secrets import StoreSecret
+from okami.core.tools.remote import RemoteConnect, RemoteDisconnect
 from okami.core.tools.process import (
     ProcessKill, ProcessList, ProcessLog, ProcessPoll, ProcessSignal, ProcessStart,
     ProcessWait, ProcessWrite,
@@ -30,6 +31,7 @@ __all__ = [
     "RememberFact", "RecallMemory", "RememberUser", "FinishSetup",
     "UseSkill", "ManageSkill", "Spawn", "Browse", "GenerateImage",
     "AudioAnalyze", "Notify", "TodoWrite", "render_pending", "StoreSecret",
+    "RemoteConnect", "RemoteDisconnect",
     "ProcessStart", "ProcessWrite", "ProcessPoll", "ProcessWait", "ProcessLog", "ProcessList",
     "ProcessKill", "ProcessSignal",
     "Respond", "TaskComplete", "TaskBlocked", "NeedInput", "default_registry",

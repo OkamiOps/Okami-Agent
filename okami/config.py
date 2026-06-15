@@ -233,6 +233,7 @@ class OkamiConfig(BaseModel):
     groups: list[Any] = Field(default_factory=list)          # salas multi-agente (§10 turn-taking)
     persona: dict[str, Any] = Field(default_factory=dict)    # {"observe": true, "gradual_scale": 1} (§8)
     gateway: dict[str, Any] = Field(default_factory=dict)    # {"auto_resume": false, "max_sessions": 500} (§13)
+    remote: dict[str, Any] = Field(default_factory=dict)     # {"hosts": {alias: {host,via,cwd}}, "ssh_agent": bool} (SSH/Tailscale)
     learning: dict[str, Any] = Field(default_factory=dict)   # {"auto_skill": false} (§7 auto-aprimoramento)
     hooks: dict[str, Any] = Field(default_factory=dict)      # {evento: ["cmd"]} event hooks (§11)
     sandbox: dict[str, Any] = Field(default_factory=dict)    # {"backend": "local|docker", "mode": ...} (§P0 #2)
@@ -406,6 +407,7 @@ def build_config(raw: dict) -> OkamiConfig:
         groups=raw.get("groups") or [],
         persona=raw.get("persona") or {},
         gateway=raw.get("gateway") or {},
+        remote=raw.get("remote") or {},          # SSH/Tailscale: hosts allowlist + ssh_agent (senão era dead-code)
         learning=raw.get("learning") or {},
         hooks=raw.get("hooks") or {},
         sandbox=raw.get("sandbox") or {},

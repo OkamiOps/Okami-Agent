@@ -26,6 +26,11 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'\bAKIA[0-9A-Z]{12,}\b'), f"AKIA{_MASK}"),             # AWS access key id
     (re.compile(r'\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{6,}\b'),
      f"{_MASK}-jwt"),                                                    # JWT
+    (re.compile(r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----', re.DOTALL),
+     f"-----BEGIN PRIVATE KEY-----{_MASK}-----END PRIVATE KEY-----"),  # pragma: allowlist secret  (é a MÁSCARA, não segredo)
+    (re.compile(r'([a-z][a-z0-9+.\-]*://[^:/@\s]+:)([^@/\s]+)(@)'),      # senha em URL: scheme://user:SENHA@host
+     lambda m: f"{m.group(1)}{_MASK}{m.group(3)}"),
+    (re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'), f"AIza{_MASK}"),         # Google API key
 ]
 
 

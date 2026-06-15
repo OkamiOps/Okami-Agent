@@ -431,8 +431,13 @@ class RunShell(Tool):
             return ToolResult(False, "sandbox: comando toca caminho sensível (.env/.ssh/.aws/credenciais/"
                               f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
                               effect=False)
-        res = run_sandboxed(cmd, ctx.workspace, policy)
         from okami.core.redact import redact            # token impresso na saída (gh auth/build log) NÃO pode
+        remote = getattr(ctx, "remote", None)           # AMBIENTE REMOTO: roda LÁ, não no sandbox local
+        if remote is not None:                          # (as guardas hardline/read-only/sensível JÁ rodaram acima)
+            rr = remote.run(cmd, timeout=policy.timeout)
+            out = f"[📡 {getattr(remote, 'alias', 'remoto')}] exit={rr.returncode}\n{redact(rr.output)}"
+            return ToolResult(rr.returncode == 0, out, effect=eff)
+        res = run_sandboxed(cmd, ctx.workspace, policy)
         out = f"exit={res.returncode}\n{redact(res.output)}"   # ir verbatim p/ o LLM/transcript (igual ao bg log)
         if getattr(res, "timed_out", False):                     # cortou no teto → ensina a recuperar (não é "falha real")
             out += (f"\n[o comando passou de {policy.timeout}s e foi cortado. Se é legítimo e demora mesmo: "
