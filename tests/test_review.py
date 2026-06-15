@@ -73,6 +73,23 @@ def test_review_goal_has_do_not_capture_and_turn():
     assert "nada a salvar" in g.lower() and "PEDIDO: oi" in g
 
 
+def test_review_goal_teaches_support_file_taxonomy():
+    # #9: o review aprende a demotar detalhe pesado p/ references/templates/scripts (skill enxuta).
+    from okami.learning.review import build_review_goal
+    g = build_review_goal("PEDIDO: x")
+    assert "references/" in g and "templates/" in g and "scripts/" in g
+
+
+def test_learned_summary_only_when_something_saved():
+    # #9: surface "o que aprendi" — avisa o dono SÓ quando algo foi salvo (transparência).
+    from okami.learning.review import learned_summary
+    assert learned_summary("nada a salvar") is None
+    assert learned_summary("") is None
+    assert learned_summary(None) is None
+    s = learned_summary("salvei a preferência: respostas curtas e diretas")
+    assert s and "aprendi" in s and "respostas curtas" in s
+
+
 def test_summarize_turn_is_compact():
     from okami.learning.review import summarize_turn
     t = Task(goal="crie o app")

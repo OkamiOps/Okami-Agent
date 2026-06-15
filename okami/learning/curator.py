@@ -25,19 +25,33 @@ _DAY = 86400.0
 
 
 # ---------------------------------------------------------------- uso (LRU telemetry, p/ o archival)
-def record_skill_use(skills_dir, name: str, *, now: float | None = None) -> None:
-    """Bump de uso de uma skill (count + last_used) — base do archival LRU. Best-effort, nunca levanta."""
+# #9: sinais SEPARADOS de atividade da skill — (count_field, ts_field) por kind. Ver≠usar≠patchear:
+# uma skill muito VISTA e nunca "usada" pelo path exato, ou só patchada, não pode ser arquivada como morta.
+_ACTIVITY_FIELDS = {"use": ("count", "last_used"), "view": ("view_count", "last_viewed"),
+                    "patch": ("patch_count", "last_patched")}
+
+
+def _latest_activity(entry: dict) -> float:
+    """Maior timestamp entre use/view/patch — o relógio REAL de atividade da skill (anti-archival injusto)."""
+    return max(float(entry.get("last_used") or 0.0), float(entry.get("last_viewed") or 0.0),
+               float(entry.get("last_patched") or 0.0))
+
+
+def record_skill_use(skills_dir, name: str, *, kind: str = "use", now: float | None = None) -> None:
+    """Bump de atividade de uma skill. kind=use|view|patch (count + timestamp próprios). Base do archival
+    (que usa o MAX dos três). Best-effort, nunca levanta."""
     if not skills_dir or not name:
         return
+    cf, tf = _ACTIVITY_FIELDS.get(kind, _ACTIVITY_FIELDS["use"])
     p = Path(skills_dir) / USAGE_FILE
     try:
         data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     except (OSError, ValueError):
         data = {}
     e = data.setdefault(name, {"count": 0, "last_used": 0.0})
-    e["count"] = int(e.get("count", 0)) + 1
-    e["last_used"] = now if now is not None else time.time()
-    e.setdefault("state", "active")          # usar revive: nunca fica 'stale' enquanto é usada
+    e[cf] = int(e.get(cf, 0)) + 1
+    e[tf] = now if now is not None else time.time()
+    e.setdefault("state", "active")          # qualquer atividade revive: não fica 'stale' enquanto é tocada
     if e.get("state") == "stale":
         e["state"] = "active"
     _write_usage_atomic(p, data)
@@ -137,7 +151,7 @@ def archival_candidates(skills_dir, *, archive_days: int = 90, now: float | None
     for sk in load_skills(Path(skills_dir)):
         if not is_curatable(sk):
             continue
-        last = float((usage.get(sk.name) or {}).get("last_used") or 0.0)
+        last = _latest_activity(usage.get(sk.name) or {})   # #9: max(use, view, patch) — não só last_used
         if not last:
             try:
                 last = sk.path.stat().st_mtime           # nunca usada → idade do arquivo
@@ -193,7 +207,7 @@ def lifecycle_pass(skills_dir, *, stale_days: int = 30, archive_days: int = 90,
     for sk in load_skills(Path(skills_dir)):
         if not is_curatable(sk):
             continue
-        last = float((usage.get(sk.name) or {}).get("last_used") or 0.0)
+        last = _latest_activity(usage.get(sk.name) or {})   # #9: max(use, view, patch) — não só last_used
         if not last:
             try:
                 last = sk.path.stat().st_mtime           # nunca usada → idade do arquivo

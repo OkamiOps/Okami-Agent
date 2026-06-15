@@ -42,23 +42,31 @@ def _should_review(ws, interval: int, clean: bool) -> bool:
     return fire
 
 
-def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit) -> None:
+def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit, notify=None) -> None:
     """Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): a cada N turnos LIMPOS, forka um review isolado
-    que decide (via tools) o que vale salvar. Roda em background (não bloqueia o turno do usuário)."""
+    que decide (via tools) o que vale salvar. Roda em background (não bloqueia o turno do usuário).
+    Se `notify` (canal ao dono), AVISA o que foi aprendido — transparência (#9)."""
     from okami.core import TaskState
     lc = cfg.learning or {}
     if not lc.get("review", True):
         return
     if not _should_review(ws, int(lc.get("review_interval", 6)), task.state == TaskState.COMPLETE):
         return
-    from okami.learning.review import run_review, summarize_turn
+    from okami.learning.review import learned_summary, run_review, summarize_turn
     ctx = summarize_turn(task)
 
     def _bg():
         from okami.llm.aux import aux_for
         aux_p, aux_m = aux_for(cfg, "review")        # fundo → modelo auxiliar barato (Hermes: −85% custo)
-        run_review(cfg, ws, ctx, skills_dir=skills_dir,
-                   model=aux_m or model, provider=aux_p or provider, emit=lambda m: None)
+        rt = run_review(cfg, ws, ctx, skills_dir=skills_dir,
+                        model=aux_m or model, provider=aux_p or provider, emit=lambda m: None)
+        if notify is not None and rt is not None:    # #9: avisa o dono do que aprendeu (se algo foi salvo)
+            msg = learned_summary(getattr(rt, "result", None))
+            if msg:
+                try:
+                    notify(msg)
+                except Exception:  # noqa: BLE001 — aviso é best-effort
+                    pass
     if lc.get("review_sync"):              # síncrono (testes / CLI one-shot que sai rápido)
         _bg()
     else:                                 # background: roda DEPOIS de a pessoa já ter a resposta
@@ -287,7 +295,8 @@ def run_task(
                 # Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): o modelo decide o que salvar via tools,
                 # guiado pela lista "Do NOT capture", a cada N turnos e SÓ em conclusão limpa. Substitui a
                 # destilação MECÂNICA (que gerava lixo). auto_skill mecânico fica como legado opt-in.
-                _maybe_background_review(cfg, home, t, skills_dir=skills_dir, model=model, provider=provider, emit=emit)
+                _maybe_background_review(cfg, home, t, skills_dir=skills_dir, model=model, provider=provider,
+                                         emit=emit, notify=notify)   # #9: avisa o dono do que aprendeu
                 if (cfg.learning or {}).get("auto_skill"):     # opt-in: destilação pós-tarefa (LLM-ou-nada,
                     name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
                     if name:                                   # julgamento worth + gate determinístico)

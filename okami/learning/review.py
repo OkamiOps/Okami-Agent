@@ -38,6 +38,10 @@ SALVE (use a tool certa):
 - SKILL (`manage_skill`): SÓ se emergiu um PROCEDIMENTO reutilizável de uma CLASSE de tarefa (não a tarefa
   específica de hoje). Prefira EDITAR uma skill existente (action=edit) a criar uma nova. Nome no nível de
   CLASSE (kebab-case, ≤3 palavras) — nunca a frase do pedido / PR / erro / codinome.
+  DETALHE PESADO vai p/ um SUBARQUIVO da skill (manage_skill action=write_file), não inchando o SKILL.md:
+  `references/<tópico>.md` (doc de API, banco de conhecimento condensado), `templates/<nome>` (gabarito p/
+  copiar e adaptar), `scripts/<nome>` (ação re-executável determinística — verificador, probe). O SKILL.md
+  fica curto e APONTA o subarquivo (1 linha); o agente carrega o detalhe só quando precisa (use_skill path=).
 
 FRUSTRAÇÃO DO USUÁRIO é sinal de SKILL de primeira classe (não só de memória): "para de fazer X",
 "tá verboso demais", "você SEMPRE faz Y e eu odeio" → corrija a SKILL que governa aquela classe de
@@ -94,15 +98,29 @@ def summarize_turn(task) -> str:
     return redact("\n".join(parts))                    # segredo na observação não volta ao modelo
 
 
+def learned_summary(result: str | None) -> str | None:
+    """Mensagem curta p/ AVISAR o dono do que o review aprendeu, ou None se nada foi salvo (#9).
+
+    Transparência/consentimento: aprendizado invisível tira do dono a chance de corrigir ("não, isso
+    não era pra virar skill"). Só avisa quando algo foi de fato salvo."""
+    r = (result or "").strip()
+    low = r.lower()
+    if not r or "nada a salvar" in low or "nothing to save" in low or "nada a guardar" in low:
+        return None
+    return f"💾 aprendi: {r[:200]}"
+
+
 def run_review(cfg, workspace, turn_context: str, *, skills_dir, model=None, provider=None,
-               emit=lambda m: None) -> None:
+               emit=lambda m: None):
     """Roda o review num fork de tools restrito (REVIEW_TOOLS), auto-aprovando esse conjunto seguro,
-    SEM re-disparar aprendizado (learn=False → sem recursão). Best-effort: nunca derruba o turno."""
+    SEM re-disparar aprendizado (learn=False → sem recursão). Best-effort: nunca derruba o turno.
+    Devolve a Task do review (p/ o caller avisar o dono do que foi aprendido) ou None se falhou."""
     from okami.runner import run_task
     try:
-        run_task(cfg, workspace, build_review_goal(turn_context), provider=provider, model=model,
-                 skills_dir=skills_dir, registry_filter=REVIEW_TOOLS,
-                 approve=lambda req: True,           # conjunto de tools já é seguro (sem shell/arquivo/spawn)
-                 learn=False, surface="review", emit=emit)
+        return run_task(cfg, workspace, build_review_goal(turn_context), provider=provider, model=model,
+                        skills_dir=skills_dir, registry_filter=REVIEW_TOOLS,
+                        approve=lambda req: True,      # conjunto de tools já é seguro (sem shell/arquivo/spawn)
+                        learn=False, surface="review", emit=emit)
     except Exception as e:  # noqa: BLE001 — review é best-effort
         emit(f"(review falhou: {e})")
+        return None

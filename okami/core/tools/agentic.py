@@ -54,6 +54,11 @@ class UseSkill(Tool):
             content = read_text_capped(p)
         except OSError as e:
             return ToolResult(False, f"falha ao ler arquivo da skill: {e}")
+        try:                                          # #9: ler subarquivo conta como VIEW (≠ use/patch)
+            from okami.learning.curator import record_skill_use
+            record_skill_use(root, name, kind="view")
+        except Exception:  # noqa: BLE001
+            pass
         return ToolResult(True, f"SKILL '{name}' / {rel}:\n{content}")
 
 
@@ -107,6 +112,11 @@ class ManageSkill(Tool):
                 dst.write_text(content, encoding="utf-8", newline="\n")
             except OSError as e:
                 return ToolResult(False, f"falha ao gravar arquivo da skill: {e}")
+            try:                                      # #9: editar/anexar conta como PATCH (sinal de manutenção)
+                from okami.learning.curator import record_skill_use
+                record_skill_use(root, name, kind="patch")
+            except Exception:  # noqa: BLE001
+                pass
             return ToolResult(True, f"arquivo '{rel}' gravado em skill '{name}'", effect=True)
         body = str(args.get("body", "")).strip()
         if len(body) < 20:

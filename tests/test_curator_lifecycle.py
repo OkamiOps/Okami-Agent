@@ -134,6 +134,24 @@ def test_apply_plan_merges_and_archives(tmp_path):
     assert snaps, "apply_plan tem que snapshotar antes de mutar"
 
 
+def test_skill_telemetry_separate_view_use_patch(tmp_path):
+    # #9: ver / usar / patchear são sinais SEPARADOS (count + timestamp próprios).
+    cur.record_skill_use(tmp_path, "s", kind="view", now=100.0)
+    cur.record_skill_use(tmp_path, "s", kind="patch", now=200.0)
+    cur.record_skill_use(tmp_path, "s", kind="use", now=300.0)
+    u = cur._usage(tmp_path)["s"]
+    assert u["view_count"] == 1 and u["patch_count"] == 1 and u["count"] == 1
+    assert u["last_viewed"] == 100.0 and u["last_patched"] == 200.0 and u["last_used"] == 300.0
+
+
+def test_archival_uses_latest_activity_across_kinds(tmp_path):
+    # skill VISTA recentemente (mas nunca "usada" pelo path exato) NÃO é arquivada injustamente.
+    _mk_skill(tmp_path, "s")
+    now = 1_000_000_000.0
+    cur.record_skill_use(tmp_path, "s", kind="view", now=now - 5 * 86400)   # vista há 5 dias
+    assert "s" not in cur.archival_candidates(tmp_path, archive_days=90, now=now)
+
+
 def test_merge_records_absorbed_names_as_aliases(tmp_path):
     # bug #9: o nome absorvido vira ALIAS na umbrella → `use_skill <nome-antigo>` ainda resolve.
     # Sem isto, um uso/job que cita a skill fundida roda sem as instruções (degradação silenciosa).
