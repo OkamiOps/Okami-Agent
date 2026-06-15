@@ -43,6 +43,23 @@ def test_call_retries_on_429(monkeypatch):
     assert res["result"] == 7 and calls["n"] == 2                  # tentou de novo após o 429
 
 
+def test_split_balances_code_fence_across_parts():
+    # #9: bloco de código longo que atravessa o corte → cada parte fecha e reabre a fence (renderiza certo).
+    from okami.channels.telegram import _split_message
+    code = "```python\n" + "x = 1\n" * 1500 + "```"
+    parts = _split_message(code, limit=4000)
+    assert len(parts) >= 2
+    for p in parts:
+        assert p.count("```") % 2 == 0                # cada parte tem fence BALANCEADA
+    assert parts[1].lstrip().startswith("```python")  # a 2ª parte reabre na linguagem certa
+
+
+def test_split_plain_text_unchanged_count():
+    from okami.channels.telegram import _split_message
+    parts = _split_message("a " * 5000, limit=4000)
+    assert all(p.count("```") == 0 for p in parts)    # sem fence → não inventa fence
+
+
 def test_call_no_retry_on_timeout_for_send(monkeypatch):
     # BUG #9: retry de read-timeout em sendMessage DUPLICA (o Telegram pode já ter recebido).
     import pytest

@@ -44,6 +44,33 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
         rest = rest[cut:].lstrip()
     if rest:
         out.append(rest)
+    return _balance_fences(out)
+
+
+def _last_fence_lang(part: str) -> str:
+    """Linguagem do ÚLTIMO ``` da parte (abertura → 'python'; fechamento → '')."""
+    lang = ""
+    for line in part.splitlines():
+        s = line.lstrip()
+        if s.startswith("```"):
+            lang = s[3:].strip()
+    return lang
+
+
+def _balance_fences(parts: list[str]) -> list[str]:
+    """#9: bloco de código que atravessa o corte → fecha o ``` na parte atual e REABRE na próxima
+    (com a linguagem), pra cada parte renderizar como markdown válido. Sem fence, não muda nada."""
+    out: list[str] = []
+    carry: str | None = None                  # linguagem do fence que ficou aberto da parte anterior
+    for part in parts:
+        if carry is not None:
+            part = f"```{carry}\n{part}"        # reabre o bloco aberto antes
+        if part.count("```") % 2 == 1:         # fence ainda aberta ao fim desta parte
+            carry = _last_fence_lang(part)
+            part = part.rstrip() + "\n```"      # fecha aqui
+        else:
+            carry = None
+        out.append(part)
     return out
 
 
