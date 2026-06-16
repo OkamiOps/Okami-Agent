@@ -114,3 +114,37 @@ def test_generate_video_tool_check_needs_config(tmp_path):
     # sem config → run devolve erro claro (não crash)
     res = GenerateVideo().run({"prompt": "x", "path": "v.mp4"}, ctx)
     assert res.ok is False and "configure" in res.output.lower()
+
+
+# ── G4: registry de backends nomeados (Veo3/Kling/Pixverse) + capabilities ──
+def test_video_backends_registry_has_presets():
+    from okami.llm.videogen import video_backends
+    names = {b["name"] for b in video_backends()}
+    assert {"veo3", "kling", "pixverse"} <= names
+    for b in video_backends():
+        assert "capabilities" in b and "audio" in b["capabilities"]
+
+
+def test_video_config_resolves_named_backend():
+    from okami.llm.videogen import video_config
+    cfg = _cfg({"video": {"backend": "veo3", "api_key_env": "FAL_KEY"}})
+    vc = video_config(cfg)
+    assert vc is not None and vc["url"] and vc["api_key_env"] == "FAL_KEY"
+    assert vc.get("backend") == "veo3" and vc.get("capabilities", {}).get("audio") is True
+
+
+def test_video_config_unknown_backend_is_none():
+    from okami.llm.videogen import video_config
+    assert video_config(_cfg({"video": {"backend": "inexistente", "api_key_env": "K"}})) is None
+
+
+def test_generate_video_with_backend_preset(tmp_path, monkeypatch):
+    from okami.llm import videogen
+    monkeypatch.setenv("FAL_KEY", "k")
+    cfg = _cfg({"video": {"backend": "kling", "api_key_env": "FAL_KEY"}})
+    out = tmp_path / "v.mp4"
+    res = videogen.generate_video(cfg, "prompt", str(out),
+                                  _post=lambda u, b, h: {"video": {"url": "https://x/r.mp4"}},
+                                  _download=lambda u, d: d.write_bytes(b"OK"),
+                                  _validate=lambda u: None)
+    assert res == str(out) and out.read_bytes() == b"OK"

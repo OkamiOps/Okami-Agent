@@ -178,15 +178,31 @@ def image_cmd(
     console.print(f"[green]✓ imagem:[/green] {path}")
 
 
-@app.command("video", help=_tr("cli.video", _default="Generate a video via the configured provider (media.video). With `--image base.png` for image-to-video."))
+@app.command("video", help=_tr("cli.video", _default="Generate a video via the configured provider (media.video). With `--image base.png` for image-to-video; `--list` shows named backends."))
 def video_cmd(
-    prompt: str = typer.Argument(..., help=_tr("cli.video.prompt", _default="What to generate.")),
+    prompt: str = typer.Argument("", help=_tr("cli.video.prompt", _default="What to generate.")),
     out: str = typer.Option("video.mp4", "-o", "--out"),
     image: str = typer.Option("", "--image", help=_tr("cli.video.image", _default="Base image for image-to-video.")),
+    list_backends: bool = typer.Option(False, "--list", help=_tr("cli.video.list", _default="List named backends (veo3/kling/pixverse) and their capabilities.")),
 ) -> None:
     """Gera um vídeo via o provider configurado (media.video). Sem config → mensagem clara, nunca crasha."""
     from okami.cli._shared import _load
-    from okami.llm.videogen import generate_video
+    from okami.llm.videogen import generate_video, video_backends
+    if list_backends:
+        from rich.table import Table
+        tbl = Table(title="backends de vídeo (media.video.backend)", title_style="bold")
+        for col in ("backend", "model", "áudio", "duração", "aspect"):
+            tbl.add_column(col)
+        for b in video_backends():
+            c = b["capabilities"]
+            tbl.add_row(b["name"], b["model"], "sim" if c.get("audio") else "não",
+                        f"{c.get('max_duration_s', '?')}s", " ".join(c.get("aspect_ratios", [])))
+        console.print(tbl)
+        console.print("[dim]use: media.video.backend: <nome> + api_key_env. Ou media.video.url p/ um endpoint próprio.[/dim]")
+        return
+    if not prompt.strip():
+        console.print("[yellow]informe o prompt[/yellow] [dim](ou `okami video --list`).[/dim]")
+        raise typer.Exit(2)
     try:
         cfg = _load()
     except Exception:  # noqa: BLE001

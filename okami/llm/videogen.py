@@ -20,15 +20,47 @@ from pathlib import Path
 _POLL_MAX = 60          # nº máximo de polls
 _POLL_EVERY = 5.0       # segundos entre polls
 
+# Registry de backends nomeados (paridade Hermes plugins/video_gen/*) — presets de URL/model + capabilities
+# refletíveis. O dono escolhe `media.video.backend: veo3` (em vez de digitar a url) e só põe a api_key_env.
+# URLs via FAL (gateway comum a vários modelos de vídeo); editável por `media.video.url` se preferir outro.
+VIDEO_BACKENDS: dict[str, dict] = {
+    "veo3": {"url": "https://fal.run/fal-ai/veo3", "model": "veo-3",
+             "poll_url": "https://queue.fal.run/fal-ai/veo3/requests",
+             "capabilities": {"audio": True, "max_duration_s": 8, "aspect_ratios": ["16:9", "9:16"],
+                              "max_reference_images": 1, "resolutions": ["720p", "1080p"]}},
+    "kling": {"url": "https://fal.run/fal-ai/kling-video/v2/master/text-to-video", "model": "kling-2",
+              "poll_url": "https://queue.fal.run/fal-ai/kling-video/requests",
+              "capabilities": {"audio": False, "max_duration_s": 10, "aspect_ratios": ["16:9", "9:16", "1:1"],
+                               "max_reference_images": 1, "resolutions": ["720p"]}},
+    "pixverse": {"url": "https://fal.run/fal-ai/pixverse/v4/text-to-video", "model": "pixverse-v4",
+                 "poll_url": "https://queue.fal.run/fal-ai/pixverse/requests",
+                 "capabilities": {"audio": True, "max_duration_s": 8, "aspect_ratios": ["16:9", "9:16", "1:1"],
+                                  "max_reference_images": 1, "resolutions": ["540p", "720p", "1080p"]}},
+}
+
+
+def video_backends() -> list[dict]:
+    """Lista os backends nomeados disponíveis (p/ `okami video --list` e descoberta)."""
+    return [{"name": k, **v} for k, v in VIDEO_BACKENDS.items()]
+
 
 def video_config(cfg) -> dict | None:
-    """Lê `media.video.*`. None se não configurado (sem `url`)."""
+    """Resolve `media.video`. Aceita um BACKEND nomeado (`backend: veo3`) OU url direta. None se não
+    configurado (sem backend válido nem url)."""
     media = (getattr(cfg, "media", None) or {}) if not isinstance(cfg, dict) else (cfg.get("media") or {})
     v = media.get("video") or {}
+    backend = (v.get("backend") or "").strip().lower()
+    if backend:                                            # preset nomeado
+        preset = VIDEO_BACKENDS.get(backend)
+        if preset is None:
+            return None                                    # backend desconhecido → não configurado
+        return {"url": v.get("url") or preset["url"], "model": v.get("model") or preset["model"],
+                "api_key_env": v.get("api_key_env", ""), "poll_url": v.get("poll_url") or preset["poll_url"],
+                "size": v.get("size", ""), "backend": backend, "capabilities": dict(preset["capabilities"])}
     if not v.get("url"):
         return None
     return {"url": v["url"], "model": v.get("model", ""), "api_key_env": v.get("api_key_env", ""),
-            "poll_url": v.get("poll_url", ""), "size": v.get("size", "")}
+            "poll_url": v.get("poll_url", ""), "size": v.get("size", ""), "backend": "", "capabilities": {}}
 
 
 def _video_url_from(resp: dict) -> str:
@@ -118,4 +150,4 @@ def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
     return str(dest)
 
 
-__all__ = ["video_config", "generate_video"]
+__all__ = ["video_config", "video_backends", "generate_video", "VIDEO_BACKENDS"]
