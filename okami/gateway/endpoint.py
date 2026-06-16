@@ -1162,6 +1162,28 @@ class AgentEndpoint(EndpointCommandsMixin):
         _th.Thread(target=_loop, daemon=True).start()
         return stop
 
+    def _start_typing(self, chat_id, *, interval: float = 4.0):
+        """Mantém o 'digitando…' do Telegram VIVO durante o turno: o sendChatAction dura ~5s, então re-envia
+        a cada ~4s até parar (era one-shot → sumia em turno >5s). Devolve um Event p/ parar, ou None se o
+        canal não tem typing (REST). 1º envio é IMEDIATO (aparece na hora)."""
+        _typing = getattr(self.channel, "send_typing", None)
+        if not callable(_typing):
+            return None
+        import threading as _th
+        stop = _th.Event()
+
+        def _loop():
+            while True:
+                try:
+                    _typing(chat_id)
+                except Exception:  # noqa: BLE001 — typing nunca derruba o turno
+                    return
+                if stop.wait(interval):                    # re-envia a cada `interval`; sai já no stop
+                    return
+
+        _th.Thread(target=_loop, daemon=True).start()
+        return stop
+
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None,
              surface_override: str | None = None) -> None:
         if resume:                                        # retomada: o USER já está no transcript
@@ -1199,12 +1221,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                     "o gpt-image-2 é quem gera.")
             ctx = note + ("\n\n" + ctx if ctx else "")
             images = abss                                  # vision lê os caminhos no inbox
-        _typing = getattr(self.channel, "send_typing", None)   # indicador "digitando…" (Telegram)
-        if _typing:
-            try:
-                _typing(chat_id)
-            except Exception:  # noqa: BLE001 — typing nunca quebra o turno
-                pass
+        _typing_stop = None                                # iniciado DENTRO do try → o finally externo sempre para
         _thinking = "💭 " + _tr("gw.thinking", _default="{agent} is thinking…", agent=self.agent_id)
         _status_id = None                                # streaming-by-edit: 1 msg de status editada ao vivo
         if getattr(self.channel, "supports_edit", False):
@@ -1213,6 +1230,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, _thinking)
         self._react(chat_id, "👀")                       # 👀 = processando (Telegram)
         try:
+            _typing_stop = self._start_typing(chat_id)   # "digitando…" VIVO no turno (re-envia ~4s; Telegram)
             approve = self._approve(chat_id, s)
             on_ev = self.on_event
             if genesis:                                   # na gênese, escrever a própria identidade é o
@@ -1334,6 +1352,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, "❌ " + redact(_tr("gw.run_error", _default="error: {e}", e=e)))
             self._react(chat_id, "👎")
         finally:
+            if _typing_stop is not None:                 # para de "digitar" ao fim do turno (qualquer caminho)
+                _typing_stop.set()
             with self._sess_lock:                        # reset+drain ATÔMICO vs. o check-then-set do dispatch
                 s.busy = False
                 s.cancel = False
