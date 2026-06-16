@@ -333,6 +333,70 @@ def doctor(
             console.print("  " + t("doctor.fix.dbs", _default="SQLite DBs: [green]all healthy[/green] ({n})", n=len(dbs)))
 
 
+@app.command(help=_tr("cli.blueprint", _default="Parameterized automations: okami blueprint list | show <key> | use <key> [slot=val ...]."))
+def blueprint(
+    action: str = typer.Argument("list", help=_tr("cli.blueprint.action", _default="list | show | use")),
+    key: str = typer.Argument("", help=_tr("cli.blueprint.key", _default="blueprint key (for show/use)")),
+    slots: list[str] = typer.Argument(None, help=_tr("cli.blueprint.slots", _default="slot=value pairs (for use)")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+) -> None:
+    """#12: automação parametrizada. `okami blueprint use daily-briefing time=09:00 days=weekdays`."""
+    from okami.automation.blueprints import (
+        CATALOG, BlueprintFillError, blueprint_slash_command, fill_blueprint, get_blueprint,
+    )
+    if action == "list":
+        for k, bp in sorted(CATALOG.items()):
+            console.print(f"  [bold]{k}[/bold] — {bp.description}")
+        return
+    if not key:
+        console.print("[red]informe a key:[/red] okami blueprint show <key>")
+        raise typer.Exit(2)
+    try:
+        bp = get_blueprint(key)
+    except KeyError:
+        console.print(f"[red]blueprint '{key}' não existe[/red] [dim](okami blueprint list)[/dim]")
+        raise typer.Exit(1) from None
+    if action == "show":
+        console.print(f"[bold]{bp.title}[/bold] — {bp.description}\n{blueprint_slash_command(bp)}")
+        for s in bp.slots:
+            console.print(f"  · {s.name} ({s.type}) default={s.default} {('— ' + s.help) if s.help else ''}")
+        return
+    if action == "use":
+        vals = dict(p.split("=", 1) for p in (slots or []) if "=" in p)
+        try:
+            kw = fill_blueprint(bp, vals)
+        except BlueprintFillError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(2) from e
+        from okami.automation.scheduler import Scheduler
+        job = Scheduler(workspace).add(kw["schedule"], kw["prompt"], target=kw.get("target"))
+        console.print(f"[green]✓ automação criada[/green] {job['id']} · {kw['schedule']} [dim](blueprint {key})[/dim]")
+        return
+    console.print(f"[red]ação '{action}' não reconhecida[/red] — use: list | show | use")
+    raise typer.Exit(2)
+
+
+@app.command(help=_tr("cli.swarm", _default="Print a worker→verifier→synthesizer swarm plan for a goal."))
+def swarm(
+    goal: str = typer.Argument(..., help=_tr("cli.swarm.goal", _default="The goal to farm out to specialists.")),
+    worker: list[str] = typer.Option(None, "--worker", help=_tr("cli.swarm.worker", _default="title:body of a worker (repeatable).")),
+) -> None:
+    """#12: monta o plano de enxame (workers paralelos → verificador → sintetizador) p/ um objetivo."""
+    from okami.automation.swarm import build_swarm_plan
+    workers = []
+    for w in (worker or []):
+        title, _, body = w.partition(":")
+        workers.append({"title": title.strip(), "body": body.strip() or title.strip()})
+    if not workers:
+        workers = [{"title": "pesquisa", "body": "investigue a fundo"},
+                   {"title": "revisão", "body": "valide e critique"}]
+    plan = build_swarm_plan(goal, workers)
+    console.print(f"[bold]Swarm:[/bold] {plan['goal']} [dim](blackboard {plan['blackboard']})[/dim]")
+    for i, w in enumerate(plan["workers"], 1):
+        console.print(f"  worker {i} [{w['title']}]: {w['prompt'].splitlines()[2][:80]}")
+    console.print("  verificador → sintetizador (delegue via spawn/run_task)")
+
+
 @app.command(help=_tr("cli.deps", _default="Manage optional backends (lazy deps): okami deps list | install <feature>."))
 def deps(
     action: str = typer.Argument("list", help=_tr("cli.deps.action", _default="list | install")),
