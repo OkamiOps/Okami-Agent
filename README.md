@@ -15,7 +15,7 @@ or wherever you want.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-2539%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2578%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -29,13 +29,16 @@ or wherever you want.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
 > ### ✨ New in `0.9.0-alpha`
-> A big capability jump — **~100/100 parity** with the state of the art, including **multi-vendor
-> readiness**. From ~1.7k → **2.5k tests passing**.
+> A big capability jump — **~98% parity** with the state of the art (by capability presence), including
+> **multi-vendor readiness**. From ~1.7k → **2.6k tests passing**.
 > - **Mixture-of-Agents** — `okami moa` fans one hard problem across your configured providers and
 >   synthesizes the best answer with the strongest (reasoning amplification, subscription-only).
 > - **Free Gemini tier** — `okami gemini login` (Google Code Assist via OAuth PKCE), no billing.
-> - **Semantic diagnostics on write** — an **LSP client** (`okami lsp`) feeds pyright/gopls/… diagnostics
->   into the post-write delta filter.
+> - **Copilot backend** — GitHub Copilot as a provider via the `copilot` CLI (`transport: copilot_cli`).
+> - **Semantic diagnostics on write** — a persistent **LSP client** (`okami lsp`, auto-install) feeds
+>   pyright/gopls/ts/rust/… diagnostics into the post-write delta filter.
+> - **14 channels + niche tools** — added WhatsApp/Signal/Matrix/SMS/iMessage/DingTalk/WeCom/QQ/WeChat
+>   (outbound) plus `x_search` (Grok), `homeassistant` (IoT) and `feishu_doc_read`.
 > - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
 >   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
 > - **Hardened security** — scope-aware threat-pattern library, context-file injection scan, MCP exfil
@@ -94,7 +97,7 @@ LMStudio).
 | 🗄️ **Pluggable memory** | `sqlite-fts5` (default), holographic, Honcho, or layered — with embeddings, **auto-compaction** and source citation. |
 | 🛡️ **Fail-closed security** | Real sandbox (Docker), persistent go/no-go approval, anti-SSRF guard, central secret redactor, MCP *trust store*, checkpoint journal with HMAC. |
 | 📜 **Authored conformance** | Versioned `okami.policy.yaml` + `okami policy check` (CI gate) + `--strict` (production/GA posture). |
-| 💬 **Multi-channel** | Terminal (TUI), Telegram (inline buttons), Slack, Discord, Mattermost, **HTTP API**, Paperclip and **ACP** (Zed/VS Code IDE). |
+| 💬 **Multi-channel** | Terminal (TUI), Telegram (inline buttons), Slack, Discord, Mattermost, Email, **HTTP API**, Paperclip, **ACP** (Zed/VS Code IDE) — plus outbound to **WhatsApp · Signal · Matrix · SMS · iMessage (BlueBubbles) · DingTalk · WeCom · QQ · WeChat**. |
 | 🔭 **Observability** | Event log with `trace_id`, per-turn **trajectory replay**, `doctor --json/--lint`, usage + cost per session, audit log. |
 | ⚙️ **Operable** | Background processes with an **interactive PTY**, cron, hooks, config hot-reload, disk cleanup, auth profiles. |
 

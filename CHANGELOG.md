@@ -6,7 +6,30 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
-Rodada **#18**: endereçados os **3 gaps reais** que o comparativo #17 deixou. Subagente adversarial varreu
+Rodada **#19** — **paridade ~98%** com o Hermes (por presença de capacidade): fechada a cauda-longa que
+restava (integrações de nicho + breadth de canais). Subagente adversarial → 1 path-injection + 1 perf
+corrigidos. **2.578 testes passando** · gates limpos.
+([COMPETITIVE_RESEARCH_19.md](docs/COMPETITIVE_RESEARCH_19.md).)
+
+### 🔌 Integrações de nicho
+- **`x_search`** (Grok/xAI no X/Twitter), **`homeassistant`** (IoT: list/state/call; domínios perigosos
+  bloqueados), **`feishu_doc_read`** (docs Feishu/Lark) — todas config-driven (`integrations.*`),
+  graceful sem credencial, saída externa embrulhada como não-confiável.
+
+### 📡 Canais: de 5 → **14 plataformas**
+- Novos (outbound): **DingTalk, WeCom (WeChat Work), QQBot** (`okami/channels/regional.py`) + **WhatsApp,
+  Signal, Matrix, SMS, BlueBubbles, Weixin** (`okami/channels/messaging.py`) — registrados no ChannelSpec +
+  tool-policy por superfície, deny-by-default.
+
+### 🎬 Vídeo + 🔁 LSP + 🤖 Copilot
+- vídeo: **registry de backends nomeados** (veo3/kling/pixverse) + `okami video --list`.
+- LSP: **auto-install** (`okami lsp install` via lazy_deps `lsp.pyright`) + **diagnostics multi-linguagem
+  wired no write** (gopls/ts/rust/bash/clangd via o cliente persistente).
+- **Copilot como backend**: transporte `copilot_cli` (GitHub Copilot via o CLI `copilot`).
+
+## Rodada #18
+
+Endereçados os **3 gaps reais** que o comparativo #17 deixou. Subagente adversarial varreu
 o código novo → **1 SSRF real corrigido**. **2.539 testes passando** · gates limpos.
 ([COMPETITIVE_RESEARCH_18.md](docs/COMPETITIVE_RESEARCH_18.md): paridade honesta ~88–91%.)
 
