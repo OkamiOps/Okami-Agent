@@ -18,6 +18,10 @@ class ModelInfo:
     # tabela conhecida → clamp_effort passa direto (fail-open). Preenchido só p/ modelos onde mandar
     # um effort acima do teto dá 400 OU cobra reasoning que o modelo não usa direito (cost-safe).
     supported_efforts: tuple[str, ...] = ()
+    audio: bool = False                 # #11: aceita áudio NATIVO de entrada (futuro STT-direto-ao-modelo)
+
+    def supports_audio_input(self) -> bool:
+        return self.audio
 
 
 # Chave = nome NORMALIZADO (sem prefixo de provider, sem :tag, lowercase). O lookup casa por

@@ -78,3 +78,10 @@ def clear(provider: str) -> None:
         _path(provider).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def is_genuine_rate_limit(status: int) -> bool:
+    """#11: distingue limite GENUÍNO de quota (429 → backoff longo/1h) de sobrecarga TRANSIENTE do
+    upstream (503/529 → segundos). Só 429 é quota real; 5xx é capacidade momentânea (não some a quota
+    do dono). Espelha a distinção que o note_rate_limited/note_overloaded já aplicam nos TTLs."""
+    return int(status) == 429

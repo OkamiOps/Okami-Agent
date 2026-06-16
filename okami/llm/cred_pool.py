@@ -23,6 +23,26 @@ def _fingerprint(key: str) -> str:
     return hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:16]
 
 
+# #11: classificação borrowed-vs-owned (port do Hermes credential_persistence). O cred_pool já é
+# fingerprint-only (nunca grava valor), mas qualquer caminho que persista PAYLOAD de credencial (ex.: OAuth
+# de terceiro) deve sanitizar antes do disco: mantém metadata (fingerprint/status/ttl), tira o segredo cru.
+_OWNED_SOURCES = frozenset({"oauth_pkce", "manual", "device_code", "anthropic", "codex_oauth", "minimax_oauth"})
+_SECRET_KEYS = ("access_token", "refresh_token", "api_key", "token", "secret", "password", "client_secret")
+
+
+def is_owned_source(source: str) -> bool:
+    """True se a credencial é do PRÓPRIO dono (OAuth/manual) — pode persistir o valor. Terceiro = borrowed."""
+    return str(source or "").lower() in _OWNED_SOURCES
+
+
+def sanitize_borrowed_credential_payload(payload: dict, source: str) -> dict:
+    """Source owned → devolve o payload intacto. Source BORROWED → cópia SEM os valores de segredo cru
+    (mantém metadata: fingerprint, status, ttl, expires_at). Defesa em profundidade no limite do disco."""
+    if is_owned_source(source):
+        return dict(payload or {})
+    return {k: v for k, v in (payload or {}).items() if k not in _SECRET_KEYS}
+
+
 def _path():
     from okami.home import okami_home
     return okami_home() / "cred_pool.json"

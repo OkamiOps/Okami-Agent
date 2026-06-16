@@ -395,7 +395,8 @@ def complete_messages_ex(
     do_fallback = True
     send = messages                                   # cópia local recebe o nudge; `messages` fica intacta
     nudged = False
-    recovered: set = set()                            # #10: recuperações REATIVAS já aplicadas (1× por tipo)
+    from okami.llm.turn_retry_state import TurnRetryState
+    recovered = TurnRetryState()                      # #10/#11: guards one-shot de recuperação reativa
     attempt = 0
     while attempt < attempts:
         attempt += 1
@@ -435,13 +436,12 @@ def complete_messages_ex(
             # provider ANTES de queimar chave/failover. Crucial p/ assinatura-only (sem key pool):
             # um 400 'imagem grande' ou um 401 (token revogado) não pode pular pro fallback e perder o turno.
             from okami.llm import recovery as _rec
-            if _rec.is_image_too_large(e) and "shrink" not in recovered:
-                recovered.add("shrink")
+            if _rec.is_image_too_large(e) and recovered.try_once("shrink"):
                 send = _rec.shrink_images(send)        # encolhe a imagem nativa e tenta de novo
                 attempt -= 1
                 continue
-            if ce.reason == "auth" and "oauth_refresh" not in recovered and _rec.refresh_oauth(pc):
-                recovered.add("oauth_refresh")         # 401 c/ token não-expirado → força refresh e re-tenta
+            if ce.reason == "auth" and not recovered.did("oauth_refresh") and _rec.refresh_oauth(pc):
+                recovered.try_once("oauth_refresh")    # 401 c/ token não-expirado → força refresh e re-tenta
                 attempt -= 1
                 continue
             if ce.reason == "rate_limit":             # marca CROSS-SESSÃO: outros processos param de martelar

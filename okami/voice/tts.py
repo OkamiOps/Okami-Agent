@@ -11,6 +11,8 @@ from pathlib import Path
 
 
 class EdgeTTS:
+    voice_compatible = True            # #11: saída opus → vira bolha de voz nativa no Telegram
+
     def __init__(self, voice: str = "pt-BR-AntonioNeural", rate: str = "+0%"):
         self.voice = voice
         self.rate = rate
@@ -27,6 +29,22 @@ class EdgeTTS:
 
         asyncio.run(_go())
         return out
+
+    def stream(self, text: str):
+        """#11: streaming opcional — gera chunks de áudio (bytes) conforme o provider entrega, p/ entrega
+        de voz de baixa latência (decodifica enquanto fala). Yield de bytes de áudio."""
+        import asyncio
+
+        import edge_tts
+
+        async def _collect():
+            chunks = []
+            async for ch in edge_tts.Communicate(text, self.voice, rate=self.rate).stream():
+                if ch.get("type") == "audio" and ch.get("data"):
+                    chunks.append(ch["data"])
+            return chunks
+
+        yield from asyncio.run(_collect())
 
 
 class MiniMaxTTS:

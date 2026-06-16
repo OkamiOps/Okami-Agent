@@ -250,8 +250,10 @@ def run_task(
         max_steps = int((getattr(cfg, "harness", None) or {}).get("max_steps", 200))
     # anti-travamento (NÃO teto de turno): tempo máx. sem concluir passo. Tunável: harness.max_stall_seconds.
     _stall = float((getattr(cfg, "harness", None) or {}).get("max_stall_seconds", 300.0))
+    from okami.core.harness.loopguard_config import guardrail_budget_overrides
     budget = Budget(max_steps=max_steps, max_stall_seconds=_stall,
-                    max_context_chars=prov.compaction_threshold_chars(pc))
+                    max_context_chars=prov.compaction_threshold_chars(pc),
+                    **guardrail_budget_overrides(cfg))   # #11: tools.loop_guardrails afina os thresholds
     emit(f"janela≈{prov.context_window_tokens(pc)//1000}K tokens · compacta em ~{budget.max_context_chars//1000}k chars")
 
     from okami.gateway.checkpoints import Checkpoints
