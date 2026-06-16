@@ -63,10 +63,14 @@ def _default_download(url, dest: Path):
         dest.write_bytes(r.read())
 
 
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024     # teto da imagem base (evita OOM no base64)
+
+
 def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
-                   _post=None, _get=None, _download=None, _sleep=None) -> str:
+                   _post=None, _get=None, _download=None, _sleep=None, _validate=None) -> str:
     """Gera um vídeo a partir de `prompt` (e opcionalmente uma imagem base) → salva em `out`. Devolve o
-    caminho. Sem config → RuntimeError("configure media.video…"); sem a chave → RuntimeError(env)."""
+    caminho. Sem config → RuntimeError("configure media.video…"); sem a chave → RuntimeError(env).
+    A URL de download (vinda do PROVIDER, não-confiável) passa pelo net_guard anti-SSRF antes de baixar."""
     vc = video_config(cfg)
     if vc is None:
         raise RuntimeError("geração de vídeo não configurada — configure media.video.{url,model,api_key_env}.")
@@ -77,6 +81,8 @@ def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
     get = _default_get if _get is None else _get
     download = _download or _default_download
     sleep = _sleep or __import__("time").sleep
+    if _validate is None:                                  # default: valida a URL do provider (anti-SSRF)
+        from okami.core.net_guard import validate_public_url as _validate
 
     headers = {"Content-Type": "application/json"}
     if key:
@@ -86,7 +92,10 @@ def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
         body["size"] = vc["size"]
     if image:
         import base64
-        body["image"] = base64.b64encode(Path(image).read_bytes()).decode("ascii")
+        ip = Path(image)
+        if ip.stat().st_size > _MAX_IMAGE_BYTES:           # imagem gigante → recusa (anti-OOM)
+            raise RuntimeError(f"imagem base grande demais ({ip.stat().st_size} bytes > {_MAX_IMAGE_BYTES}).")
+        body["image"] = base64.b64encode(ip.read_bytes()).decode("ascii")
 
     resp = post(vc["url"], body, headers)
     url = _video_url_from(resp)
@@ -102,6 +111,7 @@ def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
                 raise RuntimeError(f"geração de vídeo falhou: {str(st)[:160]}")
     if not url:
         raise RuntimeError(f"resposta sem URL de vídeo: {str(resp)[:160]}")
+    _validate(url)                                         # anti-SSRF: provider não redireciona p/ file://, IP interno…
     dest = Path(out)
     dest.parent.mkdir(parents=True, exist_ok=True)
     download(url, dest)

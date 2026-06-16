@@ -33,8 +33,8 @@ class LspPool:
         server = server_for_path(path)
         if server is None or not binary_available(server):
             return []
-        root = find_git_worktree(path) or str(workspace)
-        if not find_git_worktree(path):                # fora de repo git → off (não sobe daemon)
+        root = find_git_worktree(path)                 # 1 só walk (era 2)
+        if not root:                                   # fora de repo git → off (não sobe daemon)
             return []
         client = self._client_for(server, root)
         if client is None:

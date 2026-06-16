@@ -40,9 +40,29 @@ def test_generate_video_sync(tmp_path, monkeypatch):
         posts["dl"] = url
         dest.write_bytes(b"FAKEMP4")
 
-    res = videogen.generate_video(cfg, "um lobo correndo", str(out), _post=_post, _download=_download)
+    res = videogen.generate_video(cfg, "um lobo correndo", str(out), _post=_post, _download=_download,
+                                  _validate=lambda u: None)
     assert res == str(out) and out.read_bytes() == b"FAKEMP4"
     assert posts["auth"] == "Bearer k" and posts["dl"] == "https://x/result.mp4"
+
+
+def test_generate_video_blocks_ssrf_download_url(tmp_path, monkeypatch):
+    # SEGURANÇA: a URL de download vem do PROVIDER (não-confiável) → passa pelo net_guard anti-SSRF
+    import pytest
+
+    from okami.llm import videogen
+    monkeypatch.setenv("FAL_KEY", "k")
+    cfg = _cfg({"video": {"url": "https://x/video", "model": "m", "api_key_env": "FAL_KEY"}})
+    downloaded = {"hit": False}
+
+    def _download(url, dest):
+        downloaded["hit"] = True
+
+    for evil in ("file:///etc/passwd", "http://169.254.169.254/latest/meta-data"):
+        with pytest.raises(Exception):                     # noqa: B017 — BlockedURL (anti-SSRF)
+            videogen.generate_video(cfg, "x", str(tmp_path / "v.mp4"),
+                                    _post=lambda u, b, h: {"video": {"url": evil}}, _download=_download)
+    assert downloaded["hit"] is False                      # NUNCA baixou o alvo malicioso
 
 
 # ── geração ASSÍNCRONA (job id → poll até completar) ──
@@ -59,7 +79,7 @@ def test_generate_video_async_polls(tmp_path, monkeypatch):
         _post=lambda u, b, h: {"id": "job-1"},
         _get=lambda u, h: next(states),
         _download=lambda u, d: d.write_bytes(b"OK"),
-        _sleep=lambda s: None)
+        _sleep=lambda s: None, _validate=lambda u: None)
     assert res == str(out) and out.read_bytes() == b"OK"
 
 
