@@ -192,6 +192,38 @@ def summarize_store(store: dict) -> CanonicalUsage:
     return total
 
 
+def summarize_by_vendor(store: dict) -> dict:
+    """Agrega o uso por VENDOR (parte antes do `/` em `served_by`). Sessão sem served_by → bucket "—".
+    Telemetria de custo por-vendor: quem trabalhou (e quanto) ao longo da vida do agente."""
+    by: dict[str, CanonicalUsage] = {}
+    for e in (store or {}).values():
+        if not (isinstance(e, dict) and e.get("usage")):
+            continue
+        served = str(e.get("served_by") or "")
+        vendor = served.split("/", 1)[0] if served else "—"
+        by[vendor] = by.get(vendor, CanonicalUsage()) + CanonicalUsage.from_dict(e["usage"])
+    return by
+
+
+def vendor_cost_rows(by: dict, *, models: dict | None = None) -> list[dict]:
+    """Linhas prontas p/ exibir custo POR VENDOR: tokens compactos + custo (incluído/estimado/—).
+    `by` = {vendor: CanonicalUsage}; `models` = {vendor: model} opc. p/ casar pricing/assinatura."""
+    models = models or {}
+    rows = []
+    for vendor, u in sorted(by.items(), key=lambda kv: -kv[1].total_tokens):
+        model = models.get(vendor, "")
+        # assinatura é por-transporte; aproximamos pelo vendor (claude/codex = assinatura no Okami).
+        transport = "claude_cli" if vendor in ("claude", "anthropic") else (
+            "codex_oauth" if vendor in ("codex", "openai") else "litellm")
+        cr = estimate_cost(u, transport=transport, provider=vendor, model=model)
+        tokens = f"{format_tokens(u.input_tokens)} in · {format_tokens(u.output_tokens)} out"
+        if u.cache_read_tokens:
+            tokens += f" · {format_tokens(u.cache_read_tokens)} cache"
+        rows.append({"vendor": vendor, "tokens": tokens, "requests": u.requests,
+                     "cost": cr.label, "cost_status": cr.status})
+    return rows
+
+
 def cache_hit_ratio(u: CanonicalUsage) -> float:
     """Quanto da entrada veio do cache (prova a economia do prompt caching)."""
     denom = u.input_tokens + u.cache_read_tokens

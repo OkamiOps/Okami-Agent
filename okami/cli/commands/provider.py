@@ -97,12 +97,48 @@ def provider_list_cmd() -> None:
     list_providers()
 
 
+def _pc_for_transport(transport: str):
+    """Acha o ProviderConfig configurado cujo transport bate (p/ pegar api_key/model na validação ao vivo)."""
+    try:
+        from okami.config import load_config
+        cfg = load_config()
+        for name in (cfg.providers or {}):
+            try:
+                pc = cfg.provider(name)
+            except Exception:  # noqa: BLE001
+                continue
+            if getattr(pc, "transport", None) == transport:
+                return pc
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _provider_check_live(transport: str) -> None:
+    """Roda a validação EM TRÁFEGO real e imprime o veredito (pula com graça sem credencial)."""
+    from okami.llm.provider_check import live_check_transport
+    pc = _pc_for_transport(transport)
+    rep = live_check_transport(transport, pc=pc)
+    if rep.get("skipped"):
+        console.print(f"[yellow]↷ live {transport}: pulado[/yellow] [dim]({rep.get('reason')})[/dim]")
+    elif rep.get("ok"):
+        console.print(f"[green]✓ live {transport} OK[/green] [dim](respondeu: {rep.get('text','')!r})[/dim]")
+    elif "error" in rep:
+        console.print(f"[red]✗ live {transport}: {rep['error']}[/red]")
+    else:
+        console.print(f"[yellow]live {transport}: resposta vazia[/yellow]")
+
+
 @provider_app.command("check", help=_tr("cli.provider.check", _default="Self-test a native transport's capability (gemini_native/bedrock_native): text+tools+image+tool-calls."))
 def provider_check_cmd(
     transport: str = typer.Argument("gemini_native", help=_tr("cli.provider.check.transport", _default="Native transport: gemini_native | bedrock_native.")),
+    live: bool = typer.Option(False, "--live", help=_tr("cli.provider.check.live", _default="Also make a REAL minimal call to the vendor if credentials are present (skips gracefully otherwise).")),
 ) -> None:
-    """Valida o round-trip de tradução do transporte nativo (sem rede/chave) — prova de capacidade."""
+    """Valida o round-trip de tradução do transporte nativo (sem rede/chave) — prova de capacidade.
+    Com --live, faz também uma chamada real ao vendor se houver credencial (senão pula com graça)."""
     from okami.llm.provider_check import check_native_transport
+    if live:
+        _provider_check_live(transport)
     rep = check_native_transport(transport)
     if rep["ok"]:
         console.print(f"[green]✓ {transport} capability OK[/green] [dim](texto · tools · imagem · tool-call)[/dim]")

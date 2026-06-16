@@ -50,4 +50,50 @@ def check_native_transport(transport: str) -> dict:
     return rep
 
 
-__all__ = ["check_native_transport"]
+def credentials_present(transport: str, pc=None) -> tuple[bool, str]:
+    """A credencial p/ um transporte nativo está disponível? Devolve (presente, motivo). NUNCA loga/devolve
+    o valor da credencial — só se existe e de onde viria."""
+    import os
+    if transport == "gemini_native":
+        key = (getattr(pc, "api_key", "") or os.environ.get("GEMINI_API_KEY")
+               or os.environ.get("GOOGLE_API_KEY") or "")
+        return (bool(key), "api_key/GEMINI_API_KEY presente" if key else "sem api_key (GEMINI_API_KEY/GOOGLE_API_KEY)")
+    if transport == "bedrock_native":                    # cadeia de credencial AWS (env/SSO/role)
+        present = any(os.environ.get(k) for k in (
+            "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"))
+        return (present, "credencial AWS na env" if present else "sem credencial AWS (env/SSO/role)")
+    return (False, "transporte não-nativo")
+
+
+def live_check_transport(transport: str, *, pc=None, _caller=None) -> dict:
+    """Validação EM TRÁFEGO real: faz uma chamada mínima de verdade ao vendor se a credencial existe; senão
+    PULA com graça (skipped=True, não falha). `_caller(msgs)->Completion` injetável p/ teste sem rede."""
+    rep = {"transport": transport, "ok": False, "live": False, "skipped": False}
+    present, why = credentials_present(transport, pc)
+    rep["reason"] = why
+    if not present:
+        rep["skipped"] = True
+        return rep
+    msgs = [{"role": "user", "content": "responda exatamente com a palavra: pong"}]
+    try:
+        if _caller is not None:
+            comp = _caller(msgs)
+        elif transport == "gemini_native":
+            from okami.llm.gemini_native import gemini_native_complete
+            comp = gemini_native_complete(pc, msgs, getattr(pc, "model", None))
+        elif transport == "bedrock_native":
+            from okami.llm.bedrock_native import bedrock_native_complete
+            comp = bedrock_native_complete(pc, msgs, getattr(pc, "model", None))
+        else:
+            rep["reason"] = "transporte não-nativo"
+            return rep
+        text = (getattr(comp, "text", "") or "")
+        rep["live"] = True
+        rep["ok"] = bool(text.strip())
+        rep["text"] = text[:80]
+    except Exception as e:  # noqa: BLE001 — erro real (403/quota/rede) → reporta, não derruba a CLI
+        rep["error"] = str(e)[:200]
+    return rep
+
+
+__all__ = ["check_native_transport", "credentials_present", "live_check_transport"]

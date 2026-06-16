@@ -27,6 +27,47 @@ def insights(
     console.print(_ins.render(rep))
 
 
+@app.command(help=_tr("cli.cost", _default="Cost telemetry aggregated BY VENDOR (tokens + cost; subscription = included, never invents $)."))
+def cost(
+    agent: str = typer.Option("", "-a", "--agent", help=_tr("cli.cost.agent", _default="Agent whose sessions to aggregate (default: configured default).")),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.cost.json", _default="Structured JSON (scripts/monitoring).")),
+) -> None:
+    """Telemetria de custo agregada POR VENDOR: quem trabalhou e quanto, ao longo da vida do agente.
+    Assinatura (claude/codex) = 'incluído' — NUNCA inventa $; pay-per-token estima pelo pricing conhecido."""
+    from pathlib import Path
+
+    from okami.gateway.sessions import TranscriptStore
+    from okami.home import agents_dir
+    from okami.llm.usage import summarize_by_vendor, vendor_cost_rows
+    cfg = _load()
+    who = agent or getattr(cfg, "default_agent", "") or ""
+    ws = agents_dir() / who if who else Path(".")
+    store = TranscriptStore(ws).load_store()
+    by = summarize_by_vendor(store)
+    # modelo representativo por vendor (última served_by daquele vendor) p/ casar pricing.
+    models: dict[str, str] = {}
+    for e in (store or {}).values():
+        served = str((e or {}).get("served_by") or "") if isinstance(e, dict) else ""
+        if "/" in served:
+            v, m = served.split("/", 1)
+            models.setdefault(v, m)
+    rows = vendor_cost_rows(by, models=models)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps(rows, ensure_ascii=False))
+        return
+    if not rows:
+        console.print("[dim]sem uso registrado ainda — rode o agente e volte aqui.[/dim]")
+        return
+    from rich.table import Table
+    tbl = Table(title=f"custo por vendor · {who or 'cwd'}", title_style="bold")
+    for col, kw in (("vendor", {}), ("tokens", {}), ("reqs", {"justify": "right"}), ("custo", {})):
+        tbl.add_column(col, **kw)
+    for r in rows:
+        tbl.add_row(r["vendor"], r["tokens"], str(r["requests"]), r["cost"])
+    console.print(tbl)
+
+
 @app.command("serve-mcp", help=_tr("cli.serve_mcp", _default="Serve Okami as an MCP server (sessions/history/memory) over stdio."))
 def serve_mcp(
     agent: str = typer.Option("okami", "-a", "--agent", help=_tr("cli.serve_mcp.agent", _default="Agent whose home/sessions to expose.")),

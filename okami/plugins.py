@@ -66,6 +66,50 @@ def discover_plugins(roots, *, entry_points=None) -> list[Plugin]:
     return list(found.values())
 
 
+@dataclass(frozen=True)
+class PluginContext:
+    """Capacidade que um plugin recebe p/ pedir uma chamada ao modelo, GATED por confiança (port do Hermes
+    plugin_llm). Regra: trocar de provider só é permitido se o plugin é `trusted` E `allow_provider_override`
+    E o provider está em `allowed_providers`. Plugin `untrusted` fica preso ao `default_provider` — um
+    plugin de pasta/terceiro NÃO pode redirecionar o tráfego (e o gasto) p/ um vendor à revelia do dono."""
+    plugin: str
+    trust: str = "untrusted"                 # untrusted | trusted
+    default_provider: str = ""
+    allowed_providers: tuple = ()
+    allow_provider_override: bool = False
+
+    def can_override(self) -> bool:
+        return self.trust == "trusted" and self.allow_provider_override
+
+    def resolve_provider(self, requested: str | None = None) -> str:
+        """Provider efetivo p/ a chamada do plugin. Pedir o default (ou nada) sempre passa; pedir OUTRO
+        exige override permitido + estar na allowlist, senão PermissionError."""
+        if not requested or requested == self.default_provider:
+            return self.default_provider
+        if not self.can_override():
+            raise PermissionError(
+                f"plugin {self.plugin!r} ({self.trust}) não pode trocar de provider "
+                f"(allow_provider_override desligado p/ não-confiáveis)")
+        if self.allowed_providers and requested not in self.allowed_providers:
+            raise PermissionError(
+                f"plugin {self.plugin!r} pediu provider {requested!r} fora da allowlist {self.allowed_providers}")
+        return requested
+
+
+def plugin_context(plugin: str, *, trust: str = "untrusted", cfg: dict | None = None) -> PluginContext:
+    """Monta o PluginContext a partir do config (`default_provider` + `plugins.allowed_providers/
+    allow_provider_override`). Trust vem da fonte do plugin (pasta=untrusted; entry-point assinado=trusted)."""
+    cfg = cfg or {}
+    pl = (cfg.get("plugins") or {}) if isinstance(cfg, dict) else {}
+    return PluginContext(
+        plugin=plugin,
+        trust=trust,
+        default_provider=str(cfg.get("default_provider") or ""),
+        allowed_providers=tuple(pl.get("allowed_providers") or ()),
+        allow_provider_override=bool(pl.get("allow_provider_override", False)),
+    )
+
+
 def plugin_roots() -> list[Path]:
     """Raízes padrão: projeto (.) + home do Okami."""
     roots = [Path(".")]
@@ -77,4 +121,4 @@ def plugin_roots() -> list[Path]:
     return roots
 
 
-__all__ = ["Plugin", "discover_plugins", "plugin_roots"]
+__all__ = ["Plugin", "PluginContext", "discover_plugins", "plugin_context", "plugin_roots"]
