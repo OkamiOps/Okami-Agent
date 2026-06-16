@@ -47,7 +47,10 @@ class Budget:
     max_poll_waits: int = 8      # ESPERAS repetidas num processo em background (process_wait/poll/log) antes de
     #                              cobrar como loop — esperar um build/teste lento NÃO é loop inútil, é I/O
     max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos
-    max_context_chars: int = 24000  # dispara auto-compaction (§6.4)
+    max_context_chars: int = 64000  # dispara auto-compaction (§6.4). Produção SOBRESCREVE com o teto real
+    #   do modelo (prov.compaction_threshold_chars); este default só vale p/ testes diretos de Harness. Subiu
+    #   de 24000→64000 porque o próprio system-prompt (lista de tools) já beira 24K — a 24000 qualquer turno
+    #   multi-passo disparava compaction espúria. Testes que EXIGEM compaction passam max_context_chars=24000.
     # Teto AGREGADO de tool-output do turno (Hermes: 200K chars). O teto por-resultado (8K) não
     # impede N resultados médios de inundar o contexto; estourou o agregado → outputs passam a ser
     # persistidos com preview CURTO mesmo abaixo do teto individual.

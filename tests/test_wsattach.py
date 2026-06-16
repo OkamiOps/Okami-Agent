@@ -108,3 +108,29 @@ def test_ws_run_receives_session_so_history_persists():
         c.close()
     finally:
         srv.shutdown()
+
+
+def test_materialize_attachment_writes_and_jails(tmp_path):
+    from okami.gateway.wsattach import materialize_attachment
+    import base64
+    rel = materialize_attachment(tmp_path, "../../evil.png", base64.b64encode(b"PNGDATA").decode())
+    p = tmp_path / rel
+    assert p.exists() and p.read_bytes() == b"PNGDATA"
+    assert ".okami/attachments/" in rel.replace("\\", "/") and ".." not in rel   # jailed (só basename)
+
+
+def test_attach_roundtrip_over_ws(tmp_path):
+    from okami.gateway.wsattach import WSClient, serve_ws
+    port = _free_port()
+    srv = serve_ws(port, token="t", run=lambda m: m, host="127.0.0.1", attach_dir=str(tmp_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        c = WSClient()
+        c.connect(f"ws://127.0.0.1:{port}/attach", token="t")
+        c.send_attach("foto.png", b"\x89PNG-bytes")
+        reply = c.recv()
+        assert "@file:" in reply and "foto.png" in reply             # gateway materializou + devolveu o ref
+        assert (tmp_path / ".okami" / "attachments" / "foto.png").read_bytes() == b"\x89PNG-bytes"
+        c.close()
+    finally:
+        srv.shutdown()

@@ -42,7 +42,8 @@ def _should_review(ws, interval: int, clean: bool) -> bool:
     return fire
 
 
-def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit, notify=None) -> None:
+def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit, notify=None,
+                            core_block=None) -> None:
     """Auto-aprimoramento MODEL-DRIVEN (estilo Hermes): a cada N turnos LIMPOS, forka um review isolado
     que decide (via tools) o que vale salvar. Roda em background (não bloqueia o turno do usuário).
     Se `notify` (canal ao dono), AVISA o que foi aprendido — transparência (#9)."""
@@ -59,7 +60,8 @@ def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit
         from okami.llm.aux import aux_for
         aux_p, aux_m = aux_for(cfg, "review")        # fundo → modelo auxiliar barato (Hermes: −85% custo)
         rt = run_review(cfg, ws, ctx, skills_dir=skills_dir,
-                        model=aux_m or model, provider=aux_p or provider, emit=lambda m: None)
+                        model=aux_m or model, provider=aux_p or provider, emit=lambda m: None,
+                        core_block=core_block)         # #10: reusa a identidade/memória do pai (prefix-cache)
         if notify is not None and rt is not None:    # #9: avisa o dono do que aprendeu (se algo foi salvo)
             msg = learned_summary(getattr(rt, "result", None))
             if msg:
@@ -109,6 +111,8 @@ def run_task(
     allow_paths: list | None = None,             # pastas extras liberadas além do workspace (config tools.allow_paths)
     remote=None,                                 # alvo de execução REMOTO (RemoteTarget) — FS/shell rodam LÁ
     set_remote=None,                             # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
+    core_block: str | None = None,               # #10: identidade/memória JÁ renderizada (review reusa a do pai →
+                                                 # prefixo byte-idêntico = prefix-cache + pula a re-leitura do disco)
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)                          # operacional: jail de arquivos, shell, find, @refs
@@ -209,7 +213,9 @@ def run_task(
 
     mem = open_memory(home, backend=cfg.memory.get("backend", "sqlite-fts5"),
                       embedder=embedder, config=cfg.memory)
-    core_block = memfiles.core_block(home, cfg.memory.get("files", {}))
+    # #10: o review reusa a identidade/memória JÁ renderizada do pai (prefixo byte-idêntico p/ o
+    # prefix-cache + pula a re-leitura do disco). None = renderiza do disco (caminho normal).
+    core_block = core_block if core_block is not None else memfiles.core_block(home, cfg.memory.get("files", {}))
 
     from okami.core.tool_policy import filter_registry, prune_unavailable
     registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
@@ -305,7 +311,8 @@ def run_task(
                 # guiado pela lista "Do NOT capture", a cada N turnos e SÓ em conclusão limpa. Substitui a
                 # destilação MECÂNICA (que gerava lixo). auto_skill mecânico fica como legado opt-in.
                 _maybe_background_review(cfg, home, t, skills_dir=skills_dir, model=model, provider=provider,
-                                         emit=emit, notify=notify)   # #9: avisa o dono do que aprendeu
+                                         emit=emit, notify=notify,    # #9: avisa o dono do que aprendeu
+                                         core_block=core_block)       # #10: review reusa a identidade do pai
                 if (cfg.learning or {}).get("auto_skill"):     # opt-in: destilação pós-tarefa (LLM-ou-nada,
                     name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
                     if name:                                   # julgamento worth + gate determinístico)

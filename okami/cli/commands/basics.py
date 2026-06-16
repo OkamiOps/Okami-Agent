@@ -309,7 +309,7 @@ def doctor(
 
     if fix:
         from okami.config import global_env_path
-        from okami.core.maintenance import clean_stale_locks, fix_env_perms, prune_temp
+        from okami.core.maintenance import clean_stale_locks, fix_env_perms, prune_temp, repair_dbs_under
         console.print("\n[bold]--fix[/bold]")
         locks = clean_stale_locks(".")
         env_p = global_env_path()
@@ -321,6 +321,16 @@ def doctor(
         console.print(f"  {env_p} perms: {_perms}")
         console.print("  " + t("doctor.fix.temp", _default="temp files removed: [bold]{n}[/bold] [dim]({kb:.1f} KB)[/dim]",
                                n=len(rm_t), kb=freed / 1024))
+        # #10: recupera SQLite malformado (state.db/memória) no HOME — backup + dump/reload.
+        from okami.home import okami_home
+        dbs = repair_dbs_under(okami_home())
+        broken = [r for r in dbs if r["action"] != "healthy"]
+        if broken:
+            for r in broken:
+                console.print(f"  [yellow]DB {r['path']}: {r['action']}[/yellow]"
+                              + (f" [dim](backup: {r.get('backup')})[/dim]" if r.get("backup") else ""))
+        else:
+            console.print("  " + t("doctor.fix.dbs", _default="SQLite DBs: [green]all healthy[/green] ({n})", n=len(dbs)))
 
 
 @app.command(help=_tr("cli.harden", _default="Apply the HARDENED-STRICT profile (recommended posture for public/GA)."))

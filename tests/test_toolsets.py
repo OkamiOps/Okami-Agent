@@ -37,12 +37,12 @@ def test_prune_unavailable_drops_with_reason():
 
 def test_default_tools_have_no_check_or_pass():
     # nenhuma tool nativa do registro default pode sumir por check num ambiente de teste comum —
-    # exceto as que dependem de extra/credencial REAL: generate_image (login codex) e audio_analyze
-    # (extra `voice`/faster-whisper). Ambas degradam via check() de propósito (#7 item 1).
+    # exceto as que dependem de extra/credencial REAL: generate_image (login codex), audio_analyze
+    # (extra `voice`/faster-whisper) e text_to_speech (edge-tts). Degradam via check() de propósito.
     reg = default_registry()
     out = prune_unavailable(reg, emit=lambda m: None)
     missing = set(reg) - set(out)
-    assert missing <= {"generate_image", "audio_analyze"}
+    assert missing <= {"generate_image", "audio_analyze", "text_to_speech"}
 
 
 def test_generate_image_check_depends_on_codex_login(monkeypatch):

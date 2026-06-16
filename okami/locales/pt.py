@@ -554,6 +554,7 @@ MESSAGES: dict[str, str] = {
     "doctor.fix.locks": "locks órfãos removidos: [bold]{n}[/bold]",
     "doctor.fix.perms_fixed": "corrigido → 0600",
     "doctor.fix.temp": "temporários removidos: [bold]{n}[/bold] [dim]({kb:.1f} KB)[/dim]",
+    "doctor.fix.dbs": "bancos SQLite: [green]todos saudáveis[/green] ({n})",
     # ── status (okami status) ──
     "status.all_conformant": "tudo conforme",
     "status.conformance_fail": "{n} falha(s) de conformance",

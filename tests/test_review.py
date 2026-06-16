@@ -164,3 +164,20 @@ def test_maybe_review_triggers_only_when_due_and_clean(tmp_path, monkeypatch):
     cfg.learning["review"] = False
     runner._maybe_background_review(cfg, tmp_path, done, skills_dir=None, model=None, provider=None, emit=lambda m: None)
     assert calls["n"] == 1                                    # desligado → não revisa
+
+
+def test_run_review_forwards_core_block(monkeypatch):
+    # #10: o review reusa a identidade/memória JÁ renderizada do pai (prefixo p/ o prefix-cache).
+    import okami.runner as runner
+    from okami.learning.review import run_review
+    seen = {}
+
+    def fake_run_task(cfg, ws, goal, **kw):
+        seen.update(kw)
+        from okami.core import Task, TaskState
+        t = Task(goal=goal)
+        t.state = TaskState.COMPLETE
+        return t
+    monkeypatch.setattr(runner, "run_task", fake_run_task)
+    run_review(None, ".", "PEDIDO: x", skills_dir=".", core_block="IDENTIDADE-DO-PAI")
+    assert seen.get("core_block") == "IDENTIDADE-DO-PAI"

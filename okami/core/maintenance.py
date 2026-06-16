@@ -62,6 +62,61 @@ def clean_stale_locks(root, *, stale: float = 300.0, dry_run: bool = False) -> l
     return removed
 
 
+def repair_sqlite(path) -> dict:
+    """Recupera um SQLite malformado (#10 — state.db/memória corrompida): roda integrity_check; se
+    quebrado, salva um `.malformed-backup-<ts>` e tenta dump+reload (recupera o recuperável via
+    iterdump). Devolve {ok, action: healthy|rebuilt|failed|missing, backup?}. Best-effort, nunca levanta."""
+    import os
+    import shutil
+    import sqlite3
+    import time
+    p = Path(path)
+    if not p.exists():
+        return {"ok": False, "action": "missing"}
+    try:
+        con = sqlite3.connect(str(p))
+        try:
+            row = con.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            con.close()
+        if row and str(row[0]).lower() == "ok":
+            return {"ok": True, "action": "healthy"}
+    except sqlite3.DatabaseError:
+        pass                                              # corrupto a ponto do próprio check falhar
+    bak = p.with_name(p.name + f".malformed-backup-{int(time.time())}")
+    try:
+        shutil.copy2(p, bak)
+    except OSError:
+        bak = None
+    try:
+        src = sqlite3.connect(str(p))
+        sql = "\n".join(src.iterdump())                   # recupera o que dá de um DB corrompido
+        src.close()
+        if "BEGIN" not in sql.upper():
+            raise sqlite3.DatabaseError("dump vazio/inválido")
+        tmp = p.with_name(p.name + ".rebuilt")
+        new = sqlite3.connect(str(tmp))
+        new.executescript(sql)
+        new.commit()
+        new.close()
+        os.replace(tmp, p)
+        return {"ok": True, "action": "rebuilt", "backup": str(bak) if bak else None}
+    except (sqlite3.DatabaseError, OSError) as e:
+        return {"ok": False, "action": "failed", "error": str(e), "backup": str(bak) if bak else None}
+
+
+def repair_dbs_under(root) -> list[dict]:
+    """Roda repair_sqlite em cada *.db sob `root` (ex.: o HOME). Pula backups/.rebuilt. Lista os resultados."""
+    out = []
+    for p in sorted(Path(root).rglob("*.db")):
+        if ".malformed-backup" in p.name or p.name.endswith(".rebuilt"):
+            continue
+        r = repair_sqlite(p)
+        r["path"] = str(p)
+        out.append(r)
+    return out
+
+
 def fix_env_perms(env_path) -> bool:
     """Garante 0600 no .env de segredos. True se PRECISOU corrigir."""
     p = Path(env_path)

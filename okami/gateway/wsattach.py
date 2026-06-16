@@ -14,6 +14,7 @@ import os
 import secrets
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from okami.gateway.wsproto import (
@@ -29,6 +30,37 @@ def handshake_headers(client_key: str) -> bytes:
             f"Sec-WebSocket-Accept: {accept_key(client_key)}\r\n\r\n").encode("ascii")
 
 
+# ── Upload de arquivo do cliente p/ o gateway remoto (#10 file.attach) ──
+_ATTACH_PREFIX = "\x00ATTACH\x00"
+
+
+def encode_attach(name: str, data: bytes) -> str:
+    """Frame de texto que carrega um anexo: sentinela + nome + base64 do conteúdo."""
+    return _ATTACH_PREFIX + str(name) + "\x00" + base64.b64encode(data).decode("ascii")
+
+
+def parse_attach(frame: str):
+    """(nome, base64) se o frame é um anexo, senão None."""
+    if not isinstance(frame, str) or not frame.startswith(_ATTACH_PREFIX):
+        return None
+    name, _, b64 = frame[len(_ATTACH_PREFIX):].partition("\x00")
+    return name, b64
+
+
+def materialize_attachment(attach_dir, name: str, b64: str) -> str:
+    """Grava o anexo sob <attach_dir>/.okami/attachments/<nome-seguro> e devolve o caminho relativo a
+    attach_dir (p/ virar um @file:). Anti path-traversal: usa só o basename sanitizado."""
+    import os
+    import re
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(str(name or "anexo"))) or "anexo"
+    base = Path(attach_dir)
+    d = base / ".okami" / "attachments"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / safe
+    p.write_bytes(base64.b64decode(b64 or ""))
+    return str(p.relative_to(base))
+
+
 def _call_run(run, msg: str, session: str) -> str:
     """Chama o run com (msg, session) se ele aceitar; senão só (msg). Sempre devolve texto."""
     try:
@@ -37,7 +69,7 @@ def _call_run(run, msg: str, session: str) -> str:
         return str(run(msg))
 
 
-def _make_handler(token: str, run):
+def _make_handler(token: str, run, attach_dir=None):
     class _Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -92,10 +124,18 @@ def _make_handler(token: str, run):
                         continue
                     if op == OP_TEXT:
                         msg = payload.decode("utf-8", "replace")
-                        try:
-                            reply = _call_run(run, msg, session)
-                        except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a conexão
-                            reply = f"erro: {e}"
+                        att = parse_attach(msg)
+                        if att is not None:               # #10: upload de arquivo do cliente → @file:
+                            try:
+                                rel = materialize_attachment(attach_dir or ".", att[0], att[1])
+                                reply = f"📎 anexado: @file:{rel} (referencie-o na sua próxima mensagem)"
+                            except Exception as e:  # noqa: BLE001
+                                reply = f"erro ao anexar: {e}"
+                        else:
+                            try:
+                                reply = _call_run(run, msg, session)
+                            except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a conexão
+                                reply = f"erro: {e}"
                         try:
                             sock.sendall(encode_text_frame(reply))
                         except OSError:
@@ -104,12 +144,13 @@ def _make_handler(token: str, run):
     return _Handler
 
 
-def serve_ws(port: int, token: str, run, *, host: str = "127.0.0.1") -> ThreadingHTTPServer:
+def serve_ws(port: int, token: str, run, *, host: str = "127.0.0.1", attach_dir=None) -> ThreadingHTTPServer:
     """Servidor WS de attach (fail-closed sem token). O chamador roda `serve_forever()`.
-    Bind em 127.0.0.1 por padrão; passe host=<ip da tailnet>/0.0.0.0 p/ alcançar de outra máquina."""
+    Bind em 127.0.0.1 por padrão; passe host=<ip da tailnet>/0.0.0.0 p/ alcançar de outra máquina.
+    attach_dir = onde materializar uploads do cliente (file.attach) — vira @file: no workspace."""
     if not token:
         raise RuntimeError("token obrigatório — o attach por WS não sobe sem token (fail-closed).")
-    return ThreadingHTTPServer((host, port), _make_handler(token, run))
+    return ThreadingHTTPServer((host, port), _make_handler(token, run, attach_dir))
 
 
 class WSClient:
@@ -145,6 +186,10 @@ class WSClient:
 
     def send(self, text: str) -> None:
         self.sock.sendall(encode_text_frame(text, mask=client_mask()))   # cliente SEMPRE mascara
+
+    def send_attach(self, name: str, data: bytes) -> None:
+        """Envia um arquivo do disco local p/ o gateway remoto (#10 file.attach) → vira @file: lá."""
+        self.sock.sendall(encode_text_frame(encode_attach(name, data), mask=client_mask()))
 
     def recv(self, timeout: float = 120.0):
         self.sock.settimeout(timeout)

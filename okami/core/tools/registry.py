@@ -18,6 +18,7 @@ from okami.core.tools.websearch import WebSearch
 from okami.core.tools.webextract import WebExtract
 from okami.core.tools.vision import VisionAnalyze
 from okami.core.tools.audio import AudioAnalyze
+from okami.core.tools.speak import TextToSpeech
 from okami.core.tools.notify import Notify
 from okami.core.tools.clarify import Clarify
 from okami.core.tools.suggest import SuggestAutomation
@@ -39,7 +40,7 @@ def default_registry() -> dict[str, Tool]:
              ScheduleJob(),
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
              UseSkill(), ManageSkill(), Spawn(),
-             Browse(), WebSearch(), WebExtract(), GenerateImage(), VisionAnalyze(), AudioAnalyze(),
+             Browse(), WebSearch(), WebExtract(), GenerateImage(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
              ToolSearch(), Notify(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              RemoteConnect(), RemoteDisconnect(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]

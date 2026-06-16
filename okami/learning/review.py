@@ -111,16 +111,17 @@ def learned_summary(result: str | None) -> str | None:
 
 
 def run_review(cfg, workspace, turn_context: str, *, skills_dir, model=None, provider=None,
-               emit=lambda m: None):
+               emit=lambda m: None, core_block=None):
     """Roda o review num fork de tools restrito (REVIEW_TOOLS), auto-aprovando esse conjunto seguro,
     SEM re-disparar aprendizado (learn=False → sem recursão). Best-effort: nunca derruba o turno.
-    Devolve a Task do review (p/ o caller avisar o dono do que foi aprendido) ou None se falhou."""
+    Devolve a Task do review (p/ o caller avisar o dono do que foi aprendido) ou None se falhou.
+    `core_block` = identidade/memória do pai renderizada (#10: prefixo byte-idêntico → prefix-cache)."""
     from okami.runner import run_task
     try:
         return run_task(cfg, workspace, build_review_goal(turn_context), provider=provider, model=model,
                         skills_dir=skills_dir, registry_filter=REVIEW_TOOLS,
                         approve=lambda req: True,      # conjunto de tools já é seguro (sem shell/arquivo/spawn)
-                        learn=False, surface="review", emit=emit)
+                        learn=False, surface="review", emit=emit, core_block=core_block)
     except Exception as e:  # noqa: BLE001 — review é best-effort
         emit(f"(review falhou: {e})")
         return None

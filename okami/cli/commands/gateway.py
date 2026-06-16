@@ -238,7 +238,7 @@ def serve(
             hist[session].extend([("você", message), ("okami", reply)])
             return reply
 
-        srv = _serve_ws_or_http(serve_ws, port, token, run_ws, host)
+        srv = _serve_ws_or_http(serve_ws, port, token, run_ws, host, attach_dir=str(wdir))
         console.print(f"[green]🛰  attach por WS no ar[/green] ws://{host}:{port}/attach  "
                       f"[dim](conecte com: okami attach ws://{host}:{port}/attach)[/dim]")
         if host == "127.0.0.1":
@@ -254,8 +254,8 @@ def serve(
         console.print("[dim]servidor parado.[/dim]")
 
 
-def _serve_ws_or_http(serve_ws, port, token, run_ws, host):
-    return serve_ws(port, token, run_ws, host=host)
+def _serve_ws_or_http(serve_ws, port, token, run_ws, host, *, attach_dir=None):
+    return serve_ws(port, token, run_ws, host=host, attach_dir=attach_dir)
 
 
 @app.command(help=_tr("cli.dump", _default="One-screen, paste-able status for a bug report (secrets redacted)."))
@@ -319,6 +319,14 @@ def attach(
                 continue
             if line.strip().lower() in ("/exit", "/quit", "exit", "quit"):
                 break
+            if line.strip().startswith("/attach "):       # #10: manda um arquivo local pro gateway remoto
+                fp = Path(line.strip()[len("/attach "):].strip().strip('"\''))
+                if not fp.is_file():
+                    console.print(f"[red]arquivo não encontrado: {fp}[/red]")
+                    continue
+                client.send_attach(fp.name, fp.read_bytes())
+                console.print(Markdown(client.recv() or "(sem resposta)"))
+                continue
             client.send(line)
             reply = client.recv()
             if reply is None:
