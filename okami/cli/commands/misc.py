@@ -68,6 +68,28 @@ def cost(
     console.print(tbl)
 
 
+@app.command(help=_tr("cli.moa", _default="Mixture-of-Agents: route a hard problem through your configured providers and synthesize the best answer."))
+def moa(
+    prompt: str = typer.Argument(..., help=_tr("cli.moa.prompt", _default="The hard problem to solve with multiple models.")),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.moa.json", _default="Structured JSON (response + which providers).")),
+) -> None:
+    """Mixture-of-Agents (#17): roda o problema nos providers configurados em paralelo e sintetiza a
+    melhor resposta com o mais forte. Assinatura-only — usa só o que você já tem."""
+    from okami.llm.mixture import mixture_summary_json, run_mixture
+    cfg = _load()
+    res = run_mixture(cfg, prompt)
+    if json_out:
+        console.print(mixture_summary_json(res))
+        raise typer.Exit(0 if res.get("success") else 1)
+    if not res.get("success"):
+        console.print(f"[red]mixture falhou:[/red] {res.get('response')}")
+        raise typer.Exit(1)
+    used = res.get("models_used", {})
+    console.print(f"[dim]mixture · {res.get('n_references', 0)} referências "
+                  f"({', '.join(used.get('reference_providers', []))}) → síntese por {used.get('aggregator', '?')}[/dim]\n")
+    console.print(res["response"])
+
+
 def _sessions_store(agent: str):
     """Resolve o TranscriptStore do agente (default = agente configurado), p/ os comandos `sessions`."""
     from okami.gateway.sessions import TranscriptStore

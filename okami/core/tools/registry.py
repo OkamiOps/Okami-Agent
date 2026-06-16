@@ -12,6 +12,7 @@ from okami.core.tools.memory import FinishSetup, RecallMemory, RememberFact, Rem
 from okami.core.tools.execute_code import ExecuteCode
 from okami.core.tools.search import SearchFiles
 from okami.core.tools.session_search import SessionSearch
+from okami.core.tools.mixture import MixtureOfAgents
 from okami.core.tools.patch import ApplyPatch
 from okami.core.tools.toolsearch import ToolSearch
 from okami.core.tools.websearch import WebSearch
@@ -39,7 +40,7 @@ def default_registry() -> dict[str, Tool]:
              ProcessWrite(), ProcessSignal(),
              ScheduleJob(),
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
-             UseSkill(), ManageSkill(), Spawn(),
+             UseSkill(), ManageSkill(), Spawn(), MixtureOfAgents(),
              Browse(), WebSearch(), WebExtract(), GenerateImage(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
              ToolSearch(), Notify(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              RemoteConnect(), RemoteDisconnect(),
