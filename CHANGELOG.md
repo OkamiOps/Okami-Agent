@@ -6,6 +6,42 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+Rodada **#20** — fechados os 3 itens que o dono pediu para "finalizar a implantação": **computer-use
+EMBUTIDO**, **inbound dos 9 canais novos** e os **plugins built-in do Hermes**. Caça adversarial (workflow
+de 60 subagentes, 3 céticos por achado) → **10 bugs reais corrigidos**. **2.630 testes passando** · gates
+limpos.
+
+### 🖥️ Computer-use EMBUTIDO (opt-in, approval-gated)
+- Nova tool `computer_use` (`okami/core/tools/computer_use.py`) — screenshot/click/right_click/double_click/
+  move/type/key/scroll — com **3 camadas de segurança**: (1) DESLIGADA por padrão (`computer_use.enabled`)
+  + backend presente; (2) **hardline-block** recusa combos destrutivos (cmd+q/logout/lixeira) ANTES de tocar
+  no SO; (3) `danger="dangerous"` → cada ação passa por go/no-go. Backend `okami/core/computeruse/`
+  (macOS screencapture+cliclick; pyautogui via lazy_deps). Revisão da decisão só-MCP do #17 — agora EMBUTIDO.
+
+### 📥 Inbound dos 9 canais (poll + webhook)
+- **Pollable** (`okami/channels/messaging.py`): Signal (`/v1/receive`), Matrix (`/sync` com since-token +
+  baseline no `start()`), BlueBubbles/iMessage (dedup por guid, **baseline tardio anti-flood**).
+- **Webhook-push** (`okami/channels/inbound_parsers.py` + `WebhookRoute.parser`): DingTalk, WeCom, QQBot,
+  WhatsApp, SMS, Weixin — entrega o TEXTO real ao agente (não o prompt sintetizado). XML por regex leaf-only
+  com `html.unescape` (anti-XXE, sem ElementTree). Os 14 canais agora são **bidirecionais**.
+
+### 🔌 Plugins built-in do Hermes (portados como plugins reais)
+- **`security-guidance`** — hook `before_tool` que varre o código a ser escrito por ~28 padrões inseguros
+  (eval/exec, pickle, yaml.load, shell injection, SQL por f-string, XSS, cripto fraca, segredo hardcoded,
+  JWT alg=none…). WARN por padrão; `OKAMI_SECURITY_GUIDANCE_BLOCK=1` → VETA.
+- **`disk-cleanup`** — hooks `before_tool`+`after_task`: rastreia efêmeros (`.tmp`/`.bak`/dirs scratch) e os
+  apaga no fim; conservador (nunca symlink/dir, só do projeto atual).
+- Os demais built-in já são nativos (image_gen/kanban/observability) ou ficam na superfície MCP
+  (google_meet/teams/spotify) — mapa completo em `plugins/README.md`.
+
+### 🐛 Caça adversarial (10 reais, ≥2/3 céticos)
+- **Colisão de nome**: o pacote novo sombreava `okami/core/desktop.py` (notificações) → renomeado
+  `computeruse/`. **XML**: entidades não eram decodificadas (`&lt;`→`<`). **DingTalk**: `text` não-dict
+  crashava. **Webhook**: `route.chat_id` mutado/compartilhado → corrida de roteamento (agora cópia por
+  POST). **BlueBubbles**: LRU por `set` perdia os mais recentes (→ dict ordenado) + flood do backlog se o
+  prime falhasse (→ baseline tardio). **disk-cleanup**: `patch` não-string. **security-guidance**: janela de
+  contexto do placeholder.
+
 Rodada **#19** — **paridade ~98%** com o Hermes (por presença de capacidade): fechada a cauda-longa que
 restava (integrações de nicho + breadth de canais). Subagente adversarial → 1 path-injection + 1 perf
 corrigidos. **2.578 testes passando** · gates limpos.

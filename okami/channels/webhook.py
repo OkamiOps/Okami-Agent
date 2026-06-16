@@ -10,6 +10,7 @@ Deny-by-default: rota desconhecida → 404; assinatura ausente/inválida → 401
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Callable
 
@@ -93,9 +94,12 @@ class WebhookServer:
                 inb = None
             if inb is None or not getattr(inb, "text", ""):
                 return 200, b'{"ok":true,"modo":"ignorado"}'
-            route.chat_id = getattr(inb, "chat_id", "") or route.chat_id   # resposta volta p/ o remetente
+            # NÃO muta a rota compartilhada (ThreadingHTTPServer → POSTs paralelos na MESMA rota): isso
+            # causaria corrida de roteamento (resposta de 'bob' iria pro chat de 'alice'). Entrega uma
+            # CÓPIA com o chat_id do remetente; a rota original fica intacta.
+            eff = dataclasses.replace(route, chat_id=(getattr(inb, "chat_id", "") or route.chat_id))
             if self.handle is not None:
-                self.handle(inb.text, route)
+                self.handle(inb.text, eff)
             return 200, b'{"ok":true}'
 
         # rota de evento: sintetiza prompt e chama o handler do agente

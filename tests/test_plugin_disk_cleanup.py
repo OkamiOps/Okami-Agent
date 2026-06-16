@@ -108,6 +108,14 @@ def test_clean_refuses_symlink(tmp_path):
     assert real.exists() and real.read_text() == "NÃO APAGAR"   # alvo do symlink intacto
 
 
+def test_track_survives_non_string_patch(tmp_path):
+    """#20 bug-hunt [6]: apply_patch com patch não-string (ex.: lista) não pode quebrar o hook before_tool."""
+    home = tmp_path / "home"
+    rc = _track({"tool": "apply_patch", "args": {"patch": ["linha1", "linha2"]}}, cwd=tmp_path, home=home)
+    assert rc == 0                                          # nunca veta/explode
+    assert not _state(home)                                 # nada rastreado (entrada inválida ignorada)
+
+
 def test_clean_only_touches_current_project(tmp_path):
     home = tmp_path / "home"
     other = tmp_path / "other_proj"

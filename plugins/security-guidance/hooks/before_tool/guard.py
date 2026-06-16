@@ -84,7 +84,7 @@ def _scan(code: str) -> list[str]:
         if not m or label in seen:
             continue
         if label == "hardcoded-secret":
-            line = code[max(0, m.start() - 0):m.end() + 40]
+            line = code[max(0, m.start() - 48):m.end() + 40]   # inclui contexto ANTES (ex.: comentário "example")
             if _PLACEHOLDER.search(line):
                 continue                       # valor é placeholder/env → não é segredo real
         seen.add(label)

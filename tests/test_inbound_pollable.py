@@ -75,10 +75,44 @@ def test_matrix_channel_poll_advances_token(monkeypatch):
 def test_bluebubbles_channel_poll(monkeypatch):
     from okami.channels.messaging import BlueBubblesChannel
     ch = BlueBubblesChannel("http://localhost:1234", "pw", "chatguid")
+    ch._get = lambda path, params=None: {"data": []}       # server vazio → start() prima (baseline vazio)
+    ch.start()
     ch._get = lambda path, params=None: {"data": [
         {"guid": "g9", "text": "yo", "isFromMe": False, "handle": {"address": "x"}}]}
     msgs = ch.poll()
-    assert len(msgs) == 1 and msgs[0].text == "yo"
+    assert len(msgs) == 1 and msgs[0].text == "yo"         # mensagem NOVA após baseline é emitida
+
+
+def test_bluebubbles_first_poll_baselines_when_prime_failed(monkeypatch):
+    """#20 bug-hunt [8]: se start() falhou (server offline no boot), o 1º poll bem-sucedido NÃO pode
+    despejar o backlog inteiro (até 50 msgs antigas) como 'novas' — ele baseliza e não emite nada."""
+    from okami.channels.messaging import BlueBubblesChannel
+    ch = BlueBubblesChannel("http://x", "pw", "g")          # start() NUNCA rodou com sucesso → _seen vazio
+    ch._get = lambda path, params=None: {"data": [
+        {"guid": f"g{i}", "text": f"m{i}", "isFromMe": False, "handle": {"address": "a"}} for i in range(40)]}
+    assert ch.poll() == []                                  # 1º poll = baseline tardio (sem flood)
+    ch._get = lambda path, params=None: {"data": [
+        {"guid": "gNEW", "text": "nova", "isFromMe": False, "handle": {"address": "a"}}]}
+    out = ch.poll()
+    assert len(out) == 1 and out[0].msg_id == "gNEW"        # só a mensagem realmente nova depois
+
+
+def test_bluebubbles_lru_keeps_newest(monkeypatch):
+    """#20 bug-hunt [4]: a poda do _seen deve manter os guids MAIS RECENTES (ordem de inserção), não um
+    subconjunto arbitrário de um set — senão um guid recém-visto é re-emitido como novo."""
+    from okami.channels.messaging import BlueBubblesChannel
+    ch = BlueBubblesChannel("http://x", "pw", "g")
+    ch.start()                                              # primed
+    # injeta 2500 guids antigos em ordem; o último visto deve sobreviver à poda
+    seq = [{"guid": f"old{i}", "text": "x", "isFromMe": False, "handle": {"address": "a"}} for i in range(2500)]
+    ch._get = lambda path, params=None: {"data": seq}
+    ch.poll()
+    recent = f"old{2499}"
+    assert recent in ch._seen                               # o mais recente NÃO foi evictado
+    # re-ver o guid mais recente não o re-emite (continua deduplicado)
+    ch._get = lambda path, params=None: {"data": [
+        {"guid": recent, "text": "x", "isFromMe": False, "handle": {"address": "a"}}]}
+    assert ch.poll() == []
 
 
 # ── parsers de webhook-push (callback → Inbound) ──
@@ -148,3 +182,39 @@ def test_webhook_route_parser_ignores_non_text():
     body = json.dumps({"msgtype": "image"}).encode("utf-8")     # não-texto
     status, _ = srv.handle_post("/wh/dt", {"X-Signature": _digest("s", body)}, body)
     assert status == 200 and not called                          # ignorado, agente não roda
+
+
+# ── #20 bug-hunt: correções confirmadas (≥2/3 céticos) ──
+def test_dingtalk_text_as_string_does_not_crash():
+    """[2]: payload malformado com text=str (não dict) não pode lançar AttributeError — vira None."""
+    from okami.channels.inbound_parsers import parse_dingtalk_webhook
+    assert parse_dingtalk_webhook({"msgtype": "text", "text": "raw string"}) is None
+    # forma correta segue funcionando
+    ok = parse_dingtalk_webhook({"msgtype": "text", "text": {"content": "oi"}, "conversationId": "c"})
+    assert ok and ok.text == "oi"
+
+
+def test_wecom_xml_decodes_entities():
+    """[1]: entidades XML no Content devem ser DECODIFICADAS (&lt;→<, &amp;→&), não entregues literais."""
+    from okami.channels.inbound_parsers import parse_wecom_webhook
+    xml = ("<xml><MsgType>text</MsgType><Content>5 &lt; 10 &amp; ok</Content>"
+           "<FromUserName>u1</FromUserName></xml>")
+    inb = parse_wecom_webhook(xml)
+    assert inb and inb.text == "5 < 10 & ok"
+
+
+def test_webhook_parser_does_not_mutate_shared_route():
+    """[5]: handle_post NÃO pode mutar route.chat_id (objeto compartilhado entre POSTs paralelos) — o
+    handler recebe o chat certo via cópia, mas a rota original fica intacta (sem corrida de roteamento)."""
+    import json
+
+    from okami.channels.inbound_parsers import webhook_parser
+    from okami.channels.webhook import WebhookRoute, WebhookServer
+    from okami.channels.webhook_sig import _digest
+    seen = []
+    route = WebhookRoute(provider="generic", secret="s", chat_id="DEFAULT", parser=webhook_parser("dingtalk"))
+    srv = WebhookServer(routes={"/wh": route}, handle=lambda text, r: seen.append(r.chat_id))
+    body = json.dumps({"msgtype": "text", "text": {"content": "oi"}, "conversationId": "alice"}).encode("utf-8")
+    srv.handle_post("/wh", {"X-Signature": _digest("s", body)}, body)
+    assert seen == ["alice"]                                # handler roteou p/ o remetente certo
+    assert route.chat_id == "DEFAULT"                       # rota COMPARTILHADA não foi mutada

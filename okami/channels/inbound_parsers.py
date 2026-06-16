@@ -65,7 +65,8 @@ def parse_dingtalk_webhook(body: dict) -> Inbound | None:
     """DingTalk callback: {msgtype:text, text:{content}, senderStaffId/conversationId}."""
     if (body or {}).get("msgtype") != "text":
         return None
-    content = ((body.get("text") or {}).get("content") or "").strip()
+    text = body.get("text")                                 # payload malformado pode mandar str → não crashar
+    content = ((text.get("content") if isinstance(text, dict) else None) or "").strip()
     chat = str(body.get("conversationId") or body.get("senderStaffId") or body.get("senderNick") or "")
     return Inbound("dingtalk", chat, text=content, msg_id=str(body.get("msgId") or "")) if content else None
 
@@ -122,11 +123,15 @@ def parse_sms_webhook(form: dict) -> Inbound | None:
 
 def _parse_simple_xml(xml: str) -> dict:
     """Extrai <Tag>valor</Tag> de um XML raso (tags-folha; CDATA ok) — regex, sem dep e sem expansão de
-    entidade (anti-XXE/billion-laughs). O `[^<]*` garante folha → o <xml> externo não engole os filhos."""
+    entidade (anti-XXE/billion-laughs). O `[^<]*` garante folha → o <xml> externo não engole os filhos.
+    Texto-plano (não-CDATA) é DECODIFICADO via html.unescape (&lt;→<, &amp;→&) — XML conforme escapa esses
+    caracteres, então sem isto a mensagem chegaria com as entidades literais ao agente."""
+    import html
     import re
     out: dict = {}
     for m in re.finditer(r"<(\w+)>(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))</\1>", xml or "", re.S):
-        out[m.group(1)] = (m.group(2) if m.group(2) is not None else (m.group(3) or "")).strip()
+        raw = m.group(2) if m.group(2) is not None else html.unescape(m.group(3) or "")
+        out[m.group(1)] = raw.strip()
     return out
 
 

@@ -117,19 +117,27 @@ class BlueBubblesChannel(RestChannel):
         super().__init__(channel_id, allow_chats=allow_chats, allow_all=allow_all)
         self.base_url = server_url.rstrip("/")
         self.password = password
-        self._seen: set[str] = set()
+        self._seen: dict[str, None] = {}                   # dict (ordem de inserção) → LRU mantém os MAIS recentes
+        self._primed = False                               # baseline já capturado? (start() OU 1º poll)
 
     def send(self, chat_id, text: str) -> None:
         self._post(f"/api/v1/message/text?password={self.password}",
                    {"chatGuid": str(chat_id), "message": text, "method": "apple-script"})
 
+    def _remember(self, guids) -> None:
+        for g in guids:
+            if g:
+                self._seen[g] = None
+        if len(self._seen) > 2000:                         # poda mantendo os 1000 guids MAIS RECENTES
+            self._seen = dict(list(self._seen.items())[-1000:])
+
     def start(self) -> None:
         try:                                               # baseline: marca o backlog atual como visto
-            for m in (self._get(f"/api/v1/message?password={self.password}&limit=50") or {}).get("data", []):
-                if m.get("guid"):
-                    self._seen.add(m["guid"])
+            data = (self._get(f"/api/v1/message?password={self.password}&limit=50") or {}).get("data", [])
+            self._remember(m.get("guid") for m in data)
+            self._primed = True                            # GET ok → baseline capturado
         except Exception:  # noqa: BLE001
-            pass
+            pass                                           # falhou → _primed segue False; o 1º poll baseliza
 
     def poll(self) -> list[Inbound]:
         from okami.channels.inbound_parsers import parse_bluebubbles
@@ -137,11 +145,13 @@ class BlueBubblesChannel(RestChannel):
             data = self._get(f"/api/v1/message?password={self.password}&limit=50")
         except Exception:  # noqa: BLE001
             return []
-        fresh = [m for m in parse_bluebubbles(data) if m.msg_id and m.msg_id not in self._seen]
-        for m in fresh:
-            self._seen.add(m.msg_id)
-        if len(self._seen) > 2000:                         # LRU rústico
-            self._seen = set(list(self._seen)[-1000:])
+        parsed = parse_bluebubbles(data)
+        if not self._primed:                               # start() não rodou/falhou → baseliza tardiamente,
+            self._remember(m.msg_id for m in parsed)       # sem despejar o backlog inteiro como "novo"
+            self._primed = True
+            return []
+        fresh = [m for m in parsed if m.msg_id and m.msg_id not in self._seen]
+        self._remember(m.msg_id for m in fresh)
         return fresh
 
 

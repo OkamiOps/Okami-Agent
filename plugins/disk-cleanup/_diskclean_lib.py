@@ -67,7 +67,10 @@ def candidate_paths(tool: str, args: dict, cwd: str) -> list[str]:
         if isinstance(path, str) and path:
             rels.append(path)
     elif tool == "apply_patch":
-        for line in (args.get("patch") or "").splitlines():
+        patch = args.get("patch")
+        if not isinstance(patch, str):                       # payload malformado (lista/None) → ignora
+            return []
+        for line in patch.splitlines():
             line = line.strip()
             for marker in ("*** Add File:", "*** Update File:"):
                 if line.startswith(marker):

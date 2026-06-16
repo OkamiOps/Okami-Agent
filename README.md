@@ -37,8 +37,13 @@ or wherever you want.
 > - **Copilot backend** — GitHub Copilot as a provider via the `copilot` CLI (`transport: copilot_cli`).
 > - **Semantic diagnostics on write** — a persistent **LSP client** (`okami lsp`, auto-install) feeds
 >   pyright/gopls/ts/rust/… diagnostics into the post-write delta filter.
-> - **14 channels + niche tools** — added WhatsApp/Signal/Matrix/SMS/iMessage/DingTalk/WeCom/QQ/WeChat
->   (outbound) plus `x_search` (Grok), `homeassistant` (IoT) and `feishu_doc_read`.
+> - **14 channels, now two-way** — WhatsApp/Signal/Matrix/SMS/iMessage/DingTalk/WeCom/QQ/WeChat gained
+>   **inbound** (poll for Signal/Matrix/iMessage; webhook-push for the rest) — not just outbound — plus
+>   niche tools `x_search` (Grok), `homeassistant` (IoT) and `feishu_doc_read`.
+> - **Embedded computer-use** — opt-in `computer_use` tool (screenshot/click/type/key) with a layered
+>   guard: off by default, hardline-blocks destructive combos, every action is go/no-go.
+> - **Hermes built-in plugins** — `security-guidance` (scans code-to-be-written for ~28 insecure patterns)
+>   and `disk-cleanup` (tracks & removes ephemeral files) ported as real folder plugins.
 > - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
 >   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
 > - **Hardened security** — scope-aware threat-pattern library, context-file injection scan, MCP exfil
