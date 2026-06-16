@@ -77,7 +77,13 @@ def _actions_from_tool_calls(tool_calls) -> list[Action]:
         except json.JSONDecodeError:
             if raw.rstrip() and not raw.rstrip().endswith(("}", "]")):
                 continue                             # args TRUNCADOS (stream cortou) → NÃO executa parcial
-            args = {}
+            # #11: não-truncado mas malformado (vírgula sobrando, control-char cru de modelo local) →
+            # repara em vez de descartar pra {}.
+            from okami.llm.json_repair import repair_tool_call_arguments
+            try:
+                args = json.loads(repair_tool_call_arguments(raw, name))
+            except json.JSONDecodeError:
+                args = {}
         out.append(Action(name, args if isinstance(args, dict) else {}))
     return out
 

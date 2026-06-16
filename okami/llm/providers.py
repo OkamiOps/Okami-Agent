@@ -404,8 +404,12 @@ def complete_messages_ex(
             ov["_api_key"] = _rotate_key(pc)
         try:
             res = as_completion(_complete_one(pc, send, model, response_schema, ov))
-            if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada
-                raise EmptyResponse("resposta vazia do provider")
+            if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada…
+                from okami.llm.stream_diag import classify_completion
+                # …MAS vazio por finish_reason='length' (modelo gastou tudo em reasoning) é TRUNCAÇÃO, não
+                # stall: deixa passar p/ o loop fazer length-continuation em vez de nudge de "veio vazio" (#11).
+                if classify_completion(res) != "length_truncation":
+                    raise EmptyResponse("resposta vazia do provider")
             if not res.provider:                      # garante served-by mesmo no caminho legado/teste
                 res.provider = pc.name
             if _was_blocked:                          # voltou a responder → limpa a marca cross-sessão

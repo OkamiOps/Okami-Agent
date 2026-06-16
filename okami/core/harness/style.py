@@ -100,15 +100,45 @@ _FAMILY_RULES = (
 )
 
 
+# #11: steering de formato de edição por família. Casar o formato do `apply_patch` ao que o modelo foi
+# treinado corta erro e raciocínio desperdiçado: GPT/Codex lidam melhor com patch V4A (em codex-rs o
+# apply_patch é o ÚNICO editor); open-weight/coding em geral foram afinados em editor str-replace. Claude
+# fica de fora (str-replace já é natural → não infla o prompt). Substring casa o id do modelo.
+_EDIT_FORMAT_V4A = ("- Edição: crie arquivo novo com write_file; p/ editar código existente use apply_patch "
+                    "(diff V4A) — inclusive em arquivo único. É o formato que você mais acerta.")
+_EDIT_FORMAT_REPLACE = ("- Edição: crie arquivo novo com write_file; p/ editar código existente prefira "
+                        "edit_file (casa um trecho único e troca). Use apply_patch (V4A) só quando a edição "
+                        "abrange vários arquivos de uma vez.")
+_EDIT_FORMAT_RULES = (
+    (("gpt", "codex", "o1", "o3", "o4"), _EDIT_FORMAT_V4A),
+    (("gemini", "gemma", "deepseek", "qwen", "kimi", "glm", "grok", "moonshot",
+      "minimax", "mimo", "llama", "mistral", "devstral"), _EDIT_FORMAT_REPLACE),
+)
+
+
+def _edit_format_line(model: str) -> str:
+    """Linha de steering de formato de edição p/ a família do `model` ("" p/ Claude/desconhecido)."""
+    m = (model or "").lower()
+    for needles, line in _EDIT_FORMAT_RULES:
+        if any(n in m for n in needles):
+            return line
+    return ""
+
+
 def model_family_guidance(model: str) -> str:
     """Bloco curto específico da família do `model` (vazio p/ Claude/forte e desconhecidos — não infla)."""
     m = (model or "").lower()
     if not m:
         return ""
-    for needles, block in _FAMILY_RULES:
+    block = ""
+    for needles, b in _FAMILY_RULES:
         if any(n in m for n in needles):
-            return block
-    return ""
+            block = b
+            break
+    edit = _edit_format_line(m)
+    if block and edit:
+        return f"{block}\n{edit}"
+    return block or edit          # família sem bloco mas com steering de edição (ex.: grok) → só a linha
 
 
 def style_block(surface: str = "cli") -> str:

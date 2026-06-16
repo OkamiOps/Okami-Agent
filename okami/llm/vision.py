@@ -18,9 +18,34 @@ _VISION_SYSTEM = ("Você é os OLHOS de outro agente. Descreva a imagem com PREC
                   "o que não dá pra ver.")
 
 
+def _sniff_mime_from_bytes(raw: bytes) -> str | None:
+    """MIME por magic-byte, ou None se não reconhecer. Detecção por NOME (suffix) é não-confiável quando
+    a plataforma mente o content-type (Discord serve PNG como webp); a Anthropic valida media_type×bytes
+    e dá 400 se divergir. Por isso checamos os bytes (#11)."""
+    if not raw:
+        return None
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw.startswith(b"BM"):
+        return "image/bmp"
+    if len(raw) >= 12 and raw[4:8] == b"ftyp" and raw[8:12] in (
+            b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis"):
+        return "image/heic"
+    return None
+
+
 def _data_uri(path: Path) -> str:
-    mime = _MIME.get(path.suffix.lower(), "image/png")
-    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    raw = path.read_bytes()
+    # sniff dos bytes tem prioridade sobre o suffix (sufixo mentido → 400 da Anthropic); cai no suffix se
+    # o sniff não reconhecer.
+    mime = _sniff_mime_from_bytes(raw) or _MIME.get(path.suffix.lower(), "image/png")
+    b64 = base64.b64encode(raw).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
 

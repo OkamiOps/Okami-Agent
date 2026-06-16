@@ -21,6 +21,22 @@ from __future__ import annotations
 
 from okami.core.redact import redact
 
+
+def classify_completion(comp) -> str:
+    """#11 stall-vs-truncation: nomeia o estado de uma Completion DEVOLVIDA (sem exceção).
+
+    - 'length_truncation': cortada pelo limite (finish_reason='length') — mesmo com texto vazio (modelo
+      gastou tudo em reasoning). NÃO é vazio-stall: o loop deve fazer length-continuation, não nudge.
+    - 'empty_stall': sem texto E sem tool-call e não foi length → hiccup/vazio genuíno (entra na escada).
+    - 'complete': tem texto ou tool-call.
+    (A queda de stream POR EXCEÇÃO é o outro lado, descrito por format_drop/flatten_exception_chain.)"""
+    if (getattr(comp, "finish_reason", "") or "") == "length":
+        return "length_truncation"
+    if not (getattr(comp, "text", "") or "").strip() and not getattr(comp, "tool_calls", None):
+        return "empty_stall"
+    return "complete"
+
+
 _MAX_ELOS = 8        # teto de elos andados (cadeia patológica/cíclica não vira parágrafo)
 _MAX_MSG = 200       # cada mensagem de elo truncada — linha de log, não stack trace
 

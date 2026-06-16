@@ -195,8 +195,12 @@ class Tool:
 
 
 def openai_tools(registry: dict) -> list[dict]:
-    """Schemas OpenAI das tools (p/ enviar no payload quando o provider faz function-calling nativo)."""
-    return [t.to_openai_schema() for t in registry.values()]
+    """Schemas OpenAI das tools (p/ enviar no payload quando o provider faz function-calling nativo).
+
+    #11: passa pelo sanitizador de schema — schema de tool MCP externa pode ter construto (união nullable,
+    pattern/format) que o grammar-converter do llama.cpp rejeita (400). Nativo (tudo string) passa intacto."""
+    from okami.llm.schema_sanitizer import sanitize_tool_schemas
+    return sanitize_tool_schemas([t.to_openai_schema() for t in registry.values()])
 
 
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
