@@ -34,9 +34,30 @@ Eventos: `before_tool` (pode vetar), `after_tool` (observa), `before_skill_insta
 Confiança: plugin de pasta entra **untrusted** (não pode trocar de provider à revelia do dono — ver
 `PluginContext` em `okami/plugins.py`). Liste com `okami plugins`.
 
-## Exemplos nesta pasta
+## Plugins nesta pasta
 
-- **`security-guidance/`** — manifesto que declara um hook `before_tool` (ponto de extensão p/ uma política
-  de segurança própria; sem script = no-op até você adicionar `hooks/before_tool/guard.sh`).
-- **`usage-observer/`** — manifesto que declara um hook `after_tool` (ponto de extensão p/ telemetria
-  própria; observa, nunca veta).
+- **`security-guidance/`** — **port do built-in do Hermes** (funcional). Hook `before_tool` que varre o
+  código a ser escrito (`write_file`/`edit_file`/`apply_patch`) por ~28 padrões inseguros e imprime um
+  advisory. WARN por padrão; `OKAMI_SECURITY_GUIDANCE_BLOCK=1` → VETA a escrita.
+- **`disk-cleanup/`** — **port do built-in do Hermes** (funcional). Hooks `before_tool` (rastreia efêmeros)
+  + `after_task` (apaga no fim). Conservador: só `.tmp`/`.bak`/`~`/dirs `tmp|temp|scratch`, nunca symlink/dir.
+- **`usage-observer/`** — exemplo de manifesto `after_tool` (ponto de extensão p/ telemetria própria; sem
+  script = no-op). A observabilidade nativa (event log, `okami cost`, `okami insights`) já cobre o caso comum.
+
+## Paridade com os plugins built-in do Hermes
+
+Os built-in do Hermes (`hermes-agent/docs/.../built-in-plugins`) mapeiam assim no Okami:
+
+| Built-in do Hermes | Estado no Okami |
+|---|---|
+| `security-guidance` | **Portado** como plugin (`plugins/security-guidance/`, hook `before_tool`). |
+| `disk-cleanup` | **Portado** como plugin (`plugins/disk-cleanup/`, `before_tool`+`after_task`). |
+| `image_gen/openai`, `openai-codex`, `xai` | **Nativo**: tool `generate_image` + registry de backends nomeados (G4). |
+| `kanban/dashboard` | **Nativo**: Kanban swarm do dispatcher multi-agente (#12 Onda C). |
+| `observability/langfuse`, `nemo_relay` | **Nativo**: event log + `okami cost` + `okami insights` + telemetria; relé externo via hook `after_tool` (ver `usage-observer/`). |
+| `google_meet`, `teams_pipeline`, `spotify` | **Superfície MCP**: integrações externas OAuth-pesadas vivem como servidores MCP soberanos (mesma decisão do computer-use), não como plugin de pasta. |
+| `hermes-achievements` | Fora de escopo (gamificação de histórico de sessão); sem equivalente planejado. |
+
+Princípio: o que já é **tool embutida** não vira plugin redundante; o que é **hook de ciclo de vida**
+(security-guidance, disk-cleanup) é portado como plugin real; o que é **integração externa pesada** fica
+na superfície **MCP**, não num plugin de pasta.

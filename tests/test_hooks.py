@@ -25,14 +25,16 @@ def test_after_hook_return_is_ignored():
     assert hm.fire("after_tool", {"tool": "x"}) is True
 
 
-def test_config_command_runs_and_vetoes(monkeypatch):
+def test_config_command_runs_and_vetoes(tmp_path):
     calls = []
 
     def fake_run(cmd, event, payload):
         calls.append((cmd, event, payload["tool"]))
         return cmd != "deny"                           # "deny" → veta
 
-    hm = HookManager({"before_tool": ["log", "deny"]}, runner=fake_run)
+    # root isolado: senão a fire() descobriria os plugins reais do repo (security-guidance/disk-cleanup)
+    # e o runner injetado também rodaria os scripts deles, poluindo `calls`.
+    hm = HookManager({"before_tool": ["log", "deny"]}, root=str(tmp_path), runner=fake_run)
     assert hm.fire("before_tool", {"tool": "write_file"}) is False     # algum comando vetou
     assert [c[0] for c in calls] == ["log", "deny"]
 

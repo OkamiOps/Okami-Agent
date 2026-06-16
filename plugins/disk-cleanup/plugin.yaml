@@ -1,0 +1,11 @@
+name: disk-cleanup
+hooks: [before_tool, after_task]
+description: >
+  Port do plugin built-in disk-cleanup do Hermes. Rastreia (hook before_tool, nunca veta) os arquivos
+  EFÊMEROS que o agente escreve — extensões descartáveis (.tmp/.temp/.bak/.swp/.orig/~) ou em diretórios
+  tmp/temp/scratch que ele mesmo criou — e os APAGA no fim da tarefa (hook after_task). Conservador de
+  propósito: NUNCA classifica por "está sob /tmp do SO" (a workspace do agente pode morar lá); só apaga
+  arquivo regular, que ainda existe, não-symlink, que ainda classifica como efêmero, e só do projeto atual.
+config:
+  # Opcional: padrões fnmatch extras a tratar como efêmeros (ex.: "*.cache,build-*.log").
+  OKAMI_DISKCLEAN_GLOBS: ""
