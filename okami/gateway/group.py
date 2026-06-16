@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import random
 import time
 from typing import Callable
 
 from okami.gateway.sessions import TranscriptStore
+
+_BACKOFF_BASE = 3.0     # 1ª falha
+_BACKOFF_CAP = 30.0     # teto
+_JITTER_FRAC = 0.3      # até 30% de jitter
+
+
+def _retry_backoff(fails: int, *, _rand=random.random) -> float:
+    """Backoff EXPONENCIAL capado + jitter p/ o retry do poll do grupo. Sem jitter, N grupos que caem
+    juntos (blip de rede) acordam no MESMO instante e disparam requests simultâneas (thundering herd)."""
+    base = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** min(max(0, fails - 1), 4)))
+    return base + _rand() * base * _JITTER_FRAC
 
 
 class GroupEndpoint:
@@ -70,8 +82,11 @@ class GroupEndpoint:
             except Exception:  # noqa: BLE001
                 pass
             self._started = True
+        fails = 0
         while self.running:
             try:
                 self.poll_once()
+                fails = 0                                # sucesso → zera o backoff
             except Exception:  # noqa: BLE001 — rede instável não derruba o grupo
-                time.sleep(3)
+                fails += 1
+                time.sleep(_retry_backoff(fails))        # exp backoff + jitter (anti thundering-herd)

@@ -1,0 +1,7 @@
+name: usage-observer
+hooks: [after_tool]
+description: >
+  Exemplo de plugin de terceiro: ponto de extensão para TELEMETRIA própria, executada DEPOIS de cada tool
+  (um hook after_tool — só observa, nunca veta; exit ignorado). Sem script em hooks/after_tool/ ele é
+  no-op — adicione o seu (ex.: enviar contadores a um endpoint) para ativar. Demonstra o sistema de
+  plugins; a observabilidade nativa (event log, okami cost, insights) já existe no core.

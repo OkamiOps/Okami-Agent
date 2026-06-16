@@ -14,6 +14,8 @@ from pathlib import Path
 
 import yaml
 
+from okami.log import warn
+
 
 @dataclass
 class Plugin:
@@ -57,7 +59,8 @@ def discover_plugins(roots, *, entry_points=None) -> list[Plugin]:
         try:
             from importlib import metadata
             eps = metadata.entry_points(group="okami.plugins")
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — degrada mas AVISA (plugin pip quebrado não some calado)
+            warn("falha ao ler entry-points de plugins (okami.plugins)", exc_info=True)
             eps = ()
     for ep in (eps or ()):
         name = getattr(ep, "name", "")
@@ -116,8 +119,8 @@ def plugin_roots() -> list[Path]:
     try:
         from okami.home import okami_home
         roots.append(okami_home())
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:  # noqa: BLE001 — degrada (só usa '.') mas AVISA (era silencioso)
+        warn("falha ao resolver okami_home p/ raízes de plugins", exc_info=True)
     return roots
 
 

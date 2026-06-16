@@ -1,0 +1,7 @@
+name: security-guidance
+hooks: [before_tool]
+description: >
+  Exemplo de plugin de terceiro: ponto de extensão para uma POLÍTICA DE SEGURANÇA própria, executada
+  ANTES de cada tool (um hook before_tool que sai com código ≠ 0 VETA a ação). Sem script em
+  hooks/before_tool/ ele é no-op — adicione o seu para ativar. Demonstra o sistema de plugins sem
+  duplicar as defesas já embutidas (Tirith, jail de path, net_guard, approval).
