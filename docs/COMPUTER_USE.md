@@ -1,9 +1,36 @@
-# Computer-use no Okami — decisão de escopo (soberano, via MCP)
+# Computer-use no Okami — EMBUTIDO (opt-in, approval-gated) + via MCP
 
-**TL;DR:** o Okami **não embute** um automador de desktop (controlar mouse/teclado/tela). Isso é uma
-**decisão de design deliberada**, não um buraco esquecido. Quem quer controle de desktop conecta um
-**servidor MCP de computer-use** — que entra **trust-gated** (não-confiável por padrão, go/no-go nas ações
-perigosas). A capacidade fica disponível **sem** o Okami virar, ele mesmo, um automador de SO.
+**TL;DR:** o Okami agora **embute** uma tool `computer_use` (mouse/teclado/tela) — **DESLIGADA por padrão**,
+opt-in explícito, e com 3 camadas de segurança. Quem prefere isolamento total continua podendo usar um
+**servidor MCP de computer-use** trust-gated. (No #17 isto era só-MCP; o dono optou por embutir no #20.)
+
+## A tool embutida (`computer_use`)
+
+Ações: `screenshot` (tira foto da tela — o modelo VÊ o desktop), `click`/`right_click`/`double_click`/
+`move` (x,y), `type` (texto), `key` (combo, ex.: `cmd+c`), `scroll`. Backend: **macOS nativo**
+(`screencapture` + `cliclick`, zero-dep) ou **pyautogui** (cross-platform, `okami deps install
+desktop.pyautogui`).
+
+**Segurança em 3 camadas:**
+1. **Opt-in explícito** — a tool só entra no registro se `computer_use.enabled: true` no `okami.yaml` E há
+   backend instalado. Desligada por padrão → o agente nem sabe que existe.
+2. **HARDLINE-block** — combos destrutivos (`cmd+q`/logout, lock, sleep/shutdown, `cmd+delete`/lixeira,
+   `ctrl+alt+delete`) são **recusados sempre**, antes de tocar no SO, sem override por `/yolo`.
+3. **go/no-go por ação** — `danger="dangerous"` no registro → cada clique/digitação passa pela aprovação
+   (deny-by-default em superfície remota; o dono aprova no terminal).
+
+```yaml
+computer_use:
+  enabled: true          # default false — ligue só se quiser que o agente controle seu desktop
+```
+
+---
+
+## Alternativa: via MCP (isolamento máximo)
+
+Se você prefere o núcleo 100% fail-closed sem a tool embutida, NÃO ligue `computer_use.enabled` e conecte
+um **servidor MCP de computer-use** — que entra **trust-gated** (não-confiável por padrão, go/no-go nas
+ações perigosas). A capacidade fica disponível sem o automador morar no core.
 
 ## Por que NÃO embutir
 

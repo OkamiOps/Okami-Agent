@@ -42,6 +42,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "desktop.webview": ("pywebview>=5.0",),
     # language server p/ diagnostics semânticos no write (pyright tem wrapper no PyPI)
     "lsp.pyright": ("pyright>=1.1.400",),
+    # automação de desktop (computer-use) — fallback cross-platform quando não há cliclick (macOS)
+    "desktop.pyautogui": ("pyautogui>=0.9.54",),
 }
 
 _SAFE_SPEC = re.compile(

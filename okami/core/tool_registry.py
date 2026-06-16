@@ -54,6 +54,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("manage_skill", "skill", tier="power", danger="sensitive"),
     ToolSpec("spawn", "subagente", tier="power", danger="sensitive"),
     ToolSpec("mixture_of_agents", "raciocínio", tier="power"),
+    ToolSpec("computer_use", "desktop", tier="power", danger="dangerous"),
     ToolSpec("browse", "web", tier="power", danger="sensitive"),
     ToolSpec("web_search", "web"),
     ToolSpec("x_search", "web"),

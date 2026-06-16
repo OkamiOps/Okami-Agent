@@ -17,6 +17,7 @@ from okami.core.tools.video import GenerateVideo
 from okami.core.tools.x_search import XSearch
 from okami.core.tools.homeassistant import HomeAssistant
 from okami.core.tools.feishu import FeishuDocRead
+from okami.core.tools.computer_use import ComputerUse
 from okami.core.tools.patch import ApplyPatch
 from okami.core.tools.toolsearch import ToolSearch
 from okami.core.tools.websearch import WebSearch
@@ -46,7 +47,7 @@ def default_registry() -> dict[str, Tool]:
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
              UseSkill(), ManageSkill(), Spawn(), MixtureOfAgents(),
              Browse(), WebSearch(), WebExtract(), GenerateImage(), GenerateVideo(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
-             XSearch(), HomeAssistant(), FeishuDocRead(),
+             XSearch(), HomeAssistant(), FeishuDocRead(), ComputerUse(),
              ToolSearch(), Notify(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              RemoteConnect(), RemoteDisconnect(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
