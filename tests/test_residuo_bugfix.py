@@ -90,3 +90,29 @@ def test_bedrock_translates_inline_image():
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}}]}]
     blocks = to_converse_request(msgs)["messages"][0]["content"]
     assert any("image" in b for b in blocks) and any("text" in b for b in blocks)
+
+
+# ── 7 (CRÍTICO): XSS — chat_id ia cru num onclick inline (esc não escapa aspas) ──
+def test_dashboard_no_inline_onclick_with_raw_id():
+    from okami.gateway.web import render_dashboard_html
+    html = render_dashboard_html()
+    # a linha de sessão NÃO pode injetar o chat_id num onclick inline; usa data-attribute + listener delegado
+    assert "onclick=\"showSession(" not in html and "onclick='showSession(" not in html
+    assert "data-sid" in html or "data-chat" in html
+
+
+# ── 8: data-uri malformado (sem ;base64,) não pode virar fileData/bloco quebrado ──
+def test_gemini_malformed_data_uri_skipped():
+    from okami.llm.gemini_native import _content_parts
+    parts = _content_parts([{"type": "text", "text": "x"},
+                            {"type": "image_url", "image_url": {"url": "data:image/png,QUJD"}}])
+    assert not any("fileData" in p and p["fileData"]["fileUri"].startswith("data:") for p in parts)
+    assert any("text" in p for p in parts)            # texto preservado
+
+
+def test_bedrock_malformed_data_uri_skipped():
+    from okami.llm.bedrock_native import _content_blocks
+    blocks = _content_blocks([{"type": "text", "text": "x"},
+                              {"type": "image_url", "image_url": {"url": "data:image/png,naoehbase64"}}])
+    assert all("image" not in b or b.get("image", {}).get("source") for b in blocks)
+    assert any("text" in b for b in blocks)

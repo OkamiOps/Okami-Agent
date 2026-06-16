@@ -48,7 +48,7 @@ pre{white-space:pre-wrap;font-size:12px;color:#cfcfd4;max-height:60vh;overflow:a
 const app=document.getElementById('app');let tab='status';
 const TOKEN=new URLSearchParams(location.search).get('token');
 const HDR=TOKEN?{'Authorization':'Bearer '+TOKEN}:{};
-const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const esc=s=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const api=p=>fetch(p,{headers:HDR}).then(r=>r.json());
 const ALLOW=['approvals.mode','sandbox.profile','sandbox.require_isolation','display.global.tool_progress','display.global.long_running_notifications','harness.max_steps','learning.review'];
 async function load(){
@@ -61,7 +61,7 @@ async function saveCfg(){const k=document.getElementById('ck').value,v=document.
 function cfgForm(){return '<div class="card"><h3>Editar (allowlist)</h3>chave <select id=ck>'+ALLOW.map(k=>'<option>'+k+'</option>').join('')+'</select> valor <input id=cv> <button onclick="saveCfg()">salvar</button> <span id=cmsg class=muted></span><p class=muted>só chaves não-segredo; grava em okami.local.yaml</p></div>';}
 function render(d){
  if(tab==='status'){app.innerHTML='<div class="card">'+kv(d)+'</div>';}
- else if(tab==='sessions'){app.innerHTML='<div class="card">'+((d&&d.length)?'<table><tr><th>chat</th><th>turnos</th><th>atualizado</th></tr>'+d.map(s=>'<tr style="cursor:pointer" onclick="showSession(\\''+esc(s.chat_id)+'\\')"><td>'+esc(s.chat_id)+'</td><td>'+esc(s.turns||'')+'</td><td>'+esc(s.updated_at||'')+'</td></tr>').join('')+'</table><p class=muted>clique numa sessão p/ ver o transcript</p>':'<span class=muted>sem sessões</span>')+'</div>';}
+ else if(tab==='sessions'){app.innerHTML='<div class="card">'+((d&&d.length)?'<table><tr><th>chat</th><th>turnos</th><th>atualizado</th></tr>'+d.map(s=>'<tr class="srow" style="cursor:pointer" data-sid="'+esc(s.chat_id)+'"><td>'+esc(s.chat_id)+'</td><td>'+esc(s.turns||'')+'</td><td>'+esc(s.updated_at||'')+'</td></tr>').join('')+'</table><p class=muted>clique numa sessão p/ ver o transcript</p>':'<span class=muted>sem sessões</span>')+'</div>';document.querySelectorAll('.srow').forEach(tr=>tr.onclick=()=>showSession(tr.dataset.sid));}
  else if(tab==='config'){app.innerHTML='<div class="card">'+kv(d)+'<p class=muted>nomes de env, nunca valores</p></div>'+cfgForm();}
  else{app.innerHTML='<div class="card"><pre>'+((d&&d.length)?d.map(esc).join('\\n'):'<span class=muted>sem logs</span>')+'</pre></div>';}
 }

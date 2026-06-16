@@ -42,8 +42,10 @@ def _content_parts(content) -> list[dict]:
                 head, b64 = url.split(";base64,", 1)
                 mime = head[5:] or "image/png"
                 parts.append({"inlineData": {"mimeType": mime, "data": b64}})
+            elif url.startswith("data:"):                       # data-uri malformado (sem ;base64,) → pula
+                continue                                        # NÃO mandar pro fileData (API rejeita)
             elif url:
-                parts.append({"fileData": {"fileUri": url}})     # http(s) → fileData
+                parts.append({"fileData": {"fileUri": url}})     # http(s)/gs → fileData
     return parts
 
 
