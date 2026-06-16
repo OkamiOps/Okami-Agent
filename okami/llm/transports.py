@@ -303,6 +303,29 @@ def gemini_cloudcode_complete(pc, messages, model, overrides=None):
     return _c(pc, messages, model, overrides)
 
 
+def copilot_cli_complete(pc, messages, model, overrides=None, *, _run=None, _binary="__auto__"):
+    """GitHub Copilot como BACKEND via o CLI `copilot` (#19, paridade Hermes copilot_acp_client). Espelha
+    o claude_cli: achata as mensagens num prompt, invoca o CLI, devolve o texto. `_run`/`_binary` injetáveis
+    p/ teste. Sem o CLI → erro claro (degrada com graça)."""
+    binary = (shutil.which("copilot") if _binary == "__auto__" else _binary)
+    if not binary:
+        raise RuntimeError("CLI 'copilot' não encontrado no PATH. Instale/logue o GitHub Copilot CLI.")
+    system, transcript = _flatten(messages)
+    prompt = (system + "\n\n" + transcript).strip() if system else transcript
+    cmd = [binary, "-p", prompt]
+    run = _run or (lambda c, p: subprocess.run(c, input=p, capture_output=True, text=True,  # noqa: S603
+                                               timeout=_CALL_TIMEOUT))
+    try:
+        r = run(cmd, prompt)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"copilot timeout ({_CALL_TIMEOUT}s)") from e
+    if getattr(r, "returncode", 0) != 0:
+        raise RuntimeError(f"copilot falhou (exit {r.returncode}): {(r.stderr or '').strip()[:400]}")
+    text = (r.stdout or "").strip()
+    return Completion(text=text, usage=normalize_usage(None, transport="copilot_cli"),
+                      provider=getattr(pc, "name", "copilot"), model=model or getattr(pc, "model", ""))
+
+
 def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
              overrides: dict | None = None):
     """Resultado via transport não-litellm (`Completion`), ou None se for litellm (segue no LiteLLM)."""
@@ -318,4 +341,6 @@ def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
         return bedrock_native_complete(pc, messages, model, overrides)
     if pc.transport == "gemini_cloudcode":
         return gemini_cloudcode_complete(pc, messages, model, overrides)
+    if pc.transport == "copilot_cli":
+        return copilot_cli_complete(pc, messages, model, overrides)
     return None

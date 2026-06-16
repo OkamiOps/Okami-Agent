@@ -51,6 +51,16 @@ REGISTRY: dict[str, ChannelSpec] = {
                          required_keys=("user", "app_password"),
                          hint="Você está no e-mail (texto puro): sem markdown/HTML — escreva em "
                               "texto corrido, parágrafos curtos; nada de tabela ou ** asterisco **."),
+    # Canais regionais asiáticos (#19) — OUTBOUND (notificação): o agente publica no grupo/canal.
+    "dingtalk": ChannelSpec("dingtalk", "dingtalk", "okami.channels.regional", "DingTalkChannel",
+                            ("token", "channel_id"),
+                            hint="Você está no DingTalk (texto): sem markdown rico; mensagem objetiva."),
+    "wecom": ChannelSpec("wecom", "wecom", "okami.channels.regional", "WeComChannel",
+                         ("key", "channel_id"),
+                         hint="Você está no WeCom/WeChat Work (texto): conciso, sem markdown rico."),
+    "qqbot": ChannelSpec("qqbot", "qqbot", "okami.channels.regional", "QQBotChannel",
+                         ("token", "channel_id"),
+                         hint="Você está no QQ (texto): mensagem curta e direta."),
 }
 
 # Telegram em GRUPO é a mesma plataforma (superfície 'group') → herda o hint do telegram.

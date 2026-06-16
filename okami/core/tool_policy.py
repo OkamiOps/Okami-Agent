@@ -32,6 +32,9 @@ _DENY_BY_SURFACE: dict[str, set[str]] = {
     "mattermost": set(_REMOTE_DENY),
     "email": set(_REMOTE_DENY),                      # #7: e-mail é porta ABERTA (qualquer um manda) → como telegram
     "webhook": set(_REMOTE_DENY),                    # #7: webhook entrega/dispara via HTTP externo → idem
+    "dingtalk": set(_REMOTE_DENY),                   # #19: canais regionais remotos = ≠ CLI local
+    "wecom": set(_REMOTE_DENY),
+    "qqbot": set(_REMOTE_DENY),
     # Paperclip POR PAPEL (#P1): antes 'paperclip' era surface COMPLETA (porta larga). Agora o default
     # já é o worker (executa, mas não gerencia processo/recursiona), e cada papel tem repertório próprio.
     "paperclip": set(_WORKER_DENY),                  # default = worker
