@@ -57,6 +57,13 @@ def _read_convention(folder: Path, ws: Path) -> str:
                 return ""
             if txt:
                 rel = folder.relative_to(ws).as_posix()
+                # #11: arquivo de convenção de um repo clonado pode carregar injeção/promptware. Escaneia
+                # ANTES de injetar no resultado da tool (o agente trata isto como instrução do projeto).
+                from okami.core.threat_patterns import scan_for_threats
+                threats = scan_for_threats(txt, scope="context")
+                if threats:
+                    return (f"[BLOCKED: {rel}/{fn} contém possível injeção de prompt "
+                            f"({', '.join(threats[:3])}). Conteúdo não carregado.]")
                 return f"[convenção de {rel}/{fn}]\n{txt}"
             return ""
     return ""

@@ -285,6 +285,17 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
     for name, conf in (servers or {}).items():
         if conf.get("disabled"):
             continue
+        # #11: supply-chain. (a) scanner de exfil: interpretador de shell + egress nos args → AVISA.
+        from okami.integrations.mcp_security import validate_mcp_server_entry
+        for warn in validate_mcp_server_entry(name, conf):
+            emit(f"⚠ {warn} — possível exfiltração; revise antes de confiar.")
+        # (b) OSV malware-check pré-spawn p/ npx/uvx: malware confirmado (MAL-*) BLOQUEIA. Fail-open na rede.
+        if conf.get("command") and not conf.get("url"):
+            from okami.integrations.osv_check import check_package_for_malware
+            mal = check_package_for_malware(conf["command"], conf.get("args") or [])
+            if mal:
+                emit(f"⛔ MCP '{name}' {mal}")
+                continue
         url = conf.get("url")
         if url and not _mcp_url_ok(url) and not conf.get("insecure"):   # #8: HTTPS/local-only por padrão
             emit(f"⚠ MCP '{name}' RECUSADO: {url} não é HTTPS nem local — use https:// (ou insecure: true, perigoso).")

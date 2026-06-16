@@ -379,6 +379,14 @@ def _warn_unisolated_exposure(global_raw: dict, endpoints: list, emit: Callable[
 def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = print, make_channel=None):
     from okami.config import build_config
 
+    # #11: preflight de CA bundle SSL — pega env var de CA quebrada ANTES do 1º HTTPS (erro acionável,
+    # não FileNotFoundError opaco lá na frente). Best-effort: não derruba o boot.
+    try:
+        from okami.llm.ssl_guard import verify_ca_bundle
+        verify_ca_bundle()
+    except Exception as e:  # noqa: BLE001
+        emit(f"⚠ SSL/CA bundle: {e}")
+
     eps = build_endpoints(global_raw, agents, emit=emit, make_channel=make_channel)   # DMs (1 agente/chat)
     groups = build_group_endpoints(global_raw, agents, build_config(global_raw).groups, emit=emit)  # salas
     everyone = [*eps, *groups]
