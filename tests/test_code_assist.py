@@ -96,6 +96,59 @@ def test_parse_quota_buckets():
     assert rows and rows[0]["model_id"] == "gemini-2.5-pro" and rows[0]["remaining_fraction"] == 0.5
 
 
+# ── OAuth: troca de code, persistência 0600 e refresh ──
+def test_exchange_code_posts_authorization_code():
+    from okami.llm.code_assist import exchange_code
+    sent = {}
+
+    def _post(url, form):
+        sent["url"] = url
+        sent["form"] = form
+        return {"access_token": "AT", "refresh_token": "RT", "expires_in": 3600}
+
+    tok = exchange_code("CODE", "VERIFIER", redirect_uri="http://127.0.0.1:8085/cb", _post=_post)
+    assert tok["access_token"] == "AT"
+    assert sent["form"]["grant_type"] == "authorization_code"
+    assert sent["form"]["code"] == "CODE" and sent["form"]["code_verifier"] == "VERIFIER"
+    assert "oauth2.googleapis.com/token" in sent["url"]
+
+
+def test_save_and_load_credentials_0600(tmp_path, monkeypatch):
+    import os
+
+    from okami.llm import code_assist as ca
+    monkeypatch.setattr(ca, "credentials_path", lambda: tmp_path / "google_oauth.json")
+    ca.save_credentials({"access_token": "AT", "refresh_token": "RT", "expires_at": 9999999999})
+    assert (tmp_path / "google_oauth.json").exists()
+    mode = os.stat(tmp_path / "google_oauth.json").st_mode & 0o777
+    assert mode == 0o600                                   # credencial NÃO legível por outros
+    assert ca.load_credentials()["access_token"] == "AT"
+
+
+def test_get_access_token_refreshes_when_expired(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from okami.llm import code_assist as ca
+    monkeypatch.setattr(ca, "credentials_path", lambda: tmp_path / "google_oauth.json")
+    ca.save_credentials({"access_token": "OLD", "refresh_token": "RT", "expires_at": 0})   # já expirou
+    monkeypatch.setattr(ca, "refresh_access_token",
+                        lambda rt, _post=None: {"access_token": "NEW", "expires_in": 3600})
+    tok = ca._get_access_token(SimpleNamespace(name="gca"))
+    assert tok == "NEW"                                     # expirado → renova
+    assert ca.load_credentials()["access_token"] == "NEW"  # persiste o novo
+
+
+def test_get_access_token_without_creds_raises(tmp_path, monkeypatch):
+    import pytest
+
+    from types import SimpleNamespace
+
+    from okami.llm import code_assist as ca
+    monkeypatch.setattr(ca, "credentials_path", lambda: tmp_path / "nope.json")
+    with pytest.raises(RuntimeError, match="credencial"):
+        ca._get_access_token(SimpleNamespace(name="gca"))
+
+
 # ── transporte gemini_cloudcode roteia pelo dispatch ──
 def test_dispatch_routes_gemini_cloudcode(monkeypatch):
     from okami.llm import transports

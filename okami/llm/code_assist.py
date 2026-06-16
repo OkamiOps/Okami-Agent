@@ -153,10 +153,101 @@ def code_assist_complete(pc, messages: list[dict], model: str | None, overrides:
                       usage=normalize_usage(rd.get("usageMetadata"), transport="gemini_native"))
 
 
+# ----------------------------------------------------------------- OAuth: troca/refresh + credencial
+def credentials_path():
+    """Caminho da credencial Google (mesmo do `okami gemini`)."""
+    from okami.home import okami_home
+    return okami_home() / "auth" / "google_oauth.json"
+
+
+def _post_form(url: str, form: dict) -> dict:
+    """POST application/x-www-form-urlencoded ao endpoint OAuth (real; injetável nos callers)."""
+    import json
+    import urllib.parse
+    import urllib.request
+    data = urllib.parse.urlencode(form).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST",  # noqa: S310 — endpoint OAuth fixo do Google
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
+        return json.loads(r.read().decode("utf-8"))
+
+
+def exchange_code(code: str, verifier: str, *, redirect_uri: str,
+                  client_id: str = DEFAULT_CLIENT_ID, _post=None) -> dict:
+    """Troca o authorization code por tokens (grant_type=authorization_code + PKCE verifier)."""
+    post = _post or _post_form
+    return post(TOKEN_ENDPOINT, {
+        "grant_type": "authorization_code",
+        "code": code,
+        "code_verifier": verifier,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+    })
+
+
+def refresh_access_token(refresh_token: str, *, _post=None, client_id: str = DEFAULT_CLIENT_ID) -> dict:
+    """Renova o access token a partir do refresh_token (grant_type=refresh_token)."""
+    post = _post or _post_form
+    return post(TOKEN_ENDPOINT, {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+    })
+
+
+def save_credentials(data: dict) -> None:
+    """Persiste a credencial Google em disco com 0600 (escrita atômica)."""
+    import json
+    import os
+    p = credentials_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, p)
+    os.chmod(p, 0o600)
+
+
+def load_credentials() -> dict | None:
+    """Lê a credencial do disco (ou None se ausente/ilegível)."""
+    import json
+    p = credentials_path()
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _now() -> float:
+    import time
+    return time.time()
+
+
 def _get_access_token(pc) -> str:
     """Lê/renova o access token da credencial Google em disco. Sem credencial → RuntimeError claro."""
-    raise RuntimeError("sem credencial Google Code Assist — rode `okami gemini login` "
-                       "(ou configure providers.<nome>.transport: gemini_cloudcode após o login).")
+    creds = load_credentials()
+    if not creds or not (creds.get("access_token") or creds.get("refresh_token")):
+        raise RuntimeError("sem credencial Google Code Assist — rode `okami gemini login` "
+                           "(ou configure providers.<nome>.transport: gemini_cloudcode após o login).")
+    expires_at = float(creds.get("expires_at") or 0)
+    if creds.get("access_token") and expires_at - 60 > _now():    # ainda válido (skew de 60s)
+        return creds["access_token"]
+    refresh = creds.get("refresh_token")
+    if not refresh:
+        raise RuntimeError("credencial Google sem refresh_token — rode `okami gemini login` de novo.")
+    tok = refresh_access_token(refresh)
+    access = tok.get("access_token", "")
+    if not access:
+        raise RuntimeError("falha ao renovar a credencial Google — rode `okami gemini login` de novo.")
+    new = dict(creds)
+    new["access_token"] = access
+    new["expires_at"] = _now() + float(tok.get("expires_in") or 3600)
+    if tok.get("refresh_token"):                              # Google às vezes rotaciona o refresh
+        new["refresh_token"] = tok["refresh_token"]
+    save_credentials(new)
+    return access
 
 
 __all__ = ["CODE_ASSIST_ENDPOINT", "AUTH_ENDPOINT", "TOKEN_ENDPOINT", "DEFAULT_CLIENT_ID", "OAUTH_SCOPES",

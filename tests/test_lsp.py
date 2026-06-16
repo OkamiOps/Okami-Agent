@@ -178,3 +178,11 @@ def test_cli_lsp_status_json():
     assert res.exit_code == 0
     data = json.loads(res.stdout)
     assert any(s["id"] == "pyright" for s in data)
+
+
+# ── BUG: truncate com limit < len(marker) produzia fatia NEGATIVA (saída MAIOR que o original) ──
+def test_truncate_guards_tiny_limit():
+    from okami.lsp.reporter import truncate
+    out = truncate("x" * 100, limit=5)               # limit < len(marker)
+    assert len(out) < 30 and "truncado" in out        # devolve só o marcador, não explode
+    assert truncate("curto", limit=999) == "curto"    # menor que o limite → intacto

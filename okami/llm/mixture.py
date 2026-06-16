@@ -32,8 +32,10 @@ _MAX_REFERENCES = 4         # teto de providers de referência (custo/latência)
 
 
 def construct_aggregator_prompt(system_prompt: str, responses: list[str]) -> str:
-    """System final do aggregator: o prompt-base + as respostas enumeradas (1., 2., …). Pura."""
-    body = "\n".join(f"{i + 1}. {r}" for i, r in enumerate(responses))
+    """System final do aggregator: o prompt-base + as respostas enumeradas, cada uma EMBRULHADA como DADO
+    não-confiável (um provider comprometido/jailbroken não injeta instrução no system do aggregator). Pura."""
+    from okami.core.tools.base import untrusted_wrap
+    body = "\n".join(f"{i + 1}.\n{untrusted_wrap('mixture-ref', r)}" for i, r in enumerate(responses))
     return f"{system_prompt}\n\n{body}"
 
 
@@ -72,7 +74,7 @@ def run_mixture(cfg, prompt: str, *, reference_providers: list[str] | None = Non
         return prov.complete_messages(cfg, messages, provider=provider)
 
     complete = _complete or _default_complete
-    used = {"reference_providers": refs, "aggregator": agg}
+    used = {"reference_providers": refs, "aggregator": agg, "total_calls": len(refs) + 1}
     if not refs:
         return {"success": False, "response": "Mixture indisponível: nenhum provider de referência configurado.",
                 "models_used": used, "errors": ["sem providers"]}

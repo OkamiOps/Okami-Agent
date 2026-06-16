@@ -50,6 +50,8 @@ def truncate(s: str, *, limit: int = MAX_TOTAL_CHARS) -> str:
     if len(s) <= limit:
         return s
     marker = "\n…[truncado]"
+    if limit <= len(marker):                         # limit minúsculo → só o marcador (evita fatia negativa)
+        return marker
     return s[: limit - len(marker)] + marker
 
 
