@@ -61,6 +61,25 @@ REGISTRY: dict[str, ChannelSpec] = {
     "qqbot": ChannelSpec("qqbot", "qqbot", "okami.channels.regional", "QQBotChannel",
                          ("token", "channel_id"),
                          hint="Você está no QQ (texto): mensagem curta e direta."),
+    # Mensageria global/aberta (#19) — OUTBOUND (notificação): o agente manda mensagem.
+    "whatsapp": ChannelSpec("whatsapp", "whatsapp", "okami.channels.messaging", "WhatsAppChannel",
+                            ("token", "phone_id", "channel_id"),
+                            hint="Você está no WhatsApp (texto): sem markdown; mensagem curta e clara."),
+    "signal": ChannelSpec("signal", "signal", "okami.channels.messaging", "SignalChannel",
+                          ("api_url", "number", "channel_id"),
+                          hint="Você está no Signal (texto): sem markdown; objetivo."),
+    "matrix": ChannelSpec("matrix", "matrix", "okami.channels.messaging", "MatrixChannel",
+                          ("homeserver", "token", "channel_id"),
+                          hint="Você está no Matrix (markdown leve ok): conciso."),
+    "sms": ChannelSpec("sms", "sms", "okami.channels.messaging", "SMSChannel",
+                       ("api_url", "from_number", "channel_id"),
+                       hint="Você está no SMS (texto puro, curto): uma ou duas frases, sem markdown."),
+    "bluebubbles": ChannelSpec("bluebubbles", "bluebubbles", "okami.channels.messaging", "BlueBubblesChannel",
+                               ("server_url", "password", "channel_id"),
+                               hint="Você está no iMessage (texto): natural e curto."),
+    "weixin": ChannelSpec("weixin", "weixin", "okami.channels.messaging", "WeixinChannel",
+                          ("access_token", "channel_id"),
+                          hint="Você está no WeChat (texto): conciso, sem markdown rico."),
 }
 
 # Telegram em GRUPO é a mesma plataforma (superfície 'group') → herda o hint do telegram.
