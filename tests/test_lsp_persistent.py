@@ -68,3 +68,51 @@ def test_pool_off_outside_git(tmp_path, monkeypatch):
     p = _pool.LspPool()                                            # tmp_path SEM .git
     assert p.diagnose_path(tmp_path, "a.py", "BUG_SENTINEL") == [] # gateado off → não sobe daemon
     assert p.live_count() == 0
+
+
+# ── G5: lazy_deps p/ pyright + okami lsp install + delta multi-linguagem no write ──
+def test_lazy_deps_has_pyright():
+    from okami.core.lazy_deps import LAZY_DEPS
+    assert "lsp.pyright" in LAZY_DEPS
+
+
+def test_cli_lsp_install_pyright_uses_lazy_deps(monkeypatch):
+    from typer.testing import CliRunner
+
+    from okami.cli import app
+    from okami.core import lazy_deps
+    calls = []
+    monkeypatch.setattr(lazy_deps, "ensure", lambda feat, **k: calls.append(feat))
+    res = CliRunner().invoke(app, ["lsp", "install", "pyright"])
+    assert res.exit_code == 0 and "lsp.pyright" in calls
+
+
+def test_cli_lsp_install_non_pip_prints_hint():
+    from typer.testing import CliRunner
+
+    from okami.cli import app
+    res = CliRunner().invoke(app, ["lsp", "install", "rust-analyzer"])
+    assert res.exit_code == 0 and "rustup" in res.stdout.lower()
+
+
+def test_multi_lang_delta_reports_new_error(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from okami.lsp import session as _sess
+    from okami.lsp.pool import LspPool
+    (tmp_path / ".git").mkdir()
+    fake = SimpleNamespace(id="mock-go", binary=sys.executable, args=(_MOCK,), extensions=(".go",),
+                           languages=("go",))
+    monkeypatch.setattr("okami.lsp.pool.server_for_path", lambda p: fake if p.endswith(".go") else None)
+    monkeypatch.setattr("okami.lsp.pool.binary_available", lambda s: True)
+    monkeypatch.setattr(_sess, "server_for_path", lambda p: fake if p.endswith(".go") else None)
+    pool = LspPool()
+    try:
+        # before limpo, after com BUG_SENTINEL → erro NOVO reportado
+        out = _sess.multi_lang_delta(tmp_path, "main.go", "package main", "BUG_SENTINEL", _pool=pool)
+        assert "main.go" in out and "mock-go" in out
+        # before já tinha o erro → não nagueia
+        out2 = _sess.multi_lang_delta(tmp_path, "main.go", "BUG_SENTINEL", "BUG_SENTINEL outra", _pool=pool)
+        assert out2 == ""
+    finally:
+        pool.shutdown()

@@ -87,6 +87,29 @@ def lsp_probe(
     console.print(block or "[dim]sem erros.[/dim]")
 
 
+@lsp_app.command("install", help=_tr("cli.lsp.install", _default="Install a language server's binary if it has a PyPI wrapper (e.g. pyright), else print the install hint."))
+def lsp_install(
+    server_id: str = typer.Argument(..., help=_tr("cli.lsp.install.id", _default="Server id (see `okami lsp list`).")),
+) -> None:
+    """Instala o binário de um language server quando há wrapper no PyPI (pyright); senão mostra a dica."""
+    from okami.lsp.servers import server_by_id
+    s = server_by_id(server_id)
+    if s is None:
+        console.print(f"[red]servidor desconhecido:[/red] {server_id} [dim](veja `okami lsp list`)[/dim]")
+        raise typer.Exit(1)
+    feature = f"lsp.{s.id}"
+    from okami.core import lazy_deps
+    if feature in lazy_deps.LAZY_DEPS:
+        try:
+            lazy_deps.ensure(feature, prompt=False)
+            console.print(f"[green]✓ {s.id} instalado[/green] [dim](via PyPI)[/dim]")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[yellow]não instalou {s.id} automaticamente ({e})[/yellow] [dim]→ {s.install_hint}[/dim]")
+            raise typer.Exit(1) from e
+        return
+    console.print(f"[yellow]{s.id} não tem wrapper no PyPI[/yellow] — instale manual: [dim]{s.install_hint}[/dim]")
+
+
 @lsp_app.command("which", help=_tr("cli.lsp.which", _default="Print the resolved binary path for a language server (okami lsp which <id>)."))
 def lsp_which(
     server_id: str = typer.Argument(..., help=_tr("cli.lsp.which.id", _default="Server id (see `okami lsp list`).")),

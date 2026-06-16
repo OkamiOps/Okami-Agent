@@ -17,6 +17,16 @@ def _as_int(v) -> int | None:
         return None
 
 
+def _multi_lang_delta(workspace, rel, before, after) -> str:
+    """#19: diagnostics semânticos de OUTRAS linguagens (não-.py) via o LSP persistente — fail-open total
+    (sem o subsistema / qualquer erro → "")."""
+    try:
+        from okami.lsp.session import multi_lang_delta
+        return multi_lang_delta(workspace, rel, before, after)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _first_changed_line(text: str, old: str, new: str) -> int:
     """Nº (1-based) da 1ª linha que de fato mudou (item 8): linha onde `old` começa + offset da
     1ª divergência dentro do bloco. Sem casar → 1 (fallback inofensivo)."""
@@ -187,8 +197,9 @@ class WriteFile(Tool):
         from okami.core.code_security import security_warn            # #9: padrão perigoso no que o agente grava
         warn = lint_delta(rel, before, content)
         sem = semantic_delta(ctx.workspace, rel, before, content)    # item 16: diagnóstico semântico (pyright)
+        sem2 = _multi_lang_delta(ctx.workspace, rel, before, content)  # #19: outras linguagens (LSP persistente)
         sec = security_warn(rel, content)
-        extra = "".join(f"\n{w}" for w in (warn, sem, sec) if w)
+        extra = "".join(f"\n{w}" for w in (warn, sem, sem2, sec) if w)
         return ToolResult(True, f"escrito {rel} ({n} chars)" + extra, effect=True)
 
 
@@ -275,11 +286,12 @@ class EditFile(Tool):
         from okami.core.code_security import security_warn            # #9: padrão perigoso introduzido
         warn = lint_delta(rel, text, new_text)
         sem = semantic_delta(ctx.workspace, rel, text, new_text)     # item 16: diagnóstico semântico (pyright)
+        sem2 = _multi_lang_delta(ctx.workspace, rel, text, new_text)  # #19: outras linguagens (LSP persistente)
         sec = security_warn(rel, new_text)
         line_no = _first_changed_line(text, old, new)                # item 8: nº da 1ª linha mudada
         diff = _short_diff(text, new_text)                           # item 8: diff unified curto (capado)
         head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'})"
-        extra = "".join(f"\n{w}" for w in (warn, sem, sec) if w)
+        extra = "".join(f"\n{w}" for w in (warn, sem, sem2, sec) if w)
         return ToolResult(True, head + (f"\n{diff}" if diff else "") + extra, effect=True)
 
 

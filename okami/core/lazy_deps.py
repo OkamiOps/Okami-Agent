@@ -40,6 +40,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "image.pillow": ("Pillow>=10.0.0",),
     # janela nativa do dashboard (desktop) — webview do SO, sem Electron
     "desktop.webview": ("pywebview>=5.0",),
+    # language server p/ diagnostics semânticos no write (pyright tem wrapper no PyPI)
+    "lsp.pyright": ("pyright>=1.1.400",),
 }
 
 _SAFE_SPEC = re.compile(
