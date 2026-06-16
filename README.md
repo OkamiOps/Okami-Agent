@@ -15,7 +15,7 @@ or wherever you want.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-2408%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2433%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -29,7 +29,7 @@ or wherever you want.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
 > ### ✨ New in `0.9.0-alpha`
-> A big capability jump — **~94/100 parity** with the state of the art, including **multi-vendor
+> A big capability jump — **~99/100 parity** with the state of the art, including **multi-vendor
 > readiness**. From ~1.7k → **2.4k tests passing**.
 > - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
 >   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
