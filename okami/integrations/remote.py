@@ -106,7 +106,7 @@ class RemoteTarget:
     def run(self, cmd: str, *, timeout: int | None = None, stdin: str | None = None) -> RemoteResult:
         """Roda `cmd` no host remoto. `stdin` (opc) vai pro processo (conteúdo de write não entra no argv).
         Devolve RemoteResult(returncode, output). Nunca levanta."""
-        to = timeout or self.timeout
+        to = timeout if timeout is not None else self.timeout    # 0 é válido (timeout imediato) ≠ None (usa default)
         argv = self.build_argv(cmd)
         try:
             r = self._run_fn(argv, capture_output=True, text=True, timeout=to, env=self._env(), input=stdin)

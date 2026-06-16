@@ -59,7 +59,11 @@ _SHELL_READONLY = {"ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "wh
 # `cat ~/.ssh/id_rsa` escapa via expansão). Bloqueia comando que toca segredo conhecido — defesa em
 # profundidade (yolo/docker liberam). Não é à prova de ofuscação, mas mata o `cat .env`/exfil óbvio.
 _SENSITIVE_PATH = re.compile(
-    r"\.env\b|\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
+    # `.env` e variantes COM segredo (.env.local/.production/.staging…) ficam barradas; carve-out p/ os que
+    # NÃO carregam segredo: templates públicos (.env.example/.sample/.template/.dist/.defaults) e código-fonte
+    # (.env.js/.ts/… — ex.: `test.env.ts`). Lookahead exclui só esses sufixos; tudo mais após `.env.` continua barrado.
+    r"\.env\b(?!\.(?:example|sample|template|tmpl|dist|defaults|js|ts|mjs|cjs|jsx|tsx)\b)|"
+    r"\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
     r"\.pem\b|\.key\b|/etc/(passwd|shadow|sudoers?)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
     r"secrets?\.(env|json|ya?ml)"
     # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s); NAO o nome solto

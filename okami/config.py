@@ -36,7 +36,9 @@ def set_env_secret(name: str, value: str, *, path: str | None = None) -> Path:
     lines = p.read_text(encoding="utf-8").splitlines() if p.exists() else []
     out, done = [], False
     for ln in lines:
-        if ln.strip().startswith(f"{name}=") or ln.strip().startswith(f"{name} ="):
+        # UPSERT tolerante a espaçamento: compara a CHAVE (lado esquerdo do 1º '=') já stripada, em vez de
+        # startswith("KEY=") — 'KEY_A   =   old' não casava o prefixo e virava linha DUPLICADA.
+        if "=" in ln and ln.split("=", 1)[0].strip() == name:
             out.append(f"{name}={value}")
             done = True
         else:

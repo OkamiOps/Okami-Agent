@@ -32,7 +32,11 @@ _PHONE = re.compile(
 )
 
 # Id numérico longo (>=7 dígitos contíguos) — user-id, chat-id etc. Trocado por hash curto.
-_LONG_ID = re.compile(r"\b\d{7,}\b")
+# Boundary por LETRA/DÍGITO (não \b): \b trata '_' como caractere de palavra, então 'chat_123456789' não
+# era mascarado (id colado a '_' é comum). Já dígitos DENTRO de um token alfanumérico (hash/hex
+# 'abc123456789def') ficam intactos — só mascara a corrida de dígitos que NÃO encosta em letra/dígito
+# (permite '_', espaço, pontuação em volta).
+_LONG_ID = re.compile(r"(?<![A-Za-z0-9])\d{7,}(?![A-Za-z0-9])")
 
 
 def hash_id(x: str) -> str:

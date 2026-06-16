@@ -197,4 +197,4 @@ def format_tokens(n: int) -> str:
         return f"{n / 1000:.1f}K".replace(".0K", "K")
     if n < 1_000_000_000:
         return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
-    return f"{n / 1_000_000_000:.1f}B"
+    return f"{n / 1_000_000_000:.1f}B".replace(".0B", "B")

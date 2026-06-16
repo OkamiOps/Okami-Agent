@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -44,9 +45,19 @@ class TranscriptStore:
 
     def _save_store(self, store: dict) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
-        tmp = self._store_path().with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8", newline="\n")
-        os.replace(tmp, self._store_path())      # rename atômico
+        # tmp ÚNICO por escrita (pid+rand): o nome fixo 'sessions.json.tmp' fazia 2 processos colidirem no
+        # mesmo arquivo → o os.replace do 2º estourava FileNotFoundError (o 1º já tinha movido o tmp).
+        fd, tmp_name = tempfile.mkstemp(dir=str(self.dir), prefix=".sessions-", suffix=".json.tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps(store, ensure_ascii=False))
+            os.replace(tmp_name, self._store_path())      # rename atômico
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def entry(self, chat_id) -> dict:
         return self.load_store().get(str(chat_id), {})
@@ -182,21 +193,25 @@ class TranscriptStore:
     # ----------------------------------------------------------------- maintenance (poda)
     def prune(self, max_sessions: int = 500, max_age_days: float = 30.0) -> int:
         """Estilo OpenClaw session.maintenance: remove sessões velhas/excedentes (store + transcript)."""
-        store = self.load_store()
-        if not store:
-            return 0
-        items = sorted(store.items(), key=lambda kv: kv[1].get("updated_at", 0), reverse=True)
-        cutoff = self._clock() - max_age_days * 86400
-        keep, removed = {}, 0
-        for i, (cid, e) in enumerate(items):
-            if i >= max_sessions or e.get("updated_at", 0) < cutoff:
-                try:
-                    self._tx_path(cid).unlink()
-                except OSError:
-                    pass
-                removed += 1
-            else:
-                keep[cid] = e
-        if removed:
-            self._save_store(keep)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        # read-modify-write sob _FileLock (igual update_entry/add_usage): sem o lock, um prune concorrente
+        # com um update_entry sobrescrevia a gravação do outro (lost update) e/ou colidia no os.replace.
+        with _FileLock(self._store_path()):
+            store = self.load_store()
+            if not store:
+                return 0
+            items = sorted(store.items(), key=lambda kv: kv[1].get("updated_at", 0), reverse=True)
+            cutoff = self._clock() - max_age_days * 86400
+            keep, removed = {}, 0
+            for i, (cid, e) in enumerate(items):
+                if i >= max_sessions or e.get("updated_at", 0) < cutoff:
+                    try:
+                        self._tx_path(cid).unlink()
+                    except OSError:
+                        pass
+                    removed += 1
+                else:
+                    keep[cid] = e
+            if removed:
+                self._save_store(keep)
         return removed

@@ -67,7 +67,12 @@ def parse_skill(path: Path) -> Skill:
     text = path.read_text(encoding="utf-8")
     m = _FRONTMATTER.match(text)
     if m:
-        meta = yaml.safe_load(m.group(1)) or {}
+        try:
+            meta = yaml.safe_load(m.group(1)) or {}
+        except yaml.YAMLError:               # frontmatter malformado NÃO derruba load_skills inteiro
+            meta = {}
+        if not isinstance(meta, dict):       # frontmatter que é escalar/lista (ex.: só "- x") → ignora
+            meta = {}
         body = m.group(2).strip()
     else:
         meta, body = {}, text.strip()

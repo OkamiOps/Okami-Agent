@@ -33,7 +33,7 @@ def _last(history, role: str) -> str:
     for item in reversed(history or []):
         try:
             r, text = item[0], item[1]
-        except (TypeError, IndexError, ValueError):
+        except (TypeError, IndexError, ValueError, KeyError):   # KeyError: item dict ({"role":...}) → item[0] explode
             continue
         if isinstance(r, str) and r.upper() == role:
             return text if isinstance(text, str) else ""
@@ -46,7 +46,7 @@ def _count_turns(history) -> int:
     for item in history or []:
         try:
             r = item[0]
-        except (TypeError, IndexError):
+        except (TypeError, IndexError, KeyError):   # KeyError: item dict → item[0] explode
             continue
         if not isinstance(r, str):
             continue

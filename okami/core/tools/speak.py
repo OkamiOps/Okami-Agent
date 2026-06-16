@@ -45,6 +45,7 @@ class TextToSpeech(Tool):
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         import time as _t
+        import uuid as _uuid
         text = str(args.get("text") or "").strip()
         if not text:
             return ToolResult(False, "text_to_speech exige 'text' não-vazio.")
@@ -55,9 +56,11 @@ class TextToSpeech(Tool):
         tts = make_tts(vcfg)
         if tts is None:
             return ToolResult(False, "TTS não configurado (voice.tts) — não dá p/ falar.")
-        out_dir = Path(ctx.workspace) / ".okami" / "tts"
+        # .resolve(): MEDIA:<path> exige caminho ABSOLUTO (a regex de extract_media não casa relativo) —
+        # se workspace vier relativo, o áudio não chegaria no Telegram. uuid: dois TTS no mesmo ms não colidem.
+        out_dir = Path(ctx.workspace).resolve() / ".okami" / "tts"
         out_dir.mkdir(parents=True, exist_ok=True)
-        raw = out_dir / f"reply_{int(_t.time() * 1000)}.mp3"
+        raw = out_dir / f"reply_{int(_t.time() * 1000)}_{_uuid.uuid4().hex[:8]}.mp3"
         try:
             tts.synthesize(text[:3000], raw)
         except Exception as e:  # noqa: BLE001

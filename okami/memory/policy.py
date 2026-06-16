@@ -33,7 +33,7 @@ _SPECIFIC = {PREFERENCE, DECISION, SKILL, ERROR, TEMP,
 # "decid" casa "decidimos", "falh"→"falhou", etc. (trailing \b quebraria o stem matching).
 _TEMP = re.compile(r"\b(?:por (?:agora|enquanto|ora)|provis[óo]ri|tempor[áa]ri|nesta sess[ãa]o|nesse chat|"
                    r"s[óo] (?:hoje|agora)|for now|temporar|just (?:for )?now|this session|"
-                   r"esquec[ae]? depois|ignor[ae]? depois)", re.I)
+                   r"esquec[aei]? depois|ignor[ae]? depois)", re.I)  # esqueci/esquece/esqueça depois
 _DECISION = re.compile(r"\b(?:decid|vamos (?:usar|adotar|seguir|fazer)|escolh|optei|defini|"
                        r"ficou (?:decidido|definido)|a decis[ãa]o|we (?:decided|chose|will use)|"
                        r"let.?s use|stick with|go with)", re.I)
@@ -59,7 +59,7 @@ _ENV_FAILURE = re.compile(
 _NEGATIVE_TOOL = re.compile(
     r"\b(?:tool|ferramenta|browser|navegador|playwright|docker|mcp|sandbox|run_shell|"
     r"recurso|feature|comando|command)\b[^.\n]{0,40}"
-    r"(?:n[ãa]o funciona|doesn.?t work|don.?t work|is broken|est[áa] quebrad|"
+    r"(?:n[ãa]o funciona|doesn.?t work|don.?t work|is broken|(?:[ée]|est[áa]) quebrad|"
     r"n[ãa]o (?:consigo|d[áa] pra) usar|unavailable|indispon[íi]ve|not supported|n[ãa]o suporta)", re.I)
 
 
