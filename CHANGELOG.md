@@ -38,6 +38,16 @@ corrigidos com TDD. **2.468 testes passando** · ruff/bandit-HIGH/secret-scan li
 - `summarize_by_vendor` não cria mais bucket vazio com `served_by` malformado.
 - `serve_dashboard` recusa meia-config de TLS (footgun de "achar que está sob TLS").
 
+### 🖥 Revisão TUI/terminal/CLI (3 subagentes: CLI · slash-registry · TUI/REPL)
+- **gateway**: comando chat-only (`/skin /mouse /replay /copy /details /agents /exit`) digitado num
+  canal remoto (Telegram/REST) **caía como mensagem pro modelo**; agora responde "só funciona no
+  terminal" e não inicia turno (checa `CommandDef.scope`).
+- **TUI**: `/replay` não tinha handler (ia pro agente) → `_cmd_replay` (paridade com o REPL);
+  `on_input_submitted` crashava se `_cmdmenu()` era None no teardown → guard; `_tokbuf` (streaming)
+  vazava token parcial entre turnos → zerado no fim do turno.
+- **comando faltante**: `okami sessions [list|show|export]` — paridade scriptável com o `/sessions`
+  do chat (`session_summaries` puro + sub-Typer read-only).
+
 ## [0.9.0-alpha] — 2026-06-16
 
 Salto grande de capacidade. **~100/100 de paridade FUNCIONAL** com o estado-da-arte
