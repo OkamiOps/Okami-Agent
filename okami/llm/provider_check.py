@@ -92,7 +92,8 @@ def live_check_transport(transport: str, *, pc=None, _caller=None) -> dict:
         rep["ok"] = bool(text.strip())
         rep["text"] = text[:80]
     except Exception as e:  # noqa: BLE001 — erro real (403/quota/rede) → reporta, não derruba a CLI
-        rep["error"] = str(e)[:200]
+        from okami.core.redact import redact            # erro do vendor pode embutir a credencial → redige
+        rep["error"] = redact(str(e))[:200]
     return rep
 
 

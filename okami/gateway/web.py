@@ -221,6 +221,8 @@ def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provide
     from urllib.parse import parse_qs, urlparse
     if public_bind_needs_token(host, token):
         raise ValueError(f"bind público em {host} SEM token é recusado — passe --token (ou bind em localhost).")
+    if bool(certfile) != bool(keyfile):                 # meia-config de TLS serviria HTTP em silêncio (footgun)
+        raise ValueError("TLS exige certfile E keyfile juntos (passe ambos --tls-cert e --tls-key, ou nenhum).")
     provs = dict(providers or {})
     if status_provider and "status" not in provs:
         provs["status"] = status_provider

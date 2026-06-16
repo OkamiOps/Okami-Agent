@@ -74,7 +74,10 @@ def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=Non
             if delta:
                 chunks.append(delta)
                 if on_token:
-                    on_token(delta)
+                    try:
+                        on_token(delta)
+                    except Exception:  # noqa: BLE001 — DISPLAY é best-effort: um erro na TUI/edição NÃO
+                        pass            # pode truncar a saída do modelo nem mascarar como falha de provider
     except Exception:  # noqa: BLE001 — stream caiu (antes ou no meio)
         if chunks:                                   # já streamou parte → entrega o que veio (não duplica)
             return Completion(text="".join(chunks), provider=getattr(cfg.provider(provider), "name", "") if cfg else "",

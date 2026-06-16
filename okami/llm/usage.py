@@ -200,7 +200,7 @@ def summarize_by_vendor(store: dict) -> dict:
         if not (isinstance(e, dict) and e.get("usage")):
             continue
         served = str(e.get("served_by") or "")
-        vendor = served.split("/", 1)[0] if served else "—"
+        vendor = (served.split("/", 1)[0] if served else "") or "—"   # served_by "/m" → "" → "—"
         by[vendor] = by.get(vendor, CanonicalUsage()) + CanonicalUsage.from_dict(e["usage"])
     return by
 
