@@ -28,6 +28,32 @@ def test_discover_ignores_bad_plugin(tmp_path):
     assert discover_plugins([tmp_path], entry_points=()) == []               # ignora, não crasha
 
 
+def test_plugin_hooks_execute_and_can_veto(tmp_path):
+    from okami.automation.hooks import HookManager
+    # plugin com um hook before_tool que VETA (exit 1)
+    hookdir = tmp_path / "plugins" / "guard" / "hooks" / "before_tool"
+    hookdir.mkdir(parents=True)
+    (tmp_path / "plugins" / "guard" / "plugin.yaml").write_text("name: guard\nhooks: [before_tool]\n", encoding="utf-8")
+    veto = hookdir / "veto.sh"
+    veto.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    veto.chmod(0o755)
+    hm = HookManager(root=str(tmp_path))
+    assert hm.fire("before_tool", {"tool": "run_shell"}) is False    # hook de PLUGIN vetou
+    assert hm.events().get("before_tool", 0) >= 1                     # contado em events()
+
+
+def test_plugin_after_hook_observes_not_vetoes(tmp_path):
+    from okami.automation.hooks import HookManager
+    hookdir = tmp_path / "plugins" / "obs" / "hooks" / "after_tool"
+    hookdir.mkdir(parents=True)
+    (tmp_path / "plugins" / "obs" / "plugin.yaml").write_text("name: obs\n", encoding="utf-8")
+    s = hookdir / "log.sh"
+    s.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")    # after_* não bloqueia mesmo com exit≠0
+    s.chmod(0o755)
+    hm = HookManager(root=str(tmp_path))
+    assert hm.fire("after_tool", {}) is True
+
+
 # ── browser supervisor: CDP events → snapshot + política de diálogo ──
 def test_supervisor_tracks_dialog():
     from okami.integrations.browser_supervisor import BrowserSupervisor

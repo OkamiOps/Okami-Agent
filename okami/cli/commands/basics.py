@@ -414,13 +414,15 @@ def blueprint(
     raise typer.Exit(2)
 
 
-@app.command(help=_tr("cli.swarm", _default="Print a worker→verifier→synthesizer swarm plan for a goal."))
+@app.command(help=_tr("cli.swarm", _default="Plan (or run) a worker→verifier→synthesizer swarm for a goal."))
 def swarm(
     goal: str = typer.Argument(..., help=_tr("cli.swarm.goal", _default="The goal to farm out to specialists.")),
     worker: list[str] = typer.Option(None, "--worker", help=_tr("cli.swarm.worker", _default="title:body of a worker (repeatable).")),
+    run: bool = typer.Option(False, "--run", help=_tr("cli.swarm.run", _default="Actually execute the swarm (spawn workers→verifier→synthesizer).")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
-    """#12: monta o plano de enxame (workers paralelos → verificador → sintetizador) p/ um objetivo."""
-    from okami.automation.swarm import build_swarm_plan
+    """#12/#14: monta — e com --run EXECUTA — o enxame (workers → verificador → sintetizador)."""
+    from okami.automation.swarm import build_swarm_plan, run_swarm
     workers = []
     for w in (worker or []):
         title, _, body = w.partition(":")
@@ -428,11 +430,24 @@ def swarm(
     if not workers:
         workers = [{"title": "pesquisa", "body": "investigue a fundo"},
                    {"title": "revisão", "body": "valide e critique"}]
-    plan = build_swarm_plan(goal, workers)
-    console.print(f"[bold]Swarm:[/bold] {plan['goal']} [dim](blackboard {plan['blackboard']})[/dim]")
-    for i, w in enumerate(plan["workers"], 1):
-        console.print(f"  worker {i} [{w['title']}]: {w['prompt'].splitlines()[2][:80]}")
-    console.print("  verificador → sintetizador (delegue via spawn/run_task)")
+    if not run:
+        plan = build_swarm_plan(goal, workers)
+        console.print(f"[bold]Swarm:[/bold] {plan['goal']} [dim](blackboard {plan['blackboard']})[/dim]")
+        for i, w in enumerate(plan["workers"], 1):
+            console.print(f"  worker {i} [{w['title']}]: {w['prompt'].splitlines()[2][:80]}")
+        console.print("  verificador → sintetizador [dim](use --run p/ executar)[/dim]")
+        return
+    from okami.cli._shared import _load
+    from okami.runner import run_task
+    cfg = _load()
+
+    def _run_fn(prompt: str) -> str:
+        t = run_task(cfg, workspace, prompt, surface="cli")
+        return t.result or t.reason or ""
+
+    console.print(f"[bold]Executando swarm:[/bold] {goal} …")
+    res = run_swarm(goal, workers, run_fn=_run_fn)
+    console.print(f"\n[bold green]Síntese:[/bold green]\n{res['synthesis']}")
 
 
 @app.command(help=_tr("cli.deps", _default="Manage optional backends (lazy deps): okami deps list | install <feature>."))

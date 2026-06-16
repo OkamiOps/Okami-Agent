@@ -74,4 +74,34 @@ def blackboard_read(path) -> list[dict]:
     return out
 
 
-__all__ = ["build_swarm_plan", "blackboard_append", "blackboard_read"]
+def run_swarm(goal: str, workers: list[dict], *, run_fn, blackboard: str = ".okami/swarm.json") -> dict:
+    """ORQUESTRA o plano: roda cada worker (via `run_fn(prompt) -> texto`), escreve o achado no
+    blackboard, roda o verificador, depois o sintetizador. `run_fn` é injetável (= um wrapper de
+    run_task/spawn). Worker que explode é ISOLADO (não derruba o swarm). Devolve {workers, verdict, synthesis}.
+
+    Sequencial por padrão (blackboard compartilhado + isolamento simples); paralelizar é trocar o laço
+    por spawn concorrente quando o run_fn for thread-safe."""
+    plan = build_swarm_plan(goal, workers, blackboard=blackboard)
+    bb = plan["blackboard"]
+    results = []
+    for w in plan["workers"]:
+        try:
+            out = run_fn(w["prompt"])
+        except Exception as e:  # noqa: BLE001 — worker isolado
+            out = f"[worker falhou: {e}]"
+        results.append({"title": w["title"], "output": out})
+        blackboard_append(bb, f"worker:{w['title']}", {"output": out})
+    try:
+        verdict = run_fn(plan["verifier"]["prompt"])
+    except Exception as e:  # noqa: BLE001
+        verdict = f"[verificador falhou: {e}]"
+    blackboard_append(bb, "verifier", {"verdict": verdict})
+    try:
+        synthesis = run_fn(plan["synthesizer"]["prompt"])
+    except Exception as e:  # noqa: BLE001
+        synthesis = f"[sintetizador falhou: {e}]"
+    blackboard_append(bb, "synthesizer", {"synthesis": synthesis})
+    return {"workers": results, "verdict": verdict, "synthesis": synthesis}
+
+
+__all__ = ["build_swarm_plan", "blackboard_append", "blackboard_read", "run_swarm"]

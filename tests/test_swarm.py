@@ -40,3 +40,42 @@ def test_blackboard_roundtrip(tmp_path):
 def test_blackboard_read_missing_is_empty(tmp_path):
     from okami.automation.swarm import blackboard_read
     assert blackboard_read(tmp_path / "nao-existe.json") == []
+
+
+# ── orquestrador: executa o plano (workers → verificador → sintetizador) ──
+def test_run_swarm_executes_topology(tmp_path):
+    from okami.automation.swarm import run_swarm
+    calls = []
+
+    def fake_run(prompt):
+        calls.append(prompt)
+        if "SINTETIZADOR" in prompt:
+            return "ENTREGA FINAL consolidada"
+        if "VERIFICADOR" in prompt:
+            return "veredito: ok"
+        return f"achado de {prompt.splitlines()[2][:20]}"
+
+    bb = tmp_path / "swarm.json"
+    result = run_swarm("pesquisar X", [{"title": "a", "body": "x"}, {"title": "b", "body": "y"}],
+                       run_fn=fake_run, blackboard=str(bb))
+    assert result["synthesis"] == "ENTREGA FINAL consolidada"
+    assert len(result["workers"]) == 2                    # 2 workers executaram
+    # ordem: workers, depois verificador, depois sintetizador
+    assert calls[-1].count("SINTETIZADOR") == 1 and "VERIFICADOR" in calls[-2]
+    from okami.automation.swarm import blackboard_read
+    authors = {e["author"] for e in blackboard_read(bb)}
+    assert "verifier" in authors and any(a.startswith("worker:") for a in authors)
+
+
+def test_run_swarm_worker_failure_isolated(tmp_path):
+    from okami.automation.swarm import run_swarm
+
+    def flaky(prompt):
+        if "papel (a)" in prompt.lower():
+            raise RuntimeError("worker a morreu")
+        return "ok"
+
+    # um worker que explode NÃO derruba o swarm
+    result = run_swarm("meta", [{"title": "a", "body": "x"}, {"title": "b", "body": "y"}],
+                       run_fn=flaky, blackboard=str(tmp_path / "s.json"))
+    assert result["synthesis"] == "ok"                    # seguiu até o sintetizador

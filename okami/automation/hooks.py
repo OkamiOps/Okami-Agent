@@ -39,7 +39,21 @@ class HookManager:
 
     def _scripts(self, event: str) -> list[Path]:
         d = self.root / "hooks" / event
-        return sorted(p for p in d.glob("*") if p.is_file()) if d.exists() else []
+        scripts = sorted(p for p in d.glob("*") if p.is_file()) if d.exists() else []
+        return [*scripts, *self._plugin_scripts(event)]
+
+    def _plugin_scripts(self, event: str) -> list[Path]:
+        """#14: plugin instalado em `<root>/plugins/<nome>/hooks/<event>/*` contribui scripts de hook —
+        é o que faz a DESCOBERTA de plugin virar EXECUÇÃO no ciclo de vida."""
+        base = self.root / "plugins"
+        if not base.is_dir():
+            return []
+        out: list[Path] = []
+        for plugin in sorted(base.iterdir()):
+            d = plugin / "hooks" / event
+            if d.is_dir():
+                out += sorted(p for p in d.glob("*") if p.is_file())
+        return out
 
     def _run_cmd(self, cmd: str, event: str, payload: dict) -> bool:
         """Roda um hook de shell; devolve True se passou (exit 0), False se vetou (exit≠0).
@@ -88,9 +102,20 @@ class HookManager:
             out[ev] += len(cmds or [])
         for ev, fns in self._handlers.items():
             out[ev] += len(fns)
+        seen_events = set()
         base = self.root / "hooks"
         if base.exists():
             for d in base.iterdir():
                 if d.is_dir():
-                    out[d.name] += len(self._scripts(d.name))
+                    seen_events.add(d.name)
+        plug = self.root / "plugins"                       # #14: eventos vindos de plugin
+        if plug.is_dir():
+            for plugin in plug.iterdir():
+                hd = plugin / "hooks"
+                if hd.is_dir():
+                    for d in hd.iterdir():
+                        if d.is_dir():
+                            seen_events.add(d.name)
+        for ev in seen_events:
+            out[ev] += len(self._scripts(ev))              # _scripts já soma pasta + plugins
         return dict(out)
