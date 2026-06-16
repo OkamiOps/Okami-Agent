@@ -10,12 +10,12 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
-![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
+![version](https://img.shields.io/badge/version-0.9.0--alpha-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-955%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2408%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,7 +24,7 @@ ou onde você quiser.
 
 ---
 
-> 🐺 **Alpha público (`v0.1.0-alpha`).** O Okami está aberto pra você experimentar. A superfície de
+> 🐺 **Alpha público (`v0.9.0-alpha`).** O Okami está aberto pra você experimentar. A superfície de
 > comandos/config ainda pode mudar entre alphas — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md).
 

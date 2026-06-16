@@ -1,6 +1,6 @@
 [project]
 name = "okami-agent"
-version = "0.1.0-alpha"
+version = "0.9.0-alpha"
 description = "Okami Agent — reliable, self-improving coding agent with capability parity across LLMs"
 readme = "README.md"
 license = "MIT"

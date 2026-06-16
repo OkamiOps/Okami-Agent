@@ -4,6 +4,48 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versionamento
 [SemVer](https://semver.org/lang/pt-BR/) (pré-1.0 = a superfície ainda pode mudar entre alphas).
 
+## [0.9.0-alpha] — 2026-06-16
+
+Salto grande de capacidade — **~94/100 de paridade** com o estado-da-arte (NousResearch/hermes-agent),
+incluindo **prontidão multi-vendor**. De ~1.7k → **2.4k testes passando**. 🐺
+
+### Highlights
+- **Prontidão multi-vendor**: transportes NATIVOS Gemini (`generateContent`) e Bedrock (Converse/IAM)
+  — assinatura-Claude hoje, mas pronto p/ trocar de vendor quando precisar. `lazy_deps` instala o SDK
+  só quando ativar.
+- **Segurança endurecida**: biblioteca de threat-patterns scope-aware (injeção/C2/anti-forense/unicode),
+  scan de injeção em arquivo de contexto (AGENTS.md/.cursorrules), scanner de exfil + OSV malware-check
+  em MCP, preflight de CA-bundle SSL, e o **Tirith** (scan de conteúdo pré-exec: homograph/pipe-to-shell).
+- **Resiliência de provider/modelo-local**: recuperação reativa de erro (401-refresh, image-shrink),
+  reparo multi-passe de tool-call JSON, sanitização de schema p/ llama.cpp, stall-vs-truncation.
+- **UX por plataforma**: display-config em tiers, heartbeat de turno longo, panic-hook, detecção de
+  silêncio multi-marcador, merge de álbum de fotos, auto-extração de imagem do texto, TTS.
+- **Automação & extensibilidade**: Blueprints (automação parametrizada), Kanban swarm (workers →
+  verificador → sintetizador), descoberta de plugins (pasta + entry-point pip), browser supervisor (CDP),
+  dashboard web leve + `okami gui`.
+
+### Added
+- Transportes `gemini_native` / `bedrock_native` (tradução OpenAI↔nativo, dispatch, SDK lazy).
+- `okami deps` (lazy-install de backend opcional, allowlist + venv-scoped + opt-out).
+- `okami blueprint` (automação parametrizada → cron) e `okami swarm` (plano de enxame + blackboard).
+- `okami plugins` (descoberta) · `okami gui` (dashboard web leve, zero-dep) · `okami completion`
+  (bash/zsh/fish) · `okami mcp --auth` (OAuth 2.1 + PKCE p/ MCP protegido).
+- `okami logs --level/--component/--since`, `okami doctor --fix` recupera SQLite malformado.
+- Skills: bundles, config no frontmatter, gating por plataforma/ambiente, tiers de confiança.
+- `env_probe`, `text_to_speech`, file.attach por WebSocket.
+
+### Changed
+- Default `Budget.max_context_chars` 24000 → 64000 (o system-prompt cresceu; produção sobrescreve).
+- `_SENSITIVE_PATH` libera `.env.example`/`.env.js` (template/código), mantém `.env`/`.env.local` barrados.
+- PII mascara id colado a `_`; coalesce mescla rajada de fotos do mesmo chat.
+
+### Fixed
+- Caça adversarial de bugs por subagentes: ~36 defeitos reais corrigidos com TDD ao longo de #7-#13
+  (entre eles: `skill_matches_platform` escondendo skill macOS no Mac; injeção markdown-ofuscada;
+  panic-hook que crashava; transporte Gemini perdendo o system prompt; tokens bedrock/gemini zerados).
+
+---
+
 ## [0.1.0-alpha] — 2026-06-05
 
 Primeiro **alpha público**. 🐺

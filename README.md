@@ -10,12 +10,12 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 (skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
 or wherever you want.
 
-![version](https://img.shields.io/badge/version-0.1.0--alpha-ff7527)
+![version](https://img.shields.io/badge/version-0.9.0--alpha-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-955%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2408%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,9 +24,23 @@ or wherever you want.
 
 ---
 
-> 🐺 **Public alpha (`v0.1.0-alpha`).** Okami is open for you to try. The command/config surface may
+> 🐺 **Public alpha (`v0.9.0-alpha`).** Okami is open for you to try. The command/config surface may
 > still change between alphas — before exposing it publicly, run `okami policy check --strict` first.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
+
+> ### ✨ New in `0.9.0-alpha`
+> A big capability jump — **~94/100 parity** with the state of the art, including **multi-vendor
+> readiness**. From ~1.7k → **2.4k tests passing**.
+> - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
+>   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
+> - **Hardened security** — scope-aware threat-pattern library, context-file injection scan, MCP exfil
+>   scanner + OSV malware check, SSL CA-bundle preflight, and **Tirith** pre-exec content scanning.
+> - **Provider/local-model resilience** — reactive error recovery, multi-pass tool-call JSON repair,
+>   llama.cpp schema sanitization, stall-vs-truncation.
+> - **Automation & extensibility** — Blueprints (`okami blueprint`), Kanban swarm (`okami swarm`),
+>   plugin discovery (`okami plugins`), CDP browser supervisor, lightweight web dashboard (`okami gui`).
+>
+> Full notes in the [CHANGELOG](CHANGELOG.md).
 
 `okami chat` opens a **full-screen TUI** in the brand identity (Onyx + Heat Orange / Volt Cyan):
 
