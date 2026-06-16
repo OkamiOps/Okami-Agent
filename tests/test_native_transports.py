@@ -26,14 +26,14 @@ def test_gemini_response_extraction():
     from okami.llm.gemini_native import from_gemini_response
     resp = {"candidates": [{"content": {"parts": [{"text": "resposta "}, {"text": "final"}]},
                             "finishReason": "STOP"}]}
-    text, finish = from_gemini_response(resp)
-    assert text == "resposta final" and finish == "stop"
+    text, finish, tool_calls = from_gemini_response(resp)
+    assert text == "resposta final" and finish == "stop" and tool_calls == []
 
 
 def test_gemini_response_handles_empty():
     from okami.llm.gemini_native import from_gemini_response
-    assert from_gemini_response({"candidates": []}) == ("", "stop")
-    assert from_gemini_response({}) == ("", "stop")
+    assert from_gemini_response({"candidates": []}) == ("", "stop", [])
+    assert from_gemini_response({}) == ("", "stop", [])
 
 
 # ── Bedrock native (Converse) ──
@@ -53,8 +53,52 @@ def test_bedrock_response_extraction():
     from okami.llm.bedrock_native import from_converse_response
     resp = {"output": {"message": {"content": [{"text": "olá "}, {"text": "mundo"}]}},
             "stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}}
-    text, finish = from_converse_response(resp)
-    assert text == "olá mundo" and finish == "stop"
+    text, finish, tool_calls = from_converse_response(resp)
+    assert text == "olá mundo" and finish == "stop" and tool_calls == []
+
+
+# ── tool-calling NATIVO (function calling) — capacidade completa ──
+def test_gemini_tools_declaration():
+    from okami.llm.gemini_native import to_gemini_request
+    tools = [{"type": "function", "function": {"name": "run_shell", "description": "roda",
+              "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}}]
+    req = to_gemini_request([{"role": "user", "content": "liste"}], tools=tools)
+    decls = req["tools"][0]["functionDeclarations"]
+    assert decls[0]["name"] == "run_shell" and "parameters" in decls[0]
+
+
+def test_gemini_extracts_tool_call():
+    from okami.llm.gemini_native import from_gemini_response
+    resp = {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_shell", "args": {"cmd": "ls"}}}]},
+                            "finishReason": "STOP"}]}
+    text, finish, tool_calls = from_gemini_response(resp)
+    assert text == "" and len(tool_calls) == 1
+    assert tool_calls[0]["name"] == "run_shell"
+    import json
+    assert json.loads(tool_calls[0]["arguments"]) == {"cmd": "ls"}
+
+
+def test_bedrock_tools_and_tool_call():
+    from okami.llm.bedrock_native import to_converse_request, from_converse_response
+    tools = [{"type": "function", "function": {"name": "search", "description": "busca",
+              "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}}]
+    req = to_converse_request([{"role": "user", "content": "x"}], tools=tools)
+    assert req["toolConfig"]["tools"][0]["toolSpec"]["name"] == "search"
+    resp = {"output": {"message": {"content": [{"toolUse": {"toolUseId": "t1", "name": "search", "input": {"q": "ok"}}}]}},
+            "stopReason": "tool_use"}
+    _text, finish, tool_calls = from_converse_response(resp)
+    assert finish == "tool_calls" and tool_calls[0]["name"] == "search" and tool_calls[0]["id"] == "t1"
+
+
+def test_gemini_tool_result_message_translates():
+    from okami.llm.gemini_native import to_gemini_request
+    msgs = [{"role": "user", "content": "rode"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "run_shell", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "name": "run_shell", "content": "saída"}]
+    req = to_gemini_request(msgs)
+    # a mensagem de tool vira functionResponse num content
+    flat = str(req["contents"])
+    assert "functionResponse" in flat and "saída" in flat
 
 
 # ── dispatch roteia os transportes nativos ──
