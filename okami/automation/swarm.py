@@ -83,23 +83,21 @@ def run_swarm(goal: str, workers: list[dict], *, run_fn, blackboard: str = ".oka
     por spawn concorrente quando o run_fn for thread-safe."""
     plan = build_swarm_plan(goal, workers, blackboard=blackboard)
     bb = plan["blackboard"]
+    def _call(prompt: str, role: str) -> str:
+        try:
+            out = run_fn(prompt)
+        except Exception as e:  # noqa: BLE001 — etapa isolada
+            return f"[{role} falhou: {e}]"
+        return out if isinstance(out, str) else ("" if out is None else str(out))  # contrato: sempre str
+
     results = []
     for w in plan["workers"]:
-        try:
-            out = run_fn(w["prompt"])
-        except Exception as e:  # noqa: BLE001 — worker isolado
-            out = f"[worker falhou: {e}]"
+        out = _call(w["prompt"], f"worker {w['title']}")
         results.append({"title": w["title"], "output": out})
         blackboard_append(bb, f"worker:{w['title']}", {"output": out})
-    try:
-        verdict = run_fn(plan["verifier"]["prompt"])
-    except Exception as e:  # noqa: BLE001
-        verdict = f"[verificador falhou: {e}]"
+    verdict = _call(plan["verifier"]["prompt"], "verificador")
     blackboard_append(bb, "verifier", {"verdict": verdict})
-    try:
-        synthesis = run_fn(plan["synthesizer"]["prompt"])
-    except Exception as e:  # noqa: BLE001
-        synthesis = f"[sintetizador falhou: {e}]"
+    synthesis = _call(plan["synthesizer"]["prompt"], "sintetizador")
     blackboard_append(bb, "synthesizer", {"synthesis": synthesis})
     return {"workers": results, "verdict": verdict, "synthesis": synthesis}
 

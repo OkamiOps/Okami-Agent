@@ -136,6 +136,8 @@ class Completion:
 def as_completion(x) -> Completion:
     """Tolera o caminho legado/teste: str → Completion(text=str); Completion → ele mesmo."""
     if isinstance(x, Completion):
+        if x.tool_calls is None:                          # contrato: tool_calls é SEMPRE lista (não None)
+            x.tool_calls = []
         return x
     if isinstance(x, str):
         return Completion(text=x, usage=CanonicalUsage(requests=1))

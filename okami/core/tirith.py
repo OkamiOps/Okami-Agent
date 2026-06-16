@@ -127,9 +127,10 @@ def install_tirith(*, version: str, dest, asset_name: str = "", _fetch=_fetch_ur
     except Exception:  # noqa: BLE001
         return None
     expected = ""
+    from pathlib import Path as _P
     for line in checks.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[-1].endswith(asset_name):
+        if len(parts) >= 2 and _P(parts[-1]).name == asset_name:   # basename EXATO (não endswith de path)
             expected = parts[0].lower()
             break
     if not expected or _sha256(blob).lower() != expected:   # SHA-256 OBRIGATÓRIO

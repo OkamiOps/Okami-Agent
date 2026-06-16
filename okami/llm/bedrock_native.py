@@ -22,6 +22,32 @@ def _text_of(content) -> str:
     return ""
 
 
+def _content_blocks(content) -> list[dict]:
+    """Content OpenAI → blocos Converse: {text} + {image:{format,source:{bytes}}} p/ imagem data-uri."""
+    if isinstance(content, str):
+        return [{"text": content}] if content else []
+    if not isinstance(content, list):
+        return []
+    blocks: list[dict] = []
+    for p in content:
+        if not isinstance(p, dict):
+            continue
+        if p.get("type") == "text" and p.get("text"):
+            blocks.append({"text": p["text"]})
+        elif p.get("type") == "image_url":
+            url = (p.get("image_url") or {}).get("url", "")
+            if url.startswith("data:") and ";base64," in url:
+                import base64
+                head, b64 = url.split(";base64,", 1)
+                mime = head[5:] or "image/png"
+                fmt = mime.split("/")[-1].replace("jpg", "jpeg")
+                try:
+                    blocks.append({"image": {"format": fmt, "source": {"bytes": base64.b64decode(b64)}}})
+                except Exception:  # noqa: BLE001
+                    pass
+    return blocks
+
+
 def _tool_to_bedrock(tool: dict) -> dict:
     fn = tool.get("function") or tool
     return {"toolSpec": {"name": fn.get("name", ""), "description": fn.get("description", ""),
@@ -45,10 +71,7 @@ def to_converse_request(messages: list[dict], *, tools: list | None = None) -> d
                 "toolUseId": m.get("tool_call_id") or m.get("name") or "tool",
                 "content": [{"text": _text_of(m.get("content"))}]}}]})
             continue
-        blocks = []
-        text = _text_of(m.get("content"))
-        if text:
-            blocks.append({"text": text})
+        blocks = _content_blocks(m.get("content"))    # texto + imagem (data-uri → bytes)
         for tc in (m.get("tool_calls") or []):        # tool-call do assistant → toolUse
             fn = tc.get("function") or {}
             try:

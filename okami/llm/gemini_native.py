@@ -24,6 +24,29 @@ def _text_of(content) -> str:
     return ""
 
 
+def _content_parts(content) -> list[dict]:
+    """Content OpenAI (str ou lista multimodal) → parts Gemini: text + inlineData/fileData p/ imagem."""
+    if isinstance(content, str):
+        return [{"text": content}] if content else []
+    if not isinstance(content, list):
+        return []
+    parts: list[dict] = []
+    for p in content:
+        if not isinstance(p, dict):
+            continue
+        if p.get("type") == "text" and p.get("text"):
+            parts.append({"text": p["text"]})
+        elif p.get("type") == "image_url":
+            url = (p.get("image_url") or {}).get("url", "")
+            if url.startswith("data:") and ";base64," in url:   # data-uri → inlineData
+                head, b64 = url.split(";base64,", 1)
+                mime = head[5:] or "image/png"
+                parts.append({"inlineData": {"mimeType": mime, "data": b64}})
+            elif url:
+                parts.append({"fileData": {"fileUri": url}})     # http(s) → fileData
+    return parts
+
+
 def _tool_to_gemini(tool: dict) -> dict:
     """Schema OpenAI {type:function, function:{name,description,parameters}} → functionDeclaration Gemini."""
     fn = tool.get("function") or tool
@@ -48,10 +71,7 @@ def to_gemini_request(messages: list[dict], *, tools: list | None = None, genera
                 "name": m.get("name") or m.get("tool_call_id") or "tool",
                 "response": {"result": _text_of(m.get("content"))}}}]})
             continue
-        parts = []
-        text = _text_of(m.get("content"))
-        if text:
-            parts.append({"text": text})
+        parts = _content_parts(m.get("content"))      # texto + imagem (inlineData/fileData)
         for tc in (m.get("tool_calls") or []):        # tool-call do assistant → functionCall
             fn = tc.get("function") or {}
             try:
@@ -103,12 +123,16 @@ def probe_gemini_tier(api_key: str, *, _get=None) -> str:
 
 def gemini_native_complete(pc, messages: list[dict], model: str | None, overrides: dict | None = None) -> Completion:
     """Completa via SDK nativo do Gemini (google-genai). lazy_deps instala se faltar."""
+    key = getattr(pc, "api_key", None) or ""
+    if not key:                                       # erro CLARO antes do SDK (ValueError opaco do genai)
+        raise RuntimeError(f"provider '{getattr(pc, 'name', '?')}' (gemini_native) precisa de api_key — "
+                           "configure GEMINI_API_KEY ou providers.<nome>.api_key")
     from okami.core.lazy_deps import ensure
     ensure("provider.gemini", prompt=False)
     from google import genai  # type: ignore
 
     ov = overrides or {}
-    client = genai.Client(api_key=getattr(pc, "api_key", None) or "")
+    client = genai.Client(api_key=key)
     req = to_gemini_request(messages, tools=ov.get("tools"), generation_config=ov.get("generation_config"))
     mdl = model or pc.model
     config = dict(req.get("generationConfig") or {})

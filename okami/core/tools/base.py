@@ -62,6 +62,7 @@ _SENSITIVE_PATH = re.compile(
     # `.env` e variantes COM segredo (.env.local/.production/.staging…) ficam barradas; carve-out p/ os que
     # NÃO carregam segredo: templates públicos (.env.example/.sample/.template/.dist/.defaults) e código-fonte
     # (.env.js/.ts/… — ex.: `test.env.ts`). Lookahead exclui só esses sufixos; tudo mais após `.env.` continua barrado.
+    r"\.envrc\b|"   # direnv (.envrc) guarda segredo via `export` — barrar igual ao .env
     r"\.env\b(?!\.(?:example|sample|template|tmpl|dist|defaults|js|ts|mjs|cjs|jsx|tsx)\b)|"
     r"\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
     r"\.pem\b|\.key\b|/etc/(passwd|shadow|sudoers?)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
