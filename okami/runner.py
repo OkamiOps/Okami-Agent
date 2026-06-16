@@ -177,6 +177,9 @@ def run_task(
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
     all_skills = skillmod.load_skills(Path(skills_dir))
     safe = [s for s in all_skills if not scan_path(s.path.parent).blocked]
+    import sys as _sys                                  # #11: gating do CATÁLOGO por plataforma/ambiente —
+    safe = skillmod.visible_skills(safe, os_name=_sys.platform, active_environments=None)  # esconde skill de
+    #   OS/runtime irrelevante do índice (load explícito por nome ainda resolve)
     if len(safe) != len(all_skills):
         emit("skills bloqueadas pelo scan: " + ", ".join({s.name for s in all_skills} - {s.name for s in safe}))
     routed = skillmod.route(goal, cfg.contracts, safe)

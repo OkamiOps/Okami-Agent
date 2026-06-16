@@ -61,6 +61,8 @@ class Skill:
     path: Path
     intent_examples: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)      # nomes antigos (migração) → use_skill ainda resolve
+    platforms: list[str] = field(default_factory=list)    # #11: OS permitidos (darwin/linux/win); vazio = todos
+    environments: list[str] = field(default_factory=list)  # #11: runtimes (docker/s6…); vazio = sempre visível
 
 
 def parse_skill(path: Path) -> Skill:
@@ -83,10 +85,66 @@ def parse_skill(path: Path) -> Skill:
         # frases reais de pedido ("amor, analisa o okami-agent de novo") → casam por INTENÇÃO, não literal.
         intent_examples=[str(x) for x in (meta.get("intent_examples") or [])],
         aliases=[str(a) for a in (meta.get("aliases") or [])],
+        platforms=[str(p).lower() for p in (meta.get("platforms") or [])],
+        environments=[str(e).lower() for e in (meta.get("environments") or [])],
         meta=meta,
         body=body,
         path=path,
     )
+
+
+# ───────────────────────────────────────────────────── #11: config no frontmatter + gating + bundles
+def extract_skill_config_vars(skill: Skill) -> list[dict]:
+    """Variáveis de CONFIG declaradas no frontmatter (`metadata.okami.config: [{key,description,default,
+    prompt}]`) — a skill diz o que precisa; o sistema pergunta 1x e persiste em skills.config.<key>."""
+    okami_meta = (skill.meta or {}).get("okami") or {}
+    out = []
+    for item in (okami_meta.get("config") or []):
+        if isinstance(item, dict) and item.get("key"):
+            out.append({"key": str(item["key"]), "description": str(item.get("description", "")),
+                        "default": item.get("default"), "prompt": str(item.get("prompt", "")),
+                        "skill": skill.name})
+    return out
+
+
+def discover_all_skill_config_vars(skills: list[Skill]) -> list[dict]:
+    """Todas as variáveis de config declaradas por todas as skills (dedup por key, 1ª vence)."""
+    seen, out = set(), []
+    for s in skills:
+        for c in extract_skill_config_vars(s):
+            if c["key"] not in seen:
+                seen.add(c["key"])
+                out.append(c)
+    return out
+
+
+def missing_skill_config(skills: list[Skill], config: dict) -> list[dict]:
+    """Variáveis de config declaradas que ainda NÃO estão no `config` (chave ausente)."""
+    cfg = config or {}
+    return [c for c in discover_all_skill_config_vars(skills) if c["key"] not in cfg]
+
+
+def skill_matches_platform(skill: Skill, os_name: str) -> bool:
+    """True se a skill não declara `platforms` OU o OS atual está na lista (darwin/linux/win…)."""
+    if not skill.platforms:
+        return True
+    o = (os_name or "").lower()
+    return any(o.startswith(p) or p.startswith(o) for p in skill.platforms)
+
+
+def skill_matches_environment(skill: Skill, active_environments) -> bool:
+    """True se a skill não declara `environments` OU algum dos declarados está ATIVO agora."""
+    if not skill.environments:
+        return True
+    active = {str(e).lower() for e in (active_environments or set())}
+    return any(e in active for e in skill.environments)
+
+
+def visible_skills(skills: list[Skill], *, os_name: str, active_environments=None) -> list[Skill]:
+    """Filtra o CATÁLOGO (índice/autocomplete) por plataforma+ambiente. Load explícito por nome ainda
+    resolve a skill escondida — isto só evita inflar o índice com skill irrelevante pro runtime."""
+    return [s for s in skills if skill_matches_platform(s, os_name)
+            and skill_matches_environment(s, active_environments)]
 
 
 def _name_is_bad(name: str) -> bool:

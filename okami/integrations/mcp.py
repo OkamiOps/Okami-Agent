@@ -311,8 +311,17 @@ def load_mcp_tools(servers: dict, emit: Callable[[str], None] = lambda m: None):
         try:
             if url:                                  # transporte HTTP/SSE (§12)
                 # resolve ${ENV} nos headers — antes o literal `${TOKEN}` ia cru pro servidor.
-                client = McpHttpClient(resolve_env(url), resolve_env_map(conf.get("headers")),
-                                       conf.get("timeout", 30))
+                _headers = resolve_env_map(conf.get("headers"))
+                if conf.get("auth") == "oauth":      # #11: MCP protegido por OAuth → Bearer do TokenStore
+                    import time as _time
+                    from okami.home import okami_home
+                    from okami.integrations.mcp_oauth import TokenStore, oauth_bearer
+                    bearer = oauth_bearer(name, conf, TokenStore(okami_home() / "mcp" / "oauth"), now=_time.time())
+                    if bearer:
+                        _headers = {**(_headers or {}), "Authorization": f"Bearer {bearer}"}
+                    else:
+                        emit(f"⚠ MCP '{name}': OAuth não autorizado — rode `okami mcp --auth {name}` (PKCE no browser).")
+                client = McpHttpClient(resolve_env(url), _headers, conf.get("timeout", 30))
             else:
                 client = McpStdioClient(
                     conf["command"], conf.get("args"), resolve_env_map(conf.get("env")),

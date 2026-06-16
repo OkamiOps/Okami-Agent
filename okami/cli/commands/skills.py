@@ -157,8 +157,32 @@ def skill(
         console.print(f"[green]✓ fonte confiável adicionada:[/green] {kind}:{prefix} "
                       "[dim](skills dela instalam sem confirmar, se o scan passar)[/dim]")
         return
+    if action == "config":                           # #11: config que as skills declaram no frontmatter
+        from okami import skills as _sk
+        decl = _sk.discover_all_skill_config_vars(_sk.load_skills(skills_dir()))
+        if not decl:
+            console.print("[dim]nenhuma skill declara config (metadata.okami.config).[/dim]")
+            return
+        for c in decl:
+            console.print(f"[bold]{c['key']}[/bold] [dim](skill: {c['skill']})[/dim] — {c['description']}")
+        return
+    if action == "bundle":                           # #11: dispatch de bundle — UM nome carrega N skills
+        from okami import skills as _sk
+        from okami.skills.bundles import bundle_invocation_message, resolve_bundle
+        if not name:
+            from okami.skills.bundles import list_bundles
+            avail = list_bundles(skills_dir() / "bundles")
+            console.print("bundles: " + (", ".join(avail) if avail else "[dim]nenhum[/dim]"))
+            return
+        root = skills_dir()
+        resolved = resolve_bundle(root / "bundles", name, _sk.load_skills(root))
+        if not resolved:
+            console.print(f"[yellow]bundle '{name}' vazio ou inexistente[/yellow] [dim]({root / 'bundles'})[/dim]")
+            raise typer.Exit(1)
+        console.print(bundle_invocation_message(name, resolved))
+        return
     if action != "new":
-        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove | tap")
+        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove | tap | bundle | config")
         raise typer.Exit(2)
     if not name.strip():
         console.print("[red]informe o nome:[/red] okami skill new <nome>")

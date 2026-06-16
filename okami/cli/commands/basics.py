@@ -333,6 +333,19 @@ def doctor(
             console.print("  " + t("doctor.fix.dbs", _default="SQLite DBs: [green]all healthy[/green] ({n})", n=len(dbs)))
 
 
+@app.command(help=_tr("cli.completion", _default="Print a shell-completion snippet (bash/zsh/fish) to source in your shell rc."))
+def completion(
+    shell: str = typer.Argument("bash", help=_tr("cli.completion.shell", _default="Shell: bash, zsh or fish.")),
+) -> None:
+    """#11: tab-completion zero-setup. `okami completion zsh >> ~/.zshrc` (ou source no rc)."""
+    from okami.cli.completion import completion_script
+    snippet = completion_script(shell)
+    if snippet is None:
+        console.print(f"[red]shell não suportado:[/red] {shell} [dim](use bash, zsh ou fish)[/dim]")
+        raise typer.Exit(1)
+    console.print(snippet, end="")
+
+
 @app.command(help=_tr("cli.harden", _default="Apply the HARDENED-STRICT profile (recommended posture for public/GA)."))
 def harden(
     off: bool = typer.Option(False, "--off", help=_tr("cli.harden.off", _default="Turn off strict isolation (back to dev-friendly).")),

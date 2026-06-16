@@ -95,6 +95,8 @@ class ExecuteCode(Tool):
             timer.start()
             out_parts: list[str] = []
             out_len = 0
+            from okami.core.tool_output_limits import output_limit
+            max_out = output_limit(getattr(ctx, "cfg", None), "max_bytes", _MAX_OUTPUT)   # #11 config-driven
             rpc_calls = 0
             try:
                 for line in proc.stdout:                # RPC e prints chegam intercalados, em linha
@@ -107,7 +109,7 @@ class ExecuteCode(Tool):
                         except (BrokenPipeError, OSError):
                             break
                         continue
-                    if out_len < _MAX_OUTPUT:
+                    if out_len < max_out:
                         out_parts.append(line)
                         out_len += len(line)
                 proc.wait()
@@ -117,8 +119,8 @@ class ExecuteCode(Tool):
                     proc.kill()
             stderr = (proc.stderr.read() or "").strip()
         output = "".join(out_parts).rstrip()
-        if out_len >= _MAX_OUTPUT:
-            output += f"\n[… stdout cortado em {_MAX_OUTPUT} chars — imprima MENOS (agregue no script)]"
+        if out_len >= max_out:
+            output += f"\n[… stdout cortado em {max_out} chars — imprima MENOS (agregue no script)]"
         if timed_out.is_set():
             return ToolResult(False, f"execute_code: timeout ({to}s) — script cortado. Saída até aqui:\n"
                               f"{output}", effect=True)

@@ -478,6 +478,9 @@ def service_status() -> None:
 def logs(
     follow: bool = typer.Option(False, "-f", "--follow", help=_tr("cli.logs.follow", _default="Follow the log live (tail -f).")),
     lines: int = typer.Option(200, "-n", "--lines", help=_tr("cli.logs.lines", _default="How many trailing lines to show.")),
+    level: str = typer.Option("", "--level", help=_tr("cli.logs.level", _default="Filter by level (DEBUG/INFO/WARNING/ERROR).")),
+    component: str = typer.Option("", "--component", help=_tr("cli.logs.component", _default="Filter by component (gateway/agent/tools/cron).")),
+    since: str = typer.Option("", "--since", help=_tr("cli.logs.since", _default="Only lines newer than this window (e.g. 1h, 30m, 2d).")),
 ) -> None:
     """Mostra o log do gateway (serviço em ~/.okami/logs/gateway.log, ou o background em .okami/gateway.log)."""
     import time as _t
@@ -491,6 +494,10 @@ def logs(
     console.print(f"[dim]{log}[/dim]")
     with log.open("r", encoding="utf-8", errors="ignore") as f:
         tail = f.readlines()[-max(1, lines):]
+        if level or component or since:                   # #11: filtro multi-eixo
+            import time as _now
+            from okami.cli.log_filter import filter_log_lines
+            tail = filter_log_lines(tail, level=level, component=component, since=since, now=_now.time())
         console.print("".join(tail), end="")
         if not follow:
             return
@@ -654,13 +661,28 @@ def process_clean(
     console.print(f"[dim]{len(removed)} processo(s) {verb}.[/dim]")
 
 
-@app.command("mcp", help=_tr("cli.mcp", _default="List the configured MCP servers and the tools they expose."))
-def mcp_cmd() -> None:
-    """Lista os servidores MCP configurados e as tools que eles expõem."""
+@app.command("mcp", help=_tr("cli.mcp", _default="List MCP servers and their tools; `okami mcp auth <server>` does the OAuth/PKCE login."))
+def mcp_cmd(
+    auth: str = typer.Option("", "--auth", help=_tr("cli.mcp.auth", _default="OAuth-login (PKCE, browser) to an MCP server by name.")),
+) -> None:
+    """Lista os servidores MCP configurados e as tools que eles expõem. `--auth <server>`: login OAuth (#11)."""
     cfg = _load()
     servers = (cfg.mcp or {}).get("servers")
     if not servers:
         console.print("[dim]nenhum servidor MCP em okami.yaml (mcp.servers)[/dim]")
+        return
+    if auth:                                          # #11: login OAuth/PKCE no browser p/ MCP protegido
+        from okami.home import okami_home
+        from okami.integrations.mcp_oauth import TokenStore, authorize_interactive
+        conf = servers.get(auth)
+        if not conf:
+            console.print(f"[red]servidor MCP '{auth}' não está em mcp.servers[/red]")
+            raise typer.Exit(2)
+        console.print(f"abrindo o browser p/ autorizar '{auth}' (OAuth/PKCE)…")
+        ok = authorize_interactive(auth, conf, TokenStore(okami_home() / "mcp" / "oauth"))
+        console.print(f"[green]✓ autorizado:[/green] {auth}" if ok
+                      else f"[yellow]não autorizou {auth}[/yellow] [dim](precisa de mcp.servers.{auth}.oauth: "
+                           "{authorization_endpoint, token_endpoint, client_id})[/dim]")
         return
     from okami.integrations.mcp import load_mcp_tools
 

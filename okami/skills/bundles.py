@@ -58,3 +58,28 @@ def load_bundle(bundles_dir, name: str) -> list[str]:
         if s:
             out.append(s)
     return out
+
+
+def resolve_bundle(bundles_dir, name: str, all_skills: list) -> list:
+    """#11: resolve um bundle p/ os OBJETOS Skill que ele agrupa (na ordem do bundle, dedup). Nome que
+    não casa nenhuma skill carregada é ignorado. É o caller que faltava p/ o dispatch `/bundle`."""
+    want = load_bundle(bundles_dir, name)
+    by_name = {getattr(s, "name", ""): s for s in (all_skills or [])}
+    out, seen = [], set()
+    for n in want:
+        sk = by_name.get(n)
+        if sk is not None and n not in seen:
+            seen.add(n)
+            out.append(sk)
+    return out
+
+
+def bundle_invocation_message(name: str, skills: list) -> str:
+    """Mensagem que CARREGA o bundle: cabeçalho + corpo de cada skill concatenado (estilo Hermes
+    build_bundle_invocation_message). Vai pro contexto como 'siga estas N skills de uma vez'."""
+    header = (f"BUNDLE '{name}' ativado — siga as {len(skills)} skills abaixo em conjunto p/ esta classe "
+              "de trabalho:")
+    parts = [header]
+    for s in skills:
+        parts.append(f"\n### skill: {getattr(s, 'name', '?')}\n{getattr(s, 'body', '')}")
+    return "\n".join(parts)
