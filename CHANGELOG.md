@@ -6,10 +6,11 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [0.9.0-alpha] — 2026-06-16
 
-Salto grande de capacidade. **~99/100 de paridade FUNCIONAL** com o estado-da-arte
-(NousResearch/hermes-agent), incluindo **prontidão multi-vendor**. De ~1.7k → **2.433 testes passando**.
-~44 defeitos reais caçados por subagentes adversariais e corrigidos com TDD ao longo de 8 rodadas de
-pesquisa (#7–#14). 🐺
+Salto grande de capacidade. **~100/100 de paridade FUNCIONAL** com o estado-da-arte
+(NousResearch/hermes-agent), incluindo **prontidão multi-vendor**. De ~1.7k → **2.447 testes passando**.
+~47 defeitos reais caçados por subagentes adversariais e corrigidos com TDD ao longo de 9 rodadas de
+pesquisa (#7–#15). O restante p/ "100 absoluto" é só validação em TRÁFEGO real dos providers nativos
+(precisa das chaves) — capacidade completa e testada. 🐺
 
 > Nota de método: cada feature abaixo nasceu da comparação arquivo:linha com o Hermes, foi implementada
 > com TDD (RED→GREEN), e o código novo passou por caça de bug adversarial (subagentes paralelos que
@@ -24,6 +25,10 @@ pesquisa (#7–#14). 🐺
 - **Transporte nativo Bedrock** (`bedrock_native`): traduz ↔ Converse API (system separado, content em
   blocos), **toolConfig/toolUse/toolResult**, **imagem** (data-uri → image-block), usa a cadeia de
   credencial AWS IAM (sem API key). SDK `boto3` sob demanda.
+- **Erro nativo classificado**: `errors._status_of` lê o status escondido no `.response` do boto3
+  (ClientError) → ThrottlingException/AccessDenied/ServiceUnavailable etc. roteiam a alavanca certa
+  (rotaciona/back-off/failover). `okami provider check <transport>` faz **self-test de capacidade**
+  (texto + tools + imagem + tool-call) sem rede/chave.
 - **`lazy_deps`** (`okami deps list|install <feature>`): instala backend opcional em runtime (allowlist
   fechada, spec-safe sem URL/path/metachar, venv-scoped via uv→pip, opt-out por
   `security.allow_lazy_installs`). Resolve a fragilidade do extra `[all]` e o bloat.
@@ -68,7 +73,9 @@ pesquisa (#7–#14). 🐺
   (`okami.plugins`); hooks de plugin em `hooks/<event>/*` **EXECUTAM** no ciclo de vida (before_* pode vetar).
 - **Browser supervisor**: listener CDP (diálogos pendentes + árvore de frames/OOPIF) + política de diálogo.
 - **Dashboard web** (`okami gui` / `okami desktop`): app single-file (stdlib, **zero-dep**) com abas
-  Status/Sessões/Config(read-only, só nomes de env)/Logs; `--app` abre em janela app-mode do browser.
+  Status/Sessões/Config/Logs; clique na sessão abre o **transcript**; aba Config edita por **form**
+  (allowlist de chaves não-segredo → `okami.local.yaml` via secure_write); **auth por token**
+  (`--token`, Bearer/`?token=`); `--app` abre em janela app-mode do browser.
 
 ### 🧠 Skills & auto-aprimoramento
 - **Bundles** (`okami skill bundle`): UM nome carrega N skills. **Config no frontmatter**
@@ -89,12 +96,14 @@ pesquisa (#7–#14). 🐺
 - `as_completion`: `tool_calls` é sempre lista (nunca None) — contrato p/ os callers.
 
 ### Fixed
-~44 defeitos reais (subagentes adversariais + TDD). Destaques: `_SENSITIVE_PATH` não barrava `.envrc`
-(direnv); `skill_matches_platform` escondia skill macOS no Mac (sys.platform='darwin'≠'macos');
-injeção ofuscada por markdown escapava o scan; panic-hook crashava com `__str__` ruim; transporte Gemini
-perdia o system prompt (kwarg errado) e descartava imagem; checksum do Tirith casava por sufixo de path;
-`run_swarm` propagava None; race no `sessions.json.tmp`; YAML malformado derrubava `load_skills`;
-`format_tokens(1e9)` dava "1.0B".
+~47 defeitos reais (subagentes adversariais + TDD). Destaques: **XSS** no dashboard (chat_id cru num
+onclick inline; esc não escapava aspas → data-attribute + listener delegado); `_SENSITIVE_PATH` não
+barrava `.envrc` (direnv); `skill_matches_platform` escondia skill macOS no Mac (sys.platform='darwin'≠
+'macos'); injeção ofuscada por markdown escapava o scan; panic-hook crashava com `__str__` ruim;
+transporte Gemini perdia o system prompt (kwarg errado), descartava imagem e mandava data-uri malformado
+como fileData; erro do boto3 mal-classificado (status escondido no `.response`); checksum do Tirith casava
+por sufixo de path; `run_swarm` propagava None; race no `sessions.json.tmp`; YAML malformado derrubava
+`load_skills`; `format_tokens(1e9)` dava "1.0B".
 
 ---
 
