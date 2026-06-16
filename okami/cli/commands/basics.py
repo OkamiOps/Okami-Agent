@@ -345,30 +345,60 @@ def plugins() -> None:
         console.print(f"  [bold]{p.name}[/bold] [dim]({p.source})[/dim] hooks: {', '.join(p.hooks) or '—'}")
 
 
-@app.command(help=_tr("cli.gui", _default="Open the lightweight web dashboard (status) in your browser."))
+@app.command(help=_tr("cli.gui", _default="Open the web dashboard (status/sessions/config/logs) in your browser."))
 def gui(
     port: int = typer.Option(9119, "--port", help=_tr("cli.gui.port", _default="Port for the local dashboard.")),
     no_open: bool = typer.Option(False, "--no-open", help=_tr("cli.gui.no_open", _default="Don't open the browser, just serve.")),
+    app_window: bool = typer.Option(False, "--app", help=_tr("cli.gui.app", _default="Open in an app-mode window (chrome --app) instead of a tab.")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
-    """#12: dashboard web leve (stdlib, zero-dep) — status/sessões no navegador. Localhost, read-only."""
+    """#12/#14: dashboard web (stdlib, zero-dep) — status/sessões/config(read-only)/logs. Localhost."""
     import threading
-    import webbrowser
-    from okami.gateway.web import serve_dashboard
-
-    def _status():
-        return {"agent": "okami", "status": "online", "port": port}
+    from okami.gateway.web import default_providers, serve_dashboard
 
     url = f"http://127.0.0.1:{port}/"
     console.print(f"[green]dashboard em[/green] {url} [dim](Ctrl-C p/ parar)[/dim]")
     if not no_open:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.6, lambda: _open_dashboard(url, app_window)).start()
     try:
-        serve_dashboard(port, status_provider=_status)
+        serve_dashboard(port, providers=default_providers(workspace))
     except KeyboardInterrupt:
         console.print("\n[dim]dashboard parado.[/dim]")
     except OSError as e:
         console.print(f"[red]não subiu ({e})[/red] — porta ocupada? tente --port outro.")
         raise typer.Exit(1) from e
+
+
+def _open_dashboard(url: str, app_window: bool) -> None:
+    """Abre o dashboard: janela app-mode (chrome/edge --app) se pedido e disponível, senão browser normal."""
+    import shutil
+    import subprocess
+    import webbrowser
+    if app_window:
+        for binexe in ("google-chrome", "chromium", "chromium-browser", "microsoft-edge", "brave-browser"):
+            path = shutil.which(binexe)
+            if path:
+                try:
+                    subprocess.Popen([path, f"--app={url}"])  # noqa: S603
+                    return
+                except OSError:
+                    break
+        if shutil.which("open"):                          # macOS: tenta o Chrome app-mode
+            try:
+                subprocess.Popen(["open", "-na", "Google Chrome", "--args", f"--app={url}"])  # noqa: S603,S607
+                return
+            except OSError:
+                pass
+    webbrowser.open(url)
+
+
+@app.command(help=_tr("cli.desktop", _default="Open the dashboard as a desktop app window (alias for `gui --app`)."))
+def desktop(
+    port: int = typer.Option(9119, "--port", help=_tr("cli.desktop.port", _default="Port for the local dashboard.")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+) -> None:
+    """#14: experiência 'desktop' sem Electron — abre o dashboard numa janela app-mode do browser."""
+    gui(port=port, no_open=False, app_window=True, workspace=workspace)
 
 
 @app.command(help=_tr("cli.blueprint", _default="Parameterized automations: okami blueprint list | show <key> | use <key> [slot=val ...]."))

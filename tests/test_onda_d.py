@@ -92,3 +92,37 @@ def test_dashboard_route():
     assert route("/")[0] == 200
     assert route("/healthz") == (200, "text/plain", "ok")
     assert route("/nao-existe")[0] == 404
+
+
+def test_dashboard_serves_app_html():
+    from okami.gateway.web import route
+    code, ctype, body = route("/")
+    assert code == 200 and "text/html" in ctype
+    assert "Okami" in body and "/api/" in body and "fetch(" in body   # app single-file faz fetch das APIs
+
+
+def test_dashboard_api_endpoints_json():
+    import json
+    from okami.gateway.web import route
+    providers = {
+        "status": lambda: {"agent": "dev", "sessions": 2},
+        "sessions": lambda: [{"chat_id": "c1", "turns": 3}],
+        "config": lambda: {"providers": ["claude"], "env_present": ["ANTHROPIC_API_KEY"]},
+        "logs": lambda: ["2026-06-16 INFO up"],
+    }
+    for path, key in [("/api/status", "agent"), ("/api/sessions", None), ("/api/config", "providers"), ("/api/logs", None)]:
+        code, ctype, body = route(path, providers=providers)
+        assert code == 200 and "json" in ctype
+        data = json.loads(body)
+        if key:
+            assert key in data
+    # endpoint sem provider → 200 com payload vazio/seguro, nunca 500
+    assert route("/api/status")[0] == 200
+
+
+def test_dashboard_config_never_leaks_secret_values():
+    from okami.gateway.web import route
+    # o provider de config deve expor NOMES de env, nunca valores — o route não inventa valores
+    providers = {"config": lambda: {"env_present": ["ANTHROPIC_API_KEY"], "providers": ["claude"]}}
+    body = route("/api/config", providers=providers)[2]
+    assert "ANTHROPIC_API_KEY" in body and "sk-" not in body
