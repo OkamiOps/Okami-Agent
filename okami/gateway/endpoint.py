@@ -1348,6 +1348,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         from okami.gateway.streamedit import StreamEditor
         from okami.tui import tool_emoji
         ed = StreamEditor(header=header)
+        tok = {"text": ""}                  # #16: buffer do streaming token-a-token
 
         def _ev(e):
             if base is not None:
@@ -1355,8 +1356,18 @@ class AgentEndpoint(EndpointCommandsMixin):
                     base(e)
                 except Exception:  # noqa: BLE001
                     pass
-            line = ""
             k = e.get("kind")
+            if k == "token":                # streaming: vai mostrando a resposta parcial na msg de status
+                tok["text"] += e.get("text", "")
+                now = _t.monotonic()
+                if ed.due(now):
+                    try:
+                        self.channel.edit_message(chat_id, status_id, (header + "\n" + tok["text"][-3500:]).strip())
+                        ed.mark_sent(now)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return
+            line = ""
             if k == "step":
                 line = f"{tool_emoji(e.get('tool', ''))} {e.get('tool', '')}"
             elif k == "loop":

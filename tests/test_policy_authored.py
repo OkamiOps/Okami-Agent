@@ -34,7 +34,7 @@ def test_load_policy_merges_authored(tmp_path, monkeypatch):
     (tmp_path / "okami.policy.yaml").write_text("providers:\n  allow: [codex]\n", encoding="utf-8")
     policy, source = load_policy()
     assert policy["providers"]["allow"] == ["codex"]
-    assert policy["approvals"]["mode_allow"] == ["manual", "smart"]   # baseline preservada no merge
+    assert policy["approvals"]["mode_allow"] == ["manual", "smart", "strict"]   # baseline preservada no merge
 
 
 def test_provider_allowlist_violation(tmp_path):
@@ -94,6 +94,25 @@ def test_lint_mcp_nested_servers(tmp_path):
 def test_approval_mode_policy(tmp_path):
     f = evaluate(_cfg(approvals={"mode": "yolo"}), DEFAULT_POLICY, base_yaml=tmp_path / "none.yaml")
     assert _levels(f)["policy.approvals"] == "fail"
+
+
+def test_approval_mode_strict_is_accepted(tmp_path):
+    """`strict` é MAIS restritivo que manual (nega o sensível por padrão) → conforme, não reprova.
+
+    Regressão: o allowlist só tinha [manual, smart] e `policy.approvals` reprovava o modo MAIS seguro.
+    """
+    assert "strict" in DEFAULT_POLICY["approvals"]["mode_allow"]
+    # default (dev): strict não reprova a regra de approvals
+    f = evaluate(_cfg(approvals={"mode": "strict"}), DEFAULT_POLICY, base_yaml=tmp_path / "none.yaml")
+    assert "policy.approvals" not in _levels(f)
+    # e na postura de PRODUÇÃO/GA (--strict) o modo strict continua conforme
+    from okami.core.policy import strict_policy
+    g = evaluate(_cfg(approvals={"mode": "strict"}), strict_policy(DEFAULT_POLICY),
+                 base_yaml=tmp_path / "none.yaml")
+    assert "policy.approvals" not in _levels(g)
+    # sem afrouxar: yolo continua reprovando
+    y = evaluate(_cfg(approvals={"mode": "yolo"}), DEFAULT_POLICY, base_yaml=tmp_path / "none.yaml")
+    assert _levels(y)["policy.approvals"] == "fail"
 
 
 def test_strict_overlay_turns_on_production_posture():

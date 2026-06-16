@@ -166,7 +166,9 @@ class Harness:
         clarify=None,                   # hook BLOQUEANTE: pergunta ao dono e devolve a resposta (#8 item 1)
         remote=None,                    # alvo de execução remoto (RemoteTarget) — FS/shell rodam LÁ
         set_remote=None,                # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
+        stream_tokens: bool = False,    # #16: streaming token-a-token → emite eventos 'token' ao gerar
     ):
+        self.stream_tokens = stream_tokens
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
@@ -262,6 +264,16 @@ class Harness:
     def _emit(self, kind: str, **data):
         self.on_event({"kind": kind, **data})
         self.events.emit(kind, **data)      # persiste o timeline (start/step/loop/compact/complete/…)
+
+    def _do_generate(self, messages, schema):
+        """Gera. Com stream_tokens, passa on_token (emite 'token' por delta) — mas tolera generate de 2
+        args (stubs de teste) via TypeError. Sem streaming, chamada de sempre."""
+        if self.stream_tokens:
+            try:
+                return self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t))
+            except TypeError:
+                pass
+        return self.generate(messages, schema)
 
     def _pending_todos(self) -> str:
         """Bloco de reinjeção da CHECKLIST operacional (item 9) — só os itens em aberto. "" se não há
@@ -438,7 +450,7 @@ class Harness:
             else:
                 _g0 = _wt.monotonic()                  # cronômetro da geração → torna o gargalo VISÍVEL
                 try:
-                    out = self.generate(self.messages, self._action_schema)
+                    out = self._do_generate(self.messages, self._action_schema)
                 except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
                     from okami.core.errors import Action as _Act
                     from okami.core.errors import classify_provider
@@ -951,7 +963,7 @@ class Harness:
                 "faltando e por quê (o bloqueio). NUNCA fabrique dado, conteúdo de arquivo, número ou "
                 "resultado de teste que você não produziu — reportar o bloqueio honestamente é melhor que "
                 "inventar. Texto puro, sem json de ação. Esta é a ENTREGA final."})
-            comp = as_completion(self.generate(self.messages, self._action_schema))
+            comp = as_completion(self._do_generate(self.messages, self._action_schema))
             txt = comp.text or ""
             cands = [prose_outside_action(txt), txt]
             act = _action_from_tool_calls(comp.tool_calls) or parse_action(txt)

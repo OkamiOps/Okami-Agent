@@ -6,7 +6,7 @@
 # superfície exposta deve rodar com isolamento real. Veja docs/ARCHITECTURE.md.
 
 approvals:
-  mode_allow: [manual, smart]          # yolo/off reprovam — ação sensível sempre passa por go/no-go
+  mode_allow: [manual, smart, strict]  # strict = nega sensível por padrão (+ seguro); yolo/off reprovam
 
 providers:
   allow: [lmstudio, codex, claude, minimax, mimo]   # só os providers homologados do projeto

@@ -157,9 +157,17 @@ def run_task(
     from okami.llm.usage import CanonicalUsage
     _acc = {"usage": CanonicalUsage(), "served": ""}   # tokens + quem respondeu (custo §A5 / served-by §E5)
 
-    def generate(messages, schema=None):
-        res = prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                        response_schema=schema, **eff)
+    from okami.llm.streaming import streaming_enabled as _stream_on
+    _streaming = _stream_on(cfg)
+
+    def generate(messages, schema=None, on_token=None):
+        if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
+            from okami.llm.streaming import streaming_generate
+            res = streaming_generate(cfg, messages, provider=provider, model=model,
+                                     response_schema=schema, on_token=on_token, **eff)
+        else:
+            res = prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
+                                            response_schema=schema, **eff)
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
             _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
@@ -270,7 +278,7 @@ def run_task(
     from okami.core.sandbox import effective_sandbox
     sandbox = effective_sandbox(cfg.sandbox, surface)   # #P1.1: superfície exposta endurece por padrão
     _hkw = dict(
-        budget=budget,
+        budget=budget, stream_tokens=_streaming,
         on_event=on_event, escalate=escalate, system_extra=system_extra,
         memory=mem, core_block=core_block, approve=approve,
         skills=skills_map, registry=registry, cancel=cancel,

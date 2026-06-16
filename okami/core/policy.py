@@ -16,7 +16,7 @@ from okami.core.lint import Finding, lint_posture, network_exposed
 
 # Baseline segura: o que vale quando não há okami.policy.yaml autorado.
 DEFAULT_POLICY: dict = {
-    "approvals": {"mode_allow": ["manual", "smart"]},      # yolo/off não-conformes por padrão
+    "approvals": {"mode_allow": ["manual", "smart", "strict"]},   # strict = nega sensível por padrão (+ seguro); yolo/off não-conformes
     "providers": {"allow": None},                          # None = sem allowlist (qualquer provider)
     "models": {"allow": None},                             # globs (fnmatch); None = qualquer modelo
     "channels": {"allow": None, "forbid_open_ingress": True},   # allow_all=true = ingress aberto → fail
@@ -187,7 +187,7 @@ def scaffold() -> str:
     """Texto de um okami.policy.yaml inicial (baseline comentada) p/ `okami policy init`."""
     return (
         "# okami.policy.yaml — política de conformance (autoritativa). Rode: okami policy check\n"
-        "approvals:\n  mode_allow: [manual, smart]      # yolo/off reprovam\n"
+        "approvals:\n  mode_allow: [manual, smart, strict]   # strict = nega sensível por padrão; yolo/off reprovam\n"
         "providers:\n  allow: null                      # ex.: [codex, claude, lmstudio]\n"
         "models:\n  allow: null                         # ex.: ['openai-codex/*', 'anthropic/*']\n"
         "channels:\n  allow: null                       # ex.: [telegram]\n  forbid_open_ingress: true   # allow_all=true reprova\n"

@@ -258,6 +258,13 @@ if _HAS_TEXTUAL:
             log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
+            if e.get("kind") == "token":                  # #16: streaming token-a-token → escreve por LINHA
+                from rich.text import Text
+                self._tokbuf = getattr(self, "_tokbuf", "") + e.get("text", "")
+                while "\n" in self._tokbuf:
+                    line, self._tokbuf = self._tokbuf.split("\n", 1)
+                    self.query_one("#log", RichLog).write(Text(line, style="dim"))
+                return
             block = _tui.tool_block(e, self._details)     # tool-card (edit→diff, write→código, etc.)
             if block is not None:
                 self.query_one("#log", RichLog).write(block)
