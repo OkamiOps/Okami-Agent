@@ -4,6 +4,40 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versionamento
 [SemVer](https://semver.org/lang/pt-BR/) (pré-1.0 = a superfície ainda pode mudar entre alphas).
 
+## [Unreleased]
+
+Rodada **#16**: implementadas as 6 "ideias-forward" que o #15 listou honestamente como ainda-não-feitas
+(acima das 13 áreas em paridade). 3 subagentes adversariais varreram o código novo → **4 defeitos reais**
+corrigidos com TDD. **2.468 testes passando** · ruff/bandit-HIGH/secret-scan limpos. Novo comparativo
+(`docs/COMPETITIVE_RESEARCH_16.md`) achou **3 gaps novos** p/ a próxima rodada (MoA, Google Code Assist, LSP).
+
+### ✨ Novas capacidades (acima da paridade)
+- **Streaming token-a-token** (TUI + Telegram), atrás de `harness.streaming` (default OFF): o provider
+  emite os deltas ao vivo, o harness ainda recebe o `Completion` inteiro p/ parsear a ação; stream que cai
+  antes do 1º token cai no caminho robusto (retry/rotação/failover). `on_token` (display) é **best-effort**
+  — erro na TUI/edição não trunca a saída nem mascara como falha de provider.
+- **Janela nativa do desktop** sem Electron: `okami desktop --native` → pywebview (lazy-install
+  `desktop.webview`), com fallback gracioso → chrome `--app` → browser. Seleção pura/testável
+  (`_pick_window_backend`).
+- **Self-hosting do dashboard**: `okami gui --host 0.0.0.0 --tls-cert <c> --tls-key <k>` — bind público
+  (não-localhost) **EXIGE token** (`public_bind_needs_token` recusa antes de bindar); TLS via `SSLContext`;
+  meia-config de TLS (só cert ou só key) erra em vez de servir HTTP em silêncio.
+- **PluginContext trust-gated** (`okami/plugins.py`): plugin só troca de provider se for `trusted` +
+  `allow_provider_override` + o provider estar na `allowed_providers`; não-confiável fica preso ao default
+  (plugin de terceiro não redireciona tráfego/gasto à revelia do dono).
+- **Telemetria de custo por-vendor**: `okami cost [--json]` — `summarize_by_vendor` agrega por quem
+  respondeu (`served_by`); assinatura (claude/codex) = "incluído" (NUNCA inventa $), pay-per-token estima
+  pelo pricing conhecido.
+- **Validação ao vivo dos providers nativos**: `okami provider check --live` faz uma chamada REAL mínima ao
+  vendor se há credencial, senão pula com graça; erro do vendor passa pelo `redact` antes de reportar
+  (não vaza credencial).
+
+### 🐛 Caça de bugs (#16, código novo)
+- streaming `on_token` best-effort (display não corrompe a saída do modelo).
+- `provider check --live` redige segredo no erro reportado.
+- `summarize_by_vendor` não cria mais bucket vazio com `served_by` malformado.
+- `serve_dashboard` recusa meia-config de TLS (footgun de "achar que está sob TLS").
+
 ## [0.9.0-alpha] — 2026-06-16
 
 Salto grande de capacidade. **~100/100 de paridade FUNCIONAL** com o estado-da-arte
