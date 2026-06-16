@@ -422,6 +422,18 @@ def _open_dashboard(url: str, app_window: bool) -> None:
     webbrowser.open(url)
 
 
+@app.command(help=_tr("cli.dashboard", _default="Open the web dashboard (status/sessions/config/logs) — alias for `gui`."))
+def dashboard(
+    port: int = typer.Option(9119, "--port", help=_tr("cli.dashboard.port", _default="Port for the local dashboard.")),
+    no_open: bool = typer.Option(False, "--no-open", help=_tr("cli.dashboard.no_open", _default="Don't open a browser, just serve.")),
+    host: str = typer.Option("127.0.0.1", "--host", help=_tr("cli.dashboard.host", _default="Bind host (0.0.0.0 to self-host; requires --token).")),
+    token: str = typer.Option("", "--token", help=_tr("cli.dashboard.token", _default="Require this token on the /api routes.")),
+    workspace: str = typer.Option(".", "-w", "--workspace"),
+) -> None:
+    """Atalho amigável p/ `okami gui` — o dashboard web (status/sessões/config/logs)."""
+    gui(port=port, no_open=no_open, app_window=False, token=token, host=host, workspace=workspace)
+
+
 @app.command(help=_tr("cli.desktop", _default="Open the dashboard as a desktop app window (alias for `gui --app`)."))
 def desktop(
     port: int = typer.Option(9119, "--port", help=_tr("cli.desktop.port", _default="Port for the local dashboard.")),

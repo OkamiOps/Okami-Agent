@@ -458,10 +458,18 @@ _HELP_GROUPS = [
     ("Conversar / rodar", [("chat -q \"...\"", "uma pergunta e sai (script)"),
                            ("run \"...\"", "ida-e-volta crua ao provider"),
                            ("task \"...\"", "harness até concluir (com critérios -e)"),
+                           ("moa \"...\"", "mixture-of-agents: N providers + síntese (problema difícil)"),
                            ("room \"...\"", "brainstorm multi-agente (moderador)")]),
+    ("Dashboard / uso", [("dashboard", "dashboard web (status/sessões/config/logs)"),
+                         ("desktop --native", "janela nativa do SO (sem Electron)"),
+                         ("sessions list", "lista as conversas (scriptável)"),
+                         ("cost", "custo por vendor (assinatura = incluído)"),
+                         ("insights", "analytics de uso cross-sessão")]),
     ("Providers", [("provider add", "adiciona um modelo do catálogo"),
                    ("providers", "lista providers e prontidão"),
                    ("provider default <id>", "troca o default"),
+                   ("provider check --live", "self-test do transporte nativo (texto/tools/imagem)"),
+                   ("gemini login", "tier grátis de Gemini (Google Code Assist)"),
                    ("login <id>", "autentica assinatura/OAuth")]),
     ("Agentes", [("agent new <id>", "cria um agente (workspace próprio)"),
                  ("agent list", "lista agentes"), ("route <origem>", "mostra o roteamento")]),
@@ -476,7 +484,8 @@ _HELP_GROUPS = [
     ("Skills / MCP", [("skills", "lista skills"), ("learn <fonte>", "instala skill (com scan)"),
                       ("scan <path>", "verifica risco de uma skill"), ("mcp", "tools de servidores MCP")]),
     ("Mídia / IDE", [("image \"...\"", "gera imagem (gpt-image-2)"),
-                     ("say / transcribe", "TTS / STT"), ("acp", "servidor ACP p/ IDE")]),
+                     ("say / transcribe", "TTS / STT"), ("acp", "servidor ACP p/ IDE"),
+                     ("lsp status", "language servers p/ diagnostics no write/edit")]),
 ]
 
 
