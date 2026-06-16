@@ -165,3 +165,32 @@ def test_dashboard_config_set_rejects_non_allowlisted():
     from okami.gateway.web import route_post
     code, _c, _b = route_post("/api/config", '{"key": "qualquer.coisa", "value": "x"}')
     assert code == 400                                  # chave fora do allowlist → recusa
+
+
+# ── self-hosting: bind público EXIGE token ──
+def test_public_bind_requires_token():
+    from okami.gateway.web import public_bind_needs_token
+    assert public_bind_needs_token("0.0.0.0", None) is True       # público sem token → precisa
+    assert public_bind_needs_token("0.0.0.0", "tok") is False     # público com token → ok
+    assert public_bind_needs_token("127.0.0.1", None) is False    # localhost → ok sem token
+    assert public_bind_needs_token("localhost", None) is False
+
+
+def test_serve_dashboard_refuses_public_without_token():
+    import pytest
+    from okami.gateway import web
+    with pytest.raises(ValueError):
+        web.serve_dashboard(host="0.0.0.0", token=None)           # recusa ANTES de bindar
+
+
+# ── janela nativa do desktop (pywebview) com fallback a chrome --app → browser ──
+def test_pick_window_backend():
+    from okami.cli.commands.basics import _pick_window_backend
+    # nativo pedido + pywebview presente → webview do SO
+    assert _pick_window_backend(native=True, has_webview=True, has_chrome=True) == "webview"
+    # nativo pedido mas sem pywebview → cai p/ chrome --app
+    assert _pick_window_backend(native=True, has_webview=False, has_chrome=True) == "chrome"
+    # nativo pedido, sem webview e sem chrome → browser comum
+    assert _pick_window_backend(native=True, has_webview=False, has_chrome=False) == "browser"
+    # não-nativo mas app-window → chrome --app (comportamento atual)
+    assert _pick_window_backend(native=False, has_webview=True, has_chrome=True) == "chrome"

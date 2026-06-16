@@ -38,6 +38,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "read.office": ("python-docx>=1.1.0", "openpyxl>=3.1.0"),
     # imagem (vision/resize)
     "image.pillow": ("Pillow>=10.0.0",),
+    # janela nativa do dashboard (desktop) — webview do SO, sem Electron
+    "desktop.webview": ("pywebview>=5.0",),
 }
 
 _SAFE_SPEC = re.compile(

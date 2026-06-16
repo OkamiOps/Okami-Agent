@@ -202,12 +202,25 @@ def default_providers(workspace: str = ".", agent: str = "okami") -> dict:
     return {"status": _status, "sessions": _sessions, "config": _config, "logs": _logs, "session": _session}
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost", ""})
+
+
+def public_bind_needs_token(host: str, token: str | None) -> bool:
+    """True se está bindando num host PÚBLICO (não-loopback) SEM token — combinação recusada (self-host
+    exposto exige autenticação)."""
+    return (host or "") not in _LOOPBACK and not token
+
+
 def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provider=None,
-                    providers: dict | None = None, token: str | None = None):
+                    providers: dict | None = None, token: str | None = None,
+                    certfile: str | None = None, keyfile: str | None = None):
     """Sobe o dashboard (bloqueante). `providers` = {status,sessions,config,logs,session}; `token` (opc)
-    exige `Authorization: Bearer <token>` ou `?token=` nas rotas /api (GET e POST)."""
+    exige `Authorization: Bearer <token>` ou `?token=` nas rotas /api. Bind PÚBLICO (não-localhost) EXIGE
+    token (recusa senão). `certfile`/`keyfile` → serve sob HTTPS (self-hosting com TLS)."""
     from http.server import BaseHTTPRequestHandler, HTTPServer
     from urllib.parse import parse_qs, urlparse
+    if public_bind_needs_token(host, token):
+        raise ValueError(f"bind público em {host} SEM token é recusado — passe --token (ou bind em localhost).")
     provs = dict(providers or {})
     if status_provider and "status" not in provs:
         provs["status"] = status_provider
@@ -241,7 +254,13 @@ def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provide
         def log_message(self, *a):
             return
 
-    HTTPServer((host, port), _H).serve_forever()
+    httpd = HTTPServer((host, port), _H)
+    if certfile and keyfile:                            # self-hosting com TLS
+        import ssl
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile, keyfile)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    httpd.serve_forever()
 
 
 __all__ = ["render_status_html", "render_dashboard_html", "route", "default_providers", "serve_dashboard"]

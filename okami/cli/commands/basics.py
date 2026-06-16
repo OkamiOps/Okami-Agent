@@ -351,25 +351,52 @@ def gui(
     no_open: bool = typer.Option(False, "--no-open", help=_tr("cli.gui.no_open", _default="Don't open the browser, just serve.")),
     app_window: bool = typer.Option(False, "--app", help=_tr("cli.gui.app", _default="Open in an app-mode window (chrome --app) instead of a tab.")),
     token: str = typer.Option("", "--token", help=_tr("cli.gui.token", _default="Require this token (Bearer/?token=) for the /api routes.")),
+    host: str = typer.Option("127.0.0.1", "--host", help=_tr("cli.gui.host", _default="Bind host (use 0.0.0.0 to self-host; a token is then required).")),
+    tls_cert: str = typer.Option("", "--tls-cert", help=_tr("cli.gui.tls_cert", _default="TLS certificate file (serves over HTTPS).")),
+    tls_key: str = typer.Option("", "--tls-key", help=_tr("cli.gui.tls_key", _default="TLS private-key file.")),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
-    """#12/#14: dashboard web (stdlib, zero-dep) — status/sessões/config/logs. Localhost; --token autentica."""
+    """#12/#14/#16: dashboard web (stdlib, zero-dep). Localhost por padrão; --host 0.0.0.0 + --token +
+    --tls-cert/--tls-key p/ self-hosting seguro."""
     import threading
-    from okami.gateway.web import default_providers, serve_dashboard
+    from okami.gateway.web import default_providers, public_bind_needs_token, serve_dashboard
 
+    if public_bind_needs_token(host, token or None):
+        console.print(f"[red]bind público em {host} exige --token[/red] (ou use localhost).")
+        raise typer.Exit(2)
+    scheme = "https" if (tls_cert and tls_key) else "http"
+    openhost = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     suffix = f"?token={token}" if token else ""
-    url = f"http://127.0.0.1:{port}/{suffix}"
-    console.print(f"[green]dashboard em[/green] http://127.0.0.1:{port}/ [dim](Ctrl-C p/ parar)"
-                  + (" · protegido por token" if token else "") + "[/dim]")
+    url = f"{scheme}://{openhost}:{port}/{suffix}"
+    console.print(f"[green]dashboard em[/green] {scheme}://{openhost}:{port}/ [dim](Ctrl-C p/ parar)"
+                  + (" · token" if token else "") + (" · TLS" if scheme == "https" else "") + "[/dim]")
     if not no_open:
         threading.Timer(0.6, lambda: _open_dashboard(url, app_window)).start()
     try:
-        serve_dashboard(port, providers=default_providers(workspace), token=token or None)
+        serve_dashboard(port, host=host, providers=default_providers(workspace), token=token or None,
+                        certfile=tls_cert or None, keyfile=tls_key or None)
     except KeyboardInterrupt:
         console.print("\n[dim]dashboard parado.[/dim]")
     except OSError as e:
         console.print(f"[red]não subiu ({e})[/red] — porta ocupada? tente --port outro.")
         raise typer.Exit(1) from e
+
+
+def _pick_window_backend(*, native: bool, has_webview: bool, has_chrome: bool) -> str:
+    """Escolhe o backend de janela do desktop: 'webview' (janela nativa do SO, sem Electron) só quando
+    `native` foi pedido E pywebview está instalado; senão 'chrome' (--app) se houver browser Chromium;
+    senão 'browser' (aba comum). Pura → testável sem subir nada."""
+    if native and has_webview:
+        return "webview"
+    if has_chrome:
+        return "chrome"
+    return "browser"
+
+
+def _has_chrome() -> bool:
+    import shutil
+    return any(shutil.which(b) for b in ("google-chrome", "chromium", "chromium-browser",
+                                         "microsoft-edge", "brave-browser")) or bool(shutil.which("open"))
 
 
 def _open_dashboard(url: str, app_window: bool) -> None:
@@ -398,10 +425,43 @@ def _open_dashboard(url: str, app_window: bool) -> None:
 @app.command(help=_tr("cli.desktop", _default="Open the dashboard as a desktop app window (alias for `gui --app`)."))
 def desktop(
     port: int = typer.Option(9119, "--port", help=_tr("cli.desktop.port", _default="Port for the local dashboard.")),
+    native: bool = typer.Option(False, "--native", help=_tr("cli.desktop.native", _default="Use a native OS webview window (pywebview, auto-installed) instead of chrome --app.")),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
-    """#14: experiência 'desktop' sem Electron — abre o dashboard numa janela app-mode do browser."""
-    gui(port=port, no_open=False, app_window=True, workspace=workspace)
+    """#14/#16: experiência 'desktop' sem Electron — janela nativa do SO (--native, pywebview) ou app-mode do browser."""
+    if not native:
+        gui(port=port, no_open=False, app_window=True, workspace=workspace)
+        return
+    # --native: tenta a janela nativa do SO via pywebview (lazy-install). Falhou? cai p/ chrome --app.
+    has_webview = False
+    try:
+        from okami.core import lazy_deps
+        lazy_deps.ensure("desktop.webview", prompt=False)
+        has_webview = True
+    except Exception as e:  # noqa: BLE001 — qualquer falha (offline/install off) → fallback gracioso
+        console.print(f"[dim]janela nativa indisponível ({e}); usando chrome --app[/dim]")
+    backend = _pick_window_backend(native=native, has_webview=has_webview, has_chrome=_has_chrome())
+    if backend != "webview":
+        gui(port=port, no_open=False, app_window=True, workspace=workspace)
+        return
+    _open_native_window(port, workspace)
+
+
+def _open_native_window(port: int, workspace: str) -> None:
+    """Sobe o dashboard num thread daemon e abre uma janela nativa do SO (pywebview) na thread principal
+    (pywebview EXIGE a main thread). Janela fechada → encerra."""
+    import threading
+
+    import webview  # type: ignore  # noqa: PLC0415 — só importado quando lazy_deps garantiu
+
+    from okami.gateway.web import default_providers, serve_dashboard
+    url = f"http://127.0.0.1:{port}/"
+    t = threading.Thread(target=lambda: serve_dashboard(port, providers=default_providers(workspace)),
+                         daemon=True)
+    t.start()
+    console.print(f"[green]janela nativa[/green] {url} [dim](feche a janela p/ sair)[/dim]")
+    webview.create_window("Okami", url)
+    webview.start()
 
 
 @app.command(help=_tr("cli.blueprint", _default="Parameterized automations: okami blueprint list | show <key> | use <key> [slot=val ...]."))
