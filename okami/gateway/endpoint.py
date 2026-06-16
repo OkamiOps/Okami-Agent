@@ -468,6 +468,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.channel.send(chat_id, "❓ " + _tr(
                     "gw.unknown_command", _default="unknown command: {tok}.", tok=tok) + hint)
                 return
+            if cdef.scope == "chat":                       # comando só-terminal (TUI/REPL) num canal remoto:
+                self.channel.send(chat_id, "💻 " + _tr(    # avisa em vez de mandar pro modelo como mensagem
+                    "gw.terminal_only",
+                    _default="/{name} only works in the terminal (TUI/REPL), not here.", name=cdef.name))
+                return
             text = "/" + cdef.name + text[len(tok):]       # reescreve pro canônico → as branches casam
             low = text.lower()
         if low in ("/start", "/help", ""):

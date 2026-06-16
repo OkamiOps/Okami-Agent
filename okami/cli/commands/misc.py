@@ -68,6 +68,85 @@ def cost(
     console.print(tbl)
 
 
+def _sessions_store(agent: str):
+    """Resolve o TranscriptStore do agente (default = agente configurado), p/ os comandos `sessions`."""
+    from okami.gateway.sessions import TranscriptStore
+    from okami.home import agents_dir
+    cfg = _load()
+    who = agent or getattr(cfg, "default_agent", "") or ""
+    ws = agents_dir() / who if who else Path(".")
+    return TranscriptStore(str(ws)), (who or "cwd")
+
+
+sessions_app = typer.Typer(invoke_without_command=True,
+                           help=_tr("cli.sessions", _default="Inspect chat sessions (list/show/export) — CLI parity with /sessions."))
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.callback(invoke_without_command=True)
+def sessions_main(ctx: typer.Context) -> None:
+    """`okami sessions` sem subcomando → lista as sessões."""
+    if ctx.invoked_subcommand is None:
+        sessions_list(agent="", json_out=False)
+
+
+@sessions_app.command("list", help=_tr("cli.sessions.list", _default="List chat sessions (turns · last role · last message)."))
+def sessions_list(
+    agent: str = typer.Option("", "-a", "--agent", help=_tr("cli.sessions.agent", _default="Agent whose sessions to list (default: configured default).")),
+    json_out: bool = typer.Option(False, "--json", help=_tr("cli.sessions.json", _default="Structured JSON (scripts/monitoring).")),
+) -> None:
+    """Lista os chats do agente: nº de trocas, último papel e um trecho da última mensagem."""
+    from okami.gateway.sessions import session_summaries
+    store, who = _sessions_store(agent)
+    rows = session_summaries(store)
+    if json_out:
+        import json as _json
+        console.print_json(_json.dumps(rows, ensure_ascii=False))
+        return
+    if not rows:
+        console.print("[dim]nenhuma sessão ainda.[/dim]")
+        return
+    tbl = Table(title=f"sessões · {who}", title_style="bold")
+    for col, kw in (("chat", {}), ("trocas", {"justify": "right"}), ("último", {}), ("trecho", {})):
+        tbl.add_column(col, **kw)
+    for r in rows:
+        tbl.add_row(r["chat_id"], str(r["turns"]), r["last_role"] or "—", r["last_text"] or "")
+    console.print(tbl)
+
+
+@sessions_app.command("show", help=_tr("cli.sessions.show", _default="Print a session transcript (okami sessions show <chat_id> [--limit N])."))
+def sessions_show(
+    chat_id: str = typer.Argument(..., help=_tr("cli.sessions.show.id", _default="Chat id (see `okami sessions list`).")),
+    limit: int = typer.Option(40, "-n", "--limit", help=_tr("cli.sessions.show.limit", _default="Show the last N nodes.")),
+    agent: str = typer.Option("", "-a", "--agent"),
+) -> None:
+    """Imprime o transcript de uma sessão (papel + texto), os últimos N nós."""
+    store, _who = _sessions_store(agent)
+    nodes = store.read(chat_id, limit=limit)
+    if not nodes:
+        console.print(f"[yellow]sessão '{chat_id}' vazia ou inexistente[/yellow] [dim](veja `okami sessions list`)[/dim]")
+        raise typer.Exit(1)
+    who = {"USER": "você", "AGENTE": "okami", "SUMMARY": "— resumo —"}
+    for n in nodes:
+        role = who.get(n.get("role", ""), n.get("role", ""))
+        console.print(f"[bold]{role}:[/bold] {n.get('text', '')}")
+
+
+@sessions_app.command("export", help=_tr("cli.sessions.export", _default="Export a session as Markdown (okami sessions export <chat_id> [path])."))
+def sessions_export(
+    chat_id: str = typer.Argument(..., help=_tr("cli.sessions.export.id", _default="Chat id to export.")),
+    path: str = typer.Argument("", help=_tr("cli.sessions.export.path", _default="Output file (default: <chat_id>.md).")),
+    agent: str = typer.Option("", "-a", "--agent"),
+) -> None:
+    """Exporta a sessão como Markdown legível."""
+    store, _who = _sessions_store(agent)
+    if not store.read(chat_id, limit=1):
+        console.print(f"[yellow]sessão '{chat_id}' vazia ou inexistente[/yellow]")
+        raise typer.Exit(1)
+    out = store.export(chat_id, path or f"{chat_id}.md")
+    console.print(f"[green]✓ exportado[/green] {out}")
+
+
 @app.command("serve-mcp", help=_tr("cli.serve_mcp", _default="Serve Okami as an MCP server (sessions/history/memory) over stdio."))
 def serve_mcp(
     agent: str = typer.Option("okami", "-a", "--agent", help=_tr("cli.serve_mcp.agent", _default="Agent whose home/sessions to expose.")),

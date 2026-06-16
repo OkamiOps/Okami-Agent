@@ -215,3 +215,21 @@ class TranscriptStore:
             if removed:
                 self._save_store(keep)
         return removed
+
+
+def session_summaries(store: "TranscriptStore") -> list[dict]:
+    """Resumo de TODOS os chats do store p/ o CLI `okami sessions`: [{chat_id, turns, last_role,
+    last_text, last_ts}], mais recente primeiro. Read-only — paridade scriptável do /sessions do chat."""
+    out = []
+    for cid, e in (store.load_store() or {}).items():
+        if not isinstance(e, dict):
+            continue
+        last = (store.read(cid, limit=1) or [{}])[-1]
+        out.append({
+            "chat_id": cid,
+            "turns": int(e.get("node_count", 0) or 0),
+            "last_role": e.get("last_role") or last.get("role", ""),
+            "last_text": (last.get("text") or "")[:80],
+            "last_ts": e.get("last_interaction_at", 0) or 0,
+        })
+    return sorted(out, key=lambda r: r["last_ts"], reverse=True)

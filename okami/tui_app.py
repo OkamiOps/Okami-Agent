@@ -254,7 +254,8 @@ if _HAS_TEXTUAL:
                 log.write(Text("  " + text, style=_SYS_COLOR.get(head, "dim")))
                 return
             body = text[1:].strip() if head in _REPLY_MARKS else text   # fala do agente
-            self.transcript.append(("agent", text))
+            self._tokbuf = ""                             # #16: zera o buffer de streaming no fim do turno
+            self.transcript.append(("agent", text))       # (senão um token parcial sem \n vaza pro próximo)
             log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
@@ -339,7 +340,9 @@ if _HAS_TEXTUAL:
                 return
             text = event.value
             event.input.value = ""
-            self._cmdmenu().display = False
+            menu = self._cmdmenu()                        # pode ser None no teardown → não derruba o submit
+            if menu is not None:
+                menu.display = False
             if not text.strip():
                 return
             self.transcript.append(("user", text))
@@ -400,6 +403,8 @@ if _HAS_TEXTUAL:
                         self.call_from_thread(self._cmd_skin, line)
                     elif d == "mouse":
                         self.call_from_thread(self._cmd_mouse, line)
+                    elif d == "replay":                  # M8: últimos tool-calls c/ args+saída (cliente)
+                        self.call_from_thread(self._cmd_replay, line)
                     elif d == "copy":
                         self.call_from_thread(self._cmd_copy, line)
                     elif d in ("approval", "stop", "clarify"):   # clarify: responde a pergunta direto (turno bloqueado)
@@ -417,6 +422,16 @@ if _HAS_TEXTUAL:
                 self.ep.handle(self._cid, line)
             except Exception as e:  # noqa: BLE001 — um turno que falha não derruba a TUI
                 self.call_from_thread(self.sink_note, f"erro: {e}")
+
+        def _cmd_replay(self, line: str) -> None:
+            """M8: mostra os últimos N tool-calls com args COMPLETOS + saída (mesma view do REPL). Era um
+            buraco: na TUI o /replay caía como mensagem pro agente."""
+            arg = line.split(maxsplit=1)[1].strip() if " " in line else ""
+            try:
+                n = max(1, min(int(arg), 60)) if arg else 10
+            except ValueError:
+                n = 10
+            self.query_one("#log", RichLog).write(_tui.replay_view(list(getattr(self.ep, "_step_log", []) or []), n))
 
         def _cmd_copy(self, line: str) -> None:
             """Copia a ÚLTIMA resposta da agente pro clipboard (sem precisar selecionar). `/copy all` =
