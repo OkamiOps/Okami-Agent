@@ -84,6 +84,13 @@ def normalize_usage(raw, *, transport: str) -> CanonicalUsage:
             cache_write_tokens=_int(raw, "cache_creation_input_tokens"),
             requests=1,
         )
+    if transport == "bedrock_native":                # Converse: inputTokens/outputTokens
+        return CanonicalUsage(input_tokens=_int(raw, "inputTokens"), output_tokens=_int(raw, "outputTokens"),
+                              requests=1)
+    if transport == "gemini_native":                 # generateContent: usageMetadata.{prompt,candidates}TokenCount
+        meta = _get(raw, "usageMetadata", {}) or raw
+        return CanonicalUsage(input_tokens=_int(meta, "promptTokenCount"),
+                              output_tokens=_int(meta, "candidatesTokenCount"), requests=1)
     if transport == "codex_oauth":
         total_in = _int(raw, "input_tokens")
         details = _get(raw, "input_tokens_details", {})

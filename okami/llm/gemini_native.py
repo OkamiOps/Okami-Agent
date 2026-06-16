@@ -80,11 +80,17 @@ def gemini_native_complete(pc, messages: list[dict], model: str | None, override
     client = genai.Client(api_key=key)
     req = to_gemini_request(messages, generation_config=(overrides or {}).get("generation_config"))
     mdl = model or pc.model
-    resp = client.models.generate_content(model=mdl, contents=req["contents"],
-                                           config=req.get("systemInstruction"))
-    text, finish = from_gemini_response(resp if isinstance(resp, dict) else resp.to_dict())
+    # google-genai: system_instruction + os params de geração vão DENTRO de `config`. Antes o systemInstruction
+    # ia cru no kwarg `config` (errado) e o generationConfig sumia.
+    config = dict(req.get("generationConfig") or {})
+    sysi = req.get("systemInstruction")
+    if sysi:
+        config["system_instruction"] = (sysi.get("parts") or [{}])[0].get("text", "")
+    resp = client.models.generate_content(model=mdl, contents=req["contents"], config=config or None)
+    rd = resp if isinstance(resp, dict) else resp.to_dict()
+    text, finish = from_gemini_response(rd)
     return Completion(text=text, finish_reason=finish, provider=pc.name, model=mdl,
-                      usage=normalize_usage(None, transport="gemini_native"))
+                      usage=normalize_usage(rd.get("usageMetadata"), transport="gemini_native"))
 
 
 __all__ = ["to_gemini_request", "from_gemini_response", "probe_gemini_tier", "gemini_native_complete"]
