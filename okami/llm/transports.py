@@ -298,6 +298,11 @@ def bedrock_native_complete(pc, messages, model, overrides=None):
     return _b(pc, messages, model, overrides)
 
 
+def gemini_cloudcode_complete(pc, messages, model, overrides=None):
+    from okami.llm.code_assist import code_assist_complete as _c
+    return _c(pc, messages, model, overrides)
+
+
 def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
              overrides: dict | None = None):
     """Resultado via transport não-litellm (`Completion`), ou None se for litellm (segue no LiteLLM)."""
@@ -311,4 +316,6 @@ def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
         return gemini_native_complete(pc, messages, model, overrides)
     if pc.transport == "bedrock_native":
         return bedrock_native_complete(pc, messages, model, overrides)
+    if pc.transport == "gemini_cloudcode":
+        return gemini_cloudcode_complete(pc, messages, model, overrides)
     return None
