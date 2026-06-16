@@ -333,6 +333,44 @@ def doctor(
             console.print("  " + t("doctor.fix.dbs", _default="SQLite DBs: [green]all healthy[/green] ({n})", n=len(dbs)))
 
 
+@app.command(help=_tr("cli.plugins", _default="List discovered plugins (folder + pip entry-points)."))
+def plugins() -> None:
+    """#12: lista plugins descobertos (pasta .okami/plugins/ + entry-point pip okami.plugins)."""
+    from okami.plugins import discover_plugins, plugin_roots
+    found = discover_plugins(plugin_roots())
+    if not found:
+        console.print("[dim]nenhum plugin instalado (.okami/plugins/<nome>/plugin.yaml ou entry-point pip).[/dim]")
+        return
+    for p in found:
+        console.print(f"  [bold]{p.name}[/bold] [dim]({p.source})[/dim] hooks: {', '.join(p.hooks) or '—'}")
+
+
+@app.command(help=_tr("cli.gui", _default="Open the lightweight web dashboard (status) in your browser."))
+def gui(
+    port: int = typer.Option(9119, "--port", help=_tr("cli.gui.port", _default="Port for the local dashboard.")),
+    no_open: bool = typer.Option(False, "--no-open", help=_tr("cli.gui.no_open", _default="Don't open the browser, just serve.")),
+) -> None:
+    """#12: dashboard web leve (stdlib, zero-dep) — status/sessões no navegador. Localhost, read-only."""
+    import threading
+    import webbrowser
+    from okami.gateway.web import serve_dashboard
+
+    def _status():
+        return {"agent": "okami", "status": "online", "port": port}
+
+    url = f"http://127.0.0.1:{port}/"
+    console.print(f"[green]dashboard em[/green] {url} [dim](Ctrl-C p/ parar)[/dim]")
+    if not no_open:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    try:
+        serve_dashboard(port, status_provider=_status)
+    except KeyboardInterrupt:
+        console.print("\n[dim]dashboard parado.[/dim]")
+    except OSError as e:
+        console.print(f"[red]não subiu ({e})[/red] — porta ocupada? tente --port outro.")
+        raise typer.Exit(1) from e
+
+
 @app.command(help=_tr("cli.blueprint", _default="Parameterized automations: okami blueprint list | show <key> | use <key> [slot=val ...]."))
 def blueprint(
     action: str = typer.Argument("list", help=_tr("cli.blueprint.action", _default="list | show | use")),
