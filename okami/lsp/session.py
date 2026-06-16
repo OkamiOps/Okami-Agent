@@ -14,6 +14,7 @@ from pathlib import Path
 from okami.core.lsp.diagnostics import _error_keys
 from okami.lsp.pool import LspPool
 from okami.lsp.servers import server_for_path
+from okami.lsp.workspace import find_git_worktree
 
 _POOL: LspPool | None = None
 
@@ -31,6 +32,8 @@ def multi_lang_delta(workspace, rel: str, before: str, after: str, *, _pool: Lsp
     """Aviso dos erros semânticos NOVOS num arquivo NÃO-.py (o .py é do pyright one-shot). "" se nada."""
     try:
         path = str(Path(workspace) / rel)
+        if not find_git_worktree(path):                    # gate de git PRIMEIRO (barato vs scan de PATH)
+            return ""                                      # fora de repo → nem toca no catálogo/PATH/pool
         srv = server_for_path(path)
         if srv is None or srv.id == "pyright":             # .py → tratado pelo one-shot existente
             return ""

@@ -18,8 +18,9 @@ class FeishuDocRead(Tool):
         from okami.integrations.feishu import read_doc
         try:
             content = read_doc(getattr(ctx, "cfg", None), doc.strip())
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             return ToolResult(False, str(e))
-        except Exception as e:  # noqa: BLE001
-            return ToolResult(False, f"feishu_doc_read falhou: {e}")
+        except Exception as e:  # noqa: BLE001 — erro pode embutir segredo → redige
+            from okami.core.redact import redact
+            return ToolResult(False, f"feishu_doc_read falhou: {redact(str(e))[:200]}")
         return ToolResult(True, untrusted_wrap("feishu_doc", content or "(documento vazio)"), effect=False)

@@ -16,13 +16,12 @@ class XSearch(Tool):
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
             return ToolResult(False, "x_search: 'query' precisa ser uma string não-vazia.")
+        from okami.core.redact import redact
         from okami.integrations.x_search import x_search
         try:
             res = x_search(getattr(ctx, "cfg", None), query, handles=args.get("handles") or None)
-        except RuntimeError as e:
-            return ToolResult(False, str(e))
-        except Exception as e:  # noqa: BLE001
-            return ToolResult(False, f"x_search falhou: {e}")
+        except Exception as e:  # noqa: BLE001 — erro do vendor pode embutir a chave → redige sempre
+            return ToolResult(False, f"x_search: {redact(str(e))[:200]}")
         cites = "\n".join(f"- {c}" for c in res.get("citations", [])[:10])
         body = res.get("answer", "") + (f"\n\nfontes:\n{cites}" if cites else "")
         return ToolResult(True, untrusted_wrap("x_search", body), effect=False)

@@ -136,3 +136,25 @@ def test_feishu_without_secret_raises(monkeypatch):
 def test_feishu_tool_registered():
     from okami.core.tools.registry import default_registry
     assert "feishu_doc_read" in default_registry()
+
+
+# ── #19 bug-hunt fixes ──
+def test_feishu_rejects_path_injection_in_doc_token():
+    import pytest
+
+    from okami.integrations.feishu import read_doc
+    cfg = _cfg({"feishu": {"app_id": "a", "app_secret_env": "FEISHU_SECRET"}})
+    for evil in ("../../auth/v3/tenant_access_token", "doc/../../x", "a b", "x?y=1"):
+        with pytest.raises(ValueError):
+            read_doc(cfg, evil, _post=lambda *a: {"tenant_access_token": "t"}, _get=lambda *a: {})
+
+
+def test_x_search_tool_redacts_error(monkeypatch, tmp_path):
+    from okami.core.tools.base import ToolContext
+    from okami.core.tools.x_search import XSearch
+    fake = "sk-" + "ABCDEFGHIJ1234567890ABCDEFGHIJ"   # comprimento realista (redact mascara ≥20)
+    cfg = _cfg({"x": {"api_key_env": "XAI_KEY"}})
+    monkeypatch.setattr("okami.integrations.x_search.x_search",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError(f"erro com {fake} no header")))
+    res = XSearch().run({"query": "q"}, ToolContext(workspace=tmp_path, cfg=cfg))
+    assert res.ok is False and "ABCDEFGHIJ1234567890" not in res.output   # chave redigida

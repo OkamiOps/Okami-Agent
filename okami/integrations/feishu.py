@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 
 DEFAULT_BASE_URL = "https://open.feishu.cn"
+_DOC_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")          # token de doc: só alfanum/_/- (anti path-injection)
 
 
 def feishu_config(cfg) -> dict | None:
@@ -51,6 +53,8 @@ def _tenant_token(cfg, *, _post) -> tuple[str, str]:
 
 def read_doc(cfg, doc_token: str, *, _post=None, _get=None) -> str:
     """Lê o conteúdo (raw_content) de um documento Feishu como texto. Sem config/segredo → RuntimeError."""
+    if not _DOC_TOKEN_RE.match(doc_token or ""):          # doc_token vai cru na URL → valida (anti-traversal)
+        raise ValueError(f"doc_token inválido: {doc_token!r} (só letras/números/_/-).")
     post = _post or _default_post
     get = _get or _default_get
     base, tok = _tenant_token(cfg, _post=post)
