@@ -6,10 +6,43 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
-Rodada **#16**: implementadas as 6 "ideias-forward" que o #15 listou honestamente como ainda-não-feitas
+Rodada **#17**: fechados os **3 gaps reais** que o comparativo #16 achou no Hermes — Mixture-of-Agents,
+Google Code Assist (tier grátis de Gemini) e o subsistema LSP. 2 subagentes adversariais varreram o código
+novo → **4+ defeitos corrigidos** com TDD (incl. injeção de prompt via referência da MoA e o OAuth do
+Code Assist que não completava). **2.525 testes passando** · ruff/bandit-HIGH/secret-scan limpos.
+
+### 🧠 Mixture-of-Agents (amplificação de raciocínio)
+- `okami/llm/mixture.py` + tool `mixture_of_agents` + **`okami moa <prompt>`**: roteia um problema DIFÍCIL
+  pelos providers JÁ configurados em paralelo (assinatura-only, sem OpenRouter) e sintetiza a melhor
+  resposta com o mais forte. Tolera falha de referências (min 1); as respostas de referência entram no
+  system do aggregator **embrulhadas como dado não-confiável** (provider comprometido não injeta instrução);
+  reporta `total_calls` (transparência do custo N+1).
+
+### 🆓 Google Code Assist (tier grátis de Gemini)
+- `okami/llm/code_assist.py` + transporte `gemini_cloudcode` + **`okami gemini login|status|quota`**: acesso
+  ao tier GRÁTIS de Gemini via cloudcode-pa (conta Google, sem billing) — fits a constraint assinatura-only.
+  Reusa a tradução do `gemini_native`, adicionando o envelope da control-plane + OAuth PKCE (S256). O
+  `login` COMPLETA o fluxo: callback local (valida state/CSRF), troca code→token, persiste em
+  `~/.okami/auth/google_oauth.json` (0600); renova via refresh_token. Sem credencial → degrada com graça.
+
+### 🔎 LSP (cliente — diagnostics semânticos no write/edit)
+- `okami/lsp/*` + **`okami lsp status|list|which`**: o Okami spawna language servers externos
+  (pyright/gopls/typescript-language-server/rust-analyzer/bash/clangd) e consome `publishDiagnostics` p/
+  enriquecer o write/edit com erros SEMÂNTICOS — filtro delta (só os erros INTRODUZIDOS pela edição) via
+  remap de linha diff-aware. Camadas puras (protocol JSON-RPC, range_shift, reporter, workspace git-gateado)
+  testadas offline.
+
+### 🖥 Comandos de terminal
+- **`okami dashboard`** (alias amigável de `gui`, com `--host`/`--token` p/ self-hosting); `okami help`
+  agora lista os comandos novos (moa, dashboard, sessions, cost, lsp, gemini, provider check --live).
+
+---
+
+## Rodada #16
+
+Implementadas as 6 "ideias-forward" que o #15 listou honestamente como ainda-não-feitas
 (acima das 13 áreas em paridade). 3 subagentes adversariais varreram o código novo → **4 defeitos reais**
-corrigidos com TDD. **2.468 testes passando** · ruff/bandit-HIGH/secret-scan limpos. Novo comparativo
-(`docs/COMPETITIVE_RESEARCH_16.md`) achou **3 gaps novos** p/ a próxima rodada (MoA, Google Code Assist, LSP).
+corrigidos com TDD. Novo comparativo (`docs/COMPETITIVE_RESEARCH_16.md`) achou **3 gaps** — fechados no #17.
 
 ### ✨ Novas capacidades (acima da paridade)
 - **Streaming token-a-token** (TUI + Telegram), atrás de `harness.streaming` (default OFF): o provider

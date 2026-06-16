@@ -15,7 +15,7 @@ or wherever you want.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-2447%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2525%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -30,15 +30,18 @@ or wherever you want.
 
 > ### ✨ New in `0.9.0-alpha`
 > A big capability jump — **~100/100 parity** with the state of the art, including **multi-vendor
-> readiness**. From ~1.7k → **2.4k tests passing**.
+> readiness**. From ~1.7k → **2.5k tests passing**.
+> - **Mixture-of-Agents** — `okami moa` fans one hard problem across your configured providers and
+>   synthesizes the best answer with the strongest (reasoning amplification, subscription-only).
+> - **Free Gemini tier** — `okami gemini login` (Google Code Assist via OAuth PKCE), no billing.
+> - **Semantic diagnostics on write** — an **LSP client** (`okami lsp`) feeds pyright/gopls/… diagnostics
+>   into the post-write delta filter.
 > - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
 >   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
 > - **Hardened security** — scope-aware threat-pattern library, context-file injection scan, MCP exfil
 >   scanner + OSV malware check, SSL CA-bundle preflight, and **Tirith** pre-exec content scanning.
-> - **Provider/local-model resilience** — reactive error recovery, multi-pass tool-call JSON repair,
->   llama.cpp schema sanitization, stall-vs-truncation.
 > - **Automation & extensibility** — Blueprints (`okami blueprint`), Kanban swarm (`okami swarm`),
->   plugin discovery (`okami plugins`), CDP browser supervisor, lightweight web dashboard (`okami gui`).
+>   plugin discovery (`okami plugins`), CDP browser supervisor, web dashboard (`okami dashboard`/`okami gui`).
 >
 > Full notes in the [CHANGELOG](CHANGELOG.md).
 
@@ -251,6 +254,25 @@ subscription (OAuth/CLI), NEVER pay-as-you-go.**
 - **Live discovery** — `okami provider models <name>` lists models via `/v1/models`, otherwise falls
   back to the catalog. Switch the session model with `/model <id>` and reasoning effort with `/think`.
 - **Usage & cost** — tokens (incl. *cache read*) and cost accumulated per session; `okami status`/`/usage`.
+  By-vendor breakdown with **`okami cost`** (subscription = "included", never invents a $ figure).
+- **Free Gemini tier (Google Code Assist)** — **`okami gemini login`** authenticates a Google account via
+  OAuth PKCE against the Code Assist control plane (cloudcode-pa), the same free tier the official
+  `gemini-cli` uses — no billing. Point a provider at `transport: gemini_cloudcode` after login.
+  Credentials live in `~/.okami/auth/google_oauth.json` (0600); `okami gemini quota` shows the daily budget.
+- **Mixture-of-Agents** — **`okami moa "<hard problem>"`** (and the `mixture_of_agents` tool) routes one
+  prompt through *all your configured providers in parallel* and synthesizes the best answer with the
+  strongest one — reasoning amplification under the subscription-only constraint (no key pool). Reference
+  answers enter the synthesizer wrapped as untrusted data, so a compromised provider can't inject instructions.
+
+---
+
+## Semantic diagnostics on write (LSP client)
+
+Okami can act as an **LSP client**: it spawns external language servers (pyright, gopls,
+`typescript-language-server`, rust-analyzer, bash, clangd) and feeds their `publishDiagnostics` into the
+**post-write delta filter** — so a `write_file`/`edit` surfaces the *semantic* errors it introduced (with a
+diff-aware line-shift so an unchanged-but-moved error isn't reported as new). Git-gated (only inside a
+repo). Inspect with **`okami lsp status | list | which <id>`**; nothing is auto-installed without you asking.
 
 ---
 
@@ -449,19 +471,25 @@ tool metadata and retention. The `--strict` mode (production overlay) is the **G
 | `okami gate <dir>` | Design verification gate. |
 | `okami events` / `okami replay [trace]` | Timeline / trajectory replay. |
 | `okami rollback [N]` / `okami clean [--deep]` | Undo writes / disk cleanup. |
+| `okami moa <prompt>` | Mixture-of-Agents: fan out to your providers + synthesize the best answer. |
+| `okami gemini login\|status\|quota` | Free Gemini tier (Google Code Assist) via OAuth PKCE. |
+| `okami lsp status\|list\|which` | Language servers for semantic diagnostics on write/edit. |
+| `okami dashboard` / `okami desktop [--native]` | Web dashboard / native OS window (no Electron). |
+| `okami sessions list\|show\|export` | Inspect chat sessions from the terminal (scriptable). |
+| `okami cost [--json]` / `okami insights` | Cost by vendor / cross-session usage analytics. |
 | `okami tools` / `okami tune` / `okami version` | Agent tools / auto-tune / version. |
 
 </details>
 
 ## Agent tools
 
-26 tools declared with **category · tier · sensitivity** (`okami tools` lists them; an anti-drift test
+27 tools declared with **category · tier · sensitivity** (`okami tools` lists them; an anti-drift test
 ensures every tool has metadata):
 
 `respond` `read_file` `write_file` `edit_file` `list_dir` `find_files` · `run_shell` ·
 `process_start/poll/wait/log/list/write/signal/kill` · `remember` `recall_memory` `remember_user` ·
-`use_skill` · `spawn` (subagent) · `browse` · `generate_image` · `finish_setup` `task_complete`
-`task_blocked` `need_input`.
+`use_skill` · `spawn` (subagent) · `mixture_of_agents` · `browse` · `generate_image` · `finish_setup`
+`task_complete` `task_blocked` `need_input`.
 
 The **per-surface policy** restricts what each channel can do (e.g. Telegram without `run_shell`, an
 even more restricted group); sensitive actions always go through go/no-go.
