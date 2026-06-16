@@ -1,0 +1,28 @@
+"""Tool x_search (#19) — busca no X/Twitter via Grok (xAI). Config-driven; sem config → indisponível."""
+from __future__ import annotations
+
+from okami.core.tools.base import Tool, ToolResult, untrusted_wrap
+
+
+class XSearch(Tool):
+    name = "x_search"
+    description = ("Busca no X/Twitter via Grok (xAI) com citações. Use p/ o que está sendo dito AGORA no "
+                   "X sobre um tema/pessoa. Precisa de integrations.x configurado (api_key_env). Conteúdo "
+                   "EXTERNO não-confiável.")
+    args_schema = {"query": "a pergunta/tema a buscar no X", "handles": "(opc) lista de @perfis p/ restringir"}
+    required = ("query",)
+
+    def run(self, args, ctx):
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            return ToolResult(False, "x_search: 'query' precisa ser uma string não-vazia.")
+        from okami.integrations.x_search import x_search
+        try:
+            res = x_search(getattr(ctx, "cfg", None), query, handles=args.get("handles") or None)
+        except RuntimeError as e:
+            return ToolResult(False, str(e))
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(False, f"x_search falhou: {e}")
+        cites = "\n".join(f"- {c}" for c in res.get("citations", [])[:10])
+        body = res.get("answer", "") + (f"\n\nfontes:\n{cites}" if cites else "")
+        return ToolResult(True, untrusted_wrap("x_search", body), effect=False)
