@@ -15,7 +15,7 @@ or wherever you want.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-2525%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-2539%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20alpha-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**

@@ -6,7 +6,28 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
-Rodada **#17**: fechados os **3 gaps reais** que o comparativo #16 achou no Hermes — Mixture-of-Agents,
+Rodada **#18**: endereçados os **3 gaps reais** que o comparativo #17 deixou. Subagente adversarial varreu
+o código novo → **1 SSRF real corrigido**. **2.539 testes passando** · gates limpos.
+([COMPETITIVE_RESEARCH_18.md](docs/COMPETITIVE_RESEARCH_18.md): paridade honesta ~88–91%.)
+
+### 🔁 Cliente LSP persistente (reuso entre edições)
+- `okami/lsp/client.py` (`PersistentLspClient`) mantém o language server VIVO (initialize 1x, didOpen no
+  1º arquivo, didChange nos seguintes) — fecha o cold-start (~8s/edição do pyright) — + `okami/lsp/pool.py`
+  (`LspPool`: 1 server por (binário, raiz), gateado em git) + **`okami lsp probe <file>`**. Thinner que o
+  Hermes (síncrono, ainda não é o default do write) — documentado honestamente.
+
+### 🎬 Geração de vídeo
+- `okami/llm/videogen.py` + tool `generate_video` + **`okami video`**: provider-driven (`media.video`),
+  text→video e image→video, síncrono + poll assíncrono. A URL de download (do PROVIDER, não-confiável)
+  passa pelo **net_guard anti-SSRF** (recusa `file://`/IP interno) antes de baixar; teto de 25MB na imagem.
+
+### 🖱 Computer-use — decisão de escopo soberana
+- [docs/COMPUTER_USE.md](docs/COMPUTER_USE.md): o núcleo NÃO embute um automador de desktop (conflita com
+  fail-closed); a capacidade é alcançável via **servidor MCP de computer-use trust-gated** (go/no-go por ação).
+
+## Rodada #17
+
+Fechados os **3 gaps reais** que o comparativo #16 achou no Hermes — Mixture-of-Agents,
 Google Code Assist (tier grátis de Gemini) e o subsistema LSP. 2 subagentes adversariais varreram o código
 novo → **4+ defeitos corrigidos** com TDD (incl. injeção de prompt via referência da MoA e o OAuth do
 Code Assist que não completava). **2.525 testes passando** · ruff/bandit-HIGH/secret-scan limpos.
