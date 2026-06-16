@@ -504,6 +504,13 @@ class RunShell(Tool):
             return ToolResult(False, "sandbox: comando toca caminho sensível (.env/.ssh/.aws/credenciais/"
                               f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
                               effect=False)
+        if mode != "yolo":                                       # #12: Tirith — scan de CONTEÚDO (homograph,
+            from okami.core.tirith import scan_command           # pipe-to-interpreter, terminal-injection) que o
+            _tir = scan_command(cmd, cfg=getattr(ctx, "cfg", None))  # regex não pega. Inerte sem o binário.
+            if _tir.get("available") and _tir.get("verdict") == "block":
+                _ids = ", ".join(str(f.get("id", "?")) for f in _tir.get("findings", [])[:3]) or "ameaça"
+                return ToolResult(False, f"🛡 BLOQUEADO (tirith): ameaça de conteúdo no comando ({_ids}). "
+                                  f"Use o perfil yolo se for de propósito. ({cmd[:80]})", effect=False)
         from okami.core.redact import redact            # token impresso na saída (gh auth/build log) NÃO pode
         remote = getattr(ctx, "remote", None)           # AMBIENTE REMOTO: roda LÁ, não no sandbox local
         if remote is not None:                          # (as guardas hardline/read-only/sensível JÁ rodaram acima)

@@ -333,6 +333,34 @@ def doctor(
             console.print("  " + t("doctor.fix.dbs", _default="SQLite DBs: [green]all healthy[/green] ({n})", n=len(dbs)))
 
 
+@app.command(help=_tr("cli.deps", _default="Manage optional backends (lazy deps): okami deps list | install <feature>."))
+def deps(
+    action: str = typer.Argument("list", help=_tr("cli.deps.action", _default="list | install")),
+    feature: str = typer.Argument("", help=_tr("cli.deps.feature", _default="feature name (e.g. provider.gemini), for install")),
+) -> None:
+    """#12: instala backend opcional sob demanda (allowlist, venv-scoped). `okami deps install provider.gemini`."""
+    from okami.core.lazy_deps import LAZY_DEPS, FeatureUnavailable, ensure, feature_missing
+    if action == "list":
+        for k in sorted(LAZY_DEPS):
+            miss = feature_missing(k)
+            mark = "[yellow]falta[/yellow]" if miss else "[green]ok[/green]"
+            console.print(f"  {mark}  [bold]{k}[/bold] [dim]({', '.join(LAZY_DEPS[k])})[/dim]")
+        return
+    if action == "install":
+        if not feature:
+            console.print("[red]informe a feature:[/red] okami deps install provider.gemini")
+            raise typer.Exit(2)
+        try:
+            ensure(feature, prompt=False)
+            console.print(f"[green]✓ {feature} pronto[/green]")
+        except FeatureUnavailable as e:
+            console.print(f"[red]falhou:[/red] {e}")
+            raise typer.Exit(1) from e
+        return
+    console.print(f"[red]ação '{action}' não reconhecida[/red] — use: list | install")
+    raise typer.Exit(2)
+
+
 @app.command(help=_tr("cli.completion", _default="Print a shell-completion snippet (bash/zsh/fish) to source in your shell rc."))
 def completion(
     shell: str = typer.Argument("bash", help=_tr("cli.completion.shell", _default="Shell: bash, zsh or fish.")),
