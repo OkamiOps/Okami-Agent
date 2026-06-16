@@ -37,6 +37,8 @@ class WebhookRoute:
     header: str = "X-Signature"
     tolerance: int = 300
     prompt_prefix: str = ""
+    parser: Callable[[bytes], object] | None = None   # #20: body→Inbound (msg de plataforma) p/ entregar
+    #                                                   o TEXTO real ao agente em vez do prompt sintetizado
 
 
 def _synthesize_prompt(route: WebhookRoute, body: bytes) -> str:
@@ -81,6 +83,20 @@ class WebhookServer:
             if route.deliver is not None:
                 route.deliver(body, route)
             return 200, b'{"ok":true,"modo":"deliver_only"}'
+
+        # rota de mensagem de PLATAFORMA (#20): parseia o callback → Inbound e entrega o TEXTO real
+        # (não o prompt genérico). Payload que não é texto (imagem/evento) → ignorado (200).
+        if route.parser is not None:
+            try:
+                inb = route.parser(body)
+            except Exception:  # noqa: BLE001 — payload malformado não derruba o servidor
+                inb = None
+            if inb is None or not getattr(inb, "text", ""):
+                return 200, b'{"ok":true,"modo":"ignorado"}'
+            route.chat_id = getattr(inb, "chat_id", "") or route.chat_id   # resposta volta p/ o remetente
+            if self.handle is not None:
+                self.handle(inb.text, route)
+            return 200, b'{"ok":true}'
 
         # rota de evento: sintetiza prompt e chama o handler do agente
         if self.handle is not None:

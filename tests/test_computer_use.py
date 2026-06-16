@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # ── dispatcher puro: validação de ação + hardline-block ──
 def test_validate_action_ok_and_bad():
-    from okami.core.desktop.dispatcher import validate_action
+    from okami.core.computeruse.dispatcher import validate_action
     assert validate_action("screenshot", {})[0] is True
     assert validate_action("click", {"x": 10, "y": 20})[0] is True
     assert validate_action("type", {"text": "oi"})[0] is True
@@ -16,7 +16,7 @@ def test_validate_action_ok_and_bad():
 
 
 def test_hardline_blocks_dangerous_keys():
-    from okami.core.desktop.dispatcher import is_hardline
+    from okami.core.computeruse.dispatcher import is_hardline
     for combo in ("cmd+q", "Cmd+Shift+Q", "ctrl+cmd+q", "alt+f4", "ctrl+alt+delete",
                   "cmd+delete", "shift+delete"):
         assert is_hardline("key", {"keys": combo}) is not None, combo

@@ -8,7 +8,7 @@ revista: o dono optou por EMBUTIR (era só-MCP no #17).
 from __future__ import annotations
 
 from okami.core.tools.base import Tool, ToolResult, _safe_path
-from okami.core.desktop.dispatcher import is_hardline, validate_action
+from okami.core.computeruse.dispatcher import is_hardline, validate_action
 
 
 class ComputerUse(Tool):
@@ -36,7 +36,7 @@ class ComputerUse(Tool):
         enabled = cu.get("enabled") if isinstance(cu, dict) else getattr(cu, "enabled", False)
         if not enabled:
             return "computer_use desligado — ative com `computer_use.enabled: true` no okami.yaml"
-        from okami.core.desktop.backend import get_backend
+        from okami.core.computeruse.backend import get_backend
         if get_backend() is None:
             return "sem backend de desktop — instale cliclick (macOS) ou rode `okami deps install desktop.pyautogui`"
         return None
@@ -51,7 +51,7 @@ class ComputerUse(Tool):
             return ToolResult(False, f"computer_use RECUSADO: {hl}")
         backend = self._backend
         if backend is None:
-            from okami.core.desktop.backend import get_backend
+            from okami.core.computeruse.backend import get_backend
             backend = get_backend()
         if backend is None:
             return ToolResult(False, "computer_use: sem backend de desktop disponível.")
