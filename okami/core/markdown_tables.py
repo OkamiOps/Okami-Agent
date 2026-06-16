@@ -28,13 +28,16 @@ def _pad(cell: str, width: int) -> str:
     return cell + " " * max(0, width - display_width(cell))
 
 
+_CELL_SPLIT = re.compile(r"(?<!\\)\|")    # pipe NÃO escapado (\| é literal dentro da célula)
+
+
 def _split_cells(line: str) -> list[str]:
     inner = line.strip()
     if inner.startswith("|"):
         inner = inner[1:]
-    if inner.endswith("|"):
+    if inner.endswith("|") and not inner.endswith("\\|"):
         inner = inner[:-1]
-    return [c.strip() for c in inner.split("|")]
+    return [c.strip() for c in _CELL_SPLIT.split(inner)]
 
 
 def _realign_block(rows: list[str]) -> list[str]:

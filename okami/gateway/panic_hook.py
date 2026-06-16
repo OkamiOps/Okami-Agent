@@ -14,7 +14,11 @@ from pathlib import Path
 
 def format_crash(exc_type, exc, tb) -> str:
     """1-linha p/ stderr: 'Tipo: primeira linha da mensagem'."""
-    msg = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    try:
+        s = str(exc).strip()                       # __str__ malcomportado NÃO pode derrubar o panic-hook
+    except Exception:  # noqa: BLE001
+        s = ""
+    msg = s.splitlines()[0] if s else ""
     name = getattr(exc_type, "__name__", str(exc_type))
     return f"[okami-gateway-crash] {name}: {msg}" if msg else f"[okami-gateway-crash] {name}"
 

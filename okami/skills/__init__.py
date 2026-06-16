@@ -65,6 +65,18 @@ class Skill:
     environments: list[str] = field(default_factory=list)  # #11: runtimes (docker/s6…); vazio = sempre visível
 
 
+def _as_str_list(v) -> list:
+    """Coage frontmatter list-ish p/ lista: None→[], 'darwin'→['darwin'] (escalar NÃO vira ['d','a',…]),
+    lista→ela mesma, outro→[]."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return []
+
+
 def parse_skill(path: Path) -> Skill:
     text = path.read_text(encoding="utf-8")
     m = _FRONTMATTER.match(text)
@@ -85,8 +97,8 @@ def parse_skill(path: Path) -> Skill:
         # frases reais de pedido ("amor, analisa o okami-agent de novo") → casam por INTENÇÃO, não literal.
         intent_examples=[str(x) for x in (meta.get("intent_examples") or [])],
         aliases=[str(a) for a in (meta.get("aliases") or [])],
-        platforms=[str(p).lower() for p in (meta.get("platforms") or [])],
-        environments=[str(e).lower() for e in (meta.get("environments") or [])],
+        platforms=[str(p).lower() for p in _as_str_list(meta.get("platforms"))],
+        environments=[str(e).lower() for e in _as_str_list(meta.get("environments"))],
         meta=meta,
         body=body,
         path=path,
@@ -124,12 +136,27 @@ def missing_skill_config(skills: list[Skill], config: dict) -> list[dict]:
     return [c for c in discover_all_skill_config_vars(skills) if c["key"] not in cfg]
 
 
+# Aliases de OS: sys.platform dá 'darwin'/'win32', mas o frontmatter (convenção Hermes) usa
+# 'macos'/'windows'. Normaliza ambos p/ a família canônica antes de comparar.
+_OS_ALIASES = {"darwin": "macos", "mac": "macos", "osx": "macos", "macos": "macos",
+               "win32": "windows", "win": "windows", "windows": "windows", "cygwin": "windows", "msys": "windows",
+               "linux": "linux", "linux2": "linux"}
+
+
+def _os_family(name: str) -> str:
+    n = (name or "").lower()
+    if n in _OS_ALIASES:
+        return _OS_ALIASES[n]
+    return next((v for k, v in _OS_ALIASES.items() if n.startswith(k)), n)
+
+
 def skill_matches_platform(skill: Skill, os_name: str) -> bool:
-    """True se a skill não declara `platforms` OU o OS atual está na lista (darwin/linux/win…)."""
+    """True se a skill não declara `platforms` OU o OS atual casa por FAMÍLIA (darwin↔macos, win32↔
+    windows). Ignora token vazio/curto demais (não pode virar prefixo solto que casa tudo)."""
     if not skill.platforms:
         return True
-    o = (os_name or "").lower()
-    return any(o.startswith(p) or p.startswith(o) for p in skill.platforms)
+    fam = _os_family(os_name)
+    return any(_os_family(p) == fam for p in skill.platforms if p and len(p) >= 2)
 
 
 def skill_matches_environment(skill: Skill, active_environments) -> bool:

@@ -122,9 +122,18 @@ def scan_for_threats(content: str, scope: str = "context") -> list[str]:
     patterns = _COMPILED.get(scope)
     if patterns is None:
         raise ValueError(f"scan_for_threats: scope desconhecido {scope!r}")
-    for compiled, pid in patterns:
-        if compiled.search(content):
-            findings.append(pid)
+    # #11-fix: também varre uma cópia SEM ênfase markdown (* _ ~ `) — 'ignore **all** instructions'
+    # escapava o filler \w+. Remover esses chars não cria match espúrio (só desofusca). Union dos IDs.
+    import re as _re
+    sources = [content]
+    if any(c in content for c in "*_~`"):
+        sources.append(_re.sub(r"[*_~`]+", "", content))
+    seen: set[str] = set()
+    for src in sources:
+        for compiled, pid in patterns:
+            if pid not in seen and compiled.search(src):
+                seen.add(pid)
+                findings.append(pid)
     return findings
 
 

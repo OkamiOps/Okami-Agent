@@ -10,7 +10,7 @@ import re
 
 _SILENT_MARKERS = frozenset({"no_reply", "silent", "no reply"})
 _MAX_LEN = 64
-_STRIP_RE = re.compile(r"^\s*\[?\s*(no[_\s]?reply|silent)\s*\]?\s*", re.IGNORECASE)
+_STRIP_RE = re.compile(r"^\s*\[?\s*(no[_\s]?reply|silent)\b\s*\]?\s*", re.IGNORECASE)  # \b: 'SILENT2' não casa
 
 
 def _canonical(text: str) -> str:
