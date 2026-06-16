@@ -55,6 +55,38 @@ def lsp_list(
         console.print(f"{mark} [bold]{s.id}[/bold] ({', '.join(s.extensions)}){hint}")
 
 
+@lsp_app.command("probe", help=_tr("cli.lsp.probe", _default="Run the language server on a file and print its diagnostics (okami lsp probe <file>)."))
+def lsp_probe(
+    file: str = typer.Argument(..., help=_tr("cli.lsp.probe.file", _default="File to diagnose (must be inside a git repo).")),
+) -> None:
+    """Roda o language server (via pool persistente) num arquivo e mostra os diagnostics — prova o stack
+    de ponta a ponta. Sem servidor / fora de repo git → mensagem, nunca crasha."""
+    from pathlib import Path
+
+    from okami.lsp.pool import LspPool
+    from okami.lsp.reporter import report_for_file
+    p = Path(file).resolve()
+    if not p.is_file():
+        console.print(f"[red]arquivo não encontrado:[/red] {file}")
+        raise typer.Exit(1)
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except OSError as e:
+        console.print(f"[red]não consegui ler:[/red] {e}")
+        raise typer.Exit(1) from e
+    pool = LspPool()
+    try:
+        diags = pool.diagnose_path(p.parent, p.name, text)
+    finally:
+        pool.shutdown()
+    if not diags:
+        console.print("[dim]sem diagnostics (ou servidor ausente / arquivo fora de repo git). "
+                      "Veja `okami lsp status`.[/dim]")
+        return
+    block = report_for_file(str(p), diags, severities=frozenset({1, 2, 3, 4}))
+    console.print(block or "[dim]sem erros.[/dim]")
+
+
 @lsp_app.command("which", help=_tr("cli.lsp.which", _default="Print the resolved binary path for a language server (okami lsp which <id>)."))
 def lsp_which(
     server_id: str = typer.Argument(..., help=_tr("cli.lsp.which.id", _default="Server id (see `okami lsp list`).")),
