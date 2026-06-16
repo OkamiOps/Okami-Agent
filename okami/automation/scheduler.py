@@ -204,13 +204,16 @@ def delivery_targets(target, home: str = "") -> list[str]:
 
 
 def delivery_decision(result: str) -> tuple[bool, str]:
-    """Decide se a saída de um job vai pro chat. Resultado começando com `[SILENT]` (estilo Hermes) é
-    salvo/registrado mas NÃO entregue — corta o spam de cron 'sem novidade'. Devolve (entregar, texto)."""
-    import re
-    s = (result or "")
-    m = re.match(r"\s*\[silent\]\s*", s, re.IGNORECASE)
-    if m:
-        return False, s[m.end():].strip()
+    """Decide se a saída de um job vai pro chat. Marcador de silêncio (NO_REPLY/SILENT/[SILENT]/NO REPLY,
+    estilo Hermes) é salvo/registrado mas NÃO entregue — corta o spam de cron 'sem novidade'. Devolve
+    (entregar, texto). #11: detector multi-marcador compartilhado em vez de só `[SILENT]`."""
+    from okami.gateway.silence import is_intentional_silence, strip_silence_prefix
+    s = result or ""
+    if is_intentional_silence(s):                    # só o marcador → não entrega, sem texto
+        return False, ""
+    stripped = strip_silence_prefix(s)
+    if stripped != s.strip():                        # '[SILENT] nota interna' → não entrega, guarda a nota
+        return False, stripped
     return True, s
 
 

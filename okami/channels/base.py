@@ -6,7 +6,7 @@ implementar esta interface. (Estilo OpenClaw: adapters de canal sob um gateway �
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -16,6 +16,7 @@ class Inbound:
     text: str = ""
     audio: str | None = None   # caminho do áudio baixado (voz) → STT transcreve
     image: str | None = None   # caminho da imagem baixada (vision §6) → modelo multimodal
+    images: list[str] = field(default_factory=list)  # #11: rajada/álbum de fotos coalescido (1ª = image)
     file: str | None = None    # caminho de documento/vídeo baixado → vai pro inbox do workspace
     file_name: str = ""        # nome original do arquivo (p/ salvar legível no inbox)
     msg_id: str = ""           # id único da mensagem no canal → idempotência por turno (#3)

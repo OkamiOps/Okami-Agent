@@ -386,6 +386,14 @@ def run_gateway(global_raw: dict, agents: dict, emit: Callable[[str], None] = pr
         verify_ca_bundle()
     except Exception as e:  # noqa: BLE001
         emit(f"⚠ SSL/CA bundle: {e}")
+    # #11: panic-hook — crash não-tratado do gateway vira traceback em ~/.okami/logs/gateway_crash.log
+    # + 1-linha no stderr (senão some: stdout/feed não captura). Best-effort.
+    try:
+        from okami.gateway.panic_hook import install_panic_hook
+        from okami.home import okami_home
+        install_panic_hook(okami_home() / "logs" / "gateway_crash.log")
+    except Exception:  # noqa: BLE001
+        pass
 
     eps = build_endpoints(global_raw, agents, emit=emit, make_channel=make_channel)   # DMs (1 agente/chat)
     groups = build_group_endpoints(global_raw, agents, build_config(global_raw).groups, emit=emit)  # salas

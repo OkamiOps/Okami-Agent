@@ -102,7 +102,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._pending: dict[str, queue.Queue] = {}
         self._clarify_pending: dict[str, tuple] = {}   # #8 item 1: pergunta do agente esperando resposta do dono
         self.clarify_timeout = max(approval_timeout, 300.0)   # clarify pode esperar mais que uma aprovação
-        self._img: dict[str, str] = {}       # imagem pendente por chat (vision §6)
+        self._img: dict[str, list] = {}      # imagens pendentes por chat (vision §6) — LISTA (#11: álbum)
         from collections import OrderedDict
         self._seen_msgs: OrderedDict = OrderedDict()   # idempotência por turno (#3): msg_id já processado
         self._spawn = spawn or (lambda fn: threading.Thread(target=fn, daemon=True).start())
@@ -1130,6 +1130,33 @@ class AgentEndpoint(EndpointCommandsMixin):
             from okami import log
             log.dbg("goal_after_turn falhou", exc_info=True)
 
+    def _start_heartbeat(self, chat_id, t0: float):
+        """#11: thread daemon best-effort que manda "ainda trabalhando, ~N min" em turno LONGO (silêncio
+        prolongado), gateado pelo tier de display da plataforma. Devolve um threading.Event p/ parar, ou
+        None se desligado. Em turno rápido (teste/uso normal) nunca dispara — para antes do 1º intervalo."""
+        from okami.gateway.display_config import resolve_display_setting
+        platform = (getattr(self, "surface", "") or getattr(self.channel, "name", "") or "")
+        if not resolve_display_setting({}, platform, "long_running_notifications"):
+            return None
+        import threading as _th
+        from okami.gateway.heartbeat import heartbeat_due, heartbeat_message
+        stop = _th.Event()
+        interval = 60.0
+
+        def _loop():
+            last = t0
+            while not stop.wait(5.0):                      # checa a cada 5s; só manda a cada `interval`
+                now = time.time()
+                if heartbeat_due(start=t0, now=now, interval=interval, last=last):
+                    last = now
+                    try:
+                        self.channel.send(chat_id, heartbeat_message(elapsed_s=now - t0))
+                    except Exception:  # noqa: BLE001 — heartbeat nunca derruba o turno
+                        return
+
+        _th.Thread(target=_loop, daemon=True).start()
+        return stop
+
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None,
              surface_override: str | None = None) -> None:
         if resume:                                        # retomada: o USER já está no transcript
@@ -1231,7 +1258,12 @@ class AgentEndpoint(EndpointCommandsMixin):
                     s.remote_spec = None
             kw["set_remote"] = lambda rt, _s=s: setattr(_s, "remote_spec", getattr(rt, "alias", None) if rt else None)
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
-            task = self.run_task(self.cfg, self.ws, text, **kw)
+            _hb_stop = self._start_heartbeat(chat_id, _t0)  # #11: "ainda trabalhando, ~N min" em turno longo
+            try:
+                task = self.run_task(self.cfg, self.ws, text, **kw)
+            finally:
+                if _hb_stop is not None:
+                    _hb_stop.set()
             _elapsed = time.time() - _t0
             stats = getattr(task, "stats", None) or {}     # tokens do turno (custo §A5)
             if stats.get("usage"):
@@ -1396,8 +1428,14 @@ class AgentEndpoint(EndpointCommandsMixin):
                     self.channel.send(msg.chat_id, "❌ " + _tr(
                         "gw.audio_unclear", _default="couldn't understand the audio: {e}", e=e))
                     continue
-            if getattr(msg, "image", None):            # foto → vision (§6)
-                self._img[str(msg.chat_id)] = msg.image
+            imgs = list(getattr(msg, "images", None) or ([] if not getattr(msg, "image", None) else [msg.image]))
+            if not imgs and text:                      # #11: auto-extrai caminho LOCAL de imagem do texto
+                from okami.gateway.image_refs import extract_image_refs
+                from pathlib import Path as _P
+                local, _urls = extract_image_refs(text)
+                imgs = [p for p in (str(_P(x).expanduser()) for x in local) if _P(p).is_file()]
+            if imgs:                                   # foto(s) → vision (§6); lista cobre álbum/rajada
+                self._img[str(msg.chat_id)] = imgs     # LISTA (corrige iteração + suporta múltiplas imagens)
                 self.handle(msg.chat_id, text or "Analise a imagem que enviei.")
                 continue
             if getattr(msg, "file", None):             # documento/vídeo → inbox do workspace + nota
