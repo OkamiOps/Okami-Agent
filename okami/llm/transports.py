@@ -286,6 +286,18 @@ def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str 
                       provider=pc.name, model=model or pc.model)
 
 
+# #12: transportes NATIVOS multi-vendor (prontidão p/ trocar de vendor). Tradução em módulos próprios;
+# SDK lazy-import. Referenciados por nome no namespace do módulo p/ serem monkeypatcháveis.
+def gemini_native_complete(pc, messages, model, overrides=None):
+    from okami.llm.gemini_native import gemini_native_complete as _g
+    return _g(pc, messages, model, overrides)
+
+
+def bedrock_native_complete(pc, messages, model, overrides=None):
+    from okami.llm.bedrock_native import bedrock_native_complete as _b
+    return _b(pc, messages, model, overrides)
+
+
 def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
              overrides: dict | None = None):
     """Resultado via transport não-litellm (`Completion`), ou None se for litellm (segue no LiteLLM)."""
@@ -295,4 +307,8 @@ def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
         return codex_oauth_complete(pc, messages, model, overrides)
     if pc.transport == "minimax_oauth":
         return minimax_oauth_complete(pc, messages, model, overrides)
+    if pc.transport == "gemini_native":
+        return gemini_native_complete(pc, messages, model, overrides)
+    if pc.transport == "bedrock_native":
+        return bedrock_native_complete(pc, messages, model, overrides)
     return None
