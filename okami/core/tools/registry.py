@@ -13,6 +13,7 @@ from okami.core.tools.execute_code import ExecuteCode
 from okami.core.tools.search import SearchFiles
 from okami.core.tools.session_search import SessionSearch
 from okami.core.tools.mixture import MixtureOfAgents
+from okami.core.tools.video import GenerateVideo
 from okami.core.tools.patch import ApplyPatch
 from okami.core.tools.toolsearch import ToolSearch
 from okami.core.tools.websearch import WebSearch
@@ -41,7 +42,7 @@ def default_registry() -> dict[str, Tool]:
              ScheduleJob(),
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
              UseSkill(), ManageSkill(), Spawn(), MixtureOfAgents(),
-             Browse(), WebSearch(), WebExtract(), GenerateImage(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
+             Browse(), WebSearch(), WebExtract(), GenerateImage(), GenerateVideo(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
              ToolSearch(), Notify(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              RemoteConnect(), RemoteDisconnect(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]

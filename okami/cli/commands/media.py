@@ -178,3 +178,27 @@ def image_cmd(
     console.print(f"[green]✓ imagem:[/green] {path}")
 
 
+@app.command("video", help=_tr("cli.video", _default="Generate a video via the configured provider (media.video). With `--image base.png` for image-to-video."))
+def video_cmd(
+    prompt: str = typer.Argument(..., help=_tr("cli.video.prompt", _default="What to generate.")),
+    out: str = typer.Option("video.mp4", "-o", "--out"),
+    image: str = typer.Option("", "--image", help=_tr("cli.video.image", _default="Base image for image-to-video.")),
+) -> None:
+    """Gera um vídeo via o provider configurado (media.video). Sem config → mensagem clara, nunca crasha."""
+    from okami.cli._shared import _load
+    from okami.llm.videogen import generate_video
+    try:
+        cfg = _load()
+    except Exception:  # noqa: BLE001
+        cfg = None
+    try:
+        path = generate_video(cfg, prompt, out, image=image or None)
+    except RuntimeError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(1) from e
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]falhou:[/red] {e}")
+        raise typer.Exit(1) from e
+    console.print(f"[green]✓ vídeo:[/green] {path}")
+
+

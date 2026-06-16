@@ -58,6 +58,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("web_search", "web"),
     ToolSpec("web_extract", "web"),
     ToolSpec("generate_image", "mídia", tier="power"),
+    ToolSpec("generate_video", "mídia", tier="power"),
     ToolSpec("vision_analyze", "mídia"),
     ToolSpec("audio_analyze", "mídia"),                       # #7: transcreve áudio (whisper local)
     ToolSpec("text_to_speech", "mídia"),                      # #10: responde em voz (MEDIA: → bolha de voz)
