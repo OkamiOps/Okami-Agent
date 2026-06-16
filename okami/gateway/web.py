@@ -46,16 +46,23 @@ pre{white-space:pre-wrap;font-size:12px;color:#cfcfd4;max-height:60vh;overflow:a
 <main id="app"><div class="card muted">carregando…</div></main>
 <script>
 const app=document.getElementById('app');let tab='status';
+const TOKEN=new URLSearchParams(location.search).get('token');
+const HDR=TOKEN?{'Authorization':'Bearer '+TOKEN}:{};
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const api=p=>fetch(p,{headers:HDR}).then(r=>r.json());
+const ALLOW=['approvals.mode','sandbox.profile','sandbox.require_isolation','display.global.tool_progress','display.global.long_running_notifications','harness.max_steps','learning.review'];
 async function load(){
  app.innerHTML='<div class="card muted">carregando…</div>';
- try{const r=await fetch('/api/'+tab);const d=await r.json();render(d);}catch(e){app.innerHTML='<div class="card">erro: '+esc(e)+'</div>';}
+ try{render(await api('/api/'+tab));}catch(e){app.innerHTML='<div class="card">erro: '+esc(e)+'</div>';}
 }
 function kv(o){return '<table>'+Object.entries(o||{}).map(([k,v])=>'<tr><th>'+esc(k)+'</th><td>'+(Array.isArray(v)?v.map(x=>'<span class=tag>'+esc(x)+'</span>').join(''):esc(v))+'</td></tr>').join('')+'</table>';}
+async function showSession(sid){const d=await api('/api/session/'+encodeURIComponent(sid));app.innerHTML='<div class="card"><button onclick="load()">‹ voltar</button><h3>'+esc(sid)+'</h3>'+((d&&d.length)?d.map(m=>'<p><b>'+esc(m.role)+':</b> '+esc(m.text)+'</p>').join(''):'<span class=muted>sem turnos</span>')+'</div>';}
+async function saveCfg(){const k=document.getElementById('ck').value,v=document.getElementById('cv').value;const r=await fetch('/api/config',{method:'POST',headers:{...HDR,'Content-Type':'application/json'},body:JSON.stringify({key:k,value:v})});const d=await r.json();document.getElementById('cmsg').textContent=d.ok?'✓ salvo':('✗ '+(d.error||'erro'));}
+function cfgForm(){return '<div class="card"><h3>Editar (allowlist)</h3>chave <select id=ck>'+ALLOW.map(k=>'<option>'+k+'</option>').join('')+'</select> valor <input id=cv> <button onclick="saveCfg()">salvar</button> <span id=cmsg class=muted></span><p class=muted>só chaves não-segredo; grava em okami.local.yaml</p></div>';}
 function render(d){
  if(tab==='status'){app.innerHTML='<div class="card">'+kv(d)+'</div>';}
- else if(tab==='sessions'){app.innerHTML='<div class="card">'+((d&&d.length)?'<table><tr><th>chat</th><th>turnos</th><th>atualizado</th></tr>'+d.map(s=>'<tr><td>'+esc(s.chat_id)+'</td><td>'+esc(s.turns||'')+'</td><td>'+esc(s.updated_at||'')+'</td></tr>').join('')+'</table>':'<span class=muted>sem sessões</span>')+'</div>';}
- else if(tab==='config'){app.innerHTML='<div class="card">'+kv(d)+'<p class=muted>read-only · nomes de env, nunca valores</p></div>';}
+ else if(tab==='sessions'){app.innerHTML='<div class="card">'+((d&&d.length)?'<table><tr><th>chat</th><th>turnos</th><th>atualizado</th></tr>'+d.map(s=>'<tr style="cursor:pointer" onclick="showSession(\\''+esc(s.chat_id)+'\\')"><td>'+esc(s.chat_id)+'</td><td>'+esc(s.turns||'')+'</td><td>'+esc(s.updated_at||'')+'</td></tr>').join('')+'</table><p class=muted>clique numa sessão p/ ver o transcript</p>':'<span class=muted>sem sessões</span>')+'</div>';}
+ else if(tab==='config'){app.innerHTML='<div class="card">'+kv(d)+'<p class=muted>nomes de env, nunca valores</p></div>'+cfgForm();}
  else{app.innerHTML='<div class="card"><pre>'+((d&&d.length)?d.map(esc).join('\\n'):'<span class=muted>sem logs</span>')+'</pre></div>';}
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');tab=b.dataset.t;load();});
@@ -63,22 +70,88 @@ load();setInterval(()=>{if(tab==='status'||tab==='logs')load();},5000);
 </script></body></html>"""
 
 
-def route(path: str, *, providers: dict | None = None) -> tuple:
-    """Roteamento puro: (code, content_type, body). `/` = app; `/api/<x>` = JSON do provider `<x>`."""
+# Chaves de config EDITÁVEIS pela web (não-segredo, comportamento/exibição). Tudo fora disto é recusado;
+# segredo NUNCA edita pela web (o dono usa `okami config set` / o YAML direto).
+_CONFIG_ALLOWLIST = frozenset({
+    "approvals.mode", "sandbox.profile", "sandbox.require_isolation",
+    "display.global.tool_progress", "display.global.long_running_notifications",
+    "harness.max_steps", "learning.review",
+})
+_SECRET_HINT = ("token", "key", "secret", "password", "credential", "auth")
+
+
+def _json_resp(data, code: int = 200) -> tuple:
+    return code, "application/json; charset=utf-8", _json.dumps(data, ensure_ascii=False, default=str)
+
+
+def route(path: str, *, providers: dict | None = None, token: str | None = None, authorized: bool = True) -> tuple:
+    """Roteamento puro GET: (code, content_type, body). `/` = app; `/api/<x>` = JSON do provider;
+    `/api/session/<id>` = transcript. Se `token` setado e não-`authorized` → 401."""
     providers = providers or {}
     if path in ("/", "/index.html"):
         return 200, "text/html; charset=utf-8", _APP_HTML
     if path == "/healthz":
         return 200, "text/plain", "ok"
     if path.startswith("/api/"):
+        if token and not authorized:
+            return 401, "text/plain", "unauthorized"
+        if path.startswith("/api/session/"):           # transcript de UMA sessão
+            sid = path[len("/api/session/"):]
+            prov = providers.get("session")
+            try:
+                data = prov(sid) if callable(prov) else []
+            except Exception as e:  # noqa: BLE001
+                data = {"error": str(e)[:120]}
+            return _json_resp(data)
         key = path[len("/api/"):]
         prov = providers.get(key)
         try:
             data = prov() if callable(prov) else ([] if key in ("sessions", "logs") else {})
         except Exception as e:  # noqa: BLE001 — provider quebrado NÃO vira 500
             data = {"error": str(e)[:120]}
-        return 200, "application/json; charset=utf-8", _json.dumps(data, ensure_ascii=False, default=str)
+        return _json_resp(data)
     return 404, "text/plain", "not found"
+
+
+def _apply_config_set(key: str, value) -> dict:
+    """Grava `key=value` em okami.local.yaml via secure_write (atômico+backup). Só chaves do allowlist."""
+    from pathlib import Path
+    from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
+    p = Path("okami.local.yaml")
+    data = read_yaml_resilient(p, default={}) or {}
+    node = data
+    parts = key.split(".")
+    for k in parts[:-1]:
+        node = node.setdefault(k, {})
+        if not isinstance(node, dict):
+            return {"ok": False, "error": "caminho de config inválido"}
+    node[parts[-1]] = value
+    secure_write_yaml(p, data)
+    return {"ok": True, "key": key}
+
+
+def route_post(path: str, body: str, *, providers: dict | None = None, token: str | None = None,
+               authorized: bool = True) -> tuple:
+    """Roteamento POST: hoje só `/api/config` (set guardado por allowlist + anti-segredo)."""
+    if token and not authorized:
+        return 401, "text/plain", "unauthorized"
+    if path != "/api/config":
+        return 404, "text/plain", "not found"
+    try:
+        payload = _json.loads(body or "{}")
+    except _json.JSONDecodeError:
+        return _json_resp({"ok": False, "error": "json inválido"}, 400)
+    key = str(payload.get("key", ""))
+    value = payload.get("value")
+    if any(h in key.lower() for h in _SECRET_HINT):
+        return _json_resp({"ok": False, "error": "chave parece segredo — edite via `okami config set` (nunca pela web)"}, 400)
+    if key not in _CONFIG_ALLOWLIST:
+        return _json_resp({"ok": False, "error": f"chave '{key}' não é editável pela web (allowlist)"}, 400)
+    try:
+        res = _apply_config_set(key, value)
+    except Exception as e:  # noqa: BLE001
+        return _json_resp({"ok": False, "error": str(e)[:120]}, 400)
+    return _json_resp(res, 200 if res.get("ok") else 400)
 
 
 def default_providers(workspace: str = ".", agent: str = "okami") -> dict:
@@ -118,24 +191,52 @@ def default_providers(workspace: str = ".", agent: str = "okami") -> dict:
                     return []
         return []
 
-    return {"status": _status, "sessions": _sessions, "config": _config, "logs": _logs}
+    def _session(sid: str):
+        try:
+            from okami.gateway.sessions import TranscriptStore
+            hist = TranscriptStore(workspace).history(sid, limit=100)
+            return [{"role": r, "text": t} for r, t in hist]   # tuplas → dicts p/ o JS
+        except Exception:  # noqa: BLE001
+            return []
+
+    return {"status": _status, "sessions": _sessions, "config": _config, "logs": _logs, "session": _session}
 
 
-def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provider=None, providers: dict | None = None):
-    """Sobe o dashboard (bloqueante). `providers` = dict {status,sessions,config,logs}; `status_provider`
-    é compat (vira providers['status'])."""
+def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provider=None,
+                    providers: dict | None = None, token: str | None = None):
+    """Sobe o dashboard (bloqueante). `providers` = {status,sessions,config,logs,session}; `token` (opc)
+    exige `Authorization: Bearer <token>` ou `?token=` nas rotas /api (GET e POST)."""
     from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlparse
     provs = dict(providers or {})
     if status_provider and "status" not in provs:
         provs["status"] = status_provider
 
     class _H(BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            code, ctype, body = route(self.path, providers=provs)
+        def _authorized(self, parsed) -> bool:
+            if not token:
+                return True
+            hdr = self.headers.get("Authorization", "")
+            if hdr == f"Bearer {token}":
+                return True
+            return (parse_qs(parsed.query).get("token") or [None])[0] == token
+
+        def _send(self, code, ctype, body):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.end_headers()
             self.wfile.write(body.encode("utf-8"))
+
+        def do_GET(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            self._send(*route(parsed.path, providers=provs, token=token, authorized=self._authorized(parsed)))
+
+        def do_POST(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+            self._send(*route_post(parsed.path, body, providers=provs, token=token,
+                                   authorized=self._authorized(parsed)))
 
         def log_message(self, *a):
             return

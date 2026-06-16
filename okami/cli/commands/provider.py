@@ -97,6 +97,26 @@ def provider_list_cmd() -> None:
     list_providers()
 
 
+@provider_app.command("check", help=_tr("cli.provider.check", _default="Self-test a native transport's capability (gemini_native/bedrock_native): text+tools+image+tool-calls."))
+def provider_check_cmd(
+    transport: str = typer.Argument("gemini_native", help=_tr("cli.provider.check.transport", _default="Native transport: gemini_native | bedrock_native.")),
+) -> None:
+    """Valida o round-trip de tradução do transporte nativo (sem rede/chave) — prova de capacidade."""
+    from okami.llm.provider_check import check_native_transport
+    rep = check_native_transport(transport)
+    if rep["ok"]:
+        console.print(f"[green]✓ {transport} capability OK[/green] [dim](texto · tools · imagem · tool-call)[/dim]")
+        return
+    if "error" in rep:
+        console.print(f"[red]✗ {transport}: {rep['error']}[/red]")
+    elif rep["transport"] not in ("gemini_native", "bedrock_native"):
+        console.print(f"[yellow]{transport} não é um transporte nativo[/yellow] [dim](use gemini_native | bedrock_native)[/dim]")
+    else:
+        falhas = ", ".join(k for k in ("text", "tools", "image", "tool_call") if not rep.get(k))
+        console.print(f"[red]✗ {transport}: capacidades falhando: {falhas}[/red]")
+    raise typer.Exit(1)
+
+
 @provider_app.command("remove", help=_tr("cli.provider.remove", _default="Remove a provider from okami.yaml."))
 def provider_remove_cmd(provider_id: str = typer.Argument(..., help=_tr("cli.provider.remove.provider_id", _default="ID of the provider to remove."))) -> None:
     """Remove um provider do okami.yaml."""

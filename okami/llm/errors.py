@@ -48,6 +48,11 @@ def _status_of(exc) -> int | None:
         v = getattr(exc, attr, None)
         if isinstance(v, int) and 100 <= v < 600:
             return v
+    resp = getattr(exc, "response", None)              # boto3 ClientError esconde o status aqui
+    if isinstance(resp, dict):
+        v = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+        if isinstance(v, int) and 100 <= v < 600:
+            return v
     m = re.search(r"\b([45]\d\d)\b", str(exc))
     return int(m.group(1)) if m else None
 

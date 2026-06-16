@@ -350,18 +350,21 @@ def gui(
     port: int = typer.Option(9119, "--port", help=_tr("cli.gui.port", _default="Port for the local dashboard.")),
     no_open: bool = typer.Option(False, "--no-open", help=_tr("cli.gui.no_open", _default="Don't open the browser, just serve.")),
     app_window: bool = typer.Option(False, "--app", help=_tr("cli.gui.app", _default="Open in an app-mode window (chrome --app) instead of a tab.")),
+    token: str = typer.Option("", "--token", help=_tr("cli.gui.token", _default="Require this token (Bearer/?token=) for the /api routes.")),
     workspace: str = typer.Option(".", "-w", "--workspace"),
 ) -> None:
-    """#12/#14: dashboard web (stdlib, zero-dep) — status/sessões/config(read-only)/logs. Localhost."""
+    """#12/#14: dashboard web (stdlib, zero-dep) — status/sessões/config/logs. Localhost; --token autentica."""
     import threading
     from okami.gateway.web import default_providers, serve_dashboard
 
-    url = f"http://127.0.0.1:{port}/"
-    console.print(f"[green]dashboard em[/green] {url} [dim](Ctrl-C p/ parar)[/dim]")
+    suffix = f"?token={token}" if token else ""
+    url = f"http://127.0.0.1:{port}/{suffix}"
+    console.print(f"[green]dashboard em[/green] http://127.0.0.1:{port}/ [dim](Ctrl-C p/ parar)"
+                  + (" · protegido por token" if token else "") + "[/dim]")
     if not no_open:
         threading.Timer(0.6, lambda: _open_dashboard(url, app_window)).start()
     try:
-        serve_dashboard(port, providers=default_providers(workspace))
+        serve_dashboard(port, providers=default_providers(workspace), token=token or None)
     except KeyboardInterrupt:
         console.print("\n[dim]dashboard parado.[/dim]")
     except OSError as e:

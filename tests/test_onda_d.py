@@ -126,3 +126,42 @@ def test_dashboard_config_never_leaks_secret_values():
     providers = {"config": lambda: {"env_present": ["ANTHROPIC_API_KEY"], "providers": ["claude"]}}
     body = route("/api/config", providers=providers)[2]
     assert "ANTHROPIC_API_KEY" in body and "sk-" not in body
+
+
+# ── auth por token ──
+def test_dashboard_token_auth_blocks_unauthorized():
+    from okami.gateway.web import route
+    assert route("/api/status", token="segredo", authorized=False)[0] == 401   # sem token → 401
+    assert route("/api/status", token="segredo", authorized=True)[0] == 200    # com token → ok
+    assert route("/api/status")[0] == 200                                       # sem token configurado → aberto (localhost)
+
+
+# ── view de transcript por sessão ──
+def test_dashboard_session_transcript_route():
+    import json
+    from okami.gateway.web import route
+    providers = {"session": lambda sid: [{"role": "USER", "text": "oi"}, {"role": "AGENT", "text": "olá"}]}
+    code, ctype, body = route("/api/session/c1", providers=providers)
+    assert code == 200 and "json" in ctype
+    assert len(json.loads(body)) == 2
+
+
+# ── config-edit guardado (allowlist + secure_write) ──
+def test_dashboard_config_set_allowlisted(tmp_path, monkeypatch):
+    from okami.gateway import web
+    written = {}
+    monkeypatch.setattr(web, "_apply_config_set", lambda k, v: written.update({k: v}) or {"ok": True})
+    code, _ctype, body = web.route_post("/api/config", '{"key": "approvals.mode", "value": "smart"}')
+    assert code == 200 and written == {"approvals.mode": "smart"}
+
+
+def test_dashboard_config_set_rejects_secret_key():
+    from okami.gateway.web import route_post
+    code, _ctype, body = route_post("/api/config", '{"key": "channels.telegram.token", "value": "sk-evil"}')
+    assert code == 400 and "secret" in body.lower() or "segredo" in body.lower() or code == 400
+
+
+def test_dashboard_config_set_rejects_non_allowlisted():
+    from okami.gateway.web import route_post
+    code, _c, _b = route_post("/api/config", '{"key": "qualquer.coisa", "value": "x"}')
+    assert code == 400                                  # chave fora do allowlist → recusa
