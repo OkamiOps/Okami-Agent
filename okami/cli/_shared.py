@@ -195,7 +195,11 @@ def _fetch_skill_source(source: str, dest: Path) -> None:
         subprocess.call(["npx", "clawhub", "install", source.split(":", 1)[1]], cwd=str(dest), env=env)
         return
     url = f"https://github.com/{source}.git" if re.match(r"^[\w.-]+/[\w.-]+$", source) else source
-    subprocess.call(["git", "clone", "--depth", "1", url], cwd=str(dest), env=env)
+    r = subprocess.run(["git", "clone", "--depth", "1", url], cwd=str(dest), env=env,  # noqa: S603,S607
+                       capture_output=True, text=True)
+    if r.returncode != 0:                 # SEM checar o exit, repo inexistente/privado/sem rede virava o erro
+        _tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["sem detalhe"]   # ENGANOSO "nenhuma SKILL.md"
+        raise RuntimeError(f"git clone de '{source}' falhou: {_tail[0]}")
 
 
 def _build_memory_block(memory: str, honcho_url=None, honcho_key=None,

@@ -242,6 +242,10 @@ class OkamiConfig(BaseModel):
     retention: dict[str, Any] = Field(default_factory=dict)  # poda/quota de disco p/ gateway long-running (ver maintenance.py)
     paperclip: dict[str, Any] = Field(default_factory=dict)  # {"require_evidence": true} — control plane exige prova p/ done
     auxiliary: dict[str, Any] = Field(default_factory=dict)  # modelo BARATO p/ fundo: {default|distill|review|moderator: {provider, model}}
+    integrations: dict[str, Any] = Field(default_factory=dict)  # {x|homeassistant|feishu: {...}} — SEM isto as tools de
+    #                                                            integração nasciam MORTAS (cfg de runtime descartava o bloco)
+    media: dict[str, Any] = Field(default_factory=dict)         # {"video": {backend,url,model,api_key_env}} — generate_video
+    computer_use: dict[str, Any] = Field(default_factory=dict)  # {"enabled": bool, "backend": ...} — tool computer_use
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -443,6 +447,9 @@ def build_config(raw: dict) -> OkamiConfig:
         retention=raw.get("retention") or raw.get("cleanup") or {},
         paperclip=raw.get("paperclip") or {},
         auxiliary=raw.get("auxiliary") or {},
+        integrations=raw.get("integrations") or {},   # SEM propagar, x_search/homeassistant/feishu liam vazio → mortas
+        media=raw.get("media") or {},                 # idem generate_video (media.video)
+        computer_use=raw.get("computer_use") or {},   # idem computer_use (enabled)
     )
 
 

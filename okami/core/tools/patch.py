@@ -238,7 +238,11 @@ class ApplyPatch(Tool):
                     done.append(f"update {op.path} → {op.move_to}")
                 else:
                     done.append(f"{op.kind} {op.path}")
-                ctx.read_files.add(op.move_to or op.path)
+                from okami.core.tools.file_state import record_read
+                record_read(ctx, op.move_to or op.path, dst)   # acabou de escrever → ATUALIZA o baseline de
+                #   mtime (não só read_files.add). Sem isto, 2 patches no mesmo arquivo no mesmo turno → o 2º
+                #   batia no anti-stale ("mudou no disco") por causa do mtime do PRÓPRIO patch anterior.
+                #   write_file/edit_file já fazem isto (files.py:195/285).
         except Exception as e:  # noqa: BLE001 — falha no meio da escrita → desfaz o que já mexeu
             for path, original in reversed(backups):
                 try:

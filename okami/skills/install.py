@@ -24,6 +24,27 @@ class InstallResult:
     trust: str = ""
     verdict: str = "INFO"
     decision: str = ""
+    deps: list[str] = field(default_factory=list)   # deps externas a instalar À MÃO (npm/pip) — antes era
+    #   silêncio: instalava 'ok' e o script estourava em runtime (puppeteer/chromium → travamento de 300s)
+
+
+def detect_dependencies(skill_dir) -> list[str]:
+    """Olha a pasta da skill por manifestos de dependência externa e devolve instruções ACIONÁVEIS. Skill de
+    terceiros (ex.: html-to-pdf via puppeteer) não roda sem `npm install`/`pip install` — sem este aviso o
+    erro só aparecia em runtime (módulo não encontrado / Chromium baixando → estourava o anti-travamento)."""
+    d = Path(skill_dir)
+    out: list[str] = []
+    if (d / "package.json").exists():
+        out.append("npm install (Node: esta skill tem package.json — ex.: puppeteer baixa ~170MB de Chromium)")
+    for req in ("requirements.txt", "pyproject.toml"):
+        if (d / req).exists():
+            out.append(f"pip install -r {req}" if req == "requirements.txt" else "pip install . (pyproject.toml)")
+            break
+    if (d / "Gemfile").exists():
+        out.append("bundle install (Ruby)")
+    if (d / "go.mod").exists():
+        out.append("go mod download (Go)")
+    return out
 
 
 def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = False,
@@ -87,6 +108,7 @@ def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = Fa
     skills_root = Path(skills_root)
     skills_root.mkdir(parents=True, exist_ok=True)
     installed: list[str] = []
+    deps: list[str] = []
     for s in found:
         target = skills_root / s.path.parent.name
         shutil.copytree(s.path.parent, target, dirs_exist_ok=True)
@@ -94,8 +116,15 @@ def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = Fa
             target.chmod(0o700)                        # skill privada do dono (hooks/config) em VPS multi-user:
         except OSError:                                # 0700 no dir bloqueia outro usuário SEM mexer no +x dos files
             pass
+        for _sh in target.rglob("*.sh"):               # scripts da skill com bit de execução (SKILL.md manda ./run.sh)
+            try:
+                _sh.chmod(0o700)
+            except OSError:
+                pass
+        deps += [f"{s.name}: {d}" for d in detect_dependencies(target)]   # avisa deps externas (npm/pip) — não trava em runtime
         record(Path(lock_root), s.name, source=str(source), skill_dir=target)   # proveniência + sha256
         installed.append(s.name)
     shutil.rmtree(quarantine, ignore_errors=True)
+    reason = ("instalada, mas precisa instalar deps externas À MÃO: " + "; ".join(deps)) if deps else ""
     return InstallResult(True, installed=installed, kind=src.kind, trust=src.trust,
-                         verdict=verdict, decision=decision)
+                         verdict=verdict, decision=decision, deps=deps, reason=reason)

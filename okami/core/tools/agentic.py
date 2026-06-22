@@ -31,13 +31,17 @@ class UseSkill(Tool):
                 record_skill_use(root, name)
             except Exception:  # noqa: BLE001 — telemetria nunca derruba a tool
                 pass
+        skill_dir = ""
         try:                                          # #9: expande ${OKAMI_SKILL_DIR/SESSION_ID/DATE} (sem shell)
             from pathlib import Path as _P
             from okami.skills.preprocess import expand_skill_body
-            body = expand_skill_body(body, skill_dir=str(_P(root) / name) if root else "")
+            skill_dir = str((_P(root) / name).resolve()) if root else ""
+            body = expand_skill_body(body, skill_dir=skill_dir)
         except Exception:  # noqa: BLE001
             pass
-        return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}")
+        loc = (f"\n\n[arquivos desta skill em: {skill_dir} — run_shell roda no WORKSPACE, então use o caminho "
+               f"ABSOLUTO p/ os scripts (ex.: `node {skill_dir}/scripts/run.js`) ou `cd` p/ lá primeiro]") if skill_dir else ""
+        return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}{loc}")
 
     def _read_file(self, name, rel, ctx):
         """Lê um arquivo de apoio DENTRO da skill (jailed na pasta da skill). Disclosure tier-3."""
@@ -180,9 +184,10 @@ class InstallSkill(Tool):
                     ctx.skills[nm] = parse_skill(_P(root) / nm / "SKILL.md").body
                 except OSError:
                     pass
+        dep_note = ("\n⚠ ANTES de usar, instale as deps externas (run_shell): " + "; ".join(res.deps)) if res.deps else ""
         return ToolResult(True, f"skill(s) instalada(s): {', '.join(res.installed)} "
                           f"(fonte {res.kind}·confiança {res.trust}, scan {res.verdict}). "
-                          "Carregue o procedimento com use_skill.", effect=True)
+                          f"Carregue o procedimento com use_skill.{dep_note}", effect=True)
 
 
 class Spawn(Tool):
