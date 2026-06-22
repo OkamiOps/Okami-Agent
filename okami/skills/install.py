@@ -48,7 +48,8 @@ def detect_dependencies(skill_dir) -> list[str]:
 
 
 def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = False,
-                        force: bool = False, only: str = "", fetch=None, quarantine=None) -> InstallResult:
+                        force: bool = False, confirm: bool = False, only: str = "",
+                        fetch=None, quarantine=None) -> InstallResult:
     """Baixa (fetch injetável → testável offline), valida e instala skill(s) da `source` em `skills_root`,
     registrando proveniência no lockfile em `lock_root`. `only` instala só a skill com esse nome (repo
     com várias). Devolve InstallResult (nunca lança por fonte malformada)."""
@@ -103,6 +104,11 @@ def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = Fa
         return InstallResult(False, kind=src.kind, trust=src.trust, verdict=verdict, decision=decision,
                              reason=f"BLOQUEADO: scan {verdict} (segurança vence confiança). "
                                     "Ficou fora do catálogo.")
+    if decision == "confirm" and not (confirm or force):       # a matriz tem 3 estados; 'confirm' caía direto
+        shutil.rmtree(quarantine, ignore_errors=True)          # na instalação → fonte não-confiável entrava sem
+        return InstallResult(False, kind=src.kind, trust=src.trust, verdict=verdict, decision=decision,  # o dono ver
+                             reason=f"PRECISA CONFIRMAR: fonte {src.trust}·scan {verdict} — não é confiável o "
+                                    "bastante p/ auto-instalar. Reinstale com confirm=true se confia na origem.")
 
     from okami.skills.lockfile import record
     skills_root = Path(skills_root)

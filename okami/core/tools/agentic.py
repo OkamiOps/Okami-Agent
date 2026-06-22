@@ -159,7 +159,8 @@ class InstallSkill(Tool):
                    "código antes do scan). Depois, use a skill com use_skill.")
     args_schema = {"source": "owner/repo (GitHub) | caminho local | URL git | clawhub:<slug>",
                    "name": "(opc) instalar só a skill com este nome (repo-biblioteca)",
-                   "allow_exec": "(opc) true p/ permitir fonte que EXECUTA código no fetch (clawhub/npx)"}
+                   "allow_exec": "(opc) true p/ permitir fonte que EXECUTA código no fetch (clawhub/npx)",
+                   "confirm": "(opc) true p/ confirmar fonte não-confiável (community/unverified)"}
     required = ("source",)
 
     def run(self, args, ctx):
@@ -172,7 +173,7 @@ class InstallSkill(Tool):
             return ToolResult(False, "install_skill precisa de `source` (owner/repo, caminho local ou URL git).")
         lock_root = getattr(ctx, "workspace", None) or "."
         res = install_from_source(source, root, lock_root, only=str(args.get("name") or "").strip(),
-                                  allow_exec=bool(args.get("allow_exec")))
+                                  allow_exec=bool(args.get("allow_exec")), confirm=bool(args.get("confirm")))
         if not res.ok:
             return ToolResult(False, f"install_skill: {res.reason}")
         # injeta no catálogo EM MEMÓRIA → o agente pode use_skill já, sem reiniciar o gateway.

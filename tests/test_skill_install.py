@@ -50,7 +50,7 @@ def test_only_filters_one_skill_from_library(tmp_path):
             d.mkdir(parents=True, exist_ok=True)
             (d / "SKILL.md").write_text(f"---\nname: {nm}\ndescription: x\n---\n## Como\nok.\n", encoding="utf-8")
     res = install_from_source("aviz85/claude-skills-library", tmp_path / "skills", tmp_path,
-                              only="html-to-pdf", fetch=fetch)
+                              only="html-to-pdf", fetch=fetch, confirm=True)   # fonte community → confirm explícito
     assert res.ok and res.installed == ["html-to-pdf"]
     assert (tmp_path / "skills" / "html-to-pdf").exists()
     assert not (tmp_path / "skills" / "other-skill").exists()
