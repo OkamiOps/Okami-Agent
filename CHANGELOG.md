@@ -6,6 +6,16 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🛠️ fix: tool `install_skill` (o agente instalava skill SEM improvisar Docker)
+Bug de campo: pedido para instalar a skill `html-to-pdf` (`aviz85/claude-skills-library`), o agente
+**não tinha tool de instalação** (`use_skill` só carrega, `manage_skill` só AUTORA; instalar era `okami
+learn`, CLI-only) → improvisou `npx skills add` (CLI de terceiro que pede Docker), travou pedindo p/
+abrir o Docker e rodou ~160 min até um timeout transitório de modelo+fallback. Correção: nova tool
+**`install_skill`** (`okami/skills/install.py` headless + `agentic.py`) que reusa a pipeline segura do
+`okami learn` — **git clone (NUNCA Docker nem `npx skills add`)** p/ github/local → quarentena → scan de
+segurança → matriz confiança×verdict → instala + lockfile; `name=` instala uma skill de repo-biblioteca;
+HIGH+ bloqueia; clawhub/npx só com `allow_exec=true`; `danger=dangerous` (go/no-go). +9 testes.
+
 Rodada **#20** — fechados os 3 itens que o dono pediu para "finalizar a implantação": **computer-use
 EMBUTIDO**, **inbound dos 9 canais novos** e os **plugins built-in do Hermes**. Caça adversarial (workflow
 de 60 subagentes, 3 céticos por achado) → **10 bugs reais corrigidos**. **2.630 testes passando** · gates

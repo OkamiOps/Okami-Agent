@@ -145,6 +145,46 @@ class ManageSkill(Tool):
         return ToolResult(True, f"skill '{name}' {args.get('action')} (origin: agent)", effect=True)
 
 
+class InstallSkill(Tool):
+    name = "install_skill"
+    description = ("INSTALA uma skill EXTERNA no catálogo a partir de uma fonte: owner/repo do GitHub, "
+                   "caminho local, ou URL git. Baixa por git clone (NUNCA Docker nem `npx skills add` p/ "
+                   "github/local), valida em quarentena (scan de segurança) e instala se a política "
+                   "confiança×scan permitir (HIGH+ é bloqueado). Opcional `name`: instala só a skill com "
+                   "esse nome de um repo com várias. Fontes clawhub:/npx exigem allow_exec=true (rodam "
+                   "código antes do scan). Depois, use a skill com use_skill.")
+    args_schema = {"source": "owner/repo (GitHub) | caminho local | URL git | clawhub:<slug>",
+                   "name": "(opc) instalar só a skill com este nome (repo-biblioteca)",
+                   "allow_exec": "(opc) true p/ permitir fonte que EXECUTA código no fetch (clawhub/npx)"}
+    required = ("source",)
+
+    def run(self, args, ctx):
+        from okami.skills.install import install_from_source
+        root = getattr(ctx, "skills_dir", None)
+        if not root:
+            return ToolResult(False, "install_skill indisponível neste contexto (sem skills_dir).")
+        source = str(args.get("source") or "").strip()
+        if not source:
+            return ToolResult(False, "install_skill precisa de `source` (owner/repo, caminho local ou URL git).")
+        lock_root = getattr(ctx, "workspace", None) or "."
+        res = install_from_source(source, root, lock_root, only=str(args.get("name") or "").strip(),
+                                  allow_exec=bool(args.get("allow_exec")))
+        if not res.ok:
+            return ToolResult(False, f"install_skill: {res.reason}")
+        # injeta no catálogo EM MEMÓRIA → o agente pode use_skill já, sem reiniciar o gateway.
+        if isinstance(getattr(ctx, "skills", None), dict):
+            from okami.skills import parse_skill
+            from pathlib import Path as _P
+            for nm in res.installed:
+                try:
+                    ctx.skills[nm] = parse_skill(_P(root) / nm / "SKILL.md").body
+                except OSError:
+                    pass
+        return ToolResult(True, f"skill(s) instalada(s): {', '.join(res.installed)} "
+                          f"(fonte {res.kind}·confiança {res.trust}, scan {res.verdict}). "
+                          "Carregue o procedimento com use_skill.", effect=True)
+
+
 class Spawn(Tool):
     name = "spawn"
     description = ("Delega um SUBTASK a um subagente ISOLADO (contexto próprio) e recebe o resultado. "
