@@ -229,6 +229,12 @@ class Spawn(Tool):
         return ToolResult(True, "SUBAGENTES (paralelo) devolveram:\n\n" + "\n\n".join(blocks), effect=True)
 
 
+def _has_playwright() -> bool:
+    """Playwright instalado? (gate p/ as ações interativas do browse — read não precisa)."""
+    import importlib.util
+    return importlib.util.find_spec("playwright") is not None
+
+
 class Browse(Tool):
     name = "browse"
     description = ("Abre uma URL e lê o texto. Com Playwright também: action=snapshot|click|fill|screenshot. "
@@ -241,9 +247,16 @@ class Browse(Tool):
     required = ("url",)
 
     def run(self, args, ctx):
+        action = args.get("action", "read")
+        # action≠read precisa do Playwright. Sem ele, browse() degrada SILENCIOSO p/ fetch (texto) — o
+        # agente pediria 'screenshot' e receberia texto achando que deu certo. Falha CLARO em vez disso.
+        if action != "read" and not _has_playwright():
+            return ToolResult(False, f"a ação '{action}' do browse precisa do Playwright (não instalado). "
+                              "Rode: pip install playwright && playwright install chromium. "
+                              "Sem ele, só action=read funciona (lê o texto da página).")
         try:
             from okami.integrations.browser import browse
-            out = browse(args["url"], args.get("action", "read"), args.get("selector"), args.get("text"),
+            out = browse(args["url"], action, args.get("selector"), args.get("text"),
                          args.get("screenshot"))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"browse falhou: {e}")

@@ -213,6 +213,7 @@ class McpStdioClient:
             except queue.Empty:
                 break
             if line is None:
+                self._kill()                       # servidor fechou → reapa o proc (não deixa zumbi)
                 raise McpError(f"servidor MCP fechou (method={method})")
             line = line.strip()
             if not line:
@@ -226,6 +227,10 @@ class McpStdioClient:
                     raise McpError(str(msg["error"]))
                 return msg.get("result", {})
             # senão: notificação/log → ignora
+        # Timeout: o servidor não respondeu no prazo. MATA o subprocesso — senão a thread de leitura fica
+        # bloqueada em stdout p/ sempre e o proc vira zumbi até o okami sair (vazamento que a caça
+        # field-fail pegou). Servidor lento de propósito → aumente `timeout` no config do MCP.
+        self._kill()
         raise McpError(f"timeout no MCP (method={method})")
 
     def call_tool(self, name: str, arguments: dict) -> tuple[bool, str]:
@@ -235,6 +240,15 @@ class McpStdioClient:
             parts.append(c.get("text", "") if c.get("type") == "text" else json.dumps(c))
         text = "\n".join(p for p in parts if p) or "(ok)"
         return (not res.get("isError", False)), text
+
+    def _kill(self) -> None:
+        """Mata o subprocesso na marra (libera a thread de leitura travada em stdout). Usado em
+        timeout/EOF p/ não vazar proc/thread zumbi."""
+        try:
+            if self.proc:
+                self.proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
     def close(self) -> None:
         if not self.proc:
