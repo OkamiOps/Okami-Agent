@@ -76,6 +76,48 @@ def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit
         threading.Thread(target=_bg, daemon=True).start()
 
 
+def _overall_timeout_for(cfg) -> float:
+    """Teto GLOBAL de tempo da fase de geração (item 3). OKAMI_OVERALL_TIMEOUT > cfg.harness.overall_timeout
+    > 300s. 0/negativo desliga. Protege o gateway da cascata retry×fallback pendurar o canal por minutos."""
+    import os
+    env = os.environ.get("OKAMI_OVERALL_TIMEOUT")
+    if env:
+        try:
+            return max(0.0, float(env))
+        except ValueError:
+            pass
+    h = getattr(cfg, "harness", None) or {}
+    v = h.get("overall_timeout") if isinstance(h, dict) else getattr(h, "overall_timeout", None)
+    try:
+        return float(v) if v is not None else 300.0
+    except (TypeError, ValueError):
+        return 300.0
+
+
+def _run_with_deadline(fn, timeout):
+    """Roda `fn` com teto de relógio: devolve o resultado, ou levanta TimeoutError se passar de `timeout`
+    (a chamada em voo é ABANDONADA numa thread daemon — ela morre sozinha no próprio timeout de 150s). O
+    loop classifica o TimeoutError → encolhe o contexto + re-gera → salvage. 0/None = sem teto."""
+    if not timeout or timeout <= 0:
+        return fn()
+    import threading
+    box: dict = {}
+
+    def _worker():
+        try:
+            box["r"] = fn()
+        except BaseException as e:  # noqa: BLE001 — propaga o erro interno pro chamador
+            box["e"] = e
+    th = threading.Thread(target=_worker, daemon=True)
+    th.start()
+    th.join(timeout)
+    if th.is_alive():
+        raise TimeoutError(f"geração excedeu o teto global de {int(timeout)}s — abortando a cascata de retry")
+    if "e" in box:
+        raise box["e"]
+    return box.get("r")
+
+
 def run_task(
     cfg: OkamiConfig,
     workspace,
@@ -161,14 +203,17 @@ def run_task(
     from okami.llm.streaming import streaming_enabled as _stream_on
     _streaming = _stream_on(cfg)
 
+    _deadline = _overall_timeout_for(cfg)              # #3: teto global da fase de geração
+
     def generate(messages, schema=None, on_token=None):
-        if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
-            from okami.llm.streaming import streaming_generate
-            res = streaming_generate(cfg, messages, provider=provider, model=model,
-                                     response_schema=schema, on_token=on_token, **eff)
-        else:
-            res = prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                            response_schema=schema, **eff)
+        def _call():
+            if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
+                from okami.llm.streaming import streaming_generate
+                return streaming_generate(cfg, messages, provider=provider, model=model,
+                                          response_schema=schema, on_token=on_token, **eff)
+            return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
+                                             response_schema=schema, **eff)
+        res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
             _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
