@@ -21,6 +21,27 @@ def test_harness_chat_id_defaults_empty(tmp_path):
     assert h.ctx.chat_id == ""                            # default não quebra quem não passa
 
 
+# ---------------------------------------------------------------- SMOKE: run_task ponta-a-ponta
+def test_run_task_end_to_end_smoke(tmp_path, monkeypatch):
+    """O teste que FALTAVA: exercita run_task → Harness → ToolContext como o gateway faz (com provider
+    falso, sem rede). Teria pego o bug do chat_id — a suíte só construía Harness DIRETO."""
+    import okami.llm.providers as prov
+    from okami.config import build_config
+    from okami.core import TaskState
+    from okami.llm.usage import Completion
+    from okami.runner import run_task
+
+    def _fake(cfg, messages, **kw):
+        return Completion(text='```json\n{"tool": "respond", "args": {"message": "oi!"}}\n```',
+                          provider="p", model="m")
+    monkeypatch.setattr(prov, "complete_messages_ex", _fake)
+    monkeypatch.setattr(prov, "complete_messages", lambda *a, **k: _fake(*a, **k).text)
+
+    cfg = build_config({"default_provider": "p", "providers": {"p": {"model": "m"}}})
+    t = run_task(cfg, tmp_path, "oi tudo bem?", surface="telegram", chat_id="telegram:99999")
+    assert t.state == TaskState.COMPLETE and "oi!" in (t.result or "")   # caminho REAL do gateway roda
+
+
 # ---------------------------------------------------------------- #21 gh sem auth vai pro log
 def test_gh_latest_run_logs_auth_failure(monkeypatch):
     import okami.core.readiness as rd
