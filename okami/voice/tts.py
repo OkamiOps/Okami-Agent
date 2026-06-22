@@ -76,6 +76,8 @@ class MiniMaxTTS:
             data = json.loads(r.read().decode("utf-8"))
         # resposta traz o áudio em hex (data.audio) — converte p/ bytes.
         audio_hex = (data.get("data") or {}).get("audio", "")
+        if not audio_hex:                            # 200 SEM áudio (glitch/schema) → erro claro, não MP3 0-byte
+            raise RuntimeError(f"MiniMax não retornou áudio: {json.dumps(data)[:200]}")
         out = Path(out_path)
-        out.write_bytes(bytes.fromhex(audio_hex) if audio_hex else b"")
+        out.write_bytes(bytes.fromhex(audio_hex))
         return out

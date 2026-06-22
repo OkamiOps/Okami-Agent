@@ -1384,7 +1384,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                     pass
             k = e.get("kind")
             if k == "token":                # streaming: vai mostrando a resposta parcial na msg de status
-                tok["text"] += e.get("text", "")
+                tok["text"] = (tok["text"] + e.get("text", ""))[-4000:]   # buffer LIMITADO: a edição só usa
+                #                                  os últimos 3500; resposta longa não incha memória sem teto
                 now = _t.monotonic()
                 if ed.due(now):
                     try:
@@ -1419,15 +1420,21 @@ class AgentEndpoint(EndpointCommandsMixin):
     def _maybe_voice(self, chat_id, text: str) -> None:
         if not self.tts:
             return
+        import os
+        import secrets
+        import tempfile
+        out = os.path.join(tempfile.gettempdir(), f"okami_tts_{secrets.token_hex(4)}.mp3")
         try:
-            import os
-            import secrets
-            import tempfile
-            out = os.path.join(tempfile.gettempdir(), f"okami_tts_{secrets.token_hex(4)}.mp3")
             self.tts.synthesize(text[:1200], out)
             self.channel.send_audio(chat_id, out)
         except Exception:  # noqa: BLE001 — TTS é best-effort, nunca quebra a resposta
-            pass
+            from okami import log
+            log.dbg("TTS falhou (best-effort, segue sem áudio)", exc_info=True)   # antes: pass mudo
+        finally:
+            try:
+                os.unlink(out)                       # não deixa o .mp3 temporário vazar em /tmp a cada turno
+            except OSError:
+                pass
 
     def _inbox_file(self, path, name: str | None = None) -> str:
         """Copia um arquivo recebido pro inbox/ do workspace (nome original legível) e devolve

@@ -99,7 +99,10 @@ class PersistentLspClient:
                 self._send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {
                     "textDocument": {"uri": uri, "languageId": language_id, "version": 1, "text": text}}})
         got = ev.wait(timeout)
-        return self._diags.get(uri, []) if got else []
+        if not got:
+            return []
+        with self._lock:                              # lê _diags SOB lock: o _read_loop escreve nele sem
+            return self._diags.get(uri, [])           # lock; sem isto é data-race (read-after-release)
 
     def close(self) -> None:
         """Encerra o servidor educadamente; mata se travar."""

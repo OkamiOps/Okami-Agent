@@ -25,5 +25,11 @@ class WhisperSTT:
         return self._model
 
     def transcribe(self, audio_path) -> str:
+        from pathlib import Path as _P
+        p = _P(audio_path)
+        sz = p.stat().st_size if p.exists() else -1   # áudio ausente/0-byte/curtíssimo → erro CLARO, não
+        if sz < 256:                                  # crash cru do decoder (mic sem captura, arquivo cortado)
+            raise ValueError(f"áudio inválido p/ transcrição: {audio_path} "
+                             f"({sz if sz >= 0 else 'inexistente'} bytes)")
         segments, _info = self._load().transcribe(str(audio_path), language=self.language, vad_filter=True)
         return " ".join(s.text.strip() for s in segments).strip()

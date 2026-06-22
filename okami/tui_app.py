@@ -265,6 +265,9 @@ if _HAS_TEXTUAL:
                 while "\n" in self._tokbuf:
                     line, self._tokbuf = self._tokbuf.split("\n", 1)
                     self.query_one("#log", RichLog).write(Text(line, style="dim"))
+                if len(self._tokbuf) > 8000:                  # linha gigante SEM \n: descarrega p/ não inchar
+                    self.query_one("#log", RichLog).write(Text(self._tokbuf, style="dim"))
+                    self._tokbuf = ""
                 return
             block = _tui.tool_block(e, self._details)     # tool-card (edit→diff, write→código, etc.)
             if block is not None:

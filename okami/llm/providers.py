@@ -194,8 +194,8 @@ def _rotate_key(pc: ProviderConfig, now: float | None = None) -> str | None:
     if len(pool) <= 1:
         return pool[0] if pool else None
     i = _key_cursor.get(pc.name, 0) % len(pool)
-    _key_cursor[pc.name] = i + 1                  # avança → distribui carga / sai de uma chave em 429
-    return pool[i]
+    _key_cursor[pc.name] = (i + 1) % len(pool)    # avança normalizado: não cresce sem teto nem desbalanceia
+    return pool[i]                                #   a distribuição quando o pool encolhe (chave parqueada)
 
 
 _PARK_TTL = {"rate_limit": 3600.0, "billing": 6 * 3600.0}   # billing dura mais: crédito não volta sozinho
