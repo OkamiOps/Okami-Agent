@@ -1596,6 +1596,14 @@ class AgentEndpoint(EndpointCommandsMixin):
             self._bgreg.prune()
         except Exception:  # noqa: BLE001
             pass
+        try:                                            # Onda 2: auto-diagnóstico no boot → avisa o dono se o ambiente está ruim
+            from okami.core import envhealth
+            _rep = envhealth.report(str(self.ws))
+            envhealth.persist(str(self.ws), _rep)
+            if not _rep.get("ok") and _rep.get("issues"):
+                self._notify_owner("", "⚠ ambiente com problemas no boot:\n- " + "\n- ".join(_rep["issues"][:6]))
+        except Exception:  # noqa: BLE001
+            pass
         while self.running:
             try:
                 if getattr(self, "_reload_req", False):

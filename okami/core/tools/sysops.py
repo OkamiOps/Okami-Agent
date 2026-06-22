@@ -50,6 +50,36 @@ class SystemMonitor(Tool):
         return ToolResult(True, body, effect=False, content=stats)
 
 
+class EnvCheck(Tool):
+    name = "env_check"
+    description = (
+        "Diagnostica o PRÓPRIO ambiente (auto-cura): pip/venv gravável, binários presentes (git/ssh/rg/"
+        "ffmpeg/node/docker…), disco. Use quando uma tool falhar de forma estranha, ou ANTES de instalar "
+        "algo. Devolve issues ACIONÁVEIS (ex.: `apt install git`) — você conserta com run_shell/lazy install."
+    )
+    args_schema = {}
+    required = ()
+
+    def run(self, args, ctx):
+        from okami.core import envhealth
+        path = str(getattr(ctx, "workspace", ".") or ".")
+        rep = envhealth.report(path)
+        envhealth.persist(path, rep)
+        bins = rep["binaries"]
+        present = ", ".join(b for b, ok in bins.items() if ok) or "(nenhum)"
+        missing = ", ".join(b for b, ok in bins.items() if not ok) or "(nenhum)"
+        py = rep["python"]
+        lines = [f"🐍 python {py['version']} · pip={'ok' if py['pip'] else 'AUSENTE'} · "
+                 f"venv-gravável={'sim' if py['site_writable'] else 'NÃO'}",
+                 f"🔧 binários presentes: {present}",
+                 f"❓ binários ausentes: {missing}"]
+        if rep["issues"]:
+            lines.append("⚠ problemas:\n  - " + "\n  - ".join(rep["issues"]))
+        else:
+            lines.append("✓ ambiente saudável")
+        return ToolResult(True, "\n".join(lines), effect=False, content=rep)
+
+
 class RestartGateway(Tool):
     name = "restart_gateway"
     description = (

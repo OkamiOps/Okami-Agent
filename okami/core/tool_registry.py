@@ -75,6 +75,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)
     ToolSpec("store_secret", "controle", danger="sensitive"),  # guarda credencial no cofre (.env 0600)
     ToolSpec("system_monitor", "processo"),                                  # saúde do host (disco/RAM/CPU) — read-only
+    ToolSpec("env_check", "processo"),                                        # auto-diagnóstico de ambiente — read-only
     ToolSpec("restart_gateway", "processo", tier="power", danger="sensitive"),  # reinicia o próprio gateway (disruptivo)
     ToolSpec("ssh_identity", "shell", tier="power", danger="dangerous"),     # provisão: chave SSH em ~/.ssh (VPS)
     ToolSpec("git_auth", "shell", tier="power", danger="dangerous"),         # provisão: acesso GitHub (token/SSH)

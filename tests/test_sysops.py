@@ -38,7 +38,7 @@ def test_sysops_tools_registered():
     from okami.core.tool_registry import TOOL_REGISTRY
     from okami.core.tools.registry import default_registry
     reg = default_registry()
-    assert "system_monitor" in reg and "restart_gateway" in reg
+    assert {"system_monitor", "env_check", "restart_gateway"} <= set(reg)
     specs = {s.name: s for s in TOOL_REGISTRY}
     assert specs["restart_gateway"].danger == "sensitive"  # disruptivo → approval-gated
     assert specs["system_monitor"].danger == "safe"        # read-only
@@ -52,3 +52,25 @@ def test_computer_use_pruned_on_headless_linux(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
     assert bk.get_backend() is None
+
+
+# ── auto-diagnóstico de ambiente (Onda 2: o agente enxerga o que está quebrado p/ consertar) ──
+def test_envhealth_report_structure():
+    from okami.core import envhealth
+    rep = envhealth.report(".")
+    assert "python" in rep and "binaries" in rep and "issues" in rep and "ok" in rep
+    assert rep["python"]["executable"] and isinstance(rep["binaries"], dict)
+
+
+def test_envhealth_persist(tmp_path):
+    from okami.core import envhealth
+    envhealth.persist(str(tmp_path), {"ok": True, "issues": []})
+    assert (tmp_path / ".okami" / "env-health.json").is_file()   # gateway lê no boot
+
+
+def test_env_check_tool_reports_and_persists(tmp_path):
+    from okami.core.tools.base import ToolContext
+    from okami.core.tools.sysops import EnvCheck
+    res = EnvCheck().run({}, ToolContext(workspace=tmp_path))
+    assert res.ok and "python" in res.output.lower() and res.content
+    assert (tmp_path / ".okami" / "env-health.json").is_file()
