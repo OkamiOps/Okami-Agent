@@ -411,7 +411,10 @@ def build_config(raw: dict) -> OkamiConfig:
     for name, pc in (raw.get("providers") or {}).items():
         data = dict(pc or {})
         data["name"] = name
-        providers[name] = ProviderConfig(**data)
+        try:
+            providers[name] = ProviderConfig(**data)
+        except Exception as e:  # noqa: BLE001 — provider malformado NÃO derruba a config inteira: erro CLARO
+            raise ValueError(f"provider '{name}' inválido em okami.yaml: {e}") from None
 
     default_provider = raw.get("default_provider")
     if not default_provider:

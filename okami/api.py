@@ -53,6 +53,9 @@ def make_handler(token: str, run: Callable[[str, str], object]):
                 return
             try:
                 n = int(self.headers.get("Content-Length", 0) or 0)
+                if n > 1_048_576:                       # teto de 1 MB: Content-Length gigante não estoura a RAM (DoS)
+                    self._send(413, {"error": "corpo grande demais (máx 1MB)"})
+                    return
                 body = json.loads(self.rfile.read(n) or b"{}")
             except Exception:  # noqa: BLE001
                 self._send(400, {"error": "json inválido"})

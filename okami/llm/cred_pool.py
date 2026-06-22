@@ -71,18 +71,22 @@ def mark(provider: str, key: str, reason: str, *, now: float | None = None) -> N
     now = time.time() if now is None else now
     ttl = _TTL.get(reason, _TTL["default"])
     status = "dead" if reason in _DEAD_REASONS else "exhausted"
-    data = _load()
-    data.setdefault(provider, {})[_fingerprint(key)] = {
-        "status": status, "until": now + ttl, "reason": reason}
-    _save(data)
+    from okami.core.filelock import _FileLock
+    with _FileLock(_path()):                            # lock cross-processo: gateway+cron+cli não perdem update
+        data = _load()
+        data.setdefault(provider, {})[_fingerprint(key)] = {
+            "status": status, "until": now + ttl, "reason": reason}
+        _save(data)
 
 
 def clear(provider: str, key: str) -> None:
     """Chave voltou a responder → remove a marca (status ok)."""
-    data = _load()
-    prov = data.get(provider) or {}
-    if prov.pop(_fingerprint(key), None) is not None:
-        _save(data)
+    from okami.core.filelock import _FileLock
+    with _FileLock(_path()):                            # read-modify-write atômico entre processos
+        data = _load()
+        prov = data.get(provider) or {}
+        if prov.pop(_fingerprint(key), None) is not None:
+            _save(data)
 
 
 def status(provider: str, key: str, *, now: float | None = None) -> str:

@@ -231,10 +231,12 @@ def serve_dashboard(port: int = 9119, *, host: str = "127.0.0.1", status_provide
         def _authorized(self, parsed) -> bool:
             if not token:
                 return True
+            import hmac
             hdr = self.headers.get("Authorization", "")
-            if hdr == f"Bearer {token}":
+            if hmac.compare_digest(hdr, f"Bearer {token}"):   # comparação tempo-constante (anti timing-attack)
                 return True
-            return (parse_qs(parsed.query).get("token") or [None])[0] == token
+            q = (parse_qs(parsed.query).get("token") or [""])[0]
+            return hmac.compare_digest(q or "", token)
 
         def _send(self, code, ctype, body):
             self.send_response(code)

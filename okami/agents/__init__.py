@@ -35,7 +35,12 @@ def load_agents(root: str | Path | None = None) -> dict[str, AgentSpec]:
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
         f = d / "agent.yaml"
         if f.exists():
-            raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            try:                                       # agent.yaml malformado NÃO derruba TODOS os agentes
+                raw = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except (yaml.YAMLError, OSError) as e:
+                from okami.log import warn
+                warn(f"agent.yaml inválido em {d.name} — agente ignorado: {e}")
+                continue
             out[d.name] = AgentSpec(d.name, d, raw)
     return out
 

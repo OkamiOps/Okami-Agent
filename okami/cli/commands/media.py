@@ -148,7 +148,11 @@ def tune_cmd(agent: str = typer.Option(None, "-a", "--agent"),
     if not p.exists():
         console.print("[dim]sem stats ainda (rode tarefas).[/dim]")
         return
-    data = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        console.print(f"[red]tuning.json corrompido:[/red] {e}")   # erro claro, não traceback
+        raise typer.Exit(1) from None
     table = Table(title="Auto-tune (§7)")
     for col in ("modelo", "runs", "violations", "loops", "recomendação"):
         table.add_column(col, style="bold" if col == "modelo" else None)
