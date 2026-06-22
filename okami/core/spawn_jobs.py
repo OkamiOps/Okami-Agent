@@ -56,15 +56,34 @@ def _write(workspace, record: dict) -> None:
 def run_spawn_job(job, goal, agent, model, spawn_fn, notify, workspace) -> dict:
     """Roda UM subagente: grava 'running' ANTES, sobrescreve com o estado terminal + resultado no fim, e
     avisa o dono. SÍNCRONO (a thread mora na tool). Nunca levanta (fail-open: erro → state='failed')."""
+    import inspect
     started = time.time()
-    _write(workspace, {"job": job, "goal": goal, "state": "running", "started_at": started})
+    prog = {"step": 0, "tool": ""}
+    _write(workspace, {"job": job, "goal": goal, "state": "running", "started_at": started, "step": 0, "tool": ""})
+
+    def _on_event(ev):                                 # item 6: progresso "passo N (tool)" DURANTE o subagente
+        try:
+            if isinstance(ev, dict) and ev.get("kind") == "step":
+                prog["step"], prog["tool"] = ev.get("n", prog["step"]), ev.get("tool", prog["tool"])
+                _write(workspace, {"job": job, "goal": goal, "state": "running", "started_at": started,
+                                   "step": prog["step"], "tool": prog["tool"]})
+        except Exception:  # noqa: BLE001 — progresso é best-effort
+            pass
+
     try:
-        result = str(spawn_fn(goal, agent, model))
+        accepts = False
+        try:
+            accepts = "on_event" in inspect.signature(spawn_fn).parameters
+        except (ValueError, TypeError):
+            accepts = False
+        result = str(spawn_fn(goal, agent, model, on_event=_on_event) if accepts
+                     else spawn_fn(goal, agent, model))
         ok = True
     except Exception as e:  # noqa: BLE001 — falha do subagente não derruba a thread
         result, ok = f"falhou: {e}", False
     record = {"job": job, "goal": goal, "ok": ok, "state": "done" if ok else "failed",
-              "result": result, "started_at": started, "finished_at": time.time()}
+              "result": result, "started_at": started, "finished_at": time.time(),
+              "step": prog["step"], "tool": prog["tool"]}
     _write(workspace, record)
     if callable(notify):
         try:
@@ -95,7 +114,8 @@ def list_jobs(workspace) -> list[dict]:
             r = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        out.append({"job": r.get("job", f.stem), "goal": r.get("goal", ""), "state": r.get("state", "?")})
+        out.append({"job": r.get("job", f.stem), "goal": r.get("goal", ""), "state": r.get("state", "?"),
+                    "step": r.get("step", 0), "tool": r.get("tool", "")})
     return out
 
 

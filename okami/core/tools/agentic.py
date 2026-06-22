@@ -289,8 +289,10 @@ class SpawnJobs(Tool):
             jobs = list_jobs(ws)
             if not jobs:
                 return ToolResult(True, "(nenhum subagente em segundo plano)")
-            return ToolResult(True, "subagentes em segundo plano:\n" + "\n".join(
-                f"- {j['job']} · {j['state']} · {str(j['goal'])[:60]}" for j in jobs))
+            def _line(j):
+                prog = f" · passo {j['step']} ({j['tool']})" if j.get("state") == "running" and j.get("step") else ""
+                return f"- {j['job']} · {j['state']}{prog} · {str(j['goal'])[:60]}"
+            return ToolResult(True, "subagentes em segundo plano:\n" + "\n".join(_line(j) for j in jobs))
         job = str(args.get("job") or "").strip()
         if action == "await":
             try:
@@ -308,7 +310,8 @@ class SpawnJobs(Tool):
         # header AUTOCONTIDO (ideia do Hermes): o pai pode ter esquecido por que o subagente existia.
         header = f"[subagente {rec.get('job', job)} · objetivo: {str(rec.get('goal', ''))[:80]} · estado: {state}]"
         if state == "running":
-            return ToolResult(True, header + " — ainda rodando; use action=await p/ esperar.")
+            prog = f" · passo {rec['step']} ({rec.get('tool', '')})" if rec.get("step") else ""
+            return ToolResult(True, header[:-1] + prog + "] — ainda rodando; use action=await p/ esperar.")
         if action == "status":
             return ToolResult(True, header)
         return ToolResult(True, f"{header}\n{rec.get('result', '')}")

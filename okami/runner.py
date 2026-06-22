@@ -180,7 +180,7 @@ def run_task(
         extra_context = "[O usuário enviou imagem(ns), mas este modelo não tem visão.]\n\n" + extra_context
         images = None
 
-    def _spawn(subgoal, agent=None, model_=None):     # subagente em runtime (#1), com guarda de profundidade
+    def _spawn(subgoal, agent=None, model_=None, on_event=None):  # subagente em runtime (#1), guarda de profundidade
         if depth >= 2:
             return "(limite de profundidade de subagentes atingido)"
         scfg, sws, shome = cfg, ws, home
@@ -193,7 +193,7 @@ def run_task(
                 scfg, sws, shome = effective_config(graw, spec), spec.dir, spec.dir
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
                        agent_home=shome, open_fs=open_fs, allow_paths=allow_paths,   # herda acesso amplo
-                       surface="subagent", emit=emit)   # subagente: surface restrita (não spawna de novo)
+                       surface="subagent", emit=emit, on_event=on_event)   # #6: progresso do bg spawn
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
     eff = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
