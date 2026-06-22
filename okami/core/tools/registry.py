@@ -28,6 +28,7 @@ from okami.core.tools.vision import VisionAnalyze
 from okami.core.tools.audio import AudioAnalyze
 from okami.core.tools.speak import TextToSpeech
 from okami.core.tools.pdf import GeneratePdf
+from okami.core.tools.mail import Email
 from okami.core.tools.notify import Notify, SendMessage
 from okami.core.tools.clarify import Clarify
 from okami.core.tools.suggest import SuggestAutomation
@@ -52,7 +53,7 @@ def default_registry() -> dict[str, Tool]:
              RememberFact(), RecallMemory(), RememberUser(), SessionSearch(),
              UseSkill(), ManageSkill(), InstallSkill(), Spawn(), SpawnJobs(), MixtureOfAgents(),
              Browse(), WebSearch(), WebExtract(), GenerateImage(), GenerateVideo(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(), GeneratePdf(),
-             XSearch(), HomeAssistant(), FeishuDocRead(), ComputerUse(),
+             XSearch(), HomeAssistant(), FeishuDocRead(), ComputerUse(), Email(),
              ToolSearch(), Notify(), SendMessage(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              SshIdentity(), GitAuth(), RemoteAdd(), RemoteConnect(), RemoteDisconnect(),
              SystemMonitor(), EnvCheck(), RestartGateway(),

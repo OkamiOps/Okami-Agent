@@ -45,7 +45,7 @@ def test_default_tools_have_no_check_or_pass():
     out = prune_unavailable(reg, emit=lambda m: None)
     missing = set(reg) - set(out)
     assert missing <= {"generate_image", "audio_analyze", "text_to_speech", "computer_use",
-                       "generate_video", "homeassistant", "feishu_doc_read", "x_search"}
+                       "generate_video", "homeassistant", "feishu_doc_read", "x_search", "email"}
 
 
 def test_generate_image_check_depends_on_codex_login(monkeypatch):
