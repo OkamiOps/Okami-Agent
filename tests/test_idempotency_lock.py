@@ -33,7 +33,7 @@ def _bare_ep(batch):
     ep._last_msg_id = {}
     ep.stt = ep.tts = None
     handled = []
-    ep.handle = lambda cid, text: handled.append((cid, text))
+    ep.handle = lambda cid, text, **kw: handled.append((cid, text))
     return ep, handled
 
 

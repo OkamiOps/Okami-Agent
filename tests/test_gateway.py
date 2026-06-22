@@ -275,11 +275,13 @@ def test_topic_info_command():
 def test_voice_toggle_persists():
     ep = _ep()
     ep.handle("7", "/voice off")
-    assert any("DESLIGADO" in t for _, t in ep.channel.sent) and ep.session("7").voice_off is True
+    assert ep.session("7").voice_off is True and ep.session("7").voice_always is False   # nunca áudio
     ep.handle("7", "/voice on")
-    assert ep.session("7").voice_off is False
+    assert ep.session("7").voice_off is False and ep.session("7").voice_always is True    # sempre áudio
     del ep.sessions["7"]                                  # persiste no store
-    assert ep.session("7").voice_off is False
+    assert ep.session("7").voice_always is True           # voice_always sobrevive ao reload
+    ep.handle("7", "/voice auto")                         # volta pro default (espelha a entrada)
+    assert ep.session("7").voice_off is False and ep.session("7").voice_always is False
 
 
 def test_busy_queue_enqueues_and_drains():

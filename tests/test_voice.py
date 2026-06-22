@@ -90,12 +90,33 @@ def test_audio_without_stt_does_not_drop_silently():
     assert texts and any("áudio" in t.lower() or "voz" in t.lower() for t in texts)
 
 
-def test_reply_is_also_sent_as_voice_when_tts_on():
+def test_text_reply_is_not_voiced_by_default():
+    """TEXTO → NÃO vira áudio, mesmo com TTS ligado (era o bug do dono: áudio em TODA resposta).
+    Áudio ESPELHA a entrada — texto entra, só texto sai."""
     ch = VoiceChannel()
     ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, tts=FakeTTS(),
                        spawn=lambda fn: fn())
-    ep.handle("7", "me fale uma piada")
-    assert ch.audio_sent and ch.audio_sent[-1][0] == "7"               # mandou áudio também
+    ep.handle("7", "me fale uma piada")                               # entrada por TEXTO
+    assert not ch.audio_sent                                          # → SEM áudio
+
+
+def test_voice_input_mirrors_to_voice_reply():
+    """Entrada por VOZ (from_voice) → resposta TAMBÉM em áudio (espelha a modalidade)."""
+    ch = VoiceChannel()
+    ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, tts=FakeTTS(),
+                       spawn=lambda fn: fn())
+    ep.handle("7", "transcrito da nota de voz", from_voice=True)
+    assert ch.audio_sent and ch.audio_sent[-1][0] == "7"             # voz entra → voz sai
+
+
+def test_voice_always_on_voices_even_text():
+    """/voice on → SEMPRE áudio, mesmo p/ texto (opt-in explícito do dono)."""
+    ch = VoiceChannel()
+    ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, tts=FakeTTS(),
+                       spawn=lambda fn: fn())
+    ep.handle("7", "/voice on")
+    ep.handle("7", "me fale uma piada")                               # texto, mas voice_always
+    assert ch.audio_sent and ch.audio_sent[-1][0] == "7"
 
 
 def test_stt_on_by_default_tts_opt_in():

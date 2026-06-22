@@ -108,7 +108,7 @@ def test_poll_non_url_still_routes_to_handle(monkeypatch):
 
     inbox = [Inbound("telegram", "7", text="me conta uma piada", msg_id="m2")]
     ep = _ep_with(inbox, cfg=_Cfg())
-    monkeypatch.setattr(ep, "handle", lambda chat_id, text: routed.update(chat_id=str(chat_id), text=text))
+    monkeypatch.setattr(ep, "handle", lambda chat_id, text, **kw: routed.update(chat_id=str(chat_id), text=text))
     ep.poll_once()
     assert routed == {"chat_id": "7", "text": "me conta uma piada"}   # texto comum → handle (turno normal)
 
@@ -122,6 +122,6 @@ def test_poll_url_when_flag_off_routes_to_handle(monkeypatch):
 
     inbox = [Inbound("telegram", "7", text="https://exemplo.com/x", msg_id="m3")]
     ep = _ep_with(inbox, cfg=_CfgOff())
-    monkeypatch.setattr(ep, "handle", lambda chat_id, text: routed.update(chat_id=str(chat_id), text=text))
+    monkeypatch.setattr(ep, "handle", lambda chat_id, text, **kw: routed.update(chat_id=str(chat_id), text=text))
     ep.poll_once()
     assert routed == {"chat_id": "7", "text": "https://exemplo.com/x"}   # flag off → handle, não auto-resumo

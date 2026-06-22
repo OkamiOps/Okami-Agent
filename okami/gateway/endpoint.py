@@ -49,7 +49,9 @@ class Session:
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
         self.provider_override = ""      # provider desta sessão (/model <provider>) — ex.: codex (OpenAI via assinatura)
         self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
-        self.voice_off = False           # /voice off → não responde em áudio (TTS) nesta sessão
+        self.voice_off = False           # /voice off → NUNCA responde em áudio nesta sessão
+        self.voice_always = False        # /voice on → SEMPRE áudio. Default (ambos False): ESPELHA a entrada
+        #                                  (mandou voz → responde em voz; mandou texto → só texto)
         self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
         self.queued: list = []           # mensagens em fila (runtime; não persiste)
         self.remote_spec: str | None = None  # alias/host do ambiente remoto ATIVO (SSH/Tailscale) — multi-turno
@@ -127,6 +129,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.reasoning_effort = e.get("reasoning_effort", "")
             s.title = e.get("title", "")
             s.voice_off = bool(e.get("voice_off", False))
+            s.voice_always = bool(e.get("voice_always", False))
             s.busy_mode = e.get("busy_mode", "queue")
             s.approved_cats = set(e.get("approved_cats", []) or [])   # aprovações de sessão (sobrevivem a restart)
             self.sessions[cid] = s
@@ -142,8 +145,8 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
                                 resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
-                                title=s.title, voice_off=s.voice_off, busy_mode=s.busy_mode,
-                                approved_cats=sorted(s.approved_cats))
+                                title=s.title, voice_off=s.voice_off, voice_always=s.voice_always,
+                                busy_mode=s.busy_mode, approved_cats=sorted(s.approved_cats))
 
     def _all_session_ids(self) -> list[str]:
         return self.store.ids()
@@ -402,7 +405,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             return ok
         return approve
 
-    def handle(self, chat_id, text: str, surface_override: str | None = None) -> None:
+    def handle(self, chat_id, text: str, surface_override: str | None = None, *,
+               from_voice: bool = False) -> None:
         # `surface_override` (#13): força a tool policy de uma superfície ESPECÍFICA neste turno, em vez
         # de herdar a do canal-base (self.surface). É per-chamada (NÃO muta self.surface → thread-safe vs.
         # o poll concorrente do canal-base) e propaga no spawn do _run. Usado pelo webhook: o evento roda
@@ -516,16 +520,19 @@ class AgentEndpoint(EndpointCommandsMixin):
         if low.startswith("/voice"):
             arg = text[len("/voice"):].strip().lower()
             if arg in ("off", "mute", "0", "no"):
-                s.voice_off = True
+                s.voice_off, s.voice_always = True, False       # NUNCA áudio
             elif arg in ("on", "1", "yes"):
-                s.voice_off = False
+                s.voice_off, s.voice_always = False, True        # SEMPRE áudio (mesmo p/ texto)
+            elif arg in ("auto", "mirror", "espelho"):
+                s.voice_off, s.voice_always = False, False       # ESPELHA (default): voz→voz, texto→texto
             else:
-                s.voice_off = not s.voice_off          # sem arg → alterna
+                s.voice_always = not s.voice_always              # sem arg → alterna sempre↔espelho
+                s.voice_off = False
             self._save_meta(chat_id, s)
-            self.channel.send(chat_id, "🔈 " + _tr("gw.voice_off", _default="audio OFF in this session.")
-                              if s.voice_off
-                              else "🔊 " + _tr("gw.voice_on",
-                                               _default="audio ON (I reply by voice when TTS is active)."))
+            msg = ("🔇 " + _tr("gw.voice_off2", _default="audio OFF — text only.") if s.voice_off
+                   else "🔊 " + _tr("gw.voice_always", _default="audio ALWAYS on (even for text).") if s.voice_always
+                   else "🔈 " + _tr("gw.voice_mirror", _default="audio MIRRORS you — voice in → voice out, text → text."))
+            self.channel.send(chat_id, msg)
             return
         if low.startswith("/busy"):
             arg = text[len("/busy"):].strip().lower()
@@ -838,7 +845,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 s.busy, s.cancel, decision = True, False, "start"
         if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
             self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None),
-                                          surface_override=surface_override))
+                                          surface_override=surface_override, from_voice=from_voice))
         elif decision == "interrupt":
             self.channel.send(chat_id, "⏹ " + _tr(
                 "gw.interrupting", _default="interrupting the current one — starting your new message now."))
@@ -1185,7 +1192,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         return stop
 
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None,
-             surface_override: str | None = None) -> None:
+             surface_override: str | None = None, from_voice: bool = False) -> None:
         if resume:                                        # retomada: o USER já está no transcript
             ctx = _history_block(s.history[:-1], max_chars=self.max_history_chars)
         else:
@@ -1342,7 +1349,9 @@ class AgentEndpoint(EndpointCommandsMixin):
                 _done = {"COMPLETE": "✅", "BLOCKED": "⚠", "NEEDS_INPUT": "❓"}.get(task.state.name, "❌")
                 self.channel.edit_message(chat_id, _status_id, _done + " " + _tr(
                     "gw.done", _default="done"))
-            if not s.voice_off:                          # /voice off muta o áudio (TTS lê o texto LIMPO)
+            # Áudio ESPELHA a entrada: só fala se a msg veio como voz (from_voice) OU /voice on (voice_always).
+            # Texto puro NÃO vira áudio à toa (era o bug: TTS configurado → áudio em TODA resposta).
+            if not s.voice_off and (from_voice or s.voice_always):
                 self._maybe_voice(chat_id, reply_text or reply)
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
@@ -1464,6 +1473,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         from okami.gateway.coalesce import coalesce_inbound
         for msg in coalesce_inbound(fresh):                # rajada do MESMO chat no lote → 1 turno
             text = msg.text
+            _fv = bool(msg.audio and self.stt)         # ENTRADA por voz → resposta espelha em áudio
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
                 if getattr(self.stt, "_model", "ready") is None:   # 1ª vez: instala+baixa o modelo (lento) → avisa
                     self.channel.send(msg.chat_id, "🎤 " + _tr(
@@ -1501,7 +1511,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 # hora SEM gastar um turno LLM (sem run_task). Idempotente via _seen_msgs (dedup no topo).
                 if self._link_understanding_enabled() and self._maybe_summarize_link(msg.chat_id, text):
                     continue
-                self.handle(msg.chat_id, text)
+                self.handle(msg.chat_id, text, from_voice=_fv)   # voz→voz, texto→texto (espelha)
         self._notify_completed_processes()
 
     def _link_understanding_enabled(self) -> bool:
