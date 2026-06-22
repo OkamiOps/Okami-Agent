@@ -42,9 +42,10 @@ def terminate_pid(pid: int, sig=None) -> bool:
         pass
     if IS_WINDOWS:                                      # último recurso: encerra a árvore pela CLI do Windows
         try:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],  # nosec B603,B607
-                           capture_output=True, timeout=10, check=False)
-            return True
+            r = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],  # nosec B603,B607
+                               capture_output=True, timeout=10, check=False)
+            return r.returncode == 0                     # taskkill falhou (PID inexistente/sem permissão) →
+            #                                              False: o agente NÃO mente que matou o processo
         except (OSError, subprocess.SubprocessError):
             pass
     return False

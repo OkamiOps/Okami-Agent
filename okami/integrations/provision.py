@@ -92,11 +92,14 @@ def import_private_key(material: str, name: str = "id_ed25519", home: Path | Non
     text = material if material.endswith("\n") else material + "\n"
     d = ssh_dir(home)
     priv = d / name
-    priv.write_text(text, encoding="utf-8")
-    secure_chmod(priv)                                 # restringe ao dono (Windows: ACL; senão ssh recusa a chave)
-    rc, out = (run_fn or _run)(["ssh-keygen", "-y", "-f", str(priv)])   # deriva a pública da privada
-    if rc == 0 and out.strip():
-        (d / f"{name}.pub").write_text(out.strip() + "\n", encoding="utf-8")
+    from okami.core.safe_io import write_atomic
+    write_atomic(priv, text, mode=0o600)               # 0600 DESDE a criação (mkstemp) — sem janela 0644 em
+    #                                                    que outro usuário da VPS leria a chave privada
+    rc, out = (run_fn or _run)(["ssh-keygen", "-y", "-f", str(priv)])   # deriva a pública + VALIDA a privada
+    if rc != 0 or not out.strip():                     # material inválido → não deixa chave quebrada no disco
+        priv.unlink(missing_ok=True)
+        raise ValueError("chave privada inválida (ssh-keygen não conseguiu derivar a pública).")
+    (d / f"{name}.pub").write_text(out.strip() + "\n", encoding="utf-8")   # pública: 0644 é ok
     return {"imported": True, "public_key": public_key(name, home),
             "fingerprint": fingerprint(name, home, run_fn), "path": str(priv)}
 
@@ -138,8 +141,9 @@ def configure_git_token(token: str, *, user_name: str = "", user_email: str = ""
     line = f"https://x-access-token:{token}@{host}"
     existing = cred.read_text(encoding="utf-8").splitlines() if cred.is_file() else []
     kept = [ln for ln in existing if ln.strip() and f"@{host}" not in ln]   # substitui a credencial do mesmo host
-    cred.write_text("\n".join([*kept, line]) + "\n", encoding="utf-8")
-    secure_chmod(cred)                                 # restringe ao dono (Windows: ACL)
+    from okami.core.safe_io import write_atomic
+    write_atomic(cred, "\n".join([*kept, line]) + "\n", mode=0o600)   # 0600 desde a criação: o PAT nunca fica
+    #                                                                  0644 legível por outro usuário da VPS
     genv = _gitenv(home)
     run(["git", "config", "--global", "credential.helper", "store"], env=genv)
     if user_name:
