@@ -137,6 +137,9 @@ def gh_latest_run(workflow_file: str, branch: str = "main") -> WorkflowRun | Non
              "--json", "conclusion,status,headSha,url"],
             capture_output=True, text=True, timeout=15)
         if out.returncode != 0 or not out.stdout.strip():
+            if out.returncode != 0 and (out.stderr or "").strip():   # gh sem auth/offline NÃO some calado:
+                from okami import log                                 # operador vê 'token expirado' no log em
+                log.dbg(f"gh run list falhou ({workflow_file}): {out.stderr.strip()[:200]}")  # vez de "sem dados"
             return None
         rows = json.loads(out.stdout)
         if not rows:

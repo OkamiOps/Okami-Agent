@@ -157,6 +157,7 @@ class Harness:
         skills_dir=None,
         open_fs: bool = False,
         surface: str = "cli",
+        chat_id: str = "",              # chat de ORIGEM → ToolContext → process_start notifica o chat certo
         model: str = "",
         allow_paths: list | None = None,
         agent_home=None,                # CASA do agente (memória/identidade) — ≠ workspace (onde mexe)
@@ -195,6 +196,7 @@ class Harness:
                                notify=notify,             # mensagem-ao-dono fora do turno (item 3)
                                clarify=clarify,           # pergunta ao dono antes de agir (#8 item 1)
                                surface=surface,           # superfície real → allowlist do remote_connect
+                               chat_id=chat_id,           # chat de origem → process_start notifica o chat certo
                                remote=remote, set_remote=set_remote)  # ambiente remoto (SSH/Tailscale)
         # Arquivos já "conhecidos" (ex.: stubs de identidade na gênese): podem ser sobrescritos sem
         # exigir read antes — o grounding anti-alucinação não faz sentido p/ placeholders que NÓS criamos.
