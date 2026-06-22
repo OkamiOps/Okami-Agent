@@ -324,10 +324,12 @@ class SqliteFTS5Memory(Memory):
 
     def recent(self, limit: int = 10) -> list[MemoryItem]:
         now = self.clock()
-        rows = self.conn.execute(
-            f"SELECT {_COLS} FROM items WHERE superseded = 0 ORDER BY id DESC LIMIT ?", (limit * 3,)
+        rows = self.conn.execute(                          # filtra expirados NO SQL: o antigo LIMIT limit*3
+            f"SELECT {_COLS} FROM items WHERE superseded = 0 "  # + filtro em Python devolvia <limit quando
+            "AND (expires_at IS NULL OR expires_at > ?) "      # >2/3 dos 30 mais recentes estavam expirados,
+            "ORDER BY id DESC LIMIT ?", (now, limit)           # ignorando itens válidos mais antigos
         ).fetchall()
-        return [self._item(r) for r in rows if not _expired(r, now)][:limit]
+        return [self._item(r) for r in rows]
 
     def _log_retrieval(self, query: str, top: list, now: float) -> None:
         """Registra (best-effort) o que foi recuperado e com que score — base do `okami memory explain`.

@@ -315,6 +315,7 @@ def validate_plan(plan, skills_dir) -> tuple[dict, list[str]]:
         if not isinstance(m, dict):
             errors.append(f"merges[{i}]: não é um mapeamento")
             continue
+        before = len(errors)                           # erro NESTE merge → não entra no norm (fail-closed)
         umb = str(m.get("umbrella", "")).strip()
         if not _NAME_RE.match(umb) or umb.count("-") > 3:
             errors.append(f"merges[{i}]: umbrella inválida ({umb!r}) — kebab-case curto, nível de classe")
@@ -332,12 +333,14 @@ def validate_plan(plan, skills_dir) -> tuple[dict, list[str]]:
         body = str(m.get("body", "")).strip()
         if len(body) < 20:
             errors.append(f"merges[{i}]: body curto demais — escreva o procedimento da umbrella")
-        norm["merges"].append({"umbrella": umb, "description": str(m.get("description", umb))[:120],
-                               "absorb": absorb, "body": body})
+        if len(errors) == before:                      # só plano VÁLIDO entra no norm — caller que ignore
+            norm["merges"].append({"umbrella": umb, "description": str(m.get("description", umb))[:120],
+                                   "absorb": absorb, "body": body})  # `errors` não escreve lixo no disco
     for a in (plan.get("archive") or []):
         a = str(a).strip()
         if a not in curatable:
             errors.append(f"archive: '{a}' não existe ou não é curável (pinada/curada)")
+            continue                                   # não arquiva skill inexistente/protegida
         norm["archive"].append(a)
     return norm, errors
 

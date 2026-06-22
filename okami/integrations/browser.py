@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import random
 import re
+import threading
 import time
 
 _MAX = 6000
@@ -24,9 +25,17 @@ _INTERACTIVE_ROLES = frozenset({
     "radio", "switch", "menuitem", "tab", "option", "slider", "spinbutton",
 })
 
-# Mapa ref->elemento da ÚLTIMA snapshot, p/ resolver [N] em click/fill. Persistente no módulo:
-# sobrevive entre chamadas de browse() dentro do mesmo processo (a "page persistente" da sessão).
-_LAST_REFS: dict[int, dict] = {}
+# Mapa ref->elemento da ÚLTIMA snapshot, p/ resolver [N] em click/fill. POR THREAD (threading.local):
+# sobrevive entre chamadas de browse() na MESMA thread (a "page persistente" da sessão), mas dois
+# subagentes em paralelo NÃO se sobrescrevem — o snapshot de um não apaga os refs do outro.
+_REFS_TLS = threading.local()
+
+
+def _last_refs() -> dict[int, dict]:
+    d = getattr(_REFS_TLS, "refs", None)
+    if d is None:
+        d = _REFS_TLS.refs = {}
+    return d
 
 
 def _strip_html(html: str) -> str:
@@ -153,15 +162,16 @@ def _ref_selector(el: dict) -> str:
 
 
 def _snapshot(page, max_chars: int) -> str:
-    """Numera os interativos [N], popula _LAST_REFS e devolve o mapa legível + texto da página."""
-    _LAST_REFS.clear()
+    """Numera os interativos [N], popula os refs da thread e devolve o mapa legível + texto da página."""
+    refs = _last_refs()
+    refs.clear()
     tree = page.accessibility.snapshot()
     items: list[dict] = []
     if tree:
         _walk_interactive(tree, items)
     linhas = []
     for i, el in enumerate(items, start=1):
-        _LAST_REFS[i] = el
+        refs[i] = el
         linhas.append(f"[{i}] {el['role']}: {el['name']}")
     mapa = "\n".join(linhas) or "(nenhum elemento interativo encontrado)"
     corpo = ""
@@ -183,7 +193,7 @@ def _resolve_ref(selector: str | None) -> str | None:
     m = re.fullmatch(r"\s*\[(\d+)\]\s*", selector)
     if not m:
         return selector                                # não é ref → passa direto (compat)
-    el = _LAST_REFS.get(int(m.group(1)))
+    el = _last_refs().get(int(m.group(1)))
     if el is None:
         return None                                    # ref expirado/inexistente
     return _ref_selector(el)

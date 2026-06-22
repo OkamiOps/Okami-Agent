@@ -236,25 +236,39 @@ class Scheduler:
         tmp.write_text(json.dumps(jobs, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
         os.replace(tmp, self.path)
 
+    def _atomic(self, mutate):
+        """load → mutate(jobs) → save, SOB _FileLock cross-processo. Sem isto, a thread do scheduler
+        (tick→mark_run) e o CLI (add/remove/toggle) carregam o MESMO cron.json, alteram em memória e
+        salvam — o último save sobrescreve o do outro (last_run perdido → job re-executa ou some).
+        `mutate` muta a lista in-place e/ou devolve (nova_lista, resultado); só-resultado mantém in-place."""
+        from okami.core.filelock import _FileLock
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with _FileLock(self.path):
+            jobs = self.load()
+            ret = mutate(jobs)
+            new_jobs, result = ret if isinstance(ret, tuple) else (jobs, ret)
+            self.save(new_jobs)
+            return result
+
     def add(self, schedule: str, prompt: str, agent: str | None = None, target: str | None = None,
             action: str | None = None, gate: str | None = None, script: str | None = None) -> dict:
-        jobs = self.load()
-        base = _slug(prompt)
-        jid, i = base, 2
-        ids = {j["id"] for j in jobs}
-        while jid in ids:
-            jid, i = f"{base}-{i}", i + 1
-        job = {"id": jid, "schedule": schedule, "kind": parse_schedule(schedule)["kind"],
-               "prompt": prompt, "agent": agent, "target": target, "enabled": True, "last_run": None}
-        if action:                                   # ação INTERNA (ex.: 'curator') em vez de prompt p/ o harness
-            job["action"] = action
-        if gate:                                     # wake-gate: comando barato decide se ACORDA o agente
-            job["gate"] = gate
-        if script:                                   # job SCRIPT: roda comando e entrega stdout (sem LLM)
-            job["script"] = script
-        jobs.append(job)
-        self.save(jobs)
-        return job
+        def _m(jobs):
+            base = _slug(prompt)
+            jid, i = base, 2
+            ids = {j["id"] for j in jobs}
+            while jid in ids:                        # unicidade do id checada DENTRO do lock (sem corrida)
+                jid, i = f"{base}-{i}", i + 1
+            job = {"id": jid, "schedule": schedule, "kind": parse_schedule(schedule)["kind"],
+                   "prompt": prompt, "agent": agent, "target": target, "enabled": True, "last_run": None}
+            if action:                               # ação INTERNA (ex.: 'curator') em vez de prompt p/ o harness
+                job["action"] = action
+            if gate:                                 # wake-gate: comando barato decide se ACORDA o agente
+                job["gate"] = gate
+            if script:                               # job SCRIPT: roda comando e entrega stdout (sem LLM)
+                job["script"] = script
+            jobs.append(job)
+            return (jobs, job)
+        return self._atomic(_m)
 
     # ----------------------------------------------------------------- histórico de output (item 30)
     def _output_dir(self, jid: str) -> Path:
@@ -289,17 +303,17 @@ class Scheduler:
         return out
 
     def remove(self, jid: str) -> bool:
-        jobs = self.load()
-        kept = [j for j in jobs if j["id"] != jid]
-        self.save(kept)
-        return len(kept) != len(jobs)
+        def _m(jobs):
+            kept = [j for j in jobs if j["id"] != jid]
+            return (kept, len(kept) != len(jobs))
+        return self._atomic(_m)
 
     def set_enabled(self, jid: str, on: bool) -> None:
-        jobs = self.load()
-        for j in jobs:
-            if j["id"] == jid:
-                j["enabled"] = on
-        self.save(jobs)
+        def _m(jobs):
+            for j in jobs:
+                if j["id"] == jid:
+                    j["enabled"] = on
+        self._atomic(_m)
 
     def due(self, now_ts: float | None = None) -> list[dict]:
         now = now_ts if now_ts is not None else self._clock()
@@ -308,13 +322,14 @@ class Scheduler:
 
     def mark_run(self, jid: str, now_ts: float | None = None) -> None:
         now = now_ts if now_ts is not None else self._clock()
-        jobs = self.load()
-        for j in jobs:
-            if j["id"] == jid:
-                j["last_run"] = now
-                if j.get("kind") == "once":
-                    j["enabled"] = False         # one-shot: desativa após rodar
-        self.save(jobs)
+
+        def _m(jobs):
+            for j in jobs:
+                if j["id"] == jid:
+                    j["last_run"] = now
+                    if j.get("kind") == "once":
+                        j["enabled"] = False     # one-shot: desativa após rodar
+        self._atomic(_m)
 
     def tick(self, execute, now_ts: float | None = None) -> list[tuple[str, str]]:
         """Roda os jobs vencidos via `execute(job)->str`; marca cada um. Devolve [(id, resultado)]."""

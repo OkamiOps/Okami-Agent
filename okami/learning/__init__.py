@@ -267,8 +267,8 @@ def tuned_overrides(workspace, model: str) -> dict:
         m = json.loads(p.read_text(encoding="utf-8")).get(model)
     except (json.JSONDecodeError, OSError):
         return {}
-    if not m or m["runs"] < 3:
-        return {}
+    if not m or m["runs"] < 3:                       # amostra mínima 3 + exige 100% de violação (abaixo):
+        return {}                                     # adapta RÁPIDO modelo local fraco a json_constrained
     if m["violations"] / max(1, m["runs"]) >= 1.0:
         return {"tool_mode": "json_constrained"}
     return {}

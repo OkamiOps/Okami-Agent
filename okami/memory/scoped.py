@@ -31,8 +31,8 @@ class ScopedMemory(Memory):
             except Exception:  # noqa: BLE001
                 items = []
             for it in items:
-                k = it.text.strip()[:120].lower()
-                if k and k not in seen:
+                k = it.text.strip().lower()           # texto COMPLETO: 2 memórias com os mesmos 120 chars
+                if k and k not in seen:                # iniciais e resto diferente não colapsam numa só
                     seen.add(k)
                     out.append(it)
         out.sort(key=lambda i: -(i.score if i.score is not None else 0.0))
