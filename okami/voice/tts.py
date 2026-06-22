@@ -20,6 +20,8 @@ class EdgeTTS:
     def synthesize(self, text: str, out_path) -> Path:
         import asyncio
 
+        from okami.core.lazy_deps import ensure
+        ensure("tts.edge")                             # auto-instala edge-tts na 1ª vez
         import edge_tts
 
         out = Path(out_path)
@@ -35,6 +37,8 @@ class EdgeTTS:
         de voz de baixa latência (decodifica enquanto fala). Yield de bytes de áudio."""
         import asyncio
 
+        from okami.core.lazy_deps import ensure
+        ensure("tts.edge")                             # auto-instala edge-tts na 1ª vez
         import edge_tts
 
         async def _collect():

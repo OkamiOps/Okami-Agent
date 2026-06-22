@@ -400,6 +400,8 @@ MESSAGES: dict[str, str] = {
     "gw.run_error": "erro: {e}",
     "gw.heard": "ouvi: «{text}»",
     "gw.audio_unclear": "não entendi o áudio: {e}",
+    "gw.transcribing": "transcrevendo seu áudio… (a 1ª vez pode demorar um pouco)",
+    "gw.stt_off": "recebi seu áudio, mas a transcrição de voz está desligada (ligue voice.stt.enabled)",
     "gw.notify_watch": "processo {id}: padrão «{pattern}» apareceu ({count}×): {cmd}",
     "gw.notify_done": "processo {id} terminou (exit={exit_code}): {cmd}",
     "gw.reload_no_changes": "sem mudanças aplicáveis em quente",

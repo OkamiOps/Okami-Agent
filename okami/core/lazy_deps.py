@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Allowlist: feature ("namespace.backend") → specs pip. SÓ specs daqui fluem pro comando de install.
 LAZY_DEPS: dict[str, tuple[str, ...]] = {
-    # voz / TTS
+    # voz: STT (transcrição local) + TTS
+    "stt.whisper": ("faster-whisper>=1.0",),
     "tts.edge": ("edge-tts>=7.0.0",),
     "tts.piper": ("piper-tts>=1.2.0",),
     # busca web

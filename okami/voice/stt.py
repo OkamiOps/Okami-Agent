@@ -18,6 +18,8 @@ class WhisperSTT:
 
     def _load(self):
         if self._model is None:
+            from okami.core.lazy_deps import ensure
+            ensure("stt.whisper")                      # auto-instala faster-whisper na 1ª vez (sem o usuário fazer pip)
             from faster_whisper import WhisperModel
             self._model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type)
         return self._model

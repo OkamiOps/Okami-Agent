@@ -18,12 +18,15 @@ class AudioAnalyze(Tool):
     required = ("path",)
 
     def check(self):
-        """check_fn (item 27): sem o extra `voice` (faster-whisper) a tool é PODADA do registro —
-        não aparece quebrada na cara do modelo. Espelha o websearch.check()."""
+        """check_fn (item 27): disponível se faster-whisper está presente OU se o lazy-install vai
+        resolver no run (default). Só PODA do registro quando o dep falta E o lazy-install foi desligado."""
         import importlib.util
-        if importlib.util.find_spec("faster_whisper") is None:
-            return 'pacote de voz não instalado — pip install "okami-agent[voice]" (faster-whisper)'
-        return None
+        if importlib.util.find_spec("faster_whisper") is not None:
+            return None
+        from okami.core.lazy_deps import _allow_lazy_installs
+        if _allow_lazy_installs():                      # vai auto-instalar no run → tool disponível
+            return None
+        return 'pacote de voz não instalado e lazy-install desligado — pip install "okami-agent[voice]"'
 
     def run(self, args, ctx):
         rel = args.get("path")

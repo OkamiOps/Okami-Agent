@@ -1458,6 +1458,9 @@ class AgentEndpoint(EndpointCommandsMixin):
         for msg in coalesce_inbound(fresh):                # rajada do MESMO chat no lote → 1 turno
             text = msg.text
             if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
+                if getattr(self.stt, "_model", "ready") is None:   # 1ª vez: instala+baixa o modelo (lento) → avisa
+                    self.channel.send(msg.chat_id, "🎤 " + _tr(
+                        "gw.transcribing", _default="transcribing your audio… (first time may take a moment)"))
                 try:
                     text = self.stt.transcribe(msg.audio)
                     self.channel.send(msg.chat_id, "🎤 " + _tr("gw.heard", _default="heard: «{text}»", text=text))
@@ -1465,6 +1468,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                     self.channel.send(msg.chat_id, "❌ " + _tr(
                         "gw.audio_unclear", _default="couldn't understand the audio: {e}", e=e))
                     continue
+            elif msg.audio and not self.stt:           # áudio mas STT desligado → não engole em silêncio
+                self.channel.send(msg.chat_id, "🔇 " + _tr(
+                    "gw.stt_off", _default="received your audio, but voice transcription is off "
+                    "(set voice.stt.enabled: true)"))
+                continue
             imgs = list(getattr(msg, "images", None) or ([] if not getattr(msg, "image", None) else [msg.image]))
             if not imgs and text:                      # #11: auto-extrai caminho LOCAL de imagem do texto
                 from okami.gateway.image_refs import extract_image_refs

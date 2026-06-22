@@ -60,6 +60,36 @@ def test_audio_message_is_transcribed_and_handled():
     assert any("previsão do tempo" in t for t in texts)   # respondeu à transcrição (papo: sem selo ✅)
 
 
+class FirstTimeSTT:
+    def __init__(self):
+        self._model = None                             # ainda não carregou (1ª vez: instala+baixa modelo)
+
+    def transcribe(self, path):
+        self._model = object()
+        return "alô mundo"
+
+
+def test_first_transcription_sends_heads_up():
+    """1ª nota de voz dispara install do faster-whisper + download do modelo (lento) → avisa que está
+    transcrevendo pra não parecer travado."""
+    ch = VoiceChannel(inbound=[Inbound("fake", "7", text="", audio="/tmp/x.ogg")])
+    ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, stt=FirstTimeSTT(),
+                       spawn=lambda fn: fn())
+    ep.poll_once()
+    texts = [t for _, t in ch.sent]
+    assert any("transcrev" in t.lower() for t in texts)               # avisou (não congelado)
+
+
+def test_audio_without_stt_does_not_drop_silently():
+    """Áudio com STT desligado (voice.stt.enabled=false) → avisa o usuário em vez de engolir em silêncio."""
+    ch = VoiceChannel(inbound=[Inbound("fake", "7", text="", audio="/tmp/x.ogg")])
+    ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, stt=None,
+                       spawn=lambda fn: fn())
+    ep.poll_once()
+    texts = [t for _, t in ch.sent]
+    assert texts and any("áudio" in t.lower() or "voz" in t.lower() for t in texts)
+
+
 def test_reply_is_also_sent_as_voice_when_tts_on():
     ch = VoiceChannel()
     ep = AgentEndpoint("dev", None, tempfile.mkdtemp(), ch, run_task=_runner, tts=FakeTTS(),
@@ -68,10 +98,14 @@ def test_reply_is_also_sent_as_voice_when_tts_on():
     assert ch.audio_sent and ch.audio_sent[-1][0] == "7"               # mandou áudio também
 
 
-def test_make_stt_make_tts_disabled_by_default():
+def test_stt_on_by_default_tts_opt_in():
+    """STT LIGADO por padrão (nota de voz transcreve sem config; faster-whisper auto-instala). TTS é
+    OPT-IN (o agente não manda voz sozinho — usa a tool text_to_speech quando faz sentido)."""
     from okami.voice import make_stt, make_tts
-    assert make_stt(None) is None and make_stt({"enabled": False}) is None
-    assert make_tts(None) is None
+    assert make_stt(None) is not None                  # STT default LIGADO
+    assert make_stt({"enabled": False}) is None        # opt-out explícito
+    assert make_tts(None) is None                      # TTS auto-reply default DESLIGADO
+    assert make_tts({"enabled": True}) is not None
 
 
 def test_make_tts_piper_returns_piper_instance():

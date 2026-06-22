@@ -4,9 +4,10 @@ from __future__ import annotations
 
 
 def make_stt(cfg: dict | None):
-    """Constrói o STT a partir de voice.stt (None = desativado)."""
+    """Constrói o STT a partir de voice.stt. LIGADO por padrão: nota de voz tem que ser transcrita sem o
+    usuário configurar nada (faster-whisper auto-instala na 1ª transcrição). Só `enabled: false` desliga."""
     cfg = cfg or {}
-    if not cfg.get("enabled"):
+    if cfg.get("enabled") is False:                    # opt-out EXPLÍCITO (default = ligado)
         return None
     from okami.voice.stt import WhisperSTT
     return WhisperSTT(model=cfg.get("model", "base"), device=cfg.get("device", "cpu"),

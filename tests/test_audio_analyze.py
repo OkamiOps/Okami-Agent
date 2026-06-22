@@ -83,15 +83,21 @@ def test_tool_honors_language_arg(tmp_path, monkeypatch):
     assert seen["model"] == "small" and seen["language"] == "pt"
 
 
-def test_check_reports_missing_faster_whisper(monkeypatch):
+def test_check_prunes_only_when_lazy_install_off(monkeypatch):
+    """Sem faster-whisper: a tool fica DISPONÍVEL se o lazy-install vai resolver no run (default), e só
+    PODA do registro quando o lazy-install foi desligado pelo dono."""
     real = importlib.util.find_spec
 
     def fake(name, *a, **k):
         return None if name == "faster_whisper" else real(name, *a, **k)
-
     monkeypatch.setattr(importlib.util, "find_spec", fake)
+
+    monkeypatch.setattr("okami.core.lazy_deps._allow_lazy_installs", lambda: True)
+    assert AudioAnalyze().check() is None                              # lazy ON → disponível (instala no run)
+
+    monkeypatch.setattr("okami.core.lazy_deps._allow_lazy_installs", lambda: False)
     reason = AudioAnalyze().check()
-    assert reason is not None and "voice" in reason.lower()
+    assert reason is not None and "voice" in reason.lower()            # lazy OFF → poda com instrução
 
 
 def test_check_ok_when_present(monkeypatch):

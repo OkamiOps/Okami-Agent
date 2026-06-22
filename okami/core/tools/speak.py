@@ -36,12 +36,16 @@ class TextToSpeech(Tool):
     required = ("text",)
 
     def check(self) -> str | None:
-        """Disponível se houver engine de TTS (edge é o default). Sem nenhum → sai do registro."""
+        """Disponível se edge-tts está presente OU se o lazy-install resolve no run (default). Só sai do
+        registro quando o dep falta E o lazy-install foi desligado."""
         try:
             import edge_tts  # noqa: F401
             return None
         except Exception:  # noqa: BLE001
-            return "TTS indisponível (instale edge-tts: `uv add edge-tts`, ou configure voice.tts)"
+            from okami.core.lazy_deps import _allow_lazy_installs
+            if _allow_lazy_installs():                  # vai auto-instalar no run → tool disponível
+                return None
+            return "TTS indisponível e lazy-install desligado (instale edge-tts ou configure voice.tts)"
 
     def run(self, args: dict, ctx: ToolContext) -> ToolResult:
         import time as _t
