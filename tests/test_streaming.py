@@ -40,3 +40,44 @@ def test_streaming_enabled_flag():
     assert streaming_enabled(SimpleNamespace(harness={"streaming": True})) is True
     assert streaming_enabled(SimpleNamespace(harness={})) is False
     assert streaming_enabled(None) is False
+
+
+# ── default tier-aware (latência): liga sozinho p/ modelo lento de protocolo-texto ──
+def _cfg(tier="local", streaming=None, tool_mode="json_constrained"):
+    from types import SimpleNamespace
+    pc = SimpleNamespace(tier=tier, tool_mode=lambda: tool_mode)
+    h = {} if streaming is None else {"streaming": streaming}
+    return SimpleNamespace(harness=h, provider=lambda name=None: pc)
+
+
+def test_streaming_default_on_for_local_and_weak():
+    from okami.llm.streaming import streaming_enabled
+    assert streaming_enabled(_cfg(tier="local")) is True      # local lento → streaming sozinho
+    assert streaming_enabled(_cfg(tier="weak")) is True
+
+
+def test_streaming_default_off_for_strong_native_tools():
+    from okami.llm.streaming import streaming_enabled
+    # strong com tool_calls NATIVOS → off (os deltas estruturados não passam pelo streaming de texto)
+    assert streaming_enabled(_cfg(tier="strong", tool_mode="native")) is False
+
+
+def test_streaming_default_on_for_json_text_protocol():
+    from okami.llm.streaming import streaming_enabled
+    # qualquer provider em json_constrained (protocolo-texto) → streaming é seguro e útil
+    assert streaming_enabled(_cfg(tier="unknown", tool_mode="json_constrained")) is True
+
+
+def test_streaming_explicit_config_overrides_tier():
+    from okami.llm.streaming import streaming_enabled
+    assert streaming_enabled(_cfg(tier="local", streaming=False)) is False   # explícito vence
+    assert streaming_enabled(_cfg(tier="strong", tool_mode="native", streaming=True)) is True
+
+
+def test_streaming_failopen_when_provider_raises():
+    from types import SimpleNamespace
+    from okami.llm.streaming import streaming_enabled
+
+    def boom(name=None):
+        raise KeyError("sem default provider")
+    assert streaming_enabled(SimpleNamespace(harness={}, provider=boom)) is False

@@ -6,6 +6,17 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### ⚡ harness mais rápido (diagnóstico de 7 analistas → plano por impacto)
+O agente demorava demais p/ a 1ª resposta (>5min, às vezes >25min) em modelo local lento. Causas-raiz
+mapeadas: streaming desligado, prompt gigante tier-blind (~57 schemas de tool ≈ 20K chars no prefill de
+todo turno), cascata de timeout/retry/failover (≈30min no pior caso), chat serializado por tarefa
+síncrona, e re-geração por falso-positivo do Action-or-Terminate. **Leva 1 (a maior por menor esforço):**
+- **streaming token-a-token LIGADO por default p/ tier local/weak** (`okami/llm/streaming.py`): a máquina
+  de streaming já existia atrás de flag OFF — o usuário via "💭 thinking…" congelado por todo o
+  prefill+geração (dezenas de s a min). Agora o default é tier-aware: liga sozinho p/ modelo de
+  protocolo-texto (json_constrained — local/weak), fica OFF p/ strong com tool_calls nativos; config
+  explícito (`harness.streaming`) sempre vence. A 1ª resposta começa a aparecer em ~segundos.
+
 ### 🛠️ fix: robustez + `send_message` (caça field-fail, leva 2)
 - **MCP stdio anti-zumbi**: `_request` agora MATA o subprocesso no timeout/EOF (antes a thread de leitura
   ficava bloqueada em stdout p/ sempre e o proc virava zumbi).

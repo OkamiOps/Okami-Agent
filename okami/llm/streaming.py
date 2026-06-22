@@ -15,10 +15,23 @@ from okami.llm.usage import Completion, normalize_usage
 
 
 def streaming_enabled(cfg) -> bool:
-    """True se `harness.streaming` está ligado no config."""
+    """Streaming token-a-token ligado? `harness.streaming` explícito SEMPRE vence. Sem ele, o default é
+    TIER-AWARE: liga sozinho p/ modelo de PROTOCOLO-TEXTO (json_constrained — tier local/weak), onde o
+    streaming é seguro (a ação JSON vem no próprio texto) E mais NECESSÁRIO (modelo local lento: o usuário
+    via "💭 thinking…" congelado por todo o prefill+geração). Strong com tool_calls NATIVOS fica OFF (os
+    deltas estruturados não passam pelo streaming de texto)."""
     try:
         h = getattr(cfg, "harness", None) or {}
-        return bool(h.get("streaming")) if isinstance(h, dict) else bool(getattr(h, "streaming", False))
+        explicit = h.get("streaming") if isinstance(h, dict) else getattr(h, "streaming", None)
+    except Exception:  # noqa: BLE001
+        explicit = None
+    if explicit is not None:
+        return bool(explicit)
+    try:                                                  # default tier-aware (sem provider → off, fail-open)
+        pc = cfg.provider()
+        if (getattr(pc, "tier", "") or "").lower() in ("local", "weak"):
+            return True
+        return (pc.tool_mode() if hasattr(pc, "tool_mode") else "") == "json_constrained"
     except Exception:  # noqa: BLE001
         return False
 
