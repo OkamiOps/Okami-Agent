@@ -11,6 +11,17 @@ class FeishuDocRead(Tool):
     args_schema = {"doc_token": "o token do documento (da URL ou do contexto)"}
     required = ("doc_token",)
 
+    def check(self) -> str | None:
+        """Poda limpa sem integração configurada (senão o agente chama e leva RuntimeError em runtime)."""
+        try:
+            from okami.config import load_config
+            from okami.integrations.feishu import feishu_config
+            if feishu_config(load_config()) is None:
+                return "Feishu não configurado — configure integrations.feishu.{app_id, app_secret_env} no okami.yaml"
+        except Exception:  # noqa: BLE001 — erro ao ler config não poda (fail-open)
+            return None
+        return None
+
     def run(self, args, ctx):
         doc = args.get("doc_token")
         if not isinstance(doc, str) or not doc.strip():

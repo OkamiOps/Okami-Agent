@@ -17,6 +17,17 @@ class HomeAssistant(Tool):
                    "data": "(call) dict de parâmetros (JSON)"}
     required = ("action",)
 
+    def check(self) -> str | None:
+        """Poda limpa sem integração configurada (senão o agente chama e leva RuntimeError em runtime)."""
+        try:
+            from okami.config import load_config
+            from okami.integrations.homeassistant import ha_config
+            if ha_config(load_config()) is None:
+                return "Home Assistant não configurado — configure integrations.homeassistant.{url, token_env} no okami.yaml"
+        except Exception:  # noqa: BLE001 — erro ao ler config não poda (fail-open)
+            return None
+        return None
+
     def run(self, args, ctx):
         cfg = getattr(ctx, "cfg", None)
         action = str(args.get("action") or "").strip().lower()

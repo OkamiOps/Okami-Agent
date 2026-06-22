@@ -6,6 +6,16 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🛠️ fix: check() nas tools de integração (não falham mais feio em runtime)
+Caça adversarial da CLASSE "onde o agente falha em campo" (workflow de 116 subagentes, 5 dimensões, 3
+céticos/achado). 1ª leva corrigida: `generate_video`, `homeassistant`, `feishu_doc_read` e `x_search`
+**não tinham `check()`** → ficavam VISÍVEIS pro agente mesmo sem a integração configurada; ele chamava e
+levava um `RuntimeError` feio em runtime. Agora cada uma tem `check()` (via `*_config(load_config())`) →
+quando a integração falta, a tool **some do registro** com motivo claro (`🔌 indisponível: configure
+integrations.X`), igual a computer_use/web_search. `vision_analyze`/`web_extract` foram DESCARTADAS da
+correção: caem no modelo principal via `aux_complete`, então funcionam sem config — podá-las removeria
+tool que funciona. +6 testes. 2645 passed.
+
 ### 🛠️ fix: tool `install_skill` (o agente instalava skill SEM improvisar Docker)
 Bug de campo: pedido para instalar a skill `html-to-pdf` (`aviz85/claude-skills-library`), o agente
 **não tinha tool de instalação** (`use_skill` só carrega, `manage_skill` só AUTORA; instalar era `okami

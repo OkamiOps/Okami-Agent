@@ -12,6 +12,17 @@ class XSearch(Tool):
     args_schema = {"query": "a pergunta/tema a buscar no X", "handles": "(opc) lista de @perfis p/ restringir"}
     required = ("query",)
 
+    def check(self) -> str | None:
+        """Poda limpa sem integração configurada (senão o agente chama e leva RuntimeError em runtime)."""
+        try:
+            from okami.config import load_config
+            from okami.integrations.x_search import x_config
+            if x_config(load_config()) is None:
+                return "X search não configurado — configure integrations.x.{api_key_env, model} no okami.yaml"
+        except Exception:  # noqa: BLE001 — erro ao ler config não poda (fail-open)
+            return None
+        return None
+
     def run(self, args, ctx):
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():

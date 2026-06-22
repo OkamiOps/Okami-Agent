@@ -13,6 +13,17 @@ class GenerateVideo(Tool):
     args_schema = {"prompt": "o que gerar", "path": "saída (.mp4)", "image": "(opc) imagem base (caminho no workspace)"}
     required = ("prompt", "path")
 
+    def check(self) -> str | None:
+        """Poda limpa sem provider de vídeo (senão o agente chama e leva erro feio em runtime)."""
+        try:
+            from okami.config import load_config
+            from okami.llm.videogen import video_config
+            if video_config(load_config()) is None:
+                return "geração de vídeo não configurada — configure media.video (backend + chave) no okami.yaml"
+        except Exception:  # noqa: BLE001 — erro ao ler config não poda (fail-open)
+            return None
+        return None
+
     def run(self, args, ctx):
         from okami.core.tools.base import _safe_path
         cfg = getattr(ctx, "cfg", None)
