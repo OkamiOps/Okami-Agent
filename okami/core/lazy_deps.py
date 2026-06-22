@@ -39,6 +39,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "provider.gemini": ("google-genai>=1.0.0",),
     # documentos office (read_extract)
     "read.office": ("python-docx>=1.1.0", "openpyxl>=3.1.0"),
+    # geração de PDF (pura-Python, sem dep de sistema — funciona em VPS/Mac/Windows)
+    "pdf.fpdf": ("fpdf2>=2.7.0", "markdown>=3.5"),
     # imagem (vision/resize)
     "image.pillow": ("Pillow>=10.0.0",),
     # janela nativa do dashboard (desktop) — webview do SO, sem Electron
