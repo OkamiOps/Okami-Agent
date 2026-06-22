@@ -1269,6 +1269,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             # Entrega FORA-DO-TURNO (#7 item 3, usada por 10/14/19): o harness pode "tocar" o dono no meio
             # da tarefa (vigia/loop/lembrete) — entrega ao home_chat, redige segredo e (item 4) avisa o desktop.
             kw["notify"] = lambda m: self._notify_owner(chat_id, m)
+            kw["chat_id"] = str(chat_id)                # #2: process_start carimba → notifica o chat de origem
             # PERGUNTA do agente ao dono (#8 item 1): bloqueia o turno até a resposta (vinda por handle()).
             kw["clarify"] = lambda q, opts, _cid=chat_id: self._ask_clarify(_cid, q, opts)
             # AMBIENTE REMOTO (SSH/Tailscale): rehidrata o alvo da sessão (multi-turno) + persiste mudanças.
@@ -1538,16 +1539,18 @@ class AgentEndpoint(EndpointCommandsMixin):
             "gw.reload_no_changes", _default="no hot-applicable changes"))
 
     def _notify_completed_processes(self) -> None:
-        """Fila de notificações de processo (#1/#8/#P1.4): conclusão + watch hits, avisa no chat."""
-        chat = getattr(self, "_last_chat", None)
-        if not chat:
-            return
+        """Fila de notificações de processo (#1/#8/#P1.4): conclusão + watch hits, avisa NO CHAT QUE PEDIU
+        (#2: chat_id carimbado no start → roteia certo; só cai no _last_chat se a nota não tiver chat)."""
+        fallback = getattr(self, "_last_chat", None)
         try:
             from okami.core.processes import ProcessManager
             notes = ProcessManager(self.ws).drain_notifications()
         except Exception:  # noqa: BLE001
             return
         for n in notes:
+            chat = n.get("chat_id") or fallback        # #2: cada nota vai pro chat de origem
+            if not chat:
+                continue
             if n.get("kind") == "watch":
                 self.channel.send(chat, "👁 " + _tr(
                     "gw.notify_watch",

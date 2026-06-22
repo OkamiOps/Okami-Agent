@@ -52,7 +52,7 @@ class ProcessManager:
 
     # ----------------------------------------------------------------- start
     def start(self, cmd: str, policy=None, *, notify: bool = False, watch=None,
-              interactive: bool = False) -> dict:
+              interactive: bool = False, chat_id: str = "") -> dict:
         """Sobe `cmd` em background sob a política do run_shell (#5). ValueError se bloqueado.
 
         `notify` → entra em drain_completed() ao terminar. `watch` → lista de regex monitoradas no log.
@@ -72,7 +72,7 @@ class ProcessManager:
             if eff == "docker":
                 raise ValueError("modo interativo (PTY) só no backend local — docker interativo entre turnos "
                                  "não é suportado ainda.")
-            return self._start_interactive(cmd, policy, notify=notify, watch=watch)
+            return self._start_interactive(cmd, policy, notify=notify, watch=watch, chat_id=chat_id)
         self.dir.mkdir(parents=True, exist_ok=True)
         pid_id = secrets.token_hex(4)
         logrel = shlex.quote(f".okami/processes/{pid_id}.log")    # RELATIVO ao cwd=workspace (vale local E docker)
@@ -93,14 +93,15 @@ class ProcessManager:
                                     start_new_session=True, preexec_fn=pre)   # sessão própria → sobrevive ao turno
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
                 "start_time": _proc_start(proc.pid), "backend": eff, "container": container,
-                "notify": bool(notify), "watch": list(watch or []), "notified": False}
+                "notify": bool(notify), "watch": list(watch or []), "notified": False,
+                "chat_id": chat_id or ""}    # #2: chat que pediu → notificação vai pro chat CERTO (não _last_chat)
         self._write_meta(pid_id, meta)
         return meta
 
     def _ctrlf(self, pid_id):
         return self.dir / f"{pid_id}.in"
 
-    def _start_interactive(self, cmd: str, policy=None, *, notify=False, watch=None) -> dict:
+    def _start_interactive(self, cmd: str, policy=None, *, notify=False, watch=None, chat_id: str = "") -> dict:
         """PTY interativo: supervisor detached segura o mestre + FIFO de input (#1/#8)."""
         import secrets
 
@@ -122,7 +123,7 @@ class ProcessManager:
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
                 "start_time": _proc_start(proc.pid), "backend": "local", "container": "",
                 "notify": bool(notify), "watch": list(watch or []), "notified": False,
-                "interactive": True}
+                "interactive": True, "chat_id": chat_id or ""}
         self._write_meta(pid_id, meta)
         return meta
 
@@ -282,7 +283,8 @@ class ProcessManager:
                     continue
                 if n >= strikes:
                     out.append({"kind": "watch", "id": meta["id"], "pattern": pat, "count": n,
-                                "strikes": strikes, "cmd": meta.get("cmd", "")})
+                                "strikes": strikes, "cmd": meta.get("cmd", ""),
+                                "chat_id": meta.get("chat_id", "")})    # #2: chat de origem
                     fired.add(pat)
                     changed = True
             if changed:
@@ -401,6 +403,7 @@ class ProcessManager:
             if st.get("status") == "exited":
                 meta["notified"] = True
                 self._write_meta(f.stem, meta)
+                st["chat_id"] = meta.get("chat_id", "")    # #2: roteia a notificação pro chat de origem
                 out.append(st)
         return out
 

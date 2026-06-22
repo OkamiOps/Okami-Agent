@@ -101,6 +101,7 @@ def run_task(
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
     prelearned_files: list[str] | None = None,  # arquivos já "conhecidos" (não exige read antes de sobrescrever)
     surface: str = "cli",                        # superfície (cli/telegram/group/paperclip/subagent) → tool policy
+    chat_id: str = "",                           # #2: chat de origem → carimba no process_start p/ notificar o chat certo
     registry_filter: set[str] | None = None,     # allowlist de tools (None=todas) — review usa o conjunto seguro
     learn: bool = True,                          # False → pula o review pós-turno (sem recursão no próprio review)
     agent_home: str | Path | None = None,        # CASA do agente (identidade/memória/sessões/learning) — se
@@ -284,7 +285,7 @@ def run_task(
         skills=skills_map, registry=registry, cancel=cancel,
         checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
         images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
-        sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface,
+        sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface, chat_id=chat_id,
         model=model or pc.model, allow_paths=allow_paths,
         agent_home=home,              # memória/identidade escrevem na CASA, não no CWD
         cfg=cfg,                      # tools que roteiam ao modelo auxiliar (web_extract/vision)

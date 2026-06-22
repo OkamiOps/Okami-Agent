@@ -44,7 +44,7 @@ class ProcessStart(Tool):
         try:
             meta = ProcessManager(ctx.workspace).start(
                 cmd, policy, notify=bool(args.get("notify")), watch=watch,
-                interactive=bool(args.get("interactive")))
+                interactive=bool(args.get("interactive")), chat_id=getattr(ctx, "chat_id", ""))
         except ValueError as e:
             return ToolResult(False, str(e))
         except Exception as e:  # noqa: BLE001
