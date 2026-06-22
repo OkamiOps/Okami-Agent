@@ -32,7 +32,10 @@ class TranscriptStore:
         return self.dir / "sessions.json"
 
     def _tx_path(self, chat_id) -> Path:
-        return self.dir / f"{chat_id}.jsonl"
+        cid = str(chat_id)
+        if "/" in cid or "\\" in cid or ".." in cid:      # anti-traversal: `<chat>.jsonl` não escapa o dir
+            raise ValueError(f"chat_id inválido: {chat_id!r}")   # (ex.: /api/session/../../etc/x via web)
+        return self.dir / f"{cid}.jsonl"
 
     def load_store(self) -> dict:
         p = self._store_path()

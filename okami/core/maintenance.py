@@ -39,8 +39,8 @@ def resolve_retention(cfg_retention: dict | None) -> dict:
     for area, conf in (cfg_retention or {}).items():
         if isinstance(conf, dict):
             out.setdefault(area, {}).update(conf)
-        else:
-            out[area] = conf
+        # conf não-dict (config digitada errado, ex.: `sessions: 30`) → IGNORA e mantém o default; antes
+        # gravava o escalar e o cron de limpeza crashava ao tratar out[area] como dict (.get/.update).
     return out
 
 

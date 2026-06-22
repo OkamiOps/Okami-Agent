@@ -230,7 +230,14 @@ def run_acp(cfg, ws, run_task, *, stdin=None, stdout=None) -> None:  # pragma: n
 
 
 def _serve_prompt(srv, msg, emit, stdout, write_lock) -> None:  # pragma: no cover — thread de I/O
-    resp = srv.handle(msg, emit)
+    try:
+        resp = srv.handle(msg, emit)
+    except Exception as e:  # noqa: BLE001 — exceção na thread worker não pode morrer CALADA: a IDE ficaria
+        from okami.core.redact import redact   # esperando p/ sempre a resposta do session/prompt → responde erro
+        with write_lock:
+            _write_message(stdout, {"jsonrpc": "2.0", "id": msg.get("id"),
+                                    "error": {"code": -32603, "message": f"internal error: {redact(str(e))}"}})
+        return
     if resp is not None:
         with write_lock:
             _reply(stdout, resp["id"], resp["result"])

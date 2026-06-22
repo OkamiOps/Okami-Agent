@@ -79,7 +79,9 @@ class OkamiMcpServer:
                 mem.close()
                 return _text_result(out)
             except Exception as e:  # noqa: BLE001
-                return {"content": [{"type": "text", "text": f"memória indisponível: {e}"}], "isError": True}
+                from okami.core.redact import redact
+                return {"content": [{"type": "text", "text":               # redact: erro útil ao dono SEM
+                        f"memória indisponível: {redact(str(e))}"}], "isError": True}   # vazar token/segredo
         return {"content": [{"type": "text", "text": f"tool desconhecida: {name}"}], "isError": True}
 
     # ---------------------------------------------------------------- JSON-RPC
@@ -101,7 +103,8 @@ class OkamiMcpServer:
             try:
                 result = self._call(params.get("name", ""), params.get("arguments") or {})
             except Exception as e:  # noqa: BLE001 — uma tool nunca derruba o servidor
-                result = {"content": [{"type": "text", "text": f"erro: {e}"}], "isError": True}
+                from okami.core.redact import redact
+                result = {"content": [{"type": "text", "text": f"erro: {redact(str(e))}"}], "isError": True}
             return {"jsonrpc": "2.0", "id": rid, "result": result}
         return {"jsonrpc": "2.0", "id": rid,
                 "error": {"code": -32601, "message": f"method not found: {method}"}}

@@ -116,17 +116,19 @@ def route(path: str, *, providers: dict | None = None, token: str | None = None,
 def _apply_config_set(key: str, value) -> dict:
     """Grava `key=value` em okami.local.yaml via secure_write (atômico+backup). Só chaves do allowlist."""
     from pathlib import Path
+    from okami.core.filelock import _FileLock
     from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
     p = Path("okami.local.yaml")
-    data = read_yaml_resilient(p, default={}) or {}
-    node = data
-    parts = key.split(".")
-    for k in parts[:-1]:
-        node = node.setdefault(k, {})
-        if not isinstance(node, dict):
-            return {"ok": False, "error": "caminho de config inválido"}
-    node[parts[-1]] = value
-    secure_write_yaml(p, data)
+    with _FileLock(p):                               # read-modify-write atômico (como sessions.update_entry):
+        data = read_yaml_resilient(p, default={}) or {}   # 2 POSTs /api/config simultâneos não se perdem
+        node = data
+        parts = key.split(".")
+        for k in parts[:-1]:
+            node = node.setdefault(k, {})
+            if not isinstance(node, dict):
+                return {"ok": False, "error": "caminho de config inválido"}
+        node[parts[-1]] = value
+        secure_write_yaml(p, data)
     return {"ok": True, "key": key}
 
 
@@ -186,7 +188,12 @@ def default_providers(workspace: str = ".", agent: str = "okami") -> dict:
         for p in (Path(".okami") / "gateway.log",):
             if p.exists():
                 try:
-                    return p.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]
+                    with p.open("rb") as f:                # tail: lê só os últimos ~128KB do fim em vez de
+                        f.seek(0, 2)                       # carregar o log INTEIRO na memória a cada poll (5s)
+                        size = f.tell()
+                        f.seek(max(0, size - 131072))
+                        tail = f.read().decode("utf-8", errors="ignore")
+                    return tail.splitlines()[-200:]
                 except OSError:
                     return []
         return []

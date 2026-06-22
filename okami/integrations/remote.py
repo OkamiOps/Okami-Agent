@@ -110,7 +110,9 @@ class RemoteTarget:
         to = timeout if timeout is not None else self.timeout    # 0 é válido (timeout imediato) ≠ None (usa default)
         argv = self.build_argv(cmd)
         try:
-            r = self._run_fn(argv, capture_output=True, text=True, timeout=to, env=self._env(), input=stdin)
+            r = self._run_fn(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=to, env=self._env(), input=stdin)   # UTF-8 fixo: locale C/latin1 da VPS
+            #                                                              não crasha nem corrompe conteúdo
         except subprocess.TimeoutExpired:
             return RemoteResult(124, f"[remoto: comando passou de {to}s e foi cortado]")
         except FileNotFoundError as e:                  # tailscale/ssh não instalado
@@ -150,7 +152,8 @@ class RemoteTarget:
         try:
             sock = _control_socket(self.alias, self.host)
             self._run_fn(["ssh", "-o", f"ControlPath={sock}", "-O", "exit", self.host],
-                        capture_output=True, text=True, timeout=5, env=self._env())
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                        timeout=5, env=self._env())
         except Exception:  # noqa: BLE001 — fechar conexão nunca derruba nada
             pass
 
