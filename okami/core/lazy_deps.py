@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Allowlist: feature ("namespace.backend") → specs pip. SÓ specs daqui fluem pro comando de install.
 LAZY_DEPS: dict[str, tuple[str, ...]] = {
+    # monitoramento de host (disco/RAM/CPU/uptime cross-plataforma)
+    "monitor.psutil": ("psutil>=5.9",),
     # voz: STT (transcrição local) + TTS
     "stt.whisper": ("faster-whisper>=1.0",),
     "tts.edge": ("edge-tts>=7.0.0",),

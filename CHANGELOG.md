@@ -6,6 +6,21 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+### 🛰️ autonomia na VPS (auditoria × Hermes, wave 1) — monitor de host, auto-restart, web resiliente
+Auditoria de VPS-readiness vs Hermes (8 dimensões → roadmap). Wave 1 (os críticos que o dono pediu):
+- **`system_monitor`** (tool, novo `okami/core/sysmon.py`): saúde do HOST — disco/RAM/CPU/load/uptime,
+  cross-plataforma (stdlib p/ disco sempre + psutil auto-instalado p/ o resto), com alertas acionáveis
+  (disco/RAM/cpu altos) pra o agente decidir adiar/limpar antes de tarefa pesada. (antes o memwatch só
+  via o próprio processo).
+- **`restart_gateway`** (tool): o AGENTE reinicia o próprio gateway (pega código/config novos, recupera de
+  estado ruim) via o `schedule_self_restart` já existente — antes só dava pelo `/restart` no chat.
+- **WebFetch resiliente** (`integrations/browser.py:fetch`): RETRY com backoff exponencial + jitter em erro
+  TRANSITÓRIO (429/5xx/timeout, honrando `Retry-After`); PERMANENTE (403/404) falha na hora. Numa VPS a
+  rede oscila e fonte com rate-limit não pode matar a tarefa no 1º erro.
+- **computer_use** já poda em Linux headless (fix da rodada de portabilidade) → sem falsa promessa de
+  controle de tela na VPS. +1 teste confirmando.
++10 testes. Resto do roadmap (env auto-repair, multi-agent lifecycle, graceful drain, etc.) em ondas.
+
 ### 🖥️ portabilidade Windows/Mac/Linux × VPS/local — 14 breaks REAIS corrigidos (auditoria adversarial)
 Auditoria por 7 finders + triagem rigorosa (51 brutos → 14 confirmados, 30 descartados por degradarem
 gracioso). Novo `okami/core/platform_compat.py` centraliza o que difere entre POSIX e Windows.

@@ -11,9 +11,12 @@ Item 18 — a11y + contexto persistente:
 
 from __future__ import annotations
 
+import random
 import re
+import time
 
 _MAX = 6000
+_TRANSIENT_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})   # repetível; 403/404/401 = não adianta
 
 # Roles da árvore de acessibilidade que valem um [N] clicável/preenchível.
 _INTERACTIVE_ROLES = frozenset({
@@ -31,15 +34,39 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
 
 
-def fetch(url: str, max_chars: int = _MAX) -> str:
+def _transient(exc) -> tuple[bool, float]:
+    """(repetir?, retry_after_seg). HTTP 429/5xx + timeout/conexão = transitório; 403/404/401 = permanente."""
+    import socket
+    import urllib.error
+    if isinstance(exc, urllib.error.HTTPError):
+        if exc.code in _TRANSIENT_STATUS:
+            ra = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
+            try:
+                return True, min(float(ra), 30.0) if ra and str(ra).strip().isdigit() else 0.0
+            except (TypeError, ValueError):
+                return True, 0.0
+        return False, 0.0                              # 403/404/401/410 → não adianta repetir
+    return isinstance(exc, (urllib.error.URLError, socket.timeout, ConnectionError, TimeoutError)), 0.0
+
+
+def fetch(url: str, max_chars: int = _MAX, *, attempts: int = 3) -> str:
+    """Busca read-only com RETRY/backoff em erro transitório (429/5xx/timeout) — numa VPS a rede oscila e
+    fonte com rate-limit não pode matar a tarefa no 1º erro. Erro permanente (403/404) falha na hora."""
     from okami.core.net_guard import BROWSER_HEADERS, BlockedURL, guarded_urlopen
-    try:
-        with guarded_urlopen(url, timeout=20, headers=dict(BROWSER_HEADERS)) as r:  # #6 anti-SSRF · UA navegador real
-            return _strip_html(r.read(300_000).decode("utf-8", "ignore"))[:max_chars]
-    except BlockedURL as e:
-        return f"(URL recusada: {e})"
-    except Exception as e:  # noqa: BLE001
-        return f"(erro ao buscar {url}: {e})"
+    last = ""
+    for i in range(max(1, attempts)):
+        try:
+            with guarded_urlopen(url, timeout=20, headers=dict(BROWSER_HEADERS)) as r:  # #6 anti-SSRF · UA real
+                return _strip_html(r.read(300_000).decode("utf-8", "ignore"))[:max_chars]
+        except BlockedURL as e:
+            return f"(URL recusada: {e})"
+        except Exception as e:  # noqa: BLE001
+            last = f"(erro ao buscar {url}: {e})"
+            retry, retry_after = _transient(e)
+            if not retry or i == attempts - 1:
+                return last
+            time.sleep(retry_after or min(2 ** i + random.random(), 8.0))   # backoff exp + jitter, teto 8s
+    return last
 
 
 # marcadores de "preciso de um browser de verdade": desafio de bot ou página que só hidrata via JS.
