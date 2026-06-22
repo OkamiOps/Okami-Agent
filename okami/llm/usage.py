@@ -75,7 +75,7 @@ def normalize_usage(raw, *, transport: str) -> CanonicalUsage:
     """`raw` (dict ou objeto) do provider → buckets canônicos. None/vazio → zeros (1 request)."""
     if not raw:
         return CanonicalUsage(requests=1)
-    if transport == "claude_cli" or "input_tokens" in _shapekeys(raw) and "cache_read_input_tokens" in _shapekeys(raw):
+    if transport == "claude_cli" or ("input_tokens" in _shapekeys(raw) and "cache_read_input_tokens" in _shapekeys(raw)):
         # Anthropic: buckets JÁ separados (não subtrair).
         return CanonicalUsage(
             input_tokens=_int(raw, "input_tokens"),

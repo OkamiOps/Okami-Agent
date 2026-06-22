@@ -41,14 +41,22 @@ def _auth(cfg) -> tuple[dict, dict]:
 def _default_get(url, headers):
     req = urllib.request.Request(url, method="GET", headers=headers)  # noqa: S310 — URL do HA do dono
     with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+        raw = r.read().decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:                  # 200 com corpo truncado/HTML não derruba a tool
+        raise RuntimeError(f"resposta não-JSON do Home Assistant: {raw[:160]}") from e
 
 
 def _default_post(url, body, headers):
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST", headers=headers)  # noqa: S310
     with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+        raw = r.read().decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:                  # 200 com corpo truncado/HTML não derruba a tool
+        raise RuntimeError(f"resposta não-JSON do Home Assistant: {raw[:160]}") from e
 
 
 def list_entities(cfg, *, domain: str | None = None, _get=None) -> list:

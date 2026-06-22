@@ -8,6 +8,11 @@ import os
 import re
 from dataclasses import dataclass
 
+# Caminho sensível/sistema NÃO vira mídia (anti-exfil via MEDIA:"/etc/passwd", ~/.ssh/id_rsa, .env…):
+# o agente poderia ser induzido (prompt injection) a "enviar" um segredo/arquivo de sistema pro chat.
+_MEDIA_SENSITIVE = re.compile(
+    r"(?:^|/)\.(?:env|ssh|aws|gnupg)(?:/|$)|/etc/(?:passwd|shadow|sudoers)|\.(?:pem|key)$|credentials", re.I)
+
 # Conjuntos por tipo de entrega (espelham o que o Bot API aceita em cada método).
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "bmp", "tiff"}      # sendPhoto (svg não: vira documento)
 ANIMATION_EXTS = {"gif"}                                         # sendAnimation
@@ -70,6 +75,8 @@ def extract_media(text: str) -> tuple[str, list[Media]]:
         if len(p) >= 2 and p[0] in "\"'" and p[-1] == p[0]:
             p = p[1:-1]
         p = os.path.expanduser(p)
+        if _MEDIA_SENSITIVE.search(p):                 # não exfiltra segredo/arquivo de sistema via MEDIA:
+            return ""
         ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
         items.append(Media(p, voice=voice_all and ext in (VOICE_EXTS | AUDIO_EXTS),
                            document=doc_all))

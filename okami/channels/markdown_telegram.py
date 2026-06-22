@@ -19,7 +19,7 @@ _STAR_ITALIC = re.compile(r"\*([^*\n]+)\*")
 _UND_ITALIC = re.compile(r"(?<![\w_])_([^_\n]+)_(?![\w_])")
 _STRIKE = re.compile(r"~~(.+?)~~", re.S)
 _SPOILER = re.compile(r"\|\|(.+?)\|\|", re.S)              # ||x|| → spoiler (Telegram <tg-spoiler>)
-_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^)\s]|\)(?!\s|$))+)\)")  # '(' interno (ex.: wiki) não trunca a URL
 _HEADER = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 # blockquote: rodado APÓS o escape → casa o '>' já como '&gt;'. Agrupa linhas '> ' consecutivas.
 _QUOTE_LINE = re.compile(r"(?:^&gt;[ \t]?.*(?:\n|$))+", re.M)

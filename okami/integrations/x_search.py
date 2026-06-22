@@ -26,7 +26,11 @@ def _default_post(url, body, headers):
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST", headers=headers)  # noqa: S310 — endpoint xAI do config
     with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+        raw = r.read().decode("utf-8")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:                  # resposta não-JSON do xAI não derruba a tool
+        raise RuntimeError(f"resposta não-JSON do xAI: {raw[:160]}") from e
 
 
 def x_search(cfg, query: str, *, handles: list | None = None, _post=None) -> dict:
