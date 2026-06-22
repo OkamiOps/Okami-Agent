@@ -354,7 +354,10 @@ def test_on_event_threaded_into_run_task(tmp_path):
     (tmp_path / ".okami").mkdir(exist_ok=True)
     (tmp_path / ".okami" / "genesis.done").write_text("done\n", encoding="utf-8")   # pula gênese
     ep.handle("1", "oi")
-    assert captured["on_event"] is my_on_event          # progresso threadado pro harness
+    # o on_event chega EMBRULHADO pelo tracker de progresso (passo/tokens ao vivo) que ENCADEIA o do chat:
+    assert callable(captured["on_event"])               # progresso threadado pro harness
+    captured["on_event"]({"kind": "step", "tool": "x"})  # passa pelo tracker → repassa ao on_event do chat
+    assert sink and sink[-1].get("tool") == "x"
 
 
 def test_real_task_keeps_completion_seal():

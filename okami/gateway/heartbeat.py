@@ -16,10 +16,20 @@ def heartbeat_due(*, start: float, now: float, interval: float, last: float) -> 
     return (now - ref) >= interval
 
 
-def heartbeat_message(*, elapsed_s: float) -> str:
-    """'ainda trabalhando, ~N min' (arredonda p/ minuto; <1min vira ~1)."""
+def heartbeat_message(*, elapsed_s: float, steps: int = 0, tokens: int = 0, tool: str = "") -> str:
+    """'ainda trabalhando, ~N min' + (se houver) passo/tool atual e tokens acumulados — pro dono ver o que
+    está rolando e o custo correndo num turno longo, não só os minutos. Sufixos só quando >0 (compat:
+    sem extras → string idêntica à antiga)."""
     mins = max(1, round(elapsed_s / 60.0))
-    return f"⏳ ainda trabalhando nisso, ~{mins} min…"
+    msg = f"⏳ ainda trabalhando nisso, ~{mins} min…"
+    extra: list[str] = []
+    if steps:
+        extra.append(f"passo {steps}" + (f" ({tool})" if tool else ""))
+    if tokens:
+        extra.append(f"~{round(tokens / 1000)}k tok" if tokens >= 1000 else f"~{tokens} tok")
+    if extra:
+        msg += " · " + " · ".join(extra)
+    return msg
 
 
 __all__ = ["heartbeat_due", "heartbeat_message"]

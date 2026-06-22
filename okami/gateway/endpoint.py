@@ -1154,9 +1154,10 @@ class AgentEndpoint(EndpointCommandsMixin):
             from okami import log
             log.dbg("goal_after_turn falhou", exc_info=True)
 
-    def _start_heartbeat(self, chat_id, t0: float):
-        """#11: thread daemon best-effort que manda "ainda trabalhando, ~N min" em turno LONGO (silêncio
-        prolongado), gateado pelo tier de display da plataforma. Devolve um threading.Event p/ parar, ou
+    def _start_heartbeat(self, chat_id, t0: float, live: dict | None = None):
+        """#11: thread daemon best-effort que manda "ainda trabalhando, ~N min · passo M (tool) · ~Nk tok"
+        em turno LONGO (silêncio prolongado), gateado pelo tier de display da plataforma. `live` é o estado
+        mutável (passo/tokens correndo) alimentado pelo on_event. Devolve um threading.Event p/ parar, ou
         None se desligado. Em turno rápido (teste/uso normal) nunca dispara — para antes do 1º intervalo."""
         from okami.gateway.display_config import resolve_display_setting
         platform = (getattr(self, "surface", "") or getattr(self.channel, "name", "") or "")
@@ -1173,8 +1174,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                 now = time.time()
                 if heartbeat_due(start=t0, now=now, interval=interval, last=last):
                     last = now
+                    _lv = live or {}
                     try:
-                        self.channel.send(chat_id, heartbeat_message(elapsed_s=now - t0))
+                        self.channel.send(chat_id, heartbeat_message(
+                            elapsed_s=now - t0, steps=int(_lv.get("steps", 0) or 0),
+                            tokens=int(_lv.get("tokens", 0) or 0), tool=str(_lv.get("tool", "") or "")))
                     except Exception:  # noqa: BLE001 — heartbeat nunca derruba o turno
                         return
 
@@ -1267,6 +1271,20 @@ class AgentEndpoint(EndpointCommandsMixin):
                 kw_pre = None
             if _status_id is not None:                    # streaming-by-edit: edita a msg de status ao vivo
                 on_ev = self._status_on_event(chat_id, _status_id, _thinking, on_ev)
+            live = {"steps": 0, "tokens": 0, "tool": ""}   # estado VIVO p/ o heartbeat (passo + tokens correndo)
+
+            def on_ev(e, _base=on_ev):                     # noqa: E306 — SEMPRE rastreia (mesmo sem base) p/ alimentar
+                try:                                       #   o heartbeat de turno longo com passo/tokens ao vivo
+                    _k = e.get("kind")
+                    if _k == "step":
+                        live["steps"] += 1
+                        live["tool"] = e.get("tool") or live["tool"]
+                    elif _k == "llm_call":
+                        live["tokens"] += int(e.get("tokens_in", 0) or 0) + int(e.get("tokens_out", 0) or 0)
+                except Exception:  # noqa: BLE001 — tracking nunca derruba o turno
+                    pass
+                if _base is not None:
+                    return _base(e)
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
             if kw_pre:
                 kw["prelearned_files"] = kw_pre
@@ -1301,7 +1319,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                     s.remote_spec = None
             kw["set_remote"] = lambda rt, _s=s: setattr(_s, "remote_spec", getattr(rt, "alias", None) if rt else None)
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
-            _hb_stop = self._start_heartbeat(chat_id, _t0)  # #11: "ainda trabalhando, ~N min" em turno longo
+            _hb_stop = self._start_heartbeat(chat_id, _t0, live)  # #11: "ainda trabalhando ~N min · passo M · ~Nk tok"
             try:
                 task = self.run_task(self.cfg, self.ws, text, **kw)
             finally:
