@@ -6,6 +6,12 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🌐 fix: WebFetch se identifica como navegador real (menos 403)
+A busca de conteúdo (`web.py:_fetch_full` + `browser.py:fetch`) mandava `User-Agent: okami/1.0` — um
+robô óbvio que muitos sites recusam com 403 na cara. Agora usa `BROWSER_HEADERS` (Chrome real + Accept/
+Accept-Language) em `okami/core/net_guard.py`. Resolve a classe "403 só porque o UA é robô"; NÃO vence
+Cloudflare/anti-bot/JS (isso exige browser de verdade — Playwright, na fila). +3 testes.
+
 ### 💬 fix: formatação do Telegram (tags HTML cruas viravam texto literal)
 Bug real (caso FIPE): a dica de plataforma MANDAVA o modelo escrever HTML (`<b>negrito</b>`), mas o
 conversor `to_html` tratava a entrada como MARKDOWN e dava `html.escape` em tudo → `<b>` virava

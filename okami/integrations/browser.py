@@ -32,9 +32,9 @@ def _strip_html(html: str) -> str:
 
 
 def fetch(url: str, max_chars: int = _MAX) -> str:
-    from okami.core.net_guard import BlockedURL, guarded_urlopen
+    from okami.core.net_guard import BROWSER_HEADERS, BlockedURL, guarded_urlopen
     try:
-        with guarded_urlopen(url, timeout=20, headers={"User-Agent": "okami/1.0"}) as r:  # #6 anti-SSRF
+        with guarded_urlopen(url, timeout=20, headers=dict(BROWSER_HEADERS)) as r:  # #6 anti-SSRF · UA navegador real
             return _strip_html(r.read(300_000).decode("utf-8", "ignore"))[:max_chars]
     except BlockedURL as e:
         return f"(URL recusada: {e})"

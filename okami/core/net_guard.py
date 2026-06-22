@@ -30,6 +30,17 @@ class BlockedURL(ValueError):
     """URL recusada pela guarda anti-SSRF (esquema proibido, host não-roteável, ou DNS sem resposta)."""
 
 
+# Headers de NAVEGADOR REAL p/ buscar conteúdo da web. O 'okami/1.0' levava 403 na cara em muitos sites
+# (bloqueio trivial por User-Agent). NÃO vence Cloudflare/anti-bot/JS (isso exige browser de verdade —
+# Playwright), mas resolve a classe grande de "403 só porque o UA é robô".
+BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+
 # IPv4 em notação CANÔNICA estrita: 4 octetos decimais 0-255, SEM zero à esquerda.
 _STRICT_DOTTED_V4 = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
 
