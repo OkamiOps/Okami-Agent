@@ -79,6 +79,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("restart_gateway", "processo", tier="power", danger="sensitive"),  # reinicia o próprio gateway (disruptivo)
     ToolSpec("ssh_identity", "shell", tier="power", danger="dangerous"),     # provisão: chave SSH em ~/.ssh (VPS)
     ToolSpec("git_auth", "shell", tier="power", danger="dangerous"),         # provisão: acesso GitHub (token/SSH)
+    ToolSpec("remote_add", "shell", tier="power", danger="sensitive"),       # cadastra host SSH/Tailscale (persiste config)
     ToolSpec("remote_connect", "shell", tier="power", danger="sensitive"),   # entra numa máquina remota (SSH/Tailscale)
     ToolSpec("remote_disconnect", "shell"),                    # volta ao ambiente local
     ToolSpec("tool_search", "controle"),

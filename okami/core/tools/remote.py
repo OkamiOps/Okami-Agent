@@ -24,6 +24,46 @@ def _remote_cfg(ctx) -> dict:
     return rc if isinstance(rc, dict) else {}
 
 
+class RemoteAdd(Tool):
+    name = "remote_add"
+    description = (
+        "Cadastra um host SSH/Tailscale nos remotes (persiste em okami.local.yaml) pra você conectar depois "
+        "pelo ALIAS com remote_connect — inclusive no Telegram (a allowlist passa a liberar esse alias). Use "
+        "quando o dono te der uma máquina nova pra gerenciar. Valida o host (anti-injeção)."
+    )
+    args_schema = {
+        "alias": "nome curto do host (ex.: prod, vps2)",
+        "host": "user@host (ssh) ou nome do nó (tailscale)",
+        "via": "(opc) ssh | tailscale (default: ssh se tem '@', senão tailscale)",
+    }
+    required = ("alias", "host")
+
+    def run(self, args, ctx):
+        import re
+
+        from okami.integrations.remote import _check_host
+        alias = str(args.get("alias") or "").strip()
+        host = str(args.get("host") or "").strip()
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$", alias):
+            return ToolResult(False, "alias inválido — use letras/dígitos/._- (ex.: prod).", effect=False)
+        try:
+            _check_host(host)                          # recusa host hostil (-oProxyCommand=… etc.)
+        except ValueError as e:
+            return ToolResult(False, f"host inválido: {e}", effect=False)
+        via = str(args.get("via") or "").strip().lower() or ("ssh" if "@" in host else "tailscale")
+        if via not in ("ssh", "tailscale"):
+            return ToolResult(False, "via deve ser 'ssh' ou 'tailscale'.", effect=False)
+        try:
+            from okami.config import set_local
+            p = set_local(f"remote.hosts.{alias}", {"host": host, "via": via})
+        except Exception as e:  # noqa: BLE001
+            from okami.core.redact import redact
+            return ToolResult(False, f"não consegui salvar o remote: {redact(str(e))}", effect=False)
+        return ToolResult(True, f"✓ remote '{alias}' → {host} (via {via}) cadastrado em {p.name}. Conecte "
+                          f"com remote_connect host={alias}. (vale após o próximo reload de config — "
+                          "use restart_gateway se precisar agora).", effect=True)
+
+
 class RemoteConnect(Tool):
     name = "remote_connect"
     description = (

@@ -286,6 +286,30 @@ def config_dir() -> Path:
         return h
 
 
+def set_local(dotted_key: str, value):
+    """Escreve uma chave DOTTED (ex.: 'remote.hosts.prod') no okami.local.yaml (overrides do usuário),
+    merge não-destrutivo + escrita atômica. Usado por tools que persistem config a pedido do dono
+    (ex.: remote_add). Devolve o caminho."""
+    from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
+    p = config_dir() / "okami.local.yaml"
+    raw = read_yaml_resilient(p, default={}) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    parts = [k for k in str(dotted_key).split(".") if k]
+    if not parts:
+        raise ValueError("chave vazia.")
+    node = raw
+    for k in parts[:-1]:
+        nxt = node.get(k)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            node[k] = nxt
+        node = nxt
+    node[parts[-1]] = value
+    secure_write_yaml(p, raw)
+    return p
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     out = dict(base)
     for k, v in override.items():
