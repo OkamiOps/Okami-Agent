@@ -6,6 +6,26 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+### 🤖 Onda 3 — MULTI-AGENTE: cada agente seu próprio gateway, supervisionado (watchdog + auto-restart)
+O dono queria N agentes, cada um com gateway/cron/heartbeat/tasks próprios. A fundação já existia (homes
+isolados em agents/<id>/, tokens próprios, load_agents) — faltava o ciclo de vida em runtime.
+- **`okami/gateway/supervisor.py` (AgentSupervisor)**: sobe cada agente como SEU PRÓPRIO processo de
+  gateway (`okami gateway --foreground --agent <id>`), com registro durável em ~/.okami/runtime/agents.json
+  (anti-PID-reuse via start-time), cross-plataforma. up/down/status + **supervise_once (watchdog)** que
+  ressobe quem caiu. spawn_fn/agent_ids_fn injetáveis → lógica 100% testada.
+- **`okami gateway --agent <id>`**: roda o gateway de UM agente só (bot/cron/heartbeat isolados).
+- **CLI `okami agent up | down | status | supervise`**: liga/desliga/vê/vigia a frota; `supervise` é o
+  laço de watchdog (Ctrl+C sai, os gateways seguem no ar).
++4 testes (sobe-uma-vez, watchdog ressobe morto, stop/down, registro durável entre instâncias).
+
+### 🛰️ Onda 2 (continuação) — graceful drain + auto-diagnóstico + remote-from-chat
+- **env_check** (tool + okami/core/envhealth.py): auto-diagnóstico do ambiente (pip/venv gravável,
+  binários git/ssh/rg/ffmpeg…, disco) com issues acionáveis; alerta o dono no boot se algo está ruim.
+- **parada graciosa**: SIGTERM/SIGINT → drena e persiste o dedup; _seen_msgs sobrevive ao restart
+  (.okami/seen_msgs.json) → não reprocessa mensagem após reiniciar.
+- **remote_add** (tool): cadastra host SSH/Tailscale pelo chat (config.set_local → okami.local.yaml),
+  validado contra injeção; libera o alias no remote_connect (inclusive Telegram).
+
 ### 🛰️ autonomia na VPS (auditoria × Hermes, wave 1) — monitor de host, auto-restart, web resiliente
 Auditoria de VPS-readiness vs Hermes (8 dimensões → roadmap). Wave 1 (os críticos que o dono pediu):
 - **`system_monitor`** (tool, novo `okami/core/sysmon.py`): saúde do HOST — disco/RAM/CPU/load/uptime,

@@ -247,3 +247,65 @@ def agent_list() -> None:
     console.print(table)
 
 
+@agent_app.command("up", help=_tr("cli.agent.up", _default="Spawn each agent as its OWN supervised gateway (bot/cron/heartbeat per agent)."))
+def agent_up(
+    agent_id: str = typer.Argument(None, help=_tr("cli.agent.up.id", _default="One agent (default: all configured agents).")),
+) -> None:
+    """Sobe cada agente como SEU PRÓPRIO gateway supervisionado (Telegram/cron/heartbeat isolados)."""
+    from okami.gateway.supervisor import AgentSupervisor
+    s = AgentSupervisor()
+    res = [s.spawn(agent_id)] if agent_id else s.up()
+    if not res:
+        console.print("[yellow]nenhum agente. Crie com: okami agent new <id>[/yellow]")
+        raise typer.Exit(1)
+    for r in res:
+        console.print(f"[green]●[/green] {r['id']} " + ("(já no ar)" if r.get("already") else f"subiu (pid {r.get('pid')})"))
+
+
+@agent_app.command("down", help=_tr("cli.agent.down", _default="Stop the supervised gateways of all agents."))
+def agent_down(
+    agent_id: str = typer.Argument(None, help=_tr("cli.agent.down.id", _default="One agent (default: all running).")),
+) -> None:
+    from okami.gateway.supervisor import AgentSupervisor
+    s = AgentSupervisor()
+    if agent_id:
+        console.print(("[dim]parado[/dim] " if s.stop(agent_id) else "[yellow]não estava no ar:[/yellow] ") + agent_id)
+        return
+    for r in s.down():
+        console.print(("[dim]parado[/dim] " if r["stopped"] else "[yellow]?[/yellow] ") + r["id"])
+
+
+@agent_app.command("status", help=_tr("cli.agent.status", _default="Show which agents' gateways are alive."))
+def agent_status() -> None:
+    from okami.gateway.supervisor import AgentSupervisor
+    rows = AgentSupervisor().status()
+    if not rows:
+        console.print("[dim]nenhum agente configurado.[/dim]")
+        return
+    table = Table(title="Agentes — gateways")
+    table.add_column("id", style="bold")
+    table.add_column("estado")
+    table.add_column("pid")
+    table.add_column("uptime")
+    for r in rows:
+        up = f"{r['uptime_s'] // 60}m" if r.get("uptime_s") else "-"
+        table.add_row(r["id"], "[green]● no ar[/green]" if r["alive"] else "[dim]○ parado[/dim]",
+                      str(r.get("pid") or "-"), up)
+    console.print(table)
+
+
+@agent_app.command("supervise", help=_tr("cli.agent.supervise", _default="Watchdog loop: respawn any agent whose gateway dies (Ctrl+C to stop)."))
+def agent_supervise(
+    interval: float = typer.Option(30.0, "--interval", help=_tr("cli.agent.supervise.interval", _default="Seconds between health checks.")),
+) -> None:
+    """Watchdog: ressobe qualquer agente cujo gateway cair. Ctrl+C para sair."""
+    from okami.gateway.supervisor import AgentSupervisor
+    s = AgentSupervisor()
+    console.print(f"[green]🐕 watchdog ativo[/green] (checa a cada {int(interval)}s · Ctrl+C sai)")
+    s.up()
+    try:
+        s.supervise(interval=interval)
+    except KeyboardInterrupt:
+        console.print("\n[dim]watchdog encerrado (os gateways seguem no ar — okami agent down p/ parar).[/dim]")
+
+

@@ -162,6 +162,8 @@ def gateway(
                                     help=_tr("cli.gateway.foreground", _default="Run in the terminal (live logs, Ctrl+C to exit).")),
     stop: bool = typer.Option(False, "--stop", help=_tr("cli.gateway.stop", _default="(alias) = okami gateway stop")),
     status: bool = typer.Option(False, "--status", help=_tr("cli.gateway.status", _default="(alias) = okami gateway status")),
+    agent: str = typer.Option(None, "-a", "--agent",
+                              help=_tr("cli.gateway.agent", _default="Run the gateway for a SINGLE agent (its own bot/cron/heartbeat).")),
 ) -> None:
     """Ciclo de vida do gateway: start (default, background) · stop · status · restart.
     As flags --stop/--status seguem valendo (alias). -f roda em primeiro plano (Ctrl+C sai)."""
@@ -187,13 +189,19 @@ def gateway(
     # start
     if foreground:                                   # primeiro plano: logs ao vivo, bloqueia (Ctrl+C)
         from okami.agents import load_agents
-        if not load_agents():
+        agents = load_agents()
+        if not agents:
             console.print("[yellow]nenhum agente. Crie com: okami agent new <id>[/yellow]")
             raise typer.Exit(1)
+        if agent:                                    # multi-agente: roda SÓ este agente (bot/cron/heartbeat próprios)
+            if agent not in agents:
+                console.print(f"[red]agente '{agent}' não existe.[/red] (okami agent list)")
+                raise typer.Exit(1)
+            agents = {agent: agents[agent]}
         from okami.config import load_raw
         from okami.gateway import run_gateway
         graw, _ = load_raw()
-        run_gateway(graw, load_agents(), emit=lambda m: console.print(f"🤖 {m}"))
+        run_gateway(graw, agents, emit=lambda m: console.print(f"🤖 {m}"))
         return
     _gw_start_background()
 
