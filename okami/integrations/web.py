@@ -55,11 +55,10 @@ def web_extract(url: str, *, max_chars: int = 8000, chunk: int = 8000, fetch=Non
 
 
 def _fetch_full(url: str, cap: int = 200_000) -> str:
-    """Texto completo da página (sem o teto de 6000 do browse) — entrada do sumarizador."""
-    from okami.core.net_guard import BROWSER_HEADERS, guarded_urlopen
-    from okami.integrations.browser import _strip_html
-    with guarded_urlopen(url, timeout=20, headers=dict(BROWSER_HEADERS)) as r:
-        return _strip_html(r.read(cap).decode("utf-8", "ignore"))
+    """Texto completo da página (sem o teto de 6000 do browse) — entrada do sumarizador. smart_fetch:
+    estático com auto-fallback p/ browser real (Playwright) quando vem bloqueado/casca-de-JS."""
+    from okami.integrations.browser import smart_fetch
+    return smart_fetch(url, cap)
 
 
 def web_search(query: str, limit: int = 5) -> list[dict]:

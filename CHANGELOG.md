@@ -6,11 +6,14 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
-### 🌐 fix: WebFetch se identifica como navegador real (menos 403)
-A busca de conteúdo (`web.py:_fetch_full` + `browser.py:fetch`) mandava `User-Agent: okami/1.0` — um
-robô óbvio que muitos sites recusam com 403 na cara. Agora usa `BROWSER_HEADERS` (Chrome real + Accept/
-Accept-Language) em `okami/core/net_guard.py`. Resolve a classe "403 só porque o UA é robô"; NÃO vence
-Cloudflare/anti-bot/JS (isso exige browser de verdade — Playwright, na fila). +3 testes.
+### 🌐 WebFetch melhor: navegador real + auto-fallback p/ Playwright
+- **User-Agent de navegador real** (`BROWSER_HEADERS` em `okami/core/net_guard.py`): `web._fetch_full` +
+  `browser.fetch` mandavam `okami/1.0` (robô óbvio → 403 na cara). Resolve a classe "403 só por causa do UA".
+- **`smart_fetch` (auto-fallback p/ browser real)**: o fetch estático não renderiza JS nem passa bloqueio
+  brando. Agora tenta estático e, se vier 403/casca-de-JS/Cloudflare/corpo minúsculo, re-tenta no
+  **Playwright** (browser de verdade, contexto persistente p/ login) que renderiza JS e passa muitos
+  bloqueios. Bloqueio SSRF não re-tenta; sem Playwright → devolve o estático. `web_extract` usa isto.
+  Ainda NÃO vence captcha (decisão do dono: handoff p/ browser real, na fila). +10 testes.
 
 ### 💬 fix: formatação do Telegram (tags HTML cruas viravam texto literal)
 Bug real (caso FIPE): a dica de plataforma MANDAVA o modelo escrever HTML (`<b>negrito</b>`), mas o

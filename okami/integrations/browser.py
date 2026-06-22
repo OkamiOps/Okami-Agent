@@ -42,6 +42,68 @@ def fetch(url: str, max_chars: int = _MAX) -> str:
         return f"(erro ao buscar {url}: {e})"
 
 
+# marcadores de "preciso de um browser de verdade": desafio de bot ou página que só hidrata via JS.
+_JS_BLOCK_MARKERS = ("just a moment", "checking your browser", "enable javascript", "habilite o javascript",
+                     "cf-browser-verification", "please enable cookies", "verifying you are human",
+                     "verificando que você", "captcha", "attention required")
+
+
+def _looks_blocked_or_js(text: str) -> bool:
+    """O resultado estático parece bloqueio/casca-de-JS (vale tentar o browser real)?"""
+    t = (text or "").strip()
+    if t.startswith("(erro ao buscar"):
+        return True                                   # 403/5xx/rede → browser real pode passar
+    if len(t) < 200:
+        return True                                   # casca de JS / página praticamente vazia
+    low = t.lower()
+    return any(m in low for m in _JS_BLOCK_MARKERS)
+
+
+def _render_js(url: str, max_chars: int = _MAX) -> str | None:
+    """Renderiza a página num browser REAL (Playwright, contexto persistente p/ login/cookies) e devolve
+    o texto do body. None se Playwright indisponível ou se falhar (caller cai no estático)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    from okami.core.net_guard import BlockedURL, validate_public_url
+    try:
+        validate_public_url(url)                      # #6 anti-SSRF vale tb p/ o goto do Playwright
+    except BlockedURL:
+        return None
+    from okami.home import okami_home
+    profile = okami_home() / "browser_profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(user_data_dir=str(profile))
+            try:
+                page = context.new_page()
+                page.goto(url, timeout=30000)
+                page.wait_for_timeout(800)            # deixa o JS hidratar um pouco (preço/conteúdo dinâmico)
+                return page.inner_text("body")[:max_chars]
+            finally:
+                context.close()
+    except Exception:  # noqa: BLE001 — browser falhou → caller usa o estático
+        return None
+
+
+def smart_fetch(url: str, max_chars: int = _MAX) -> str:
+    """ESTÁTICO primeiro; se vier bloqueado/vazio/casca-de-JS (403, Cloudflare, corpo minúsculo), re-tenta
+    no browser REAL (Playwright) que renderiza JS e passa bloqueios brandos. Sem Playwright → estático
+    mesmo. Bloqueio SSRF (URL recusada) NÃO re-tenta (o browser também barraria). Resolve grande parte do
+    'webfetch não pega o conteúdo'; ainda NÃO vence captcha (decisão pendente do dono)."""
+    static = fetch(url, max_chars)
+    if static.startswith("(URL recusada"):
+        return static
+    if not _looks_blocked_or_js(static):
+        return static
+    rendered = _render_js(url, max_chars)
+    if rendered and len(rendered.strip()) > len(static.strip()):
+        return rendered                               # browser trouxe mais conteúdo → usa ele
+    return static
+
+
 def _walk_interactive(node: dict, out: list[dict]) -> None:
     """Achata a árvore de a11y mantendo só nós interativos (DFS, ordem de leitura)."""
     if not isinstance(node, dict):
