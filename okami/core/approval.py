@@ -80,7 +80,7 @@ _EVAL_DANGER = re.compile(
 # todo rm -rf). Era o furo: detect_hardline usava só os patterns ancorados em _CMDPOS, que NÃO casam
 # DENTRO das aspas → `bash -c 'rm -rf /'` passava o yolo-proof (audit 2026-06-08).
 _HARDLINE_EVAL = re.compile(
-    r"\brm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)"
+    r"\brm\s+(-[^\s]*\s+)*(/\$[^\s'\";&|)]*|/|/\*|~|\$HOME|/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)"
     r"|\bmkfs(\.[a-z0-9]+)?\b|\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)|:\(\)\s*\{\s*:"
     r"|\bkill\s+(-[^\s]+\s+)*-1\b|\b(shutdown|reboot|halt|poweroff)\b|\binit\s+[06]\b"
     r"|\bsystemctl\s+(poweroff|reboot|halt|kexec)\b|\btelinit\s+[06]\b", re.I)
@@ -98,9 +98,9 @@ def _strip_quoted(cmd: str) -> str:
 # são BLOQUEADAS de forma INCONDICIONAL — nem /yolo nem /always passam (≠ destructive_shell, que é só gate
 # de aprovação). É a rede que o go/no-go não cobre: um yolo distraído não pode formatar o disco.
 _HARDLINE = [
-    (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*(/|/\*|~|\$HOME|"
+    (re.compile(_CMDPOS + r"rm\s+(-[^\s]*\s+)*(/\$[^\s'\";&|)]*|/|/\*|~|\$HOME|"
                 r"/(home|root|etc|usr|var|bin|sbin|boot|lib|opt|sys|proc)(/\*?)?)(?=[\s'\";&|)]|$)", re.I),
-     "rm recursivo de / ou diretório de sistema"),
+     "rm recursivo de / ou diretório de sistema"),   # /$VAR e /$(...) : var/cmd-sub colado na raiz (vazio → rm /)
     (re.compile(_CMDPOS + r"mkfs(\.[a-z0-9]+)?\b", re.I), "formatar filesystem (mkfs)"),   # ancorado: NÃO
     #                                                       dispara em `head mkfs-howto.md` (nome de arquivo)
     (re.compile(r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*", re.I), "dd p/ dispositivo cru"),

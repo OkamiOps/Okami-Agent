@@ -28,6 +28,8 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
      f"{_MASK}-jwt"),                                                    # JWT
     (re.compile(r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----', re.DOTALL),
      f"-----BEGIN PRIVATE KEY-----{_MASK}-----END PRIVATE KEY-----"),  # pragma: allowlist secret  (é a MÁSCARA, não segredo)
+    (re.compile(r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[A-Za-z0-9+/=\s]{40,}'),  # pragma: allowlist secret
+     f"-----BEGIN PRIVATE KEY-----{_MASK}"),  # pragma: allowlist secret  — chave TRUNCADA/sem END: mascara o corpo base64
     (re.compile(r'([a-z][a-z0-9+.\-]*://[^:/@\s]+:)([^@/\s]+)(@)'),      # senha em URL: scheme://user:SENHA@host
      lambda m: f"{m.group(1)}{_MASK}{m.group(3)}"),
     (re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'), f"AIza{_MASK}"),         # Google API key

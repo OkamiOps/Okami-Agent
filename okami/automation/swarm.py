@@ -48,11 +48,15 @@ def build_swarm_plan(goal: str, workers: list[dict], *, blackboard: str = ".okam
 
 
 def blackboard_append(path, author: str, data: dict) -> None:
-    """Acrescenta uma entrada {author, data} ao blackboard (JSON-lines, append atômico best-effort)."""
+    """Acrescenta uma entrada {author, data} ao blackboard (JSON-lines). Lock cross-processo: vários
+    workers (subagentes) escrevendo em paralelo NÃO intercalam meia-linha (corromperia o JSON)."""
+    from okami.core.filelock import _FileLock
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"author": author, "data": data}, ensure_ascii=False) + "\n")
+    line = json.dumps({"author": author, "data": data}, ensure_ascii=False) + "\n"
+    with _FileLock(p):
+        with p.open("a", encoding="utf-8") as f:
+            f.write(line)
 
 
 def blackboard_read(path) -> list[dict]:
