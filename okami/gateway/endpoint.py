@@ -1330,6 +1330,27 @@ class AgentEndpoint(EndpointCommandsMixin):
             if getattr(self.channel, "supports_media", False):   # MEDIA:<path> na resposta → anexo nativo
                 from okami.channels.media import extract_media
                 reply_text, reply_media = extract_media(reply)
+                # ROBUSTEZ: generate_pdf/image/video/tts emitem MEDIA: na SAÍDA da tool; modelo fraco pode
+                # esquecer de ECOAR na resposta → o arquivo gerado não chegaria. Anexa também os MEDIA: que
+                # apareceram SÓ nos passos (deduped por caminho; só arquivo que EXISTE de verdade).
+                _have = set()
+                for _m in reply_media:
+                    try:
+                        _have.add(Path(_m.path).resolve())
+                    except Exception:  # noqa: BLE001
+                        pass
+                for _st in getattr(task, "steps", []) or []:
+                    _, _extra = extract_media(str(getattr(_st, "output", "") or ""))
+                    for _em in _extra:
+                        if _em.voice:        # VOZ não: é a modalidade do bug do áudio-não-pedido — fica
+                            continue         # só na lógica de espelho (_maybe_voice), nunca por varredura
+                        try:
+                            _rp = Path(_em.path).resolve()
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if _rp not in _have and _rp.is_file():
+                            _have.add(_rp)
+                            reply_media.append(_em)
             reply_text = redact(reply_text)                 # DLP de saída (#7 item 2): mascara segredo que o
             #                                                 modelo possa ter cuspido ANTES de qualquer send
             if reply_text.strip() or not reply_media:       # resposta só-anexo não manda texto vazio
