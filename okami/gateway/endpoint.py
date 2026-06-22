@@ -35,6 +35,15 @@ MEDIA_HINT = (
 )
 
 
+def _fmt_elapsed(s: float) -> str:
+    """Tempo do turno: segundos quando curto, `Nm SSs` quando longo (o dono esperou 628s = '10m28s' —
+    'min+s' é muito mais legível que '628.3s' p/ um turno demorado)."""
+    if s < 90:
+        return f"{s:.1f}s"
+    m, sec = divmod(int(round(s)), 60)
+    return f"{m}m{sec:02d}s"
+
+
 class Session:
     """Estado de uma conversa (um chat × um agente)."""
 
@@ -879,11 +888,14 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception:  # noqa: BLE001 — footer é cosmético, nunca quebra o turno
             pass
         if u.total_tokens:
-            tok = f"{format_tokens(u.total_tokens)} tok ({format_tokens(u.input_tokens)}↑ {format_tokens(u.output_tokens)}↓)"
+            _pfx = "~" if u.estimated else ""               # ~ = ESTIMADO (provider local não reportou usage)
+            tok = f"{_pfx}{format_tokens(u.total_tokens)} tok ({format_tokens(u.input_tokens)}↑ {format_tokens(u.output_tokens)}↓)"
             if u.cache_read_tokens:
                 tok += f" · {format_tokens(u.cache_read_tokens)} cache"
+            if u.estimated:
+                tok += " est."                              # deixa CLARO que é estimativa, não cobrança
             parts.append(tok)
-        parts.append(f"{elapsed:.1f}s")
+        parts.append(_fmt_elapsed(elapsed))                 # tempo TOTAL do turno (min+s quando longo)
         return "· " + "  ·  ".join(parts) if parts else ""
 
     def _pm(self):

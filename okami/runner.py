@@ -205,6 +205,19 @@ def run_task(
 
     _deadline = _overall_timeout_for(cfg)              # #3: teto global da fase de geração
 
+    try:                                               # chars/token p/ ESTIMAR tokens quando o provider local
+        _cpt = float(cfg.provider(provider).chars_per_token) if cfg else 4.0   # (LMStudio) não reporta usage
+    except Exception:  # noqa: BLE001
+        _cpt = 4.0
+
+    def _fill_usage(res, messages):
+        """Modelo local não devolve usage → estima por chars (marcado ~) p/ o dono SEMPRE ver tokens."""
+        if res is not None and res.usage.total_tokens == 0:
+            from okami.llm.usage import estimate_usage
+            _in = "".join(str((m or {}).get("content", "")) for m in (messages or []) if isinstance(m, dict))
+            res.usage = estimate_usage(_in, getattr(res, "text", "") or "", chars_per_token=_cpt)
+        return res
+
     def generate(messages, schema=None, on_token=None):
         def _call():
             if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
@@ -214,6 +227,7 @@ def run_task(
             return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
                                              response_schema=schema, **eff)
         res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
+        _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
             _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
@@ -223,6 +237,7 @@ def run_task(
     if escalate_to:
         def escalate(messages, schema=None):  # noqa: F811
             res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema, **eff)
+            _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
                 _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")

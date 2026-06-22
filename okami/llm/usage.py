@@ -40,6 +40,7 @@ class CanonicalUsage:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     requests: int = 0
+    estimated: bool = False        # tokens ESTIMADOS (provider local não reportou usage) → mostrar com ~
 
     @property
     def prompt_tokens(self) -> int:
@@ -57,18 +58,31 @@ class CanonicalUsage:
             self.cache_write_tokens + other.cache_write_tokens,
             self.reasoning_tokens + other.reasoning_tokens,
             self.requests + other.requests,
+            estimated=self.estimated or other.estimated,   # 1 estimado contamina a soma (rotula o turno como ~)
         )
 
     def to_dict(self) -> dict:
         return {"input": self.input_tokens, "output": self.output_tokens,
                 "cache_read": self.cache_read_tokens, "cache_write": self.cache_write_tokens,
-                "reasoning": self.reasoning_tokens, "requests": self.requests}
+                "reasoning": self.reasoning_tokens, "requests": self.requests, "estimated": self.estimated}
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "CanonicalUsage":
         d = d or {}
         return cls(int(d.get("input", 0)), int(d.get("output", 0)), int(d.get("cache_read", 0)),
-                   int(d.get("cache_write", 0)), int(d.get("reasoning", 0)), int(d.get("requests", 0)))
+                   int(d.get("cache_write", 0)), int(d.get("reasoning", 0)), int(d.get("requests", 0)),
+                   estimated=bool(d.get("estimated", False)))
+
+
+def estimate_usage(input_text: str, output_text: str, *, chars_per_token: float = 4.0) -> CanonicalUsage:
+    """Estimativa de tokens via chars/token QUANDO o provider não reporta usage (modelo local). Marca
+    estimated=True → o rodapé mostra com ~. Grosseira de propósito (não é cobrança, é visibilidade)."""
+    cpt = chars_per_token if (chars_per_token and chars_per_token > 0) else 4.0
+    return CanonicalUsage(
+        input_tokens=max(0, int(len(input_text or "") / cpt)),
+        output_tokens=max(0, int(len(output_text or "") / cpt)),
+        requests=1, estimated=True,
+    )
 
 
 def normalize_usage(raw, *, transport: str) -> CanonicalUsage:
