@@ -351,12 +351,12 @@ class ProcessManager:
         meta = self._read_meta(pid_id)
         if not meta:
             return False
-        sig = self._SIGNALS.get(name.upper().lstrip("SIG"))
-        if sig is None:
+        sig = self._SIGNALS.get(name.upper().removeprefix("SIG"))   # removeprefix: lstrip('SIG') comia QUALQUER
+        if sig is None:                                              # S/I/G inicial → INT→'NT', STOP→'TOP' (falha muda)
             return False
         if meta.get("backend") == "docker" and meta.get("container"):
             try:
-                subprocess.run(["docker", "kill", f"--signal={name.upper().lstrip('SIG')}", meta["container"]],
+                subprocess.run(["docker", "kill", f"--signal={name.upper().removeprefix('SIG')}", meta["container"]],
                                capture_output=True, timeout=15)
                 return True
             except (OSError, subprocess.SubprocessError):

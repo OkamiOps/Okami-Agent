@@ -1021,7 +1021,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             return _tr(
                 "gw.procsig_usage",
                 _default="usage: /process signal <id> <SIGNAL> (e.g. HUP, KILL, USR1, STOP, CONT).")
-        pid, name = toks[0], toks[1].upper().lstrip("SIG")
+        pid, name = toks[0], toks[1].upper().removeprefix("SIG")   # idem processes.signal: lstrip corrompia INT/STOP
         ok = self._pm().signal(pid, name)
         return ("📶 " + _tr("gw.procsig_sent", _default="signal {name} → {pid}.", name=name, pid=pid)
                 if ok else "✗ " + _tr(
