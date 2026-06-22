@@ -189,9 +189,12 @@ class Spawn(Tool):
     name = "spawn"
     description = ("Delega um SUBTASK a um subagente ISOLADO (contexto próprio) e recebe o resultado. "
                    "Use p/ paralelizar/especializar (ex.: 'agent: ui'). Para FAN-OUT, passe `tasks` (lista "
-                   "de {goal, agent?, model?}) → roda N subagentes EM PARALELO e junta. Não abuse — tem custo.")
+                   "de {goal, agent?, model?}) → roda N subagentes EM PARALELO e junta. Para tarefa LONGA "
+                   "que NÃO precisa do resultado no MESMO turno, passe background=true → roda em SEGUNDO "
+                   "PLANO e avisa o dono quando terminar (NÃO trava o chat). Não abuse — tem custo.")
     args_schema = {"goal": "o subtask (1 só)", "agent": "(opcional) id do agente", "model": "(opcional) modelo",
-                   "tasks": "(opcional) lista de {goal, agent?, model?} p/ rodar em PARALELO"}
+                   "tasks": "(opcional) lista de {goal, agent?, model?} p/ rodar em PARALELO",
+                   "background": "(opcional) true = roda em segundo plano e avisa quando terminar (tarefa longa)"}
     required = ()
     _MAX_PARALLEL = 6
 
@@ -203,11 +206,31 @@ class Spawn(Tool):
         goal = args.get("goal")
         if not goal:
             return ToolResult(False, "spawn exige 'goal' (ou 'tasks' p/ fan-out paralelo).")
+        if args.get("background"):
+            return self._background(goal, args.get("agent"), args.get("model"), ctx)
         try:
             out = ctx.spawn(goal, args.get("agent"), args.get("model"))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"subagente falhou: {e}")
         return ToolResult(True, f"SUBAGENTE devolveu:\n{out}", effect=True)
+
+    def _background(self, goal, agent, model, ctx):
+        """Roda o subagente em SEGUNDO PLANO (thread daemon) e retorna NA HORA — não trava o turno do pai
+        (item 9 da revisão de harness). Resultado persiste em .okami/spawn/<id>.json; ao terminar, avisa o
+        dono no chat que PEDIU (ctx.notify capturado agora → vai pro chat certo mesmo após o turno acabar)."""
+        import threading
+
+        from okami.core.spawn_jobs import new_job_id, run_spawn_job
+        job = new_job_id()
+        t = threading.Thread(
+            target=run_spawn_job,
+            args=(job, goal, agent, model, ctx.spawn, getattr(ctx, "notify", None),
+                  getattr(ctx, "workspace", ".")),
+            daemon=True)
+        t.start()
+        self._last_bg_thread = t                       # referência só p/ o teste poder .join()
+        return ToolResult(True, f"▶ subagente {job} rodando em SEGUNDO PLANO — te aviso aqui quando "
+                          f"terminar. (resultado em .okami/spawn/{job}.json)", effect=True)
 
     def _parallel(self, tasks, ctx):
         """Fan-out: roda os subtasks EM PARALELO (cap de concorrência) e junta os resultados rotulados.

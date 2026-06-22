@@ -6,6 +6,15 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🧱 harness #9: subagente em SEGUNDO PLANO (não trava mais o chat)
+O `spawn` era 100% BLOQUEANTE: uma tarefa longa (ou fan-out de 6 subagentes) congelava o turno do pai por
+5-25 min, o canal só mostrava "⏳ ~N min". Agora `spawn` aceita `background=true`: roda o subagente numa
+thread daemon e **retorna na hora** ("▶ rodando em segundo plano, te aviso"); ao terminar, persiste o
+resultado em `.okami/spawn/<id>.json` e **avisa o dono no chat que pediu** (captura o `ctx.notify` daquele
+turno → vai pro chat certo mesmo após o turno acabar, sem o problema do `_last_chat` global). O modo
+síncrono segue sendo o DEFAULT (zero regressão). Núcleo em `okami/core/spawn_jobs.py` (testável sem
+thread). +6 testes. (Próximo: progresso "passo N/M" durante o background — item 6.)
+
 ### 🧱 harness review (Okami vs Hermes) — adoções e correções
 Revisão completa do harness contra o source REAL do Hermes (workflow 8 agentes). Veredito honesto: nosso
 loop está À FRENTE do Hermes nos backstops de modelo fraco (anti-bail/anti-thin/anti-empty, anti-loop
