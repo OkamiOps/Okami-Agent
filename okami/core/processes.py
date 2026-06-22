@@ -32,6 +32,7 @@ import time
 from pathlib import Path
 
 from okami.core.filelock import _proc_start
+from okami.core.platform_compat import IS_WINDOWS, popen_session_kwargs, terminate_pid
 
 
 class ProcessManager:
@@ -83,14 +84,14 @@ class ProcessManager:
             from okami.core.sandbox import docker_argv
             container = f"okami-{pid_id}"
             argv = docker_argv(wrapped, self.ws, policy, name=container)
-            proc = subprocess.Popen(argv, cwd=str(self.ws), start_new_session=True)
+            proc = subprocess.Popen(argv, cwd=str(self.ws), **popen_session_kwargs())  # POSIX/Windows
         else:
             pre = None
             if policy is not None:
                 from okami.core.sandbox import _rlimit_preexec
                 pre = _rlimit_preexec(policy)                     # rlimits do perfil (CPU/mem/nproc/fsize)
             proc = subprocess.Popen(["sh", "-c", wrapped], cwd=str(self.ws), env=sanitized_env(),
-                                    start_new_session=True, preexec_fn=pre)   # sessão própria → sobrevive ao turno
+                                    preexec_fn=pre, **popen_session_kwargs())   # sessão própria → sobrevive ao turno
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
                 "start_time": _proc_start(proc.pid), "backend": eff, "container": container,
                 "notify": bool(notify), "watch": list(watch or []), "notified": False,
@@ -102,10 +103,12 @@ class ProcessManager:
         return self.dir / f"{pid_id}.in"
 
     def _start_interactive(self, cmd: str, policy=None, *, notify=False, watch=None, chat_id: str = "") -> dict:
-        """PTY interativo: supervisor detached segura o mestre + FIFO de input (#1/#8)."""
+        """PTY interativo: supervisor detached segura o mestre + FIFO de input (#1/#8). POSIX-only (PTY/FIFO)."""
         import secrets
 
         from okami.core.tools import sanitized_env
+        if IS_WINDOWS:                                 # PTY/os.mkfifo não existem no Windows → erro claro
+            raise ValueError("modo interativo (PTY) não é suportado no Windows — use process_start normal")
         self.dir.mkdir(parents=True, exist_ok=True)
         pid_id = secrets.token_hex(4)
         logp, exitp, ctrlp = self._logf(pid_id), self._exitf(pid_id), self._ctrlf(pid_id)
@@ -117,9 +120,9 @@ class ProcessManager:
             from okami.core.sandbox import _rlimit_preexec
             pre = _rlimit_preexec(policy)
         argv = [sys.executable, "-m", "okami.core.ptyproc", cmd, str(logp), str(exitp), str(ctrlp)]
-        proc = subprocess.Popen(argv, cwd=str(self.ws), env=sanitized_env(), start_new_session=True,
+        proc = subprocess.Popen(argv, cwd=str(self.ws), env=sanitized_env(),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, preexec_fn=pre)
+                                stderr=subprocess.DEVNULL, preexec_fn=pre, **popen_session_kwargs())
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
                 "start_time": _proc_start(proc.pid), "backend": "local", "container": "",
                 "notify": bool(notify), "watch": list(watch or []), "notified": False,
@@ -320,15 +323,8 @@ class ProcessManager:
                 ok = True
             except (OSError, subprocess.SubprocessError):
                 ok = False
-        try:
-            os.killpg(os.getpgid(meta["pid"]), signal.SIGTERM)   # mata o grupo (start_new_session)
-            ok = True
-        except OSError:
-            try:
-                os.kill(meta["pid"], signal.SIGTERM)
-                ok = True
-            except OSError:
-                pass                                   # killpg E kill falharam → mantém o ok do docker-kill acima
+        if terminate_pid(meta["pid"], signal.SIGTERM):  # cross-plataforma: grupo no POSIX, taskkill no Windows
+            ok = True                                  # (getpgid/killpg não existem no Windows → terminate_pid trata)
         if ok and not self._exitf(pid_id).exists():
             self._exitf(pid_id).write_text("-15", encoding="utf-8")   # marca terminado por SIGTERM (poll determinístico)
         if self._ctrlf(pid_id).exists():
@@ -357,15 +353,7 @@ class ProcessManager:
                 return True
             except (OSError, subprocess.SubprocessError):
                 return False
-        try:
-            os.killpg(os.getpgid(meta["pid"]), sig)
-            return True
-        except OSError:
-            try:
-                os.kill(meta["pid"], sig)
-                return True
-            except OSError:
-                return False
+        return terminate_pid(meta["pid"], sig)         # cross-plataforma (grupo no POSIX, taskkill no Windows)
 
     def reconcile(self) -> int:
         """Recovery de órfão (#P1.4): processo MORTO sem exitfile (crash/restart do gateway) → grava o

@@ -22,7 +22,7 @@ def _managed_pid() -> int | None:
     from okami.home import okami_home
     pidfile = okami_home() / "runtime" / "gateway.pid"
     try:
-        raw = pidfile.read_text().strip()
+        raw = pidfile.read_text(encoding="utf-8").strip()
         return int(raw) if raw.isdigit() else None
     except OSError:
         return None

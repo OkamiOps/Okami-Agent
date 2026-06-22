@@ -56,10 +56,8 @@ def set_env_secret(name: str, value: str, *, path: str | None = None) -> Path:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)
         os.replace(tmp, p)
-        try:
-            os.chmod(p, 0o600)
-        except OSError:
-            pass
+        from okami.core.platform_compat import secure_chmod
+        secure_chmod(p)                                # 0600 no POSIX (verifica) / ACL owner-only no Windows
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)

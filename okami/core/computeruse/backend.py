@@ -58,6 +58,10 @@ class PyAutoGuiBackend:
 
     def available(self) -> bool:
         try:
+            import os as _os
+            import sys as _sys
+            if _sys.platform.startswith("linux") and not _os.environ.get("DISPLAY"):
+                return False                           # Linux headless (VPS): pyautogui importa mas screenshot/click crasham
             from okami.core import lazy_deps
             return "desktop.pyautogui" in lazy_deps.LAZY_DEPS and not lazy_deps.feature_missing("desktop.pyautogui")
         except Exception:  # noqa: BLE001

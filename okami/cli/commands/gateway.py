@@ -94,7 +94,8 @@ def _pid_alive(pid: int) -> bool:
 def _gw_state():
     """(pidfile, logfile, pid|None, alive) — estado atual do gateway em background."""
     pidfile, logfile = _gateway_files()
-    pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text().strip().isdigit() else None
+    pid = (int(pidfile.read_text(encoding="utf-8"))                  # encoding explícito (Windows = cp1252 por default)
+           if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip().isdigit() else None)
     return pidfile, logfile, pid, (pid is not None and _pid_alive(pid))
 
 
@@ -145,7 +146,7 @@ def _gw_start_background() -> None:
     proc = subprocess.Popen([sys.executable, "-m", "okami.cli", "gateway", "--foreground"],
                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                             cwd=os.getcwd(), **flags)
-    pidfile.write_text(str(proc.pid))
+    pidfile.write_text(str(proc.pid), encoding="utf-8")
     console.print(f"[green]🤖 gateway no ar em background[/green] (pid {proc.pid}) — terminal livre.")
     console.print("[dim]logs:[/dim] okami logs -f   [dim]status:[/dim] okami gateway status   "
                   "[dim]reiniciar:[/dim] okami gateway restart   [dim]parar:[/dim] okami gateway stop")
@@ -308,6 +309,10 @@ def attach(
         console.print(f"[red]✗ não conectei a {url}:[/red] {e}")
         raise typer.Exit(1)
     console.print(f"[green]🛰  conectado[/green] {url}  [dim](Ctrl-D ou /exit p/ sair)[/dim]")
+    import sys as _sys
+    if not _sys.stdin.isatty():                        # sem TTY (VPS headless / cron) → não trava no input
+        console.print("[yellow]sem terminal interativo — attach precisa de TTY. Use os logs do serviço.[/yellow]")
+        raise typer.Exit(1)
     try:
         from rich.markdown import Markdown
         while True:

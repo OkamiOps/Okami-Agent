@@ -76,7 +76,7 @@ def _render_js(url: str, max_chars: int = _MAX) -> str | None:
     profile.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as p:
-            context = p.chromium.launch_persistent_context(user_data_dir=str(profile))
+            context = p.chromium.launch_persistent_context(user_data_dir=str(profile), headless=True)
             try:
                 page = context.new_page()
                 page.goto(url, timeout=30000)
@@ -183,7 +183,7 @@ def browse(url: str, action: str = "read", selector: str | None = None, text: st
     profile.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         # contexto persistente = cookies/login sobrevivem entre chamadas (no lugar de launch()+new_page())
-        context = p.chromium.launch_persistent_context(user_data_dir=str(profile))
+        context = p.chromium.launch_persistent_context(user_data_dir=str(profile), headless=True)  # VPS sem display
         try:
             page = context.new_page()
             page.goto(url, timeout=30000)

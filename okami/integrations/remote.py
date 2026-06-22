@@ -51,7 +51,8 @@ def _control_socket(alias: str, host: str) -> str:
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
-        d = Path("/tmp")  # noqa: S108 — fallback best-effort p/ o socket de controle
+        import tempfile
+        d = Path(tempfile.gettempdir())                # cross-plataforma ($TMPDIR/%TEMP%) — /tmp não existe no Windows
     h = hashlib.sha256(f"{alias}|{host}".encode()).hexdigest()[:12]
     return str(d / f"cm-{h}.sock")
 

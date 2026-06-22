@@ -15,10 +15,14 @@ code em `<id>.exit` e remove o FIFO. Mata o filho junto (mesma sessão) quando r
 
 from __future__ import annotations
 
+import sys
+
+if sys.platform == "win32":  # pragma: no cover - módulo POSIX-only (PTY/FIFO); _start_interactive já barra antes
+    raise ImportError("okami.core.ptyproc requer POSIX (PTY) — modo interativo não é suportado no Windows")
+
 import os
 import pty
 import select
-import sys
 
 
 def supervise(cmd: str, logpath: str, exitpath: str, ctrlpath: str) -> int:

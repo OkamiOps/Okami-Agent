@@ -6,6 +6,22 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+### 🖥️ portabilidade Windows/Mac/Linux × VPS/local — 14 breaks REAIS corrigidos (auditoria adversarial)
+Auditoria por 7 finders + triagem rigorosa (51 brutos → 14 confirmados, 30 descartados por degradarem
+gracioso). Novo `okami/core/platform_compat.py` centraliza o que difere entre POSIX e Windows.
+- **Crashes no Windows:** `processes.py` usava `os.getpgid` (AttributeError, não OSError → escapava do
+  handler) e `start_new_session=True` (ValueError no Windows) e `os.mkfifo` → agora `terminate_pid()` +
+  `popen_session_kwargs()` (creationflags no Windows) + modo interativo barrado com erro claro.
+  `ptyproc.py` (pty/select POSIX-only) ganha guarda de import.
+- **Segredo/chave exposto:** `os.chmod(0o600)` é no-op no Windows (NTFS=ACL) e o ssh RECUSA chave frouxa
+  → `secure_chmod()` (POSIX chmod+VERIFICA / Windows ACL via icacls) em provision/config/safe_io/backup.
+- **VPS headless:** Playwright agora `headless=True` (senão crasha sem $DISPLAY); backend pyautogui poda
+  em Linux sem $DISPLAY; serviço systemd vira multi-user.target (root) ou user-service+linger (boota sem
+  login); `attach` checa TTY antes do input (não trava em cron/headless).
+- **Encoding/paths:** pidfiles com `encoding='utf-8'` (Windows = cp1252 por default → UnicodeDecodeError);
+  socket de controle usa `tempfile.gettempdir()` em vez de `/tmp` hardcoded (inexistente no Windows).
++15 testes. 2770 passed. O agente roda nas 3 plataformas, VPS ou local, sem depender de sorte.
+
 ### 🌐 provisão remota (VPS-first) — o agente bootstrappa o PRÓPRIO acesso (SSH + GitHub)
 Falha de arquitetura: o agente assumia "o host já tem as credenciais do dono" (gh/git/ssh herdados) —
 errado pra uma VPS 24/7, onde não existe login herdado. Pior, o jail `.ssh`/`.env` e o `sanitized_env`

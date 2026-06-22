@@ -88,9 +88,9 @@ def restore_backup(zip_path, home, *, overwrite: bool = True) -> int:
             with z.open(info) as src, open(target, "wb") as fh:
                 fh.write(src.read())
             if target.name in _SECRET_NAMES or target.suffix in (".env", ".pem", ".key"):
-                try:
-                    os.chmod(target, 0o600)            # segredo restaurado fica privado
-                except OSError:
-                    pass
+                from okami.core.platform_compat import secure_chmod
+                if not secure_chmod(target):           # POSIX chmod+verifica / Windows ACL — senão ssh recusa a chave
+                    from okami.log import warn
+                    warn(f"backup: não consegui restringir a permissão de {target.name} (segredo restaurado frouxo)")
             n += 1
     return n

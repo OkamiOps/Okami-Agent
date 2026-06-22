@@ -8,6 +8,7 @@ são puros (testáveis); install/uninstall chamam launchctl/systemctl de forma d
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess  # launchctl/systemctl — sempre LISTA de args, nunca shell=True
 import sys
@@ -74,7 +75,14 @@ def _systemd_argv(argv: list[str]) -> str:
     return " ".join(out)
 
 
-def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str) -> str:
+def systemd_system_unit_path(name: str = "okami-gateway") -> Path:
+    return Path("/etc/systemd/system") / f"{name}.service"
+
+
+def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str, *, system: bool = False) -> str:
+    # serviço de SISTEMA (root) → multi-user.target boota SEM login. user-service → default.target (precisa
+    # de linger p/ subir no boot headless, tratado no install()).
+    target = "multi-user.target" if system else "default.target"
     return (
         "[Unit]\n"
         "Description=Okami Agent gateway (Telegram/canais)\n"
@@ -85,7 +93,7 @@ def render_systemd(argv: list[str], workdir: str, log: str, okami_home: str) -> 
         f"ExecStart={_systemd_argv(argv)}\n"
         "Restart=on-failure\nRestartSec=5\n"
         f"StandardOutput=append:{log}\nStandardError=append:{log}\n\n"
-        "[Install]\nWantedBy=default.target\n"
+        f"[Install]\nWantedBy={target}\n"
     )
 
 
@@ -117,11 +125,23 @@ def install(workdir: str | None = None, *, emit=print) -> bool:
         rc, out = _run(["launchctl", "load", str(p)])
         emit(f"✓ serviço instalado: {p}" if rc == 0 else f"✗ launchctl load falhou: {out}")
         return rc == 0
-    p = systemd_unit_path()
+    is_root = hasattr(os, "getuid") and os.getuid() == 0
+    if is_root:                                            # serviço de SISTEMA → boota no startup, sem login
+        p = systemd_system_unit_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(render_systemd(argv, wd, str(log), home, system=True), encoding="utf-8")
+        _run(["systemctl", "daemon-reload"])
+        rc, out = _run(["systemctl", "enable", "--now", p.name])
+        emit(f"✓ serviço (sistema) instalado: {p}" if rc == 0 else f"✗ systemctl enable falhou: {out}")
+        return rc == 0
+    p = systemd_unit_path()                                # serviço de USUÁRIO + linger → sobe no boot headless
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(render_systemd(argv, wd, str(log), home), encoding="utf-8")
+    p.write_text(render_systemd(argv, wd, str(log), home, system=False), encoding="utf-8")
     _run(["systemctl", "--user", "daemon-reload"])
     rc, out = _run(["systemctl", "--user", "enable", "--now", p.name])
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    if rc == 0 and user:
+        _run(["loginctl", "enable-linger", user])          # sem isso o user-service NÃO sobe numa VPS sem login
     emit(f"✓ serviço instalado: {p}" if rc == 0 else f"✗ systemctl enable falhou: {out}")
     return rc == 0
 

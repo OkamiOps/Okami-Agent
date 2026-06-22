@@ -36,10 +36,8 @@ def secure_write(path, data: str, *, backups: int = 3, mode: int = 0o644, fsync:
                 f.flush()
                 os.fsync(f.fileno())                  # garante no disco antes do replace (durabilidade)
         os.replace(tmp, p)                            # atômico
-        try:
-            os.chmod(p, mode)
-        except OSError:
-            pass
+        from okami.core.platform_compat import secure_chmod
+        secure_chmod(p, mode=mode)                    # POSIX chmod+verifica / Windows ACL (mkstemp já cria 0600)
         try:
             shutil.copy2(p, _sib(p, ".last-good"))    # snapshot íntegro p/ recovery
         except OSError:

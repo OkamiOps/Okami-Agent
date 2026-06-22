@@ -13,6 +13,8 @@ import re
 import subprocess  # nosec B404 — provisão roda comandos FIXOS (ssh-keygen/git/ssh-keyscan), args validados
 from pathlib import Path
 
+from okami.core.platform_compat import secure_chmod  # POSIX chmod+verify / Windows NTFS ACL (chave/segredo)
+
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")          # nome de arquivo de chave: sem traversal/espaço
 _HOST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,255}$")        # host p/ keyscan/url: sem '-' líder vira flag ssh
 
@@ -39,10 +41,7 @@ def _gitenv(home: Path | None) -> dict:
 def ssh_dir(home: Path | None = None) -> Path:
     d = _home(home) / ".ssh"
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        d.chmod(0o700)                                    # garante 0700 mesmo se a pasta já existia frouxa
-    except OSError:
-        pass
+    secure_chmod(d, mode=0o700)                           # 0700 mesmo se já existia frouxa (Windows: ACL)
     return d
 
 
@@ -79,10 +78,7 @@ def generate_ssh_key(name: str = "id_ed25519", comment: str = "okami-agent",
     rc, out = (run_fn or _run)(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(priv)])
     if rc != 0:
         raise RuntimeError(f"ssh-keygen falhou: {out[:200]}")
-    try:
-        priv.chmod(0o600)
-    except OSError:
-        pass
+    secure_chmod(priv)                                 # restringe ao dono (Windows: ACL; senão ssh recusa a chave)
     return {"created": True, "public_key": public_key(name, home),
             "fingerprint": fingerprint(name, home, run_fn), "path": str(priv)}
 
@@ -97,10 +93,7 @@ def import_private_key(material: str, name: str = "id_ed25519", home: Path | Non
     d = ssh_dir(home)
     priv = d / name
     priv.write_text(text, encoding="utf-8")
-    try:
-        priv.chmod(0o600)
-    except OSError:
-        pass
+    secure_chmod(priv)                                 # restringe ao dono (Windows: ACL; senão ssh recusa a chave)
     rc, out = (run_fn or _run)(["ssh-keygen", "-y", "-f", str(priv)])   # deriva a pública da privada
     if rc == 0 and out.strip():
         (d / f"{name}.pub").write_text(out.strip() + "\n", encoding="utf-8")
@@ -127,10 +120,7 @@ def known_host(host: str, home: Path | None = None, run_fn=None) -> dict:
             if existing and not existing.endswith("\n"):
                 f.write("\n")
             f.write("\n".join(new) + "\n")
-        try:
-            kh.chmod(0o600)
-        except OSError:
-            pass
+        secure_chmod(kh)                               # restringe ao dono (Windows: ACL)
     return {"added": bool(new), "host": host}
 
 
@@ -149,10 +139,7 @@ def configure_git_token(token: str, *, user_name: str = "", user_email: str = ""
     existing = cred.read_text(encoding="utf-8").splitlines() if cred.is_file() else []
     kept = [ln for ln in existing if ln.strip() and f"@{host}" not in ln]   # substitui a credencial do mesmo host
     cred.write_text("\n".join([*kept, line]) + "\n", encoding="utf-8")
-    try:
-        cred.chmod(0o600)
-    except OSError:
-        pass
+    secure_chmod(cred)                                 # restringe ao dono (Windows: ACL)
     genv = _gitenv(home)
     run(["git", "config", "--global", "credential.helper", "store"], env=genv)
     if user_name:
