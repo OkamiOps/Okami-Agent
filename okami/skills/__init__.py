@@ -235,6 +235,23 @@ def load_skills(root: Path) -> list[Skill]:
             if not any(part.startswith(".") for part in p.relative_to(root).parts)]
 
 
+def load_builtin_skills() -> list[Skill]:
+    """Skills NATIVAS embarcadas no pacote (okami/builtin/skills/) — viajam no pip install e independem do
+    skills_dir do usuário. Fail-open: ausência/erro → lista vazia, nunca derruba a montagem de skills."""
+    try:
+        from okami.builtin import builtin_skills_root
+        return load_skills(builtin_skills_root())
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def with_builtin(user_skills: list[Skill]) -> list[Skill]:
+    """Junta as skills do usuário com as NATIVAS. Dedup por nome: a do USUÁRIO vence (ele pode sobrescrever
+    uma nativa criando uma de mesmo nome) — o agente segue dono das suas skills."""
+    have = {s.name for s in user_skills}
+    return [*user_skills, *(s for s in load_builtin_skills() if s.name not in have)]
+
+
 def route(goal: str, contracts: dict, skills: list[Skill]) -> list[Skill]:
     """Skills OBRIGATÓRIAS (injetadas inteiras) — só as exigidas por contrato.
 

@@ -6,6 +6,18 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+### 🎙️ voz EMBUTIDA + recursos NATIVOS (skills e plugins que viajam no pacote)
+- **STT (Whisper) ligado por padrão + auto-install**: o dono mandou áudio e o agente não entendeu —
+  o stack de voz existia, mas STT era opt-in (nota de voz descartada em silêncio) e `import faster_whisper`
+  cru (falhava sem o extra). Agora STT é default ON (só `voice.stt.enabled: false` desliga) e
+  faster-whisper/edge-tts AUTO-INSTALAM na 1ª vez via lazy_deps. UX: aviso "🎤 transcrevendo…" na 1ª
+  (download do modelo) e aviso claro se a transcrição estiver desligada (sem engolir o áudio).
+- **Plugins NATIVOS**: os 3 built-in (security-guidance, disk-cleanup, usage-observer) foram p/
+  `okami/builtin/plugins/` → viajam no `pip install` e carregam em QUALQUER CWD (antes só em ./plugins).
+- **Skills NATIVAS**: novo conjunto embarcado em `okami/builtin/skills/` (criar-pull-request,
+  depuracao-sistematica, pesquisa-web), mergeado no catálogo (a skill do usuário vence por nome).
+- O agente segue podendo CRIAR plugins/skills próprios — os nativos só dão um piso útil de fábrica.
+
 ### 🐛 caça adversarial de dead-code + bugs (workflow 42 subagentes, 3 céticos/achado) — 5 reais corrigidos
 Varredura por 9 áreas + verificação por 3 céticos (grep repo-wide p/ não marcar dead-code despachado por
 registry/getattr). 7 confirmados, 4 rejeitados, 0 gap real do Hermes (já ~98% paridade + harness à frente).

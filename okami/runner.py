@@ -229,7 +229,8 @@ def run_task(
             return res                      # Completion inteiro (P0.4)
 
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
-    all_skills = skillmod.load_skills(Path(skills_dir))
+    # with_builtin junta as NATIVAS do pacote (viajam no install); a skill do usuário vence por nome.
+    all_skills = skillmod.with_builtin(skillmod.load_skills(Path(skills_dir)))
     safe = [s for s in all_skills if not scan_path(s.path.parent).blocked]
     import sys as _sys                                  # #11: gating do CATÁLOGO por plataforma/ambiente —
     safe = skillmod.visible_skills(safe, os_name=_sys.platform, active_environments=None)  # esconde skill de
