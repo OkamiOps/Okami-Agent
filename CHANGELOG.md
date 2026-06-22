@@ -6,6 +6,16 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🧱 subagente #8: sobrevive ao restart (reconcile) — paridade com o BackgroundRegistry
+Os 2 subsistemas de background (BackgroundRegistry do `/background` p/ humano · spawn_jobs p/ o agente)
+seguem SEPARADOS DE PROPÓSITO (consumidores diferentes), mas faltava ao spawn a durabilidade do outro:
+o background spawn é thread daemon (morre com o processo), e um job 'running' ficava órfão pra sempre
+após reinício do gateway. `reconcile_spawn_jobs` (chamado no boot, ANTES de qualquer spawn novo) marca os
+'running' remanescentes como 'interrupted' — todos são de um processo morto. + prune no boot.
+NÃO fiz o merge físico no BackgroundRegistry: ele trunca o result em 500 chars (quebraria o readback do
+resultado longo pelo agente, que é o ponto do subagente) e usa id int (o contrato da tool spawn_jobs é
+8-hex). Honesto: a paridade que importa (survives-restart) sem o merge lossy. +3 testes.
+
 ### 🧱 subagente: o agente PAI lê o resultado de volta + cap + GC (revisão vs Hermes)
 Revisão do subagente contra a delegação do Hermes (workflow). Gap central confirmado: o background spawn
 era fire-and-forget pro DONO — o agente pai não conseguia USAR o resultado (não dava pra encadear). O

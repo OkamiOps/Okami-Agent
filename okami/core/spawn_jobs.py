@@ -130,6 +130,28 @@ def await_job(workspace, job, timeout: float = 60.0):
     return rec
 
 
+def reconcile_spawn_jobs(workspace) -> int:
+    """Paridade com BackgroundRegistry.reconcile: o spawn em background é uma thread daemon que morre com
+    o processo. CHAMADO NO BOOT do gateway (antes de qualquer spawn novo), todo job ainda em 'running' é
+    necessariamente órfão de um processo morto → marca 'interrupted'. Devolve nº reconciliado."""
+    n = 0
+    for f in spawn_dir(workspace).glob("*.json"):
+        try:
+            r = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if r.get("state") == "running":
+            r["state"] = "interrupted"
+            r["ok"] = False
+            r["finished_at"] = time.time()
+            try:
+                f.write_text(json.dumps(r, ensure_ascii=False), encoding="utf-8")
+                n += 1
+            except OSError:
+                continue
+    return n
+
+
 def prune_spawn_jobs(workspace, keep: int = 50, max_age_days: float = 7.0) -> int:
     """GC: remove jobs além de `keep` (mais antigos) E mais velhos que `max_age_days`. Mesma higiene do
     BackgroundRegistry.prune. Devolve nº removido."""
@@ -147,4 +169,4 @@ def prune_spawn_jobs(workspace, keep: int = 50, max_age_days: float = 7.0) -> in
 
 
 __all__ = ["new_job_id", "spawn_dir", "acquire_slot", "release_slot", "run_spawn_job",
-           "read_job", "list_jobs", "await_job", "prune_spawn_jobs"]
+           "read_job", "list_jobs", "await_job", "prune_spawn_jobs", "reconcile_spawn_jobs"]

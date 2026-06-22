@@ -1577,6 +1577,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             ProcessManager(self.ws).reconcile()
         except Exception:  # noqa: BLE001
             pass
+        try:                                            # #8: spawn em bg sobrevive ao restart (running órfão → interrupted)
+            from okami.core.spawn_jobs import prune_spawn_jobs, reconcile_spawn_jobs
+            reconcile_spawn_jobs(self.ws)
+            prune_spawn_jobs(self.ws)
+        except Exception:  # noqa: BLE001
+            pass
         try:                                            # /background durável: job 'running' que o restart matou → interrupted
             self._bgreg.reconcile()
             self._bgreg.prune()
