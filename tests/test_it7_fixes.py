@@ -4,9 +4,22 @@ de chave não cresce sem teto; Whisper rejeita áudio inválido com erro claro. 
 from __future__ import annotations
 
 import io
+import json
 import urllib.request
 
 import pytest
+
+
+def _J(tool, **args):
+    return "```json\n" + json.dumps({"tool": tool, "args": args}) + "\n```"
+
+
+class _Script:
+    def __init__(self, outputs):
+        self.outputs = list(outputs)
+
+    def __call__(self, messages, schema=None):
+        return self.outputs.pop(0) if self.outputs else "ok"
 
 
 # ---------------------------------------------------------------- #2 MiniMax 200 sem áudio → erro claro
@@ -77,3 +90,20 @@ def test_maybe_voice_cleans_temp_file(monkeypatch):
     assert created and not os.path.exists(created[0])         # apagado DEPOIS do envio
     assert not glob.glob(os.path.join(tempfile.gettempdir(), "okami_tts_*.mp3")) or \
         created[0] not in glob.glob(os.path.join(tempfile.gettempdir(), "okami_tts_*.mp3"))
+
+
+# ---------------------------------------------------------------- #11 declarar concluído sem trabalho
+def test_task_complete_zero_work_action_expected_is_nudged(tmp_path):
+    from okami.core import Harness, Task, TaskState
+    outputs = [
+        _J("task_complete", summary="feito (de memória, sem rodar nada)"),  # exit_criteria VAZIO + 0 steps
+        _J("write_file", path="hello.txt", content="oi"),                   # faz trabalho REAL
+        _J("task_complete", summary="agora sim, criei o arquivo"),
+    ]
+    events: list = []
+    t = Task(goal="crie um arquivo hello.txt")                              # action-expected, SEM exit_criteria
+    r = Harness(_Script(outputs), t, tmp_path, on_event=events.append).run()
+    assert r.state == TaskState.COMPLETE
+    assert any(e["kind"] == "complete_rejected" and "nenhuma ferramenta" in str(e.get("missing"))
+               for e in events)                                            # barrou o "concluído de memória"
+    assert (tmp_path / "hello.txt").exists()                                # só completou após o trabalho real

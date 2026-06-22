@@ -886,6 +886,16 @@ class Harness:
             if ok:
                 _summary = str(action.args.get("summary", "")).strip()
                 _real = len([s for s in t.steps if s.tool not in _REPORT_META])
+                # backstop: pediu AÇÃO mas declarou CONCLUÍDO sem rodar NENHUMA ferramenta (pulou direto pro
+                # task_complete, não pelo 'respond') → re-pede 1x. Espelha o guard do ramo respond (l.829);
+                # modelo fraco às vezes "declara vitória" de memória com exit_criteria vazio + 0 trabalho.
+                if self._action_expected and not self._nudged_action and not t.steps:
+                    self._nudged_action = True
+                    self._emit("complete_rejected", missing=["concluído sem rodar nenhuma ferramenta"])
+                    self.messages.append({"role": "user", "content":
+                        "Você declarou CONCLUÍDO sem usar nenhuma ferramenta. O pedido exige AGIR: leia/rode/"
+                        "analise o que for preciso e ENTREGUE o resultado real — não conclua de memória."})
+                    return None
                 if (self._action_expected and not self._thin_nudged
                         and _deliverable_too_thin(t.goal, _summary, _real)):   # entrega rasa → re-pede 1x
                     self._thin_nudged = True
