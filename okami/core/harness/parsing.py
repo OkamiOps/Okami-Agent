@@ -164,6 +164,10 @@ def detect_malformed(text: str) -> str | None:
     """Diagnóstico que ENSINA (pesquisa #5 item 8, Hermes _repair_tool_call) quando nenhuma ação
     parseou mas o modelo claramente TENTOU emitir uma: JSON truncado → re-emitir menor (sem executar
     o parcial); JSON inválido → erro sintético com o motivo exato. None = não parece tentativa de ação."""
+    if parse_actions(text):                          # o parser ROBUSTO extraiu ação válida → NÃO é malformado.
+        return None                                  #   Evita falso "JSON inválido" quando o message tem um
+        #   bloco ```code``` (o ``` interno quebra o _FENCE não-guloso, mas parse_actions varre JSON cru e
+        #   acerta). detect_malformed e parse_actions têm de CONCORDAR — senão o loop rejeita resposta válida.
     if truncated_action_tail(text):
         return ("Seu JSON de ação foi TRUNCADO (abre '{' e não fecha). NÃO re-emita igual: reduza os "
                 "args (quebre conteúdo grande em pedaços menores) e reenvie a ação COMPLETA.")
