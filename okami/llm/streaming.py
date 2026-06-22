@@ -42,6 +42,7 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
     from okami.llm import errors as _err
     from okami.llm import providers as _p
     pc = cfg.provider(provider)
+    messages = _p._sanitize_messages(messages)       # surrogate/control char não estoura o encode (idem complete)
     via = _p.transports.dispatch(pc, messages, model, overrides)
     if via is not None:                              # transports CLI/OAuth não streamam → entrega de uma vez
         yield getattr(via, "text", "") or ""

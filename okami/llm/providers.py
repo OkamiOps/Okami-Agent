@@ -29,15 +29,11 @@ _SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
 def _sanitize_messages(messages: list[dict]) -> list[dict]:
-    """Remove surrogates UTF-16 soltos que estouram `json.dumps` (ex.: histórico de modelo
-    byte-level). Um char ruim no transcript não pode travar TODO turno até o /new."""
-    out = []
-    for m in messages:
-        c = m.get("content")
-        if isinstance(c, str) and _SURROGATE.search(c):
-            m = {**m, "content": _SURROGATE.sub("", c)}
-        out.append(m)
-    return out
+    """Remove surrogates UTF-16 soltos + control chars que estouram `.encode('utf-8')`/`json.dumps` do SDK
+    ANTES da requisição (ex.: histórico de modelo local byte-level). Cobre content STR e LISTA-DE-BLOCOS
+    (multimodal). Um char ruim no transcript não pode travar TODO turno até o /new. Fail-open."""
+    from okami.llm.sanitize import sanitize_messages
+    return sanitize_messages(messages)
 
 # Tolera params não suportados por um provider específico e reduz ruído de log.
 litellm.drop_params = True

@@ -6,6 +6,18 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🧱 harness review (Okami vs Hermes) — adoções e correções
+Revisão completa do harness contra o source REAL do Hermes (workflow 8 agentes). Veredito honesto: nosso
+loop está À FRENTE do Hermes nos backstops de modelo fraco (anti-bail/anti-thin/anti-empty, anti-loop
+ABAB, circuit-breaker por tool, paralelo com path-collision, salvage anti-alucinação) — nada disso existe
+no loop do Hermes. Gaps reais são poucos; começando a fechá-los:
+- **Sanitização de surrogates/control chars antes do modelo** (`okami/llm/sanitize.py`, port do
+  message_sanitization do Hermes): modelo LOCAL (GLM/Qwen) emite surrogate solitário (U+D800–DFFF) que
+  estoura o `.encode('utf-8')` do SDK ANTES da request → derrubava o turno com UnicodeEncodeError. Já
+  tínhamos sanitização PARCIAL (só str, só surrogate, só no complete); agora cobre **lista-de-blocos
+  (multimodal) + control chars** E o **caminho de streaming** (que NÃO sanitizava — crítico agora que o
+  streaming é default p/ local). Fail-open. +9 testes.
+
 ### 🌐 WebFetch melhor: navegador real + auto-fallback p/ Playwright
 - **User-Agent de navegador real** (`BROWSER_HEADERS` em `okami/core/net_guard.py`): `web._fetch_full` +
   `browser.fetch` mandavam `okami/1.0` (robô óbvio → 403 na cara). Resolve a classe "403 só por causa do UA".
