@@ -15,7 +15,7 @@ from okami.core.tools.files import EditFile, FindFiles, ListDir, ReadFile, RunSh
 from okami.core.tools.memory import FinishSetup, RecallMemory, RememberFact, RememberUser
 from okami.core.tools.audio import AudioAnalyze
 from okami.core.tools.speak import TextToSpeech
-from okami.core.tools.notify import Notify
+from okami.core.tools.notify import Notify, SendMessage
 from okami.core.tools.clarify import Clarify
 from okami.core.tools.suggest import SuggestAutomation
 from okami.core.tools.todo import TodoWrite, render_pending
@@ -33,7 +33,7 @@ __all__ = [
     "ReadFile", "WriteFile", "EditFile", "ListDir", "FindFiles", "RunShell",
     "RememberFact", "RecallMemory", "RememberUser", "FinishSetup",
     "UseSkill", "ManageSkill", "Spawn", "Browse", "GenerateImage",
-    "AudioAnalyze", "TextToSpeech", "Notify", "Clarify", "SuggestAutomation", "TodoWrite", "render_pending", "StoreSecret",
+    "AudioAnalyze", "TextToSpeech", "Notify", "SendMessage", "Clarify", "SuggestAutomation", "TodoWrite", "render_pending", "StoreSecret",
     "RemoteConnect", "RemoteDisconnect",
     "ProcessStart", "ProcessWrite", "ProcessPoll", "ProcessWait", "ProcessLog", "ProcessList",
     "ProcessKill", "ProcessSignal",

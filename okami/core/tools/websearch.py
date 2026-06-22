@@ -39,6 +39,6 @@ class WebSearch(Tool):
             return ToolResult(False, f"web_search falhou: {e}")
         if not results:
             return ToolResult(True, f"(nenhum resultado para '{q}')", effect=False)
-        lines = [f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet'][:200]}"
-                 for i, r in enumerate(results, 1)]
+        lines = [f"{i}. {r.get('title') or '(sem título)'}\n   {r.get('url') or '(sem url)'}\n   "
+                 f"{(r.get('snippet') or '')[:200]}" for i, r in enumerate(results, 1)]
         return ToolResult(True, untrusted_wrap("web_search", "\n".join(lines)), effect=False)

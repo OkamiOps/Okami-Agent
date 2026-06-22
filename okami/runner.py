@@ -377,8 +377,9 @@ def run_task(
                     name = learning.maybe_write_skill(t, skills_dir=skills_dir, model_name=model or "default", cfg=cfg)
                     if name:                                   # julgamento worth + gate determinístico)
                         emit(f"🧠 skill destilada: {name}")
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001 — aprendizado é best-effort, mas a falha NÃO é silenciosa
+                from okami.core.redact import redact
+                emit(f"⚠ aprendizado/memória pós-tarefa falhou (não afeta a resposta): {redact(str(e))[:160]}")
     finally:
         mem.close()
         for c in mcp_clients:

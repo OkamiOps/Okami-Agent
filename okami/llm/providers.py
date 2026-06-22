@@ -436,8 +436,9 @@ def complete_messages_ex(
                 send = _rec.shrink_images(send)        # encolhe a imagem nativa e tenta de novo
                 attempt -= 1
                 continue
-            if ce.reason == "auth" and not recovered.did("oauth_refresh") and _rec.refresh_oauth(pc):
-                recovered.try_once("oauth_refresh")    # 401 c/ token não-expirado → força refresh e re-tenta
+            if ce.reason == "auth" and recovered.try_once("oauth_refresh") and _rec.refresh_oauth(pc):
+                # one-shot REAL: marca ANTES de tentar (401 c/ token não-expirado → força refresh e re-tenta).
+                # Antes só marcava se o refresh desse certo → refresh quebrado re-tentava a cada 401 (loop).
                 attempt -= 1
                 continue
             if ce.reason == "rate_limit":             # marca CROSS-SESSÃO: outros processos param de martelar

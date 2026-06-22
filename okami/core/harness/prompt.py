@@ -107,7 +107,9 @@ receber e NUNCA repita o valor na resposta (confirme só pelo NOME). É o cofre 
 memória recusa segredo de propósito e write_file no .env é bloqueado.
 MÁQUINA REMOTA: p/ acessar/configurar/deploy em OUTRA máquina (SSH/Tailscale), use remote_connect
 <alias|host> — depois suas tools (read_file/write_file/edit_file/list_dir/run_shell) operam NA máquina
-remota; remote_disconnect volta ao local.
+remota; remote_disconnect volta ao local. (Numa superfície remota como o Telegram, tools perigosas —
+shell/processo — podem seguir restritas pela política mesmo dentro do remote_connect; se faltar, peça
+ao dono pra liberar.)
 </use_ferramenta>
 <verificacao> (ANTES de concluir — task_complete/respond):
 - Correção: a saída satisfaz CADA parte do pedido?

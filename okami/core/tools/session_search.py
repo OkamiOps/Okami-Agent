@@ -41,5 +41,6 @@ class SessionSearch(Tool):
                 except (ValueError, OSError):
                     when = ""
             who = {"USER": "você", "AGENTE": "okami"}.get(h.get("role", ""), h.get("role", "?"))
-            lines.append(f"[{when}sessão {h['chat_id']} · {who}] {h.get('snippet') or h['text'][:160]}")
+            lines.append(f"[{when}sessão {h.get('chat_id', '?')} · {who}] "
+                         f"{(h.get('snippet') or h.get('text', ''))[:160]}")
         return ToolResult(True, "\n".join(lines), effect=False)

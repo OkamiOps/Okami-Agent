@@ -212,7 +212,9 @@ class EditFile(Tool):
     required = ("path", "old")
 
     def run(self, args, ctx):
-        rel = args["path"]
+        rel = args.get("path")
+        if not isinstance(rel, str) or not rel.strip():   # modelo fraco manda {"path": null/123} → erro LIMPO
+            return ToolResult(False, "edit_file: 'path' precisa ser uma string não-vazia.", effect=False)
         old = args.get("old", "")
         new = args.get("new", "")
         replace_all = bool(args.get("replace_all", False))

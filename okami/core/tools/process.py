@@ -64,8 +64,11 @@ class ProcessWrite(Tool):
 
     def run(self, args, ctx):
         from okami.core.processes import ProcessManager
+        pid_id = args.get("id")
+        if not isinstance(pid_id, str) or not pid_id.strip():   # modelo fraco manda {"id": null} → erro LIMPO
+            return ToolResult(False, "process_write: 'id' precisa ser uma string não-vazia.", effect=False)
         submit = args.get("submit", True)
-        ok = ProcessManager(ctx.workspace).write(args["id"], str(args.get("data", "")),
+        ok = ProcessManager(ctx.workspace).write(pid_id, str(args.get("data", "")),
                                                  submit=bool(submit) if submit is not None else True)
         return ToolResult(ok, "input enviado" if ok else "processo não é interativo / não existe / já terminou",
                           effect=ok)

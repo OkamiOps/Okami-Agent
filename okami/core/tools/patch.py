@@ -43,6 +43,8 @@ def parse_patch(text: str) -> list[PatchOp]:
             "'*** End Patch'. Dentro: '*** Update File: <path>' (hunks com linhas ' ' contexto / "
             "'-' remove / '+' adiciona), '*** Add File: <path>' (linhas '+'), "
             "'*** Delete File: <path>', e opcional '*** Move to: <path>' após o Update.") from None
+    if start >= end:                                   # marcadores invertidos (End antes de Begin) → envelope inválido
+        raise PatchError("envelope malformado: '*** End Patch' aparece antes de '*** Begin Patch'.")
     ops: list[PatchOp] = []
     cur: PatchOp | None = None
     for raw in lines[start + 1:end]:

@@ -369,6 +369,11 @@ class GenerateImage(Tool):
         return None
 
     def run(self, args, ctx):
+        prompt = args.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():   # modelo fraco manda {"prompt": null} → erro LIMPO
+            return ToolResult(False, "generate_image: 'prompt' precisa ser uma string não-vazia.", effect=False)
+        if not isinstance(args.get("path"), str) or not args["path"].strip():
+            return ToolResult(False, "generate_image: 'path' precisa ser uma string não-vazia.", effect=False)
         try:
             p = _safe_path(ctx, args["path"])
             refs = []
@@ -378,7 +383,7 @@ class GenerateImage(Tool):
             return ToolResult(False, str(e))
         try:
             from okami.llm.imagegen import generate_image
-            generate_image(args["prompt"], str(p), references=refs or None)
+            generate_image(prompt, str(p), references=refs or None)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"falha ao gerar imagem: {e}")
         how = f" (com {len(refs)} referência(s))" if refs else ""
