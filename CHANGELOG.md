@@ -6,6 +6,22 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🧱 subagente: o agente PAI lê o resultado de volta + cap + GC (revisão vs Hermes)
+Revisão do subagente contra a delegação do Hermes (workflow). Gap central confirmado: o background spawn
+era fire-and-forget pro DONO — o agente pai não conseguia USAR o resultado (não dava pra encadear). O
+Hermes resolve com fila global + turno forjado (que ele mesmo desliga em sessão stateless); aqui o
+caminho soberano é mais simples: leitura sob demanda + await curto. Adições:
+- **tool `spawn_jobs`** (`action=list|status|result|await`): o agente pai LÊ o resultado de um background
+  spawn (turno seguinte) ou ESPERA no mesmo turno (`await`, cap 300s) — fecha o loop de volta ao modelo.
+  Header autocontido (objetivo+estado) p/ o pai relembrar por que o subagente existia (ideia do Hermes).
+- **estado `running`→`done`/`failed`** no registro (`.okami/spawn/<id>.json`): some a ambiguidade
+  "arquivo ausente = nunca começou OU rodando".
+- **cap de concorrência** (Semaphore, default 3 via `OKAMI_MAX_BACKGROUND`): bug real — antes cada
+  background criava thread daemon SEM limite (satura GPU local). Fila cheia → **fallback SÍNCRONO inline**
+  (não perde, igual ao Hermes).
+- **GC** (`prune_spawn_jobs`, keep=50 + TTL 7d): `.okami/spawn` não vaza mais disco; prune oportunista a
+  cada novo background. +18 testes. Sync inline segue o DEFAULT (zero regressão).
+
 ### 🧱 harness #9: subagente em SEGUNDO PLANO (não trava mais o chat)
 O `spawn` era 100% BLOQUEANTE: uma tarefa longa (ou fan-out de 6 subagentes) congelava o turno do pai por
 5-25 min, o canal só mostrava "⏳ ~N min". Agora `spawn` aceita `background=true`: roda o subagente numa

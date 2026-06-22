@@ -215,22 +215,41 @@ class Spawn(Tool):
         return ToolResult(True, f"SUBAGENTE devolveu:\n{out}", effect=True)
 
     def _background(self, goal, agent, model, ctx):
-        """Roda o subagente em SEGUNDO PLANO (thread daemon) e retorna NA HORA — não trava o turno do pai
-        (item 9 da revisão de harness). Resultado persiste em .okami/spawn/<id>.json; ao terminar, avisa o
-        dono no chat que PEDIU (ctx.notify capturado agora → vai pro chat certo mesmo após o turno acabar)."""
+        """Roda o subagente em SEGUNDO PLANO (thread daemon) e retorna NA HORA — não trava o turno do pai.
+        Cap de concorrência (Semaphore): fila cheia → roda SÍNCRONO inline (não perde). Resultado persiste
+        em .okami/spawn/<id>.json (estado running→done/failed); ao terminar avisa o dono no chat que PEDIU
+        (ctx.notify capturado → chat certo mesmo após o turno) e o agente LÊ de volta com `spawn_jobs`."""
         import threading
 
-        from okami.core.spawn_jobs import new_job_id, run_spawn_job
+        from okami.core.spawn_jobs import (
+            acquire_slot, new_job_id, prune_spawn_jobs, release_slot, run_spawn_job,
+        )
+        ws = getattr(ctx, "workspace", ".")
+        if not acquire_slot():                         # fila de background cheia → não estoura threads
+            try:
+                out = ctx.spawn(goal, agent, model)
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(False, f"subagente falhou: {e}")
+            return ToolResult(True, f"(fila de background cheia — rodei INLINE) SUBAGENTE devolveu:\n{out}",
+                              effect=True)
+        try:
+            prune_spawn_jobs(ws)                        # GC oportunista ao abrir um novo job
+        except Exception:  # noqa: BLE001
+            pass
         job = new_job_id()
-        t = threading.Thread(
-            target=run_spawn_job,
-            args=(job, goal, agent, model, ctx.spawn, getattr(ctx, "notify", None),
-                  getattr(ctx, "workspace", ".")),
-            daemon=True)
+        notify, spawn_fn = getattr(ctx, "notify", None), ctx.spawn
+
+        def _target():
+            try:
+                run_spawn_job(job, goal, agent, model, spawn_fn, notify, ws)
+            finally:
+                release_slot()
+        t = threading.Thread(target=_target, daemon=True)
         t.start()
         self._last_bg_thread = t                       # referência só p/ o teste poder .join()
         return ToolResult(True, f"▶ subagente {job} rodando em SEGUNDO PLANO — te aviso aqui quando "
-                          f"terminar. (resultado em .okami/spawn/{job}.json)", effect=True)
+                          f"terminar. Veja/use o resultado com `spawn_jobs result {job}` "
+                          f"(ou .okami/spawn/{job}.json).", effect=True)
 
     def _parallel(self, tasks, ctx):
         """Fan-out: roda os subtasks EM PARALELO (cap de concorrência) e junta os resultados rotulados.
@@ -250,6 +269,49 @@ class Spawn(Tool):
             results = list(ex.map(_one, items))
         blocks = [f"### subagente {i + 1} — {g}\n{out}" for i, (g, out) in enumerate(results)]
         return ToolResult(True, "SUBAGENTES (paralelo) devolveram:\n\n" + "\n\n".join(blocks), effect=True)
+
+
+class SpawnJobs(Tool):
+    name = "spawn_jobs"
+    description = ("Inspeciona/usa subagentes em SEGUNDO PLANO (lançados com spawn background=true). "
+                   "action=list (recentes + estado) | status (job → running/done/failed) | result (job → "
+                   "pega a saída quando terminou) | await (job → espera ATÉ Ns o resultado NESTE turno). "
+                   "Use result/await p/ ENCADEAR: spawn longo agora → usar a saída depois (ou no mesmo turno).")
+    args_schema = {"action": "list | status | result | await", "job": "(status/result/await) id do job (8 hex)",
+                   "timeout": "(await) segundos a esperar (default 60, máx 300)"}
+    required = ("action",)
+
+    def run(self, args, ctx):
+        from okami.core.spawn_jobs import await_job, list_jobs, read_job
+        ws = getattr(ctx, "workspace", ".")
+        action = str(args.get("action") or "").strip().lower()
+        if action == "list":
+            jobs = list_jobs(ws)
+            if not jobs:
+                return ToolResult(True, "(nenhum subagente em segundo plano)")
+            return ToolResult(True, "subagentes em segundo plano:\n" + "\n".join(
+                f"- {j['job']} · {j['state']} · {str(j['goal'])[:60]}" for j in jobs))
+        job = str(args.get("job") or "").strip()
+        if action == "await":
+            try:
+                timeout = float(args.get("timeout") or 60)
+            except (TypeError, ValueError):
+                timeout = 60.0
+            rec = await_job(ws, job, timeout)
+        elif action in ("status", "result"):
+            rec = read_job(ws, job)
+        else:
+            return ToolResult(False, "action inválida: use list | status | result | await.")
+        if rec is None:
+            return ToolResult(False, f"job '{job}' não encontrado (use action=list).")
+        state = rec.get("state", "?")
+        # header AUTOCONTIDO (ideia do Hermes): o pai pode ter esquecido por que o subagente existia.
+        header = f"[subagente {rec.get('job', job)} · objetivo: {str(rec.get('goal', ''))[:80]} · estado: {state}]"
+        if state == "running":
+            return ToolResult(True, header + " — ainda rodando; use action=await p/ esperar.")
+        if action == "status":
+            return ToolResult(True, header)
+        return ToolResult(True, f"{header}\n{rec.get('result', '')}")
 
 
 def _has_playwright() -> bool:
