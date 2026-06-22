@@ -26,10 +26,11 @@ _BLOCKABLE = ("before_task", "before_tool", "before_write", "before_skill_instal
 
 class HookManager:
     def __init__(self, config: dict | None = None, root: str = ".", *, runner: Callable | None = None,
-                 emit: Callable[[str], None] = lambda m: None):
+                 emit: Callable[[str], None] = lambda m: None, include_builtin: bool = False):
         self.config = config or {}
         self.root = Path(root)
         self.emit = emit
+        self.include_builtin = include_builtin     # plugins NATIVOS do pacote (o runner real liga; testes isolam)
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._run = runner or self._run_cmd
 
@@ -43,16 +44,28 @@ class HookManager:
         return [*scripts, *self._plugin_scripts(event)]
 
     def _plugin_scripts(self, event: str) -> list[Path]:
-        """#14: plugin instalado em `<root>/plugins/<nome>/hooks/<event>/*` contribui scripts de hook —
-        é o que faz a DESCOBERTA de plugin virar EXECUÇÃO no ciclo de vida."""
-        base = self.root / "plugins"
-        if not base.is_dir():
-            return []
+        """#14: plugin em `<root>/plugins/<nome>/hooks/<event>/*` contribui scripts de hook — é o que faz a
+        DESCOBERTA virar EXECUÇÃO. + plugins NATIVOS do pacote (okami/builtin/plugins) quando include_builtin
+        (o runner real liga). Dedup por nome: o plugin do projeto vence o nativo de mesmo nome."""
+        bases = [self.root / "plugins"]
+        if self.include_builtin:
+            try:
+                from okami.builtin import builtin_plugins_root
+                bases.append(builtin_plugins_root())
+            except Exception:  # noqa: BLE001 — nativos ausentes não derrubam os hooks
+                pass
         out: list[Path] = []
-        for plugin in sorted(base.iterdir()):
-            d = plugin / "hooks" / event
-            if d.is_dir():
-                out += sorted(p for p in d.glob("*") if p.is_file())
+        seen: set[str] = set()
+        for base in bases:
+            if not base.is_dir():
+                continue
+            for plugin in sorted(p for p in base.iterdir() if p.is_dir()):
+                if plugin.name in seen:            # projeto (1ª base) vence o nativo de mesmo nome
+                    continue
+                seen.add(plugin.name)
+                d = plugin / "hooks" / event
+                if d.is_dir():
+                    out += sorted(p for p in d.glob("*") if p.is_file())
         return out
 
     def _run_cmd(self, cmd: str, event: str, payload: dict) -> bool:

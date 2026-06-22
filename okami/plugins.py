@@ -114,13 +114,19 @@ def plugin_context(plugin: str, *, trust: str = "untrusted", cfg: dict | None = 
 
 
 def plugin_roots() -> list[Path]:
-    """Raízes padrão: projeto (.) + home do Okami."""
+    """Raízes: projeto (.) + home do Okami + NATIVOS do pacote (viajam no pip install). O projeto vem 1º →
+    vence o nativo de mesmo nome (discover_plugins dedup por nome, 1ª raiz ganha)."""
     roots = [Path(".")]
     try:
         from okami.home import okami_home
         roots.append(okami_home())
     except Exception:  # noqa: BLE001 — degrada (só usa '.') mas AVISA (era silencioso)
         warn("falha ao resolver okami_home p/ raízes de plugins", exc_info=True)
+    try:
+        from okami.builtin import builtin_root
+        roots.append(builtin_root())               # plugins NATIVOS embarcados (independe do CWD)
+    except Exception:  # noqa: BLE001
+        warn("falha ao resolver builtin_root p/ plugins nativos", exc_info=True)
     return roots
 
 

@@ -24,8 +24,10 @@ def test_plugin_roots_warns_on_home_failure(monkeypatch):
     monkeypatch.setattr("okami.home.okami_home",
                         lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     roots = plugins.plugin_roots()
-    assert roots == [Path(".")]                                 # ainda funciona (fail-open)
+    assert roots[0] == Path(".")                                # projeto ainda presente (fail-open no home)
     assert warned                                               # mas AVISOU (não silencioso)
+    from okami.builtin import builtin_root
+    assert builtin_root() in roots                              # nativos seguem (independem do home)
 
 
 def test_discover_plugins_warns_on_entrypoint_failure(monkeypatch):
@@ -38,9 +40,10 @@ def test_discover_plugins_warns_on_entrypoint_failure(monkeypatch):
     assert out == [] and warned                                 # degrada mas avisa
 
 
-# ── plugins de EXEMPLO empacotados (demonstram o sistema de discovery) ──
+# ── plugins NATIVOS empacotados (viajam no pacote; demonstram o discovery) ──
 def test_example_plugins_discoverable():
+    from okami.builtin import builtin_root
     from okami.plugins import discover_plugins
-    found = discover_plugins([Path(__file__).parent.parent], entry_points=())
+    found = discover_plugins([builtin_root()], entry_points=())
     names = {p.name for p in found}
-    assert names, "nenhum plugin de exemplo descoberto na raiz do repo"
+    assert names, "nenhum plugin nativo descoberto no pacote"

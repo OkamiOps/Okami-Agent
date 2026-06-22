@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-TRACK = REPO / "plugins" / "disk-cleanup" / "hooks" / "before_tool" / "track.py"
-CLEAN = REPO / "plugins" / "disk-cleanup" / "hooks" / "after_task" / "clean.py"
+TRACK = REPO / "okami" / "builtin" / "plugins" / "disk-cleanup" / "hooks" / "before_tool" / "track.py"
+CLEAN = REPO / "okami" / "builtin" / "plugins" / "disk-cleanup" / "hooks" / "after_task" / "clean.py"
 
 
 def _env(home: Path) -> dict:

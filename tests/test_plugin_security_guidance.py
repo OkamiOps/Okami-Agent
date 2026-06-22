@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-GUARD = REPO / "plugins" / "security-guidance" / "hooks" / "before_tool" / "guard.py"
+GUARD = REPO / "okami" / "builtin" / "plugins" / "security-guidance" / "hooks" / "before_tool" / "guard.py"
 
 
 def _run(payload: dict, *, block: bool = False) -> tuple[int, str]:
@@ -95,7 +95,7 @@ def test_placeholder_context_uses_preceding_chars():
 def test_end_to_end_via_hookmanager():
     from okami.automation.hooks import HookManager
     emitted: list[str] = []
-    hm = HookManager(root=str(REPO), emit=emitted.append)
+    hm = HookManager(root=str(REPO), emit=emitted.append, include_builtin=True)   # nativo do pacote
     ok = hm.fire("before_tool", {"tool": "write_file", "args": {"path": "x.py", "content": "eval(z)"}})
     assert ok is True                                          # warn-mode: roda mas não veta
     assert any("eval" in m.lower() for m in emitted)           # advisory chegou ao usuário via emit

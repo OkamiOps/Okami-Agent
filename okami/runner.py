@@ -312,7 +312,7 @@ def run_task(
 
     from okami.gateway.checkpoints import Checkpoints
     from okami.automation.hooks import HookManager
-    hooks = HookManager(cfg.hooks, root=str(ws), emit=emit)   # event hooks (§11)
+    hooks = HookManager(cfg.hooks, root=str(ws), emit=emit, include_builtin=True)   # event hooks (§11) + nativos
     t = Task(goal=goal, exit_criteria=exit_criteria or [])
     if not hooks.fire("before_task", {"goal": goal}):         # política externa pode VETAR a tarefa
         from okami.core import TaskState
