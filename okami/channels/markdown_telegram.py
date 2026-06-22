@@ -30,10 +30,35 @@ def _quote_block(m: re.Match) -> str:
     return f"<blockquote>{inner}</blockquote>\n"
 
 
+def _html_to_md(text: str) -> str:
+    """O modelo MUITAS vezes manda HTML cru (`<b>`, `<code>`…) — por hábito ou porque era instruído a
+    isso. Sem normalizar, o html.escape transforma `<b>` em `&lt;b&gt;` e o usuário vê a TAG literal
+    (o bug do FIPE). Converte as tags do Telegram p/ markdown ANTES do pipeline; tag não-suportada
+    (div/span/li/h1…) perde só a tag (conteúdo fica) p/ a API não recusar o parse. `<` solto de prosa
+    ('2 < 3') não casa nenhuma tag → segue pro escape normal."""
+    t = text
+    t = re.sub(r'<a\s+href=(["\'])(.*?)\1[^>]*>(.*?)</a>', r'[\3](\2)', t, flags=re.I | re.S)
+    t = re.sub(r'<pre>\s*<code[^>]*>(.*?)</code>\s*</pre>', lambda m: f"```\n{m.group(1)}\n```", t, flags=re.I | re.S)
+    t = re.sub(r'<pre[^>]*>(.*?)</pre>', lambda m: f"```\n{m.group(1)}\n```", t, flags=re.I | re.S)
+    t = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', t, flags=re.I | re.S)
+    t = re.sub(r'<blockquote>(.*?)</blockquote>',
+               lambda m: "\n".join("> " + ln for ln in m.group(1).strip().split("\n")), t, flags=re.I | re.S)
+    t = re.sub(r'</?(?:b|strong)\s*>', '**', t, flags=re.I)
+    t = re.sub(r'</?(?:i|em)\s*>', '_', t, flags=re.I)
+    t = re.sub(r'</?(?:s|del|strike)\s*>', '~~', t, flags=re.I)
+    t = re.sub(r'</?tg-spoiler\s*>', '||', t, flags=re.I)
+    t = re.sub(r'<br\s*/?>', '\n', t, flags=re.I)
+    t = re.sub(r'</?p\s*>', '\n', t, flags=re.I)
+    t = re.sub(r'</?(?:div|span|ul|ol|li|h[1-6]|table|tr|td|th|tbody|thead)[^>]*>', '', t, flags=re.I)
+    return t
+
+
 def to_html(md: str) -> str:
     """Converte um subconjunto de markdown p/ as tags HTML que o Telegram aceita: <b> <i> <s> <code>
-    <pre> <a> <tg-spoiler> <blockquote>. Conteúdo de código é protegido (não formata por dentro)."""
-    text = md or ""
+    <pre> <a> <tg-spoiler> <blockquote>. Conteúdo de código é protegido (não formata por dentro).
+    Tolera HTML cru do modelo (normaliza p/ markdown antes) — assim `<b>` renderiza em vez de virar tag
+    literal pro usuário."""
+    text = _html_to_md(md or "")
     stash: dict[str, str] = {}
 
     def _keep(rendered: str) -> str:
@@ -67,3 +92,10 @@ def to_html(md: str) -> str:
     for key, rendered in stash.items():
         text = text.replace(key, rendered)
     return text
+
+
+def to_plain(md: str) -> str:
+    """Versão TEXTO-PURO legível (sem markup): normaliza+renderiza e tira as tags + desescapa entidades.
+    Fallback quando o Telegram recusa o HTML — o usuário vê 'negrito', não '**negrito**' nem '<b>'."""
+    stripped = re.sub(r"<[^>]+>", "", to_html(md))
+    return html.unescape(stripped)

@@ -135,29 +135,29 @@ class TelegramClient:
         return res.get("result", [])
 
     def send_message(self, chat_id, text: str, thread: int | None = None) -> dict:
-        from okami.channels.markdown_telegram import to_html
+        from okami.channels.markdown_telegram import to_html, to_plain
         res: dict = {}
         for chunk in _split_message(text, 4000):          # >4096 → várias partes (não trunca mais)
             p = {"chat_id": chat_id, "text": chunk}
             if thread is not None:
                 p["message_thread_id"] = thread           # tópico de fórum (conversa paralela)
-            # FORMATAÇÃO (Hermes): markdown do agente vira HTML do Telegram (negrito/código/link de
-            # verdade, não asteriscos literais). Texto puro segue cru (sem custo/risco de parse); se a
-            # API recusar o HTML (entidade quebrada/tag partida no split), reenvia cru — nunca perde.
+            # FORMATAÇÃO (Hermes): markdown do agente (e HTML cru que ele às vezes manda) vira HTML do
+            # Telegram (negrito/código/link de verdade). Se a API recusar o parse (entidade quebrada/tag
+            # partida no split), cai p/ TEXTO PURO LIMPO (to_plain) — NUNCA cru com ** e tags visíveis.
             rendered = to_html(chunk)
             if rendered != chunk:
                 try:
                     res = self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
                     continue
                 except urllib.error.HTTPError:
-                    pass                                   # parse recusado → manda o texto original
+                    p["text"] = to_plain(chunk)            # parse recusado → plain legível (sem markup)
             res = self._call("sendMessage", p)
         return res
 
     def edit_message(self, chat_id, message_id, text: str, thread: int | None = None) -> bool:
         """Edita uma mensagem (editMessageText) — base do streaming-by-edit. HTML com fallback p/ cru;
         ignora o 'message is not modified' (texto igual) e erros best-effort (edição nunca quebra o turno)."""
-        from okami.channels.markdown_telegram import to_html
+        from okami.channels.markdown_telegram import to_html, to_plain
         p = {"chat_id": chat_id, "message_id": int(message_id), "text": text[:4000]}
         if thread is not None:
             p["message_thread_id"] = thread
@@ -168,7 +168,7 @@ class TelegramClient:
                     self._call("editMessageText", dict(p, text=rendered, parse_mode="HTML"))
                     return True
                 except urllib.error.HTTPError:
-                    pass                                   # parse recusado → tenta cru
+                    p["text"] = to_plain(p["text"])        # parse recusado → plain legível (não cru)
             self._call("editMessageText", p)
             return True
         except Exception:  # noqa: BLE001 — "not modified"/rede → best-effort

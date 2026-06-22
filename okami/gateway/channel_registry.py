@@ -27,9 +27,9 @@ class ChannelSpec:
 REGISTRY: dict[str, ChannelSpec] = {
     "telegram": ChannelSpec("telegram", "telegram", "okami.channels.telegram", "TelegramChannel",
                             ("token",), rest=False,
-                            hint="Você está no Telegram (HTML): use <b>negrito</b>, <i>itálico</i>, "
-                                 "<code>código</code>, <pre>bloco</pre>. NÃO use tabela markdown (pipe) "
-                                 "— vira texto cru; prefira listas 'rótulo: valor'."),
+                            hint="Você está no Telegram: escreva em MARKDOWN simples — **negrito**, "
+                                 "_itálico_, `código`, ```bloco```, [texto](url). NÃO escreva HTML cru "
+                                 "(<b>, <code>) nem tabela markdown (pipe) — prefira listas 'rótulo: valor'."),
     "slack": ChannelSpec("slack", "slack", "okami.channels.slack", "SlackChannel",
                          ("token", "channel_id"),
                          hint="Você está no Slack (mrkdwn): *negrito*, _itálico_, `código`. Sem tabela "

@@ -6,6 +6,17 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 💬 fix: formatação do Telegram (tags HTML cruas viravam texto literal)
+Bug real (caso FIPE): a dica de plataforma MANDAVA o modelo escrever HTML (`<b>negrito</b>`), mas o
+conversor `to_html` tratava a entrada como MARKDOWN e dava `html.escape` em tudo → `<b>` virava
+`&lt;b&gt;` e o Telegram mostrava a TAG literal pro usuário ("várias tags abertas"). 3 correções:
+- **dica de plataforma agora pede MARKDOWN** (`**negrito**`, `` `código` ``) — consistente com o conversor.
+- **`to_html` tolera HTML cru do modelo** (`_html_to_md`): normaliza `<b>/<i>/<code>/<a>/<pre>/<blockquote>/
+  <s>/<tg-spoiler>` p/ markdown antes do pipeline; tag não-suportada (div/span/li/h1…) perde só a tag. `<`
+  solto de prosa ("2 < 3") segue escapado.
+- **fallback agora é TEXTO-PURO LIMPO** (`to_plain`): se a API recusa o parse, manda "negrito" — não
+  "**negrito**" nem `<b>` cru. Vale p/ `send_message` E `edit_message` (streaming-by-edit). +9 testes.
+
 ### ⚡ harness mais rápido (diagnóstico de 7 analistas → plano por impacto)
 O agente demorava demais p/ a 1ª resposta (>5min, às vezes >25min) em modelo local lento. Causas-raiz
 mapeadas: streaming desligado, prompt gigante tier-blind (~57 schemas de tool ≈ 20K chars no prefill de

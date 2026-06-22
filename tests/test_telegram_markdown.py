@@ -8,8 +8,44 @@ import io
 import json
 import urllib.error
 
-from okami.channels.markdown_telegram import to_html
+from okami.channels.markdown_telegram import to_html, to_plain
 from okami.channels.telegram import TelegramClient
+
+
+# --------------------------------------------------- modelo emite HTML direto (o bug do FIPE)
+def test_model_html_bold_renders_not_escaped():
+    # o modelo às vezes manda HTML cru; tem que RENDERIZAR, não virar &lt;b&gt; literal pro usuário
+    assert to_html("<b>Amor</b> e <i>tchau</i>") == "<b>Amor</b> e <i>tchau</i>"
+
+
+def test_model_html_code_renders():
+    assert to_html("veja <code>veiculos.fipe.org.br/api</code>") == "veja <code>veiculos.fipe.org.br/api</code>"
+
+
+def test_model_html_link_renders():
+    assert to_html('<a href="https://x.com">site</a>') == '<a href="https://x.com">site</a>'
+
+
+def test_model_html_mixed_with_markdown():
+    out = to_html("<b>forte</b> e **tambem** e `cod`")
+    assert "<b>forte</b>" in out and "<b>tambem</b>" in out and "<code>cod</code>" in out
+
+
+def test_model_html_unsupported_tag_dropped():
+    # <div> não é suportado pelo Telegram → a tag some (senão a API recusa o parse), conteúdo fica
+    out = to_html("<div>conteudo</div><p>par</p>")
+    assert "div" not in out and "<p>" not in out and "conteudo" in out and "par" in out
+
+
+def test_stray_angle_brackets_still_escaped():
+    assert to_html("2 < 3 e a > b") == "2 &lt; 3 e a &gt; b"      # não confunde com tag
+
+
+# --------------------------------------------------- to_plain (fallback limpo)
+def test_to_plain_strips_markdown_and_html():
+    assert to_plain("**forte** _leve_ `cod` [site](https://x.com)") == "forte leve cod site"
+    assert to_plain("<b>oi</b> <code>x</code>") == "oi x"
+    assert to_plain("## titulo\n> quote") == "titulo\nquote"
 
 
 # ----------------------------------------------------------------- conversão (pura)
@@ -128,7 +164,8 @@ def test_send_message_falls_back_to_plain_on_parse_error(monkeypatch):
     c.send_message("1", "**negrito** com tag <oi> estranha")
     assert len(calls) == 2
     assert "parse_mode" not in calls[1]
-    assert calls[1]["text"] == "**negrito** com tag <oi> estranha"   # cru, nada perdido
+    # fallback = PLAIN LIMPO (sem ** nem tags visíveis), não cru — o usuário nunca vê markup quebrado
+    assert calls[1]["text"] == "negrito com tag <oi> estranha"
 
 
 def test_send_message_plain_text_skips_parse_mode(monkeypatch):
