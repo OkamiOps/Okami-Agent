@@ -44,9 +44,11 @@ def build_report(cfg, *, ping=None) -> dict:
         "checks": {},
         "mcp": list(getattr(cfg, "mcp", None) or {}),
     }
+    from okami.core.redact import redact
     for name, pc in cfg.providers.items():
         p = {"name": name, "tier": pc.tier, "model": pc.model, "transport": pc.transport,
-             "ready": bool(pc.ready), "api_base": pc.api_base or ""}
+             "ready": bool(pc.ready),
+             "api_base": redact(pc.api_base or "")}     # api_base com user:senha@host não vaza no doctor --json
         if pc.api_base and ping is not None:
             res = ping(pc.api_base)
             ok, msg = res[0], res[1]
