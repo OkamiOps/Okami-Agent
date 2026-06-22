@@ -42,6 +42,21 @@ def test_run_task_end_to_end_smoke(tmp_path, monkeypatch):
     assert t.state == TaskState.COMPLETE and "oi!" in (t.result or "")   # caminho REAL do gateway roda
 
 
+# ---------------------------------------------------------------- E2E: fallback de stream sem traceback
+def test_stream_fallback_warning_has_no_traceback():
+    """Achado RODANDO o app: provider fora → o aviso 'stream instável; caindo no robusto' (fallback
+    TRATADO) despejava o traceback inteiro (log.warn default exc_info=True) e o usuário achava que
+    crashou. Garante exc_info=False nas 2 chamadas de fallback."""
+    import inspect
+    import okami.llm.providers as prov
+    import okami.llm.streaming as st
+    for mod in (prov, st):
+        src = inspect.getsource(mod)
+        idx = src.index("stream instável")
+        call = src[idx - 40:idx + 200]                    # a chamada log.warn(...) em volta do texto
+        assert "exc_info=False" in call, f"warn de 'stream instável' em {mod.__name__} sem exc_info=False"
+
+
 # ---------------------------------------------------------------- #21 gh sem auth vai pro log
 def test_gh_latest_run_logs_auth_failure(monkeypatch):
     import okami.core.readiness as rd

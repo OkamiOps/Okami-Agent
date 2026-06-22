@@ -64,7 +64,7 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
         if produced:
             raise                                    # parte já entregue → propaga (não dá p/ refazer limpo)
         from okami import log
-        log.warn(f"stream instável ({_err.classify(e).reason}); caindo no robusto.")
+        log.warn(f"stream instável ({_err.classify(e).reason}); caindo no robusto.", exc_info=False)
         raise                                        # caller decide o fallback (tem o on_token/usage)
 
 

@@ -523,7 +523,8 @@ def stream_complete(
         if produced:
             raise                                     # parte já entregue ao chamador → propaga
         from okami import log
-        log.warn(f"stream instável ({_err.classify(e).reason}); caindo no caminho robusto (sem streaming).")
+        log.warn(f"stream instável ({_err.classify(e).reason}); caindo no caminho robusto (sem streaming).",
+                 exc_info=False)   # fallback TRATADO: não assusta o usuário com traceback (a razão já basta)
         res = complete_messages_ex(cfg, messages, provider=provider, model=model, **overrides)
         if res.text:
             yield res.text
