@@ -90,6 +90,10 @@ def install_from_source(source, skills_root, lock_root, *, allow_exec: bool = Fa
     for s in found:
         target = skills_root / s.path.parent.name
         shutil.copytree(s.path.parent, target, dirs_exist_ok=True)
+        try:
+            target.chmod(0o700)                        # skill privada do dono (hooks/config) em VPS multi-user:
+        except OSError:                                # 0700 no dir bloqueia outro usuário SEM mexer no +x dos files
+            pass
         record(Path(lock_root), s.name, source=str(source), skill_dir=target)   # proveniência + sha256
         installed.append(s.name)
     shutil.rmtree(quarantine, ignore_errors=True)

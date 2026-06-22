@@ -18,8 +18,8 @@ def parse_signal_receive(payload, *, self_number: str = "") -> list[Inbound]:
         env = (item or {}).get("envelope") or {}
         src = str(env.get("source") or env.get("sourceNumber") or "")
         msg = ((env.get("dataMessage") or {}).get("message") or "").strip()
-        if not msg or (self_number and src == self_number):
-            continue
+        if not msg or not src or (self_number and src == self_number):
+            continue                                       # src vazio → NÃO colapsa todos num chat_id ""
         out.append(Inbound("signal", src, text=msg, msg_id=str(env.get("timestamp") or "")))
     return out
 
@@ -54,6 +54,8 @@ def parse_bluebubbles(payload) -> list[Inbound]:
         if not text:
             continue
         chat = str((m.get("handle") or {}).get("address") or m.get("chatGuid") or "")
+        if not chat:                                       # sem remetente → não roteia p/ sessão ""
+            continue
         out.append(Inbound("bluebubbles", chat, text=text, msg_id=str(m.get("guid") or "")))
     return out
 
@@ -63,7 +65,7 @@ def parse_bluebubbles(payload) -> list[Inbound]:
 
 def parse_dingtalk_webhook(body: dict) -> Inbound | None:
     """DingTalk callback: {msgtype:text, text:{content}, senderStaffId/conversationId}."""
-    if (body or {}).get("msgtype") != "text":
+    if not isinstance(body, dict) or body.get("msgtype") != "text":   # lista/escalar → None, não crash
         return None
     text = body.get("text")                                 # payload malformado pode mandar str → não crashar
     content = ((text.get("content") if isinstance(text, dict) else None) or "").strip()
@@ -90,7 +92,9 @@ def parse_weixin_webhook(xml: str) -> Inbound | None:
 
 def parse_qqbot_webhook(body: dict) -> Inbound | None:
     """QQ Bot callback: {id, content, author:{id}, channel_id}."""
-    content = (body or {}).get("content")
+    if not isinstance(body, dict):                         # lista/escalar → None, não crash
+        return None
+    content = body.get("content")
     content = (content or "").strip() if isinstance(content, str) else ""
     chat = str(body.get("channel_id") or (body.get("author") or {}).get("id") or "")
     return Inbound("qqbot", chat, text=content, msg_id=str(body.get("id") or "")) if content else None
@@ -129,6 +133,8 @@ def _parse_simple_xml(xml: str) -> dict:
     import html
     import re
     out: dict = {}
+    if not isinstance(xml, str):                           # dict/bytes onde esperava XML string → {} (sem crash)
+        return out
     for m in re.finditer(r"<(\w+)>(?:<!\[CDATA\[(.*?)\]\]>|([^<]*))</\1>", xml or "", re.S):
         raw = m.group(2) if m.group(2) is not None else html.unescape(m.group(3) or "")
         out[m.group(1)] = raw.strip()
@@ -154,13 +160,16 @@ def webhook_parser(platform: str):
     def _xml(body: bytes) -> str:
         return (body or b"").decode("utf-8", "replace")
 
+    def _ne(inb):                                          # GUARD central: Inbound sem remetente (chat_id "")
+        return inb if (inb is not None and str(inb.chat_id).strip()) else None   # colapsaria sessões → dropa
+
     mapping = {
-        "dingtalk": lambda b: parse_dingtalk_webhook(_json(b)),
-        "wecom": lambda b: parse_wecom_webhook(_xml(b)),
-        "weixin": lambda b: parse_weixin_webhook(_xml(b)),
-        "qqbot": lambda b: parse_qqbot_webhook(_json(b)),
-        "whatsapp": lambda b: parse_whatsapp_webhook(_json(b)),
-        "sms": lambda b: parse_sms_webhook(_form(b)),
+        "dingtalk": lambda b: _ne(parse_dingtalk_webhook(_json(b))),
+        "wecom": lambda b: _ne(parse_wecom_webhook(_xml(b))),
+        "weixin": lambda b: _ne(parse_weixin_webhook(_xml(b))),
+        "qqbot": lambda b: _ne(parse_qqbot_webhook(_json(b))),
+        "whatsapp": lambda b: _ne(parse_whatsapp_webhook(_json(b))),
+        "sms": lambda b: _ne(parse_sms_webhook(_form(b))),
     }
     return mapping.get(platform)
 

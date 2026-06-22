@@ -32,7 +32,7 @@ _EXT_ALT = "|".join(sorted(ALL_EXTS))
 _MEDIA_RE = re.compile(
     r'''MEDIA:\s*(?P<path>"[^"\n]+"|'[^'\n]+'|'''
     r'''(?:~/|/|[A-Za-z]:[/\\])\S+?\.(?:''' + _EXT_ALT + r'''))'''
-    r'''(?=[\s"',;:)\]}]|$)''',
+    r'''(?=[.!?\s"',;:)\]}]|$)''',                    # .!? no lookahead: caminho no fim de frase (foto.png.) extrai
     re.IGNORECASE,
 )
 _FENCE_RE = re.compile(r"```.*?```", re.S)

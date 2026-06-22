@@ -423,11 +423,13 @@ conhece — lembra do seu projeto e do seu jeito, e fala com intimidade, não co
 - (vai se aprofundando com o uso)
 """,
     }
+    from okami.core.platform_compat import secure_chmod
     created = []
     for fname, content in stubs.items():
         p = ws / fname
         if not p.exists():
             p.write_text(content, encoding="utf-8", newline="\n")
+            secure_chmod(p, mode=0o600)                # identidade (SOUL/VOICE/PERSONA) é privada do dono
             created.append(fname)
     return created
 
@@ -467,7 +469,9 @@ def _ensure_agent(agent_id: str, *, name: str | None = None, provider: str | Non
         tg["allow_all"] = True
         tg.pop("allow_chats", None)
     d.mkdir(parents=True, exist_ok=True)
-    af.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False) or "{}\n", encoding="utf-8")
+    from okami.core.safe_io import write_atomic
+    write_atomic(af, _yaml.safe_dump(spec, allow_unicode=True, sort_keys=False) or "{}\n", mode=0o600)
+    #                  agent.yaml carrega o telegram_token → 0600 (não world-readable em VPS multi-usuário)
     _write_persona_stubs(d, name or agent_id)
     return not existed
 

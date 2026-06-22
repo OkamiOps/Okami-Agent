@@ -148,12 +148,25 @@ def gh_latest_run(workflow_file: str, branch: str = "main") -> WorkflowRun | Non
         return None
 
 
+def _current_branch() -> str:
+    """Branch atual (fallback 'main'). Sem isto, collect() checava SEMPRE 'main' → repo com default
+    master/develop reportava CI 'indeterminado' falso (gh run list --branch main = vazio)."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607
+                             capture_output=True, text=True, timeout=5)
+        b = out.stdout.strip()
+        return b if (out.returncode == 0 and b and b != "HEAD") else "main"
+    except Exception:  # noqa: BLE001
+        return "main"
+
+
 def collect(*, use_gh: bool = True) -> Readiness:
     """Junta os três sinais. `use_gh=False` = só o veredito local (offline / testes)."""
     ok, summary, source = committed_strict()
     head = git_head()
-    ci = gh_latest_run("ci.yml") if use_gh else None
-    strict = gh_latest_run("production-conformance.yml") if use_gh else None
+    br = _current_branch()
+    ci = gh_latest_run("ci.yml", branch=br) if use_gh else None
+    strict = gh_latest_run("production-conformance.yml", branch=br) if use_gh else None
     return Readiness(head=head, local_strict_ok=ok, local_summary=summary, local_source=source,
                      ci=ci, strict=strict)
 
