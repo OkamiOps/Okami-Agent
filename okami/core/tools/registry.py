@@ -25,7 +25,7 @@ from okami.core.tools.webextract import WebExtract
 from okami.core.tools.vision import VisionAnalyze
 from okami.core.tools.audio import AudioAnalyze
 from okami.core.tools.speak import TextToSpeech
-from okami.core.tools.notify import Notify
+from okami.core.tools.notify import Notify, SendMessage
 from okami.core.tools.clarify import Clarify
 from okami.core.tools.suggest import SuggestAutomation
 from okami.core.tools.todo import TodoWrite
@@ -48,7 +48,7 @@ def default_registry() -> dict[str, Tool]:
              UseSkill(), ManageSkill(), InstallSkill(), Spawn(), MixtureOfAgents(),
              Browse(), WebSearch(), WebExtract(), GenerateImage(), GenerateVideo(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
              XSearch(), HomeAssistant(), FeishuDocRead(), ComputerUse(),
-             ToolSearch(), Notify(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
+             ToolSearch(), Notify(), SendMessage(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
              RemoteConnect(), RemoteDisconnect(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

@@ -68,6 +68,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("audio_analyze", "mídia"),                       # #7: transcreve áudio (whisper local)
     ToolSpec("text_to_speech", "mídia"),                      # #10: responde em voz (MEDIA: → bolha de voz)
     ToolSpec("notify", "controle"),                           # #7: mensagem ao dono fora do turno
+    ToolSpec("send_message", "controle", danger="sensitive"),  # entrega direta a um canal/target (sem LLM)
     ToolSpec("clarify", "controle"),                          # #8: pergunta ao dono antes de agir (ambiguidade)
     ToolSpec("suggest_automation", "automação"),              # #8: propõe automação consent-first (dono aceita)
     ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)

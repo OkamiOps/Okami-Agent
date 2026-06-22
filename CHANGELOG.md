@@ -6,6 +6,15 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Unreleased]
 
+### 🛠️ fix: robustez + `send_message` (caça field-fail, leva 2)
+- **MCP stdio anti-zumbi**: `_request` agora MATA o subprocesso no timeout/EOF (antes a thread de leitura
+  ficava bloqueada em stdout p/ sempre e o proc virava zumbi).
+- **browse sem Playwright**: action≠read (screenshot/click/…) falha CLARO ("instale Playwright") em vez de
+  degradar SILENCIOSO p/ fetch (o agente pedia screenshot e recebia texto achando que deu certo).
+- **tool `send_message`**: entrega direta de texto por um canal SEM rodar o LLM (avisos/relatórios);
+  usa o token do PRÓPRIO agente (channels.telegram), target=chat_id ou vazio→dono; `danger=sensitive`
+  (go/no-go). Fecha a lacuna "o agente não tinha como mandar msg a um target sem improvisar shell".
+
 ### 🛠️ fix: check() nas tools de integração (não falham mais feio em runtime)
 Caça adversarial da CLASSE "onde o agente falha em campo" (workflow de 116 subagentes, 5 dimensões, 3
 céticos/achado). 1ª leva corrigida: `generate_video`, `homeassistant`, `feishu_doc_read` e `x_search`
