@@ -230,6 +230,7 @@ class Harness:
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
+        self._exec_refunds = 0                         # item 5: passos devolvidos p/ execute_code read-only (bounded)
         self._salvaged = False                         # já tentou a entrega-parcial antes de falhar? (1x)
         self._batch: list[Action] = []                 # leituras restantes da MESMA geração (batch — Hermes)
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
@@ -714,6 +715,13 @@ class Harness:
         t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
         self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
                    out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
+        # REFUND de passo (item 5, espelha o budget de poll): execute_code read-only é META-trabalho (rodou
+        # N tools num ÚNICO passo de modelo) — não deve queimar o orçamento de passos. BOUNDED (cap =
+        # max_poll_waits) p/ nunca virar loop infinito; o anti-loop/no-progress/stall continuam valendo.
+        if (action.tool == "execute_code" and not res.effect
+                and self._exec_refunds < self.budget.max_poll_waits):
+            self._exec_refunds += 1
+            step_n -= 1
         if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
             self._poll_waits = 0
         # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo

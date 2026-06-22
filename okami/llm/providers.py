@@ -16,7 +16,7 @@ import litellm
 
 from okami.llm import errors as _err
 from okami.llm import transports
-from okami.llm.retry import jittered_backoff
+from okami.llm.retry import retry_delay
 from okami.llm.usage import Completion, as_completion, normalize_usage
 from okami.config import OkamiConfig, ProviderConfig
 
@@ -453,8 +453,8 @@ def complete_messages_ex(
                 do_fallback = ce.fallback
                 break
             do_fallback = do_fallback or ce.fallback
-            if attempt < attempts:                    # ainda há chave → espera (jitter) e tenta de novo
-                _sleep(jittered_backoff(attempt))
+            if attempt < attempts:                    # ainda há chave → espera e tenta de novo
+                _sleep(retry_delay(attempt, ce.retry_after))   # honra o retry_after do provider (capado)
     # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
     tried = (_tried or set()) | {pc.name}
     if do_fallback:
