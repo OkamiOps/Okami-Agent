@@ -1162,7 +1162,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         _th.Thread(target=_loop, daemon=True).start()
         return stop
 
-    def _start_typing(self, chat_id, *, interval: float = 4.0):
+    def _start_typing(self, chat_id, *, interval: float = 3.0):
         """Mantém o 'digitando…' do Telegram VIVO durante o turno: o sendChatAction dura ~5s, então re-envia
         a cada ~4s até parar (era one-shot → sumia em turno >5s). Devolve um Event p/ parar, ou None se o
         canal não tem typing (REST). 1º envio é IMEDIATO (aparece na hora)."""
@@ -1173,11 +1173,11 @@ class AgentEndpoint(EndpointCommandsMixin):
         stop = _th.Event()
 
         def _loop():
-            while True:
+            while not stop.is_set():
                 try:
                     _typing(chat_id)
-                except Exception:  # noqa: BLE001 — typing nunca derruba o turno
-                    return
+                except Exception:  # noqa: BLE001 — falha TRANSITÓRIA (429/timeout/edição que limpou) NÃO
+                    pass           # mata o 'digitando…' o turno todo (era `return` → parecia travado após 1 erro)
                 if stop.wait(interval):                    # re-envia a cada `interval`; sai já no stop
                     return
 

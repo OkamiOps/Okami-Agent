@@ -46,6 +46,27 @@ def _ep(channel):
                          run_task=lambda *a, **k: None, approval_mode="manual", spawn=lambda fn: fn())
 
 
+def test_typing_survives_transient_send_failure():
+    """Uma falha transitória (429/timeout) no sendChatAction NÃO pode matar o 'digitando…' o turno
+    inteiro (era `except: return` → o canal parecia travado depois do 1º erro)."""
+    class _Flaky(_FakeTelegram):
+        def __init__(self):
+            super().__init__()
+            self._n = 0
+
+        def send_typing(self, chat_id):
+            self._n += 1
+            if self._n == 2:                           # 2ª chamada falha (transiente)
+                raise RuntimeError("429 transiente")
+            self.typing_calls.append(chat_id)
+    ch = _Flaky()
+    ep = _ep(ch)
+    stop = ep._start_typing("42", interval=0.02)
+    time.sleep(0.15)                                   # vários ciclos, incluindo o que falha
+    stop.set()
+    assert len(ch.typing_calls) >= 3                   # continuou re-enviando após a falha (não morreu)
+
+
 def test_typing_refreshes_until_stopped():
     ch = _FakeTelegram()
     ep = _ep(ch)
