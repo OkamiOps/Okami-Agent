@@ -41,6 +41,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "read.office": ("python-docx>=1.1.0", "openpyxl>=3.1.0"),
     # geração de PDF (pura-Python, sem dep de sistema — funciona em VPS/Mac/Windows)
     "pdf.fpdf": ("fpdf2>=2.7.0", "markdown>=3.5"),
+    # HTML→PDF nativo e RÁPIDO (sem Chromium/Puppeteer): renderiza CSS razoável em ~ms
+    "pdf.html": ("xhtml2pdf>=0.2.11",),
     # imagem (vision/resize)
     "image.pillow": ("Pillow>=10.0.0",),
     # janela nativa do dashboard (desktop) — webview do SO, sem Electron

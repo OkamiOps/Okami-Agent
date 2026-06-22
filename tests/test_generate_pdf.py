@@ -38,3 +38,23 @@ def test_generate_pdf_registered_and_has_spec():
     from okami.core.tool_registry import TOOL_REGISTRY
     assert "generate_pdf" in default_registry()                 # disponível pro modelo
     assert any(s.name == "generate_pdf" for s in TOOL_REGISTRY)  # anti-drift: tem metadata
+
+
+def test_generate_pdf_from_html_fast_native(tmp_path):
+    """HTML estilizado → PDF via xhtml2pdf (instantâneo, sem Chromium) — pro dono não esperar 15min."""
+    pytest.importorskip("xhtml2pdf")
+    from okami.core.tools.pdf import GeneratePdf
+    html = "<html><head><style>h1{color:red}</style></head><body><h1>Oi ção</h1><p>texto</p></body></html>"
+    res = GeneratePdf().run({"html": html, "path": "rel.pdf"}, SimpleNamespace(workspace=tmp_path))
+    assert res.ok and 'MEDIA:"' in res.output
+    pdf = tmp_path / "rel.pdf"
+    assert pdf.exists() and pdf.read_bytes()[:5] == b"%PDF-"
+
+
+def test_generate_pdf_from_html_file(tmp_path):
+    """html_path: lê o HTML de um arquivo do workspace (template grande não precisa ir no arg)."""
+    pytest.importorskip("xhtml2pdf")
+    from okami.core.tools.pdf import GeneratePdf
+    (tmp_path / "tpl.html").write_text("<html><body><h1>Template</h1></body></html>")
+    res = GeneratePdf().run({"html_path": "tpl.html", "path": "out.pdf"}, SimpleNamespace(workspace=tmp_path))
+    assert res.ok and (tmp_path / "out.pdf").read_bytes()[:5] == b"%PDF-"
