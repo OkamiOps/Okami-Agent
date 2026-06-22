@@ -34,11 +34,8 @@ def _store_path(provider: str) -> Path:
 def save_tokens(provider: str, data: dict) -> None:
     STORE_DIR.mkdir(parents=True, exist_ok=True)
     p = _store_path(provider)
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        p.chmod(0o600)
-    except OSError:
-        pass
+    from okami.core.safe_io import write_atomic
+    write_atomic(p, json.dumps(data, indent=2), mode=0o600)   # atômico + 0600: sem janela world-readable do token
 
 
 def load_tokens(provider: str) -> dict | None:

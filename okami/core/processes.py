@@ -120,9 +120,16 @@ class ProcessManager:
             from okami.core.sandbox import _rlimit_preexec
             pre = _rlimit_preexec(policy)
         argv = [sys.executable, "-m", "okami.core.ptyproc", cmd, str(logp), str(exitp), str(ctrlp)]
-        proc = subprocess.Popen(argv, cwd=str(self.ws), env=sanitized_env(),
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, preexec_fn=pre, **popen_session_kwargs())
+        try:
+            proc = subprocess.Popen(argv, cwd=str(self.ws), env=sanitized_env(),
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, preexec_fn=pre, **popen_session_kwargs())
+        except (OSError, ValueError):                  # Popen falhou → não deixa o FIFO órfão acumulando em .okami
+            try:
+                ctrlp.unlink()
+            except OSError:
+                pass
+            raise
         meta = {"id": pid_id, "cmd": cmd, "pid": proc.pid, "started": round(time.time(), 3),
                 "start_time": _proc_start(proc.pid), "backend": "local", "container": "",
                 "notify": bool(notify), "watch": list(watch or []), "notified": False,
@@ -159,7 +166,8 @@ class ProcessManager:
         return True
 
     def _write_meta(self, pid_id, meta) -> None:
-        self._meta(pid_id).write_text(json.dumps(meta), encoding="utf-8")
+        from okami.core.safe_io import write_atomic
+        write_atomic(self._meta(pid_id), json.dumps(meta))   # atômico: crash no meio não corrompe a meta do processo
 
     def _read_meta(self, pid_id):
         p = self._meta(pid_id)

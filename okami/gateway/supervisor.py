@@ -25,6 +25,20 @@ def _default_spawn(agent_id: str) -> int:
     return proc.pid
 
 
+def _pid_alive(pid: int) -> bool:
+    """O processo existe? POSIX: os.kill(pid, 0) (sem matar). Windows: tasklist. Best-effort."""
+    import os as _os
+    try:
+        if _os.name == "nt":
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}"],  # nosec B603,B607
+                               capture_output=True, text=True, timeout=8)
+            return str(int(pid)) in (r.stdout or "")
+        _os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def _configured_agent_ids() -> list[str]:
     try:
         from okami.agents import load_agents
@@ -59,12 +73,16 @@ class AgentSupervisor:
             pass
 
     def is_alive(self, agent_id: str) -> bool:
-        """pid vivo E start-time bate com o registrado (anti reuso de PID)."""
+        """No Linux: pid vivo E start-time bate (anti reuso de PID). No macOS/Windows _proc_start dá '' →
+        cai em _pid_alive (sem anti-reuso, mas ao menos DETECTA morte; antes dava sempre-vivo → o watchdog
+        nunca ressubia um agente morto fora do Linux)."""
         rec = self._load().get(agent_id)
         if not rec or not rec.get("pid"):
             return False
         cur = _proc_start(rec["pid"])
-        return cur is not None and (rec.get("start") in (None, cur))
+        if cur:                                        # Linux: start-time disponível → checagem robusta
+            return rec.get("start") in (None, "", cur)
+        return _pid_alive(rec["pid"])                  # macOS/Win: liveness real do pid
 
     def spawn(self, agent_id: str) -> dict:
         """Sobe o gateway do agente (idempotente: se já vivo, não duplica)."""

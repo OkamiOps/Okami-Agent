@@ -35,8 +35,8 @@ def _should_review(ws, interval: int, clean: bool) -> bool:
     fire = n >= interval
     st["turns_since_review"] = 0 if fire else n
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(_json.dumps(st), encoding="utf-8")
+        from okami.core.safe_io import write_atomic
+        write_atomic(p, _json.dumps(st))               # atômico: crash no meio não corrompe o contador de review
     except OSError:
         pass
     return fire

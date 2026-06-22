@@ -140,8 +140,8 @@ def _record_hash(workspace: Path, name: str, content: str) -> None:
         state = {}
     state[name] = _sha(content)
     try:
-        state_p.parent.mkdir(parents=True, exist_ok=True)
-        state_p.write_text(json.dumps(state), encoding="utf-8")
+        from okami.core.safe_io import write_atomic
+        write_atomic(state_p, json.dumps(state))       # atômico: crash no meio não corrompe o drift-guard de memória
     except OSError:
         pass
 

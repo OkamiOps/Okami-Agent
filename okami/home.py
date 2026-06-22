@@ -171,6 +171,7 @@ def _record_migration(home: Path, moved: list[str]) -> None:
         "to": str(home),
     })
     try:
-        path.write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        from okami.core.safe_io import write_atomic
+        write_atomic(path, json.dumps(log, ensure_ascii=False, indent=2) + "\n")   # atômico: registro de migração íntegro
     except OSError:
         pass

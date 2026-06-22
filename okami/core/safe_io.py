@@ -18,6 +18,28 @@ def _sib(p: Path, ext: str) -> Path:
     return Path(str(p) + ext)
 
 
+def write_atomic(path, data: str, *, mode: int = 0o644) -> Path:
+    """Escrita ATÔMICA enxuta (tmp 0600 → escreve → chmod → os.replace), SEM rotação de backup — pra
+    estado escrito com frequência (meta de processo, contadores, registries, token OAuth). Nunca deixa
+    arquivo meio-escrito/corrompido se o processo cair no meio. mode=0o600 p/ segredo. Cross-plataforma."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix="." + p.name + ".", suffix=".tmp")  # mkstemp já cria 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        from okami.core.platform_compat import secure_chmod
+        secure_chmod(tmp, mode=mode)                   # POSIX chmod+verifica / Windows ACL (segredo)
+        os.replace(tmp, p)                             # atômico
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    return p
+
+
 def secure_write(path, data: str, *, backups: int = 3, mode: int = 0o644, fsync: bool = True) -> Path:
     """Grava `data` atomicamente, rotaciona backups do conteúdo atual e marca `.last-good`."""
     p = Path(path)
