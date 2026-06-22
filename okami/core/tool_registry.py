@@ -74,6 +74,8 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("suggest_automation", "automação"),              # #8: propõe automação consent-first (dono aceita)
     ToolSpec("todo_write", "controle"),                       # #7: checklist operacional (sobrevive compactação)
     ToolSpec("store_secret", "controle", danger="sensitive"),  # guarda credencial no cofre (.env 0600)
+    ToolSpec("ssh_identity", "shell", tier="power", danger="dangerous"),     # provisão: chave SSH em ~/.ssh (VPS)
+    ToolSpec("git_auth", "shell", tier="power", danger="dangerous"),         # provisão: acesso GitHub (token/SSH)
     ToolSpec("remote_connect", "shell", tier="power", danger="sensitive"),   # entra numa máquina remota (SSH/Tailscale)
     ToolSpec("remote_disconnect", "shell"),                    # volta ao ambiente local
     ToolSpec("tool_search", "controle"),

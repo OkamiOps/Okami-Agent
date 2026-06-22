@@ -32,6 +32,7 @@ from okami.core.tools.clarify import Clarify
 from okami.core.tools.suggest import SuggestAutomation
 from okami.core.tools.todo import TodoWrite
 from okami.core.tools.secrets import StoreSecret
+from okami.core.tools.provision import GitAuth, SshIdentity
 from okami.core.tools.remote import RemoteConnect, RemoteDisconnect
 from okami.core.tools.schedule import ScheduleJob
 from okami.core.tools.process import (
@@ -51,6 +52,6 @@ def default_registry() -> dict[str, Tool]:
              Browse(), WebSearch(), WebExtract(), GenerateImage(), GenerateVideo(), VisionAnalyze(), AudioAnalyze(), TextToSpeech(),
              XSearch(), HomeAssistant(), FeishuDocRead(), ComputerUse(),
              ToolSearch(), Notify(), SendMessage(), Clarify(), SuggestAutomation(), TodoWrite(), StoreSecret(),
-             RemoteConnect(), RemoteDisconnect(),
+             SshIdentity(), GitAuth(), RemoteConnect(), RemoteDisconnect(),
              FinishSetup(), TaskComplete(), TaskBlocked(), NeedInput()]
     return {t.name: t for t in tools}

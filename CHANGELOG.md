@@ -6,6 +6,20 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+### 🌐 provisão remota (VPS-first) — o agente bootstrappa o PRÓPRIO acesso (SSH + GitHub)
+Falha de arquitetura: o agente assumia "o host já tem as credenciais do dono" (gh/git/ssh herdados) —
+errado pra uma VPS 24/7, onde não existe login herdado. Pior, o jail `.ssh`/`.env` e o `sanitized_env`
+IMPEDIAM o agente de se provisionar. Agora ele monta o acesso sozinho, dirigido pelo dono via canal:
+- **`okami/integrations/provision.py`**: primitivas sancionadas (furam o jail só aqui) — gerar chave
+  ed25519, importar chave privada (0600), ssh-keyscan→known_hosts, configurar GitHub por token
+  (credential-helper FILE-BASED → funciona mesmo com env sanitizado) ou por SSH (url.insteadOf), status
+  e verify. Segredo NUNCA volta no retorno; HOME injetável (não polui ~/.gitconfig real).
+- **Tools `ssh_identity` e `git_auth`** (danger=dangerous → approval-gated; negadas no Telegram sem o
+  grant). O dono cola um PAT (store_secret) ou deixa o agente GERAR a chave e mostrar só a pública.
+- **Skill nativa `acesso-vps`**: ensina o procedimento ponta-a-ponta (token vs chave SSH, guiar o dono a
+  adicionar a pubkey no GitHub, verificar) — dispara em "git push/clone/permission denied/ssh".
++21 testes (módulo + tools). Instalação remota deixa de depender da máquina do usuário.
+
 ### 🎙️ voz EMBUTIDA + recursos NATIVOS (skills e plugins que viajam no pacote)
 - **STT (Whisper) ligado por padrão + auto-install**: o dono mandou áudio e o agente não entendeu —
   o stack de voz existia, mas STT era opt-in (nota de voz descartada em silêncio) e `import faster_whisper`
