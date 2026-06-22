@@ -1570,11 +1570,54 @@ class AgentEndpoint(EndpointCommandsMixin):
                     _default="process {id} finished (exit={exit_code}): {cmd}",
                     id=n["id"], exit_code=n.get("exit_code"), cmd=str(n.get("cmd", ""))[:60]))
 
+    def _seen_path(self):
+        from pathlib import Path as _P
+        return _P(self.ws) / ".okami" / "seen_msgs.json"
+
+    def _load_seen(self) -> None:
+        """Carrega o dedup de mensagens do disco no boot → restart NÃO reprocessa msg já vista (idempotência)."""
+        try:
+            import json
+            ids = json.loads(self._seen_path().read_text(encoding="utf-8"))
+            for mid in ids[-1000:]:
+                self._seen_msgs[str(mid)] = True
+        except (OSError, ValueError):
+            pass
+
+    def _persist_seen(self) -> None:
+        """Grava o dedup no disco (no shutdown) → sobrevive ao restart."""
+        try:
+            import json
+            p = self._seen_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(list(self._seen_msgs.keys())[-1000:]), encoding="utf-8")
+        except OSError:
+            pass
+
+    def request_stop(self, reason: str = "") -> None:
+        """Parada GRACIOSA: para de aceitar trabalho novo (o loop sai após a iteração atual) e persiste o
+        dedup. Chamado pelo handler de SIGTERM (systemd stop/restart) — evita morte abrupta no meio de uma escrita."""
+        self.running = False
+        self._persist_seen()
+        try:
+            from okami import log
+            log.dbg(f"shutdown gracioso solicitado ({reason or 'SIGTERM'}) — drenando")
+        except Exception:  # noqa: BLE001
+            pass
+
     def loop(self) -> None:
         try:                                            # boot: registra o menu '/' (Telegram setMyCommands)
             getattr(self.channel, "start", lambda: None)()
         except Exception:  # noqa: BLE001
             pass
+        try:                                            # SIGTERM/SIGINT → parada GRACIOSA (systemd stop/restart)
+            import signal as _sig
+            for _s in ("SIGTERM", "SIGINT"):
+                if hasattr(_sig, _s):
+                    _sig.signal(getattr(_sig, _s), lambda *_: self.request_stop("signal"))
+        except (ValueError, AttributeError, OSError):
+            pass                                        # não-main-thread / Windows parcial
+        self._load_seen()                               # dedup sobrevive ao restart
         try:                                            # SIGHUP → hot-reload (convenção de daemon)
             import signal as _sig
             _sig.signal(_sig.SIGHUP, lambda *_: setattr(self, "_reload_req", True))
@@ -1622,3 +1665,4 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001 — rede instável não derruba o bot
                 secs = self._breaker.record_failure(self.surface)  # falha → backoff exponencial (não martela)
                 time.sleep(min(secs, 3))
+        self._persist_seen()                            # saiu do loop (shutdown) → grava o dedup p/ o próximo boot
