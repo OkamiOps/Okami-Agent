@@ -80,19 +80,28 @@ def _video_url_from(resp: dict) -> str:
 def _default_post(url, body, headers):
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST", headers=headers)  # noqa: S310 — URL do config do dono
-    with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310
+            return json.loads(r.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError) as e:            # endpoint morto/inacessível → erro ACIONÁVEL
+        raise RuntimeError(f"endpoint de vídeo inacessível ({url}): {e}") from e
 
 
 def _default_get(url, headers):
     req = urllib.request.Request(url, method="GET", headers=headers)  # noqa: S310
-    with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
+            return json.loads(r.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"poll de vídeo inacessível ({url}): {e}") from e
 
 
 def _default_download(url, dest: Path):
-    with urllib.request.urlopen(url, timeout=300) as r:  # noqa: S310 — URL devolvida pelo provider configurado
-        dest.write_bytes(r.read())
+    try:
+        with urllib.request.urlopen(url, timeout=300) as r:  # noqa: S310 — URL devolvida pelo provider configurado
+            dest.write_bytes(r.read())
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"download do vídeo falhou ({url}): {e}") from e
 
 
 _MAX_IMAGE_BYTES = 25 * 1024 * 1024     # teto da imagem base (evita OOM no base64)
@@ -131,6 +140,8 @@ def generate_video(cfg, prompt: str, out: str, *, image: str | None = None,
 
     resp = post(vc["url"], body, headers)
     url = _video_url_from(resp)
+    if not isinstance(resp, dict):                             # provider devolveu corpo não-dict (ex.: JSON `null`)
+        raise RuntimeError(f"resposta inválida do provider de vídeo: {str(resp)[:160]}")
     if not url and resp.get("id") and vc["poll_url"]:          # assíncrono → poll
         job = resp["id"]
         for _ in range(_POLL_MAX):

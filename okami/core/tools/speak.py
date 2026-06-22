@@ -57,7 +57,10 @@ class TextToSpeech(Tool):
         if not vcfg.get("enabled"):
             return ToolResult(False, "TTS não habilitado — configure voice.tts.enabled: true no okami.yaml.")
         from okami.voice import make_tts
-        tts = make_tts(vcfg)
+        try:
+            tts = make_tts(vcfg)
+        except ValueError as e:                            # backend desconhecido (typo na config) → erro limpo,
+            return ToolResult(False, f"TTS mal configurado: {e}")   # não ValueError escapando do run()
         if tts is None:
             return ToolResult(False, "TTS não configurado (voice.tts) — não dá p/ falar.")
         # .resolve(): MEDIA:<path> exige caminho ABSOLUTO (a regex de extract_media não casa relativo) —
