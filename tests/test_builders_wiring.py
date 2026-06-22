@@ -96,6 +96,20 @@ def test_webhook_evento_sintetiza_e_chama_handle(tmp_path):
     assert ep.channel.sent == []                     # evento NÃO entrega cru; vai pro agente
 
 
+def test_webhook_platform_route_wires_parser(tmp_path):
+    """#20 wiring: rota de PLATAFORMA (dingtalk/wecom/…) com deliver_only=False recebe o parser real,
+    senão o servidor entrega o prompt GENÉRICO sintetizado em vez do TEXTO da mensagem (o parser nunca
+    era setado em _start_webhook → o inbound de webhook ficava morto em produção)."""
+    ep = FakeEndpoint("okami", str(tmp_path), home="casa-1")
+    raw = {"gateway": {"webhook": {"routes": {
+        "/dt": {"provider": "dingtalk", "secret": "k", "deliver_only": False},
+        "/ev": {"provider": "generic", "secret": "k", "deliver_only": False},
+    }}}}
+    srv = builders._start_webhook(raw, [ep], emit=lambda m: None)
+    assert srv.routes["/dt"].parser is not None       # plataforma → parser real ligado
+    assert srv.routes["/ev"].parser is None           # generic/desconhecido → sem parser (cai na síntese)
+
+
 def test_webhook_default_deliver_only_fail_safe(tmp_path):
     """Postura fail-safe: rota SEM deliver_only explícito é tratada como deliver_only (só entrega,
     não acorda o agente) — porta exposta não roda LLM até o dono pôr deliver_only: false."""

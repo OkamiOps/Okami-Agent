@@ -111,6 +111,18 @@ def test_validate_plan_rejects_bad_umbrella_and_unknown_absorb(tmp_path):
     assert any("nao-existe" in e for e in errors)
 
 
+def test_validate_plan_rejects_umbrella_in_absorb(tmp_path):
+    """Auto-absorção: umbrella que aparece no próprio absorb é incoerente (absorveria a si mesma).
+    validate_plan deve rejeitar com erro claro, não deixar passar silenciosamente (apply_plan já
+    protege a umbrella de sumir, mas o plano em si está mal-formado)."""
+    _mk_skill(tmp_path, "api-debugging")                  # umbrella existe como skill auto-criada
+    _mk_skill(tmp_path, "debug-stripe")
+    p = _plan()
+    p["merges"][0]["absorb"] = ["api-debugging", "debug-stripe"]   # umbrella se auto-absorve
+    _, errors = cur.validate_plan(p, tmp_path)
+    assert any("api-debugging" in e and "absor" in e.lower() for e in errors)
+
+
 def test_validate_plan_rejects_pinned_absorb(tmp_path):
     _mk_skill(tmp_path, "fixada", pinned=True)
     p = _plan()

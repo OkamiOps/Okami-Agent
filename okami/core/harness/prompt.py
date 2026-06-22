@@ -14,6 +14,20 @@ def is_conversational(task: Task) -> bool:
     return not [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
 
 
+def _format_criterion(c: dict) -> str:
+    """Descrição LEGÍVEL de um critério de saída p/ o prompt (não o dict cru `{'type': ...}`)."""
+    t = c.get("type")
+    if t == "file_exists":
+        return f"o arquivo '{c.get('path', '?')}' deve existir"
+    if t == "shell_ok":
+        return f"o comando deve passar (exit 0): {c.get('cmd', '?')}"
+    if t == "file_contains":
+        return f"'{c.get('path', '?')}' deve conter: {str(c.get('text', ''))[:80]}"
+    if t == "ui_gate":
+        return f"o gate de UI em '{c.get('path', '.')}' deve passar"
+    return str(c.get("desc") or t or c)               # tipo desconhecido → desc/tipo, não o dict cru
+
+
 _ORIENT_SKIP = {".git", "__pycache__", ".venv", "node_modules", ".okami", ".pytest_cache",
                 "dist", ".mypy_cache", ".ruff_cache", "build", ".idea", ".vscode"}
 
@@ -144,8 +158,8 @@ SEU REPERTÓRIO DE AÇÕES (ferramentas — repertório interno, NÃO um menu p/
         pass
 
     if not is_conversational(task):                  # --- modo TRABALHO (com gate de saída) ---
-        crit_txt = "\n".join(f"  - {c}" for c in [c for c in task.exit_criteria
-                                                  if c.get("type") not in (None, "model_declared")])
+        crit_txt = "\n".join(f"  - {_format_criterion(c)}" for c in task.exit_criteria
+                             if c.get("type") not in (None, "model_declared"))
         return f"""Você é o agente pessoal desta pessoa — uma IA que raciocina e EXECUTA, com voz própria.
 Quem você é, como fala e o que sabe da pessoa está abaixo (SOUL/VOICE/PERSONA) — NÃO é decoração: aja e
 fale no SEU tom, inclusive na ENTREGA final. O relatório é técnico no CONTEÚDO, mas a VOZ é SUA (não um

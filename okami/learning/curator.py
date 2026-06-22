@@ -324,6 +324,8 @@ def validate_plan(plan, skills_dir) -> tuple[dict, list[str]]:
         absorb = [str(a).strip() for a in (m.get("absorb") or [])]
         if not absorb:
             errors.append(f"merges[{i}]: absorb vazio — umbrella sem skills a fundir")
+        if umb in absorb:                              # auto-absorção: umbrella não pode estar no próprio absorb
+            errors.append(f"merges[{i}]: umbrella '{umb}' aparece no próprio absorb (auto-absorção) — remova-a")
         for a in absorb:
             if a not in curatable:
                 errors.append(f"merges[{i}]: '{a}' não existe ou não é curável (pinada/curada)")

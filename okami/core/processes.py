@@ -328,7 +328,7 @@ class ProcessManager:
                 os.kill(meta["pid"], signal.SIGTERM)
                 ok = True
             except OSError:
-                ok = ok or False
+                pass                                   # killpg E kill falharam → mantém o ok do docker-kill acima
         if ok and not self._exitf(pid_id).exists():
             self._exitf(pid_id).write_text("-15", encoding="utf-8")   # marca terminado por SIGTERM (poll determinístico)
         if self._ctrlf(pid_id).exists():

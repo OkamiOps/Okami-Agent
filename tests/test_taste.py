@@ -80,3 +80,16 @@ def test_promote_strong_taste_to_voice(tmp_path):
     # não re-promove o mesmo termo
     record_feedback(tmp_path, "like", "shadcn extra")
     assert (tmp_path / "VOICE.md").read_text(encoding="utf-8").count("Em design, prefira 'shadcn'") == 1
+
+
+def test_record_feedback_survives_promote_failure(tmp_path, monkeypatch):
+    """Bug (sweep #3): se promote_to_persona falhar (I/O de VOICE, persona indisponível), record_feedback
+    crashava — o link taste→VOICE é OPCIONAL e não pode derrubar o registro do feedback."""
+    import okami.learning.taste as taste
+
+    def _boom(self, workspace):
+        raise RuntimeError("persona indisponível")
+    monkeypatch.setattr(taste.TasteProfile, "promote_to_persona", _boom)
+    prof = taste.record_feedback(tmp_path, "like", "resposta curta")   # NÃO pode levantar
+    assert prof is not None
+    assert taste.TasteProfile.load(tmp_path) is not None              # e salvou o feedback mesmo assim

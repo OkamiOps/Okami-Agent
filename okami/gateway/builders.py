@@ -286,6 +286,7 @@ def _start_webhook(global_raw: dict, eps: list, emit: Callable[[str], None],
     prompt sintetizado). `serve=True` abre o socket na própria thread (junto ao scheduler); o default
     `serve=False` só guarda a config (testes / inspeção). A superfície é alimentada no aviso unisolated
     pelo run_gateway. `desktop_notify` (#4): toast best-effort também nas notificações deliver_only."""
+    from okami.channels.inbound_parsers import webhook_parser
     from okami.channels.webhook import WebhookRoute, WebhookServer
 
     gw = (global_raw or {}).get("gateway") or {}
@@ -327,6 +328,7 @@ def _start_webhook(global_raw: dict, eps: list, emit: Callable[[str], None],
             header=str(rc.get("header", "X-Signature")),
             tolerance=int(rc.get("tolerance", 300)),
             prompt_prefix=str(rc.get("prompt_prefix", "")),
+            parser=webhook_parser(str(rc.get("provider", "generic"))),   # #20: plataforma → entrega TEXTO real
         )
 
     def _handle(prompt: str, route: "WebhookRoute") -> None:

@@ -4,6 +4,24 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/); versionamento
 [SemVer](https://semver.org/lang/pt-BR/) (pré-1.0 = a superfície ainda pode mudar entre alphas).
 
+## [Não lançado]
+
+### 🐛 caça adversarial de dead-code + bugs (workflow 42 subagentes, 3 céticos/achado) — 5 reais corrigidos
+Varredura por 9 áreas + verificação por 3 céticos (grep repo-wide p/ não marcar dead-code despachado por
+registry/getattr). 7 confirmados, 4 rejeitados, 0 gap real do Hermes (já ~98% paridade + harness à frente).
+- **inbound de webhook estava MORTO em produção** (`gateway/builders.py`): o `parser` de plataforma
+  (dingtalk/wecom/weixin/qqbot/whatsapp/sms) nunca era ligado no `WebhookRoute` → todo callback caía na
+  síntese de prompt GENÉRICA em vez de entregar o TEXTO real da mensagem ao agente. Agora `parser=webhook_parser(provider)`.
+- **critérios de saída ilegíveis no prompt** (`harness/prompt.py`): o dict cru ia pro modelo
+  (`{'type': 'file_exists', 'path': 'hello.txt'}`) em vez de "o arquivo 'hello.txt' deve existir". Novo `_format_criterion`.
+- **`record_feedback` crashava** se `promote_to_persona` falhasse (`learning/taste.py`) — link taste→VOICE
+  é opcional, agora não derruba o registro do feedback.
+- **curador aceitava auto-absorção** (`learning/curator.py`): umbrella no próprio `absorb` passava silencioso
+  → `validate_plan` agora rejeita com erro claro.
+- **no-op morto** `ok = ok or False` no `ProcessManager.kill` (`core/processes.py`) → `pass` + comentário.
+- Considerados e descartados (não quebrados): falta de log no `distill_skill_llm`, variantes de "nada a salvar".
+  +4 testes (1 por bug funcional; o no-op é refactor sem mudança de comportamento).
+
 ## [Unreleased]
 
 ### 🧱 subagente #8: sobrevive ao restart (reconcile) — paridade com o BackgroundRegistry

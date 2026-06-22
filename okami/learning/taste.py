@@ -205,7 +205,10 @@ def record_feedback(workspace, verdict: str, descriptor: str, tags: list[str] | 
     prof = TasteProfile.load(workspace)
     prof.record(_VERDICTS.get(verdict, verdict), tags or [], descriptor=descriptor)
     if promote:
-        prof.promote_to_persona(workspace)               # taste→persona: termos consistentes viram VOICE
+        try:
+            prof.promote_to_persona(workspace)           # taste→persona: termos consistentes viram VOICE
+        except Exception:  # noqa: BLE001 — link p/ VOICE é OPCIONAL; nunca derruba o registro do feedback
+            pass
     prof.save(workspace)
     return prof
 
