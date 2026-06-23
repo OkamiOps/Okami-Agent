@@ -11,6 +11,24 @@ from __future__ import annotations
 from okami.core.tools.base import Tool, ToolContext, ToolResult
 
 
+def _telegram_token(cfg) -> str:
+    """Token do Telegram do PRÓPRIO agente. `channels.*` fica FORA do OkamiConfig (é segredo), então em
+    produção `ctx.cfg` é o OBJETO OkamiConfig SEM channels → ler `cfg.get('channels')` dava sempre vazio
+    (send_message com target nascia morto). Aqui: dict embedded (lib/teste) usa o próprio dict; objeto
+    OkamiConfig cai no RAW via load_raw + resolução token/token_env — o MESMO que o gateway faz."""
+    from okami.config import _resolve_secret
+    if isinstance(cfg, dict):                                   # embedded/lib/teste: o dict É a config
+        tg = (cfg.get("channels") or {}).get("telegram") or {}
+        return _resolve_secret(tg, "token") or str(tg.get("token") or "")
+    try:                                                        # produção: OkamiConfig → lê o raw do disco
+        from okami.config import load_raw
+        raw, _ = load_raw()
+        tg = (raw.get("channels") or {}).get("telegram") or {}
+        return _resolve_secret(tg, "token") or str(tg.get("token") or "")
+    except Exception:  # noqa: BLE001 — sem config legível → erro CLARO no chamador (não trava)
+        return ""
+
+
 class Notify(Tool):
     name = "notify"
     description = (
@@ -64,9 +82,7 @@ class SendMessage(Tool):
                 return ToolResult(False, "sem 'target' e sem canal de dono neste contexto.", False)
             ok = bool(fn(text))
             return ToolResult(ok, "entregue ao dono" if ok else "falha ao entregar", effect=ok)
-        cfg = getattr(ctx, "cfg", None)
-        tg = ((cfg.get("channels") or {}).get("telegram") or {}) if isinstance(cfg, dict) else {}
-        token = tg.get("token")
+        token = _telegram_token(getattr(ctx, "cfg", None))
         if not token:
             return ToolResult(False, "sem token de Telegram (channels.telegram.token) p/ enviar a um target.", False)
         from okami.channels.telegram import TelegramChannel
