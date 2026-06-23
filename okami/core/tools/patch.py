@@ -90,6 +90,21 @@ def parse_patch(text: str) -> list[PatchOp]:
 
 _AMBIGUOUS = -2            # contexto casa em VÁRIOS lugares no nível fuzzy → recusa (não escolhe sozinho)
 
+# Pontuação "bonita" que o modelo copia e NÃO casa byte-a-byte com a ASCII do arquivo (aspas curvas,
+# travessões, reticências, espaços especiais). Normalizar os dois lados corta uma classe real de no-match.
+_UNI_MAP = {
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",
+    "“": '"', "”": '"', "„": '"', "‟": '"',
+    "–": "-", "—": "-", "―": "-", "−": "-",
+    "…": "...", " ": " ", " ": " ", " ": " ", "​": "",
+}
+_UNI_TABLE = {ord(k): v for k, v in _UNI_MAP.items()}
+
+
+def _uni_norm(s: str) -> str:
+    """Normaliza pontuação unicode 'bonita' → ASCII (aspas/travessão/reticências/nbsp)."""
+    return s.translate(_UNI_TABLE)
+
 
 def _find_block(haystack: list[str], needle: list[str], start: int) -> int:
     """Posição do bloco `needle` em `haystack`. EXATO primeiro (a partir de `start`, depois do começo —
@@ -105,7 +120,9 @@ def _find_block(haystack: list[str], needle: list[str], start: int) -> int:
         for i in range(base, span):
             if haystack[i:i + len(needle)] == needle:
                 return i
-    for norm in (str.rstrip, str.strip):               # fuzzy: divergência de whitespace → exige UNICIDADE
+    # fuzzy crescente: whitespace (rstrip/strip), depois unicode→ASCII (aspas curvas/travessão/nbsp que o
+    # modelo copia). Cada nível exige match ÚNICO no arquivo (ambíguo → recusa, não corrompe em silêncio).
+    for norm in (str.rstrip, str.strip, lambda x: _uni_norm(x.strip())):
         n = [norm(x) for x in needle]
         matches = [i for i in range(span) if [norm(x) for x in haystack[i:i + len(needle)]] == n]
         if len(matches) == 1:
