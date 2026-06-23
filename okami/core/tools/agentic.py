@@ -171,10 +171,20 @@ class InstallSkill(Tool):
         source = str(args.get("source") or "").strip()
         if not source:
             return ToolResult(False, "install_skill precisa de `source` (owner/repo, caminho local ou URL git).")
+        # ANTI-LOOP (paridade Hermes — install fora do hot loop): a MESMA fonte que JÁ falhou nesta sessão
+        # NÃO é re-tentada. O fetch (git/npx) lento ou quebrado virava loop de ~59min; falhou 1x → pare.
+        try:
+            tried = ctx.__dict__.setdefault("_failed_skill_installs", set())
+        except Exception:  # noqa: BLE001 — ctx exótico (slots): segue sem o cap, não quebra
+            tried = set()
+        if source in tried:
+            return ToolResult(False, f"'{source}' JÁ falhou nesta sessão — NÃO re-tente a mesma fonte. "
+                              "Tente uma fonte diferente, ou peça ao dono a fonte/credencial certa.")
         lock_root = getattr(ctx, "workspace", None) or "."
         res = install_from_source(source, root, lock_root, only=str(args.get("name") or "").strip(),
                                   allow_exec=bool(args.get("allow_exec")), confirm=bool(args.get("confirm")))
         if not res.ok:
+            tried.add(source)                              # marca a fonte como falha → não re-tenta
             return ToolResult(False, f"install_skill: {res.reason}")
         # injeta no catálogo EM MEMÓRIA → o agente pode use_skill já, sem reiniciar o gateway.
         if isinstance(getattr(ctx, "skills", None), dict):

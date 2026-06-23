@@ -191,12 +191,22 @@ def _fetch_skill_source(source: str, dest: Path) -> None:
     if local.exists():  # caminho local
         shutil.copytree(local, dest / local.name, dirs_exist_ok=True)
         return
+    # TIMEOUT + stdin=DEVNULL em TODA busca de rede (paridade Hermes skills_hub): sem isto, um npx/clone
+    # lento ou que PEDE credencial pendurava p/ sempre, o anti-stall resetava a cada erro variado e o
+    # agente re-tentava → ~59min sem progresso (transcript real). Agora falha LIMPO e rápido.
     if source.startswith("clawhub:"):  # ClawHub (executa npx — gated por --allow-exec no learn)
-        subprocess.call(["npx", "clawhub", "install", source.split(":", 1)[1]], cwd=str(dest), env=env)
+        try:
+            subprocess.run(["npx", "clawhub", "install", source.split(":", 1)[1]], cwd=str(dest), env=env,
+                           stdin=subprocess.DEVNULL, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"timeout (120s) instalando '{source}' via clawhub — rede lenta ou o pacote travou.")
         return
     url = f"https://github.com/{source}.git" if re.match(r"^[\w.-]+/[\w.-]+$", source) else source
-    r = subprocess.run(["git", "clone", "--depth", "1", url], cwd=str(dest), env=env,  # noqa: S603,S607
-                       capture_output=True, text=True)
+    try:
+        r = subprocess.run(["git", "clone", "--depth", "1", url], cwd=str(dest), env=env,  # noqa: S603,S607
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"timeout (120s) clonando '{source}' — repo lento/inacessível ou pediu credencial.")
     if r.returncode != 0:                 # SEM checar o exit, repo inexistente/privado/sem rede virava o erro
         _tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["sem detalhe"]   # ENGANOSO "nenhuma SKILL.md"
         raise RuntimeError(f"git clone de '{source}' falhou: {_tail[0]}")
