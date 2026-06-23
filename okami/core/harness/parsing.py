@@ -61,6 +61,16 @@ _ACTION_RE = re.compile(
 class Action:
     tool: str
     args: dict
+    call_id: str = ""        # id da tool_call NATIVA (function-calling) — p/ casar a OBSERVAÇÃO como role=tool
+
+
+def _oai_tool_call(tc: dict) -> dict:
+    """tool_call interna {id,name,arguments} → formato OpenAI p/ ECHOAR na mensagem assistant (protocolo
+    de function-calling: o modelo vê sua própria tool_call + o resultado como role=tool, igual ao Hermes)."""
+    raw = tc.get("arguments")
+    args_str = raw if isinstance(raw, str) else json.dumps(raw or {}, ensure_ascii=False, default=str)
+    return {"id": tc.get("id") or "", "type": "function",
+            "function": {"name": tc.get("name") or "", "arguments": args_str or "{}"}}
 
 
 def _actions_from_tool_calls(tool_calls) -> list[Action]:
@@ -84,7 +94,7 @@ def _actions_from_tool_calls(tool_calls) -> list[Action]:
                 args = json.loads(repair_tool_call_arguments(raw, name))
             except json.JSONDecodeError:
                 args = {}
-        out.append(Action(name, args if isinstance(args, dict) else {}))
+        out.append(Action(name, args if isinstance(args, dict) else {}, call_id=tc.get("id") or ""))
     return out
 
 

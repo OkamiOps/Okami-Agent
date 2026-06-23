@@ -546,7 +546,10 @@ class Harness:
                     if _t is not None and getattr(_t, "arg_types", None):
                         _a.args = coerce_args(_a.args, _t.arg_types)
                 action = _acts[0] if _acts else None
-                self._batch = _lead_readonly(_acts[1:], action)   # resto = leituras seguras → rodam sem nova call
+                if comp.tool_calls:               # NATIVO: 1 tool_call/turno (a echoada) — casa 1:1 com a
+                    self._batch = []              # resposta role=tool; as demais o modelo re-emite no próximo.
+                else:
+                    self._batch = _lead_readonly(_acts[1:], action)   # JSON: lote de leituras (sem nova call)
 
             # --- Reparo de nome de tool ALUCINADO (Hermes): 'read'→'read_file' etc. antes de violar ---
             if action is not None and action.tool not in self.registry:
@@ -755,6 +758,10 @@ class Harness:
             step_n -= 1
         if action.tool not in _POLL_TOOLS:            # fez algo ≠ esperar processo → zera o budget de espera
             self._poll_waits = 0
+        # OBSERVAÇÃO vai PRIMEIRO (antes de qualquer nudge): no rail NATIVO o resultado (role=tool) tem de
+        # seguir IMEDIATAMENTE a mensagem assistant que echoou a tool_call — nudge de user no meio invalida a
+        # sequência de function-calling. Pro rail JSON é indiferente (result antes do nudge é até mais natural).
+        self._append_observation(step_n, action, res)
         # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
         # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
         if res.ok and not res.effect:
@@ -814,7 +821,6 @@ class Harness:
                 "Ou task_blocked."})
             self._steps_without_effect = 0
 
-        self._append_observation(step_n, action, res)
         return step_n
 
     def _append_observation(self, step_n: int, action: Action, res: ToolResult) -> None:
@@ -853,7 +859,21 @@ class Harness:
             obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
         _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
         self._obs_chars += len(_obs)
-        self.messages.append({"role": "user", "content": _obs})
+        # FUNCTION-CALLING NATIVO (paridade Hermes): se a ação veio de uma tool_call nativa E a mensagem
+        # logo acima é a assistant deste turno, ECHOA a tool_call nela (ATÔMICO: só agora que há resposta →
+        # rejeição nunca vira tool_call órfã) e devolve o resultado como role=tool. Senão, observação user
+        # (rail JSON, ou guard de segurança se a sequência não bater).
+        _prev = self.messages[-1] if self.messages else None
+        if (getattr(action, "call_id", "") and isinstance(_prev, dict)
+                and _prev.get("role") == "assistant" and "tool_calls" not in _prev):
+            from okami.core.harness.parsing import _oai_tool_call
+            _prev["tool_calls"] = [_oai_tool_call(
+                {"id": action.call_id, "name": action.tool, "arguments": action.args})]
+            if not _prev.get("content"):
+                _prev["content"] = None                # content vazio + tool_calls → null (alguns providers exigem)
+            self.messages.append({"role": "tool", "tool_call_id": action.call_id, "content": _obs})
+        else:
+            self.messages.append({"role": "user", "content": _obs})
 
     def _handle_terminal(self, t: Task, action: Action) -> Task | None:
         if action.tool == "respond":                     # FALA com o usuário (ReAct: ramo "texto")
