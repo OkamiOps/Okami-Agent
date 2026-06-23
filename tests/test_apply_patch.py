@@ -51,6 +51,16 @@ def test_parse_missing_envelope_teaches():
 
 
 # ------------------------------------------------------------------ aplicação
+def test_no_match_shows_similar_section(tmp_path):
+    # contexto que NÃO casa (typo) → em vez de beco sem saída, mostra a seção PARECIDA p/ copiar literal
+    # (mesmo fix do edit_file — corta o loop de re-chutar o contexto, visto travando apply_patch ~3min).
+    (tmp_path / "a.py").write_text("def foo():\n    velho()\n    fim()\n", encoding="utf-8")
+    res = ApplyPatch().run({"patch": _patch(
+        "*** Update File: a.py", "@@", "-    velhoo()", "+    novo()")},   # 'velhoo' não existe
+        _ctx(tmp_path, read=["a.py"]))
+    assert res.ok is False and "velho" in res.output      # aponta a linha real parecida do arquivo
+
+
 def test_update_exact_context(tmp_path):
     (tmp_path / "a.py").write_text("def foo():\n    velho()\n    fim()\n", encoding="utf-8")
     res = ApplyPatch().run({"patch": _patch(

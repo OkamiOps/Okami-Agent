@@ -130,8 +130,10 @@ def apply_hunks(text: str, hunks: list[list[tuple[str, str]]], path: str) -> str
                              "tornar o trecho único.")
         if i < 0:
             ctx = "\n".join(old[:3])
+            from okami.core.tools.files import _edit_did_you_mean   # mostra a seção PARECIDA p/ copiar literal
+            hint = _edit_did_you_mean(text, "\n".join(old), path)   # (evita o loop de re-chutar o contexto)
             raise PatchError(f"hunk {n + 1} de '{path}': contexto não encontrado no arquivo:\n{ctx}\n"
-                             "— copie as linhas EXATAS do arquivo (releia com read_file se preciso).")
+                             "— copie as linhas EXATAS do arquivo (releia com read_file se preciso)." + hint)
         lines[i:i + len(old)] = new
         pos = i + len(new)
     out = "\n".join(lines)
