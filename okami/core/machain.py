@@ -72,20 +72,43 @@ def verify(key: bytes, entries: list[dict]) -> list[bool]:
     return oks
 
 
-def tail_mac(path) -> str:
-    """O `mac` da ÚLTIMA linha do arquivo jsonl (p/ encadear o próximo append). "" se vazio/inexistente.
-
-    Tolerante a linhas malformadas (ignora as que não parseiam — só o último mac válido importa)."""
-    p = Path(path)
-    if not p.exists():
-        return ""
-    last = ""
-    for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+def _last_mac_in(text: str) -> str:
+    """O último `mac` não-vazio do texto jsonl (varre de trás p/ frente; ignora linha malformada)."""
+    for ln in reversed(text.splitlines()):
         ln = ln.strip()
         if not ln:
             continue
         try:
-            last = str(json.loads(ln).get("mac", "")) or last
+            mac = str(json.loads(ln).get("mac", ""))
         except json.JSONDecodeError:
             continue
-    return last
+        if mac:
+            return mac
+    return ""
+
+
+_TAIL_BYTES = 65536
+
+
+def tail_mac(path) -> str:
+    """O `mac` da ÚLTIMA linha do arquivo jsonl (p/ encadear o próximo append). "" se vazio/inexistente.
+
+    Lê só a CAUDA via seek (O(k)) — é chamado a CADA snapshot e o rollback chama várias vezes; ler o arquivo
+    INTEIRO virava O(n²) num log que só cresce. Tolerante a linha malformada (ignora as que não parseiam)."""
+    p = Path(path)
+    if not p.exists():
+        return ""
+    try:
+        size = p.stat().st_size
+        with p.open("rb") as f:
+            if size > _TAIL_BYTES:
+                f.seek(-_TAIL_BYTES, 2)              # só a cauda
+                f.readline()                         # 1ª linha provavelmente cortada no meio → descarta
+            chunk = f.read()
+        last = _last_mac_in(chunk.decode("utf-8", errors="ignore"))
+        if last or size <= _TAIL_BYTES:
+            return last
+        # cauda só tinha mac vazio (patológico) e o arquivo é maior → relê inteiro (correção > velocidade)
+        return _last_mac_in(p.read_text(encoding="utf-8", errors="ignore"))
+    except OSError:
+        return ""

@@ -133,8 +133,8 @@ class Checkpoints:
             self._maybe_compact()
 
     def _tail_mac(self) -> str:
-        ents = self.entries()
-        return str(ents[-1].get("mac", "")) if ents else ""
+        from okami.core.machain import tail_mac          # lê só a CAUDA do journal (O(k)) em vez de parsear
+        return tail_mac(self.journal)                    # TODAS as entradas só p/ pegar o último mac (hot path)
 
     def entries(self) -> list[dict]:
         if not self.journal.exists():
