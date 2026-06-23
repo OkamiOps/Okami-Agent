@@ -701,9 +701,10 @@ class Harness:
                     _last_progress = _wt.monotonic()      # passo concluído (mesmo negado) = atividade → reseta o anti-travamento
                     t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False))
                     self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
-                    self.messages.append({"role": "user", "content":
-                        f"AÇÃO NEGADA (go/no-go): o usuário recusou — {sens.reason}. Proponha "
-                        "alternativa, peça confirmação com outra abordagem, ou declare task_blocked."})
+                    self._reject(action,                                   # NATIVO → erro role=tool; JSON → user
+                                 f"erro: ação NEGADA (go/no-go) — {sens.reason}. Proponha uma alternativa.",
+                                 f"AÇÃO NEGADA (go/no-go): o usuário recusou — {sens.reason}. Proponha "
+                                 "alternativa, peça confirmação com outra abordagem, ou declare task_blocked.")
                     continue
 
             # --- Hook before_tool (§11): política externa pode VETAR a tool ---
@@ -713,9 +714,10 @@ class Harness:
                 _last_progress = _wt.monotonic()          # passo concluído (vetado) = atividade → reseta o anti-travamento
                 t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False))
                 self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
-                self.messages.append({"role": "user", "content":
-                    f"AÇÃO BLOQUEADA por um hook de política: '{action.tool}'. Tente outra "
-                    "abordagem ou declare task_blocked."})
+                self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
+                             f"erro: ação BLOQUEADA por hook de política ('{action.tool}'). Tente outra abordagem.",
+                             f"AÇÃO BLOQUEADA por um hook de política: '{action.tool}'. Tente outra "
+                             "abordagem ou declare task_blocked.")
                 continue
 
             # --- Tool normal ---
@@ -997,10 +999,11 @@ class Harness:
             # rejeitado: 'concluído' falso (§3.4)
             self._stats["gate_rejections"] += 1
             self._emit("complete_rejected", missing=missing)
-            self.messages.append({"role": "user", "content":
-                "task_complete REJEITADO — critérios de saída não satisfeitos:\n"
-                + "\n".join(f"  - {m}" for m in missing)
-                + "\nContinue trabalhando para satisfazê-los."})
+            _miss = "\n".join(f"  - {m}" for m in missing)
+            self._reject(action,                                           # NATIVO → erro role=tool; JSON → user
+                         f"erro: task_complete REJEITADO — critérios não satisfeitos:\n{_miss}\nContinue.",
+                         f"task_complete REJEITADO — critérios de saída não satisfeitos:\n{_miss}"
+                         "\nContinue trabalhando para satisfazê-los.")
             return None
         return None  # não deveria acontecer
 
