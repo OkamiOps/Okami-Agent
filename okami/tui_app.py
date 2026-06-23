@@ -184,6 +184,9 @@ if _HAS_TEXTUAL:
             self._exit_armed = 0.0
             self._busy_since: float | None = None
             self._details = "collapsed"                   # verbosidade dos tool-calls (/details)
+            self._running: tuple | None = None            # tool RODANDO agora (tool, args, t0) → indicador vivo
+            self._ticks = 0                               # contador monotônico de ticks (verbo rotativo)
+            self._history = _tui.InputHistory()           # ↑/↓ recall das mensagens enviadas
             try:                                          # tema persistido de sessoes anteriores (/skin save)
                 saved = _load_theme()
                 if saved and saved in self.available_themes:
@@ -259,7 +262,8 @@ if _HAS_TEXTUAL:
             log.write(self._agent_block(body))
 
         def sink_event(self, e: dict) -> None:
-            if e.get("kind") == "token":                  # #16: streaming token-a-token → escreve por LINHA
+            kind = e.get("kind")
+            if kind == "token":                           # #16: streaming token-a-token → escreve por LINHA
                 from rich.text import Text
                 self._tokbuf = getattr(self, "_tokbuf", "") + e.get("text", "")
                 while "\n" in self._tokbuf:
@@ -269,6 +273,11 @@ if _HAS_TEXTUAL:
                     self.query_one("#log", RichLog).write(Text(self._tokbuf, style="dim"))
                     self._tokbuf = ""
                 return
+            if kind == "tool_start":                      # terminal VIVO: guarda a tool em execução p/ o _tick
+                self._running = (e.get("tool", ""), e.get("args") or {}, time.monotonic())
+                return                                    # (o card final, com resultado, vem no 'step')
+            if kind == "step":                            # terminou → some o indicador vivo; o card vai pro log
+                self._running = None
             block = _tui.tool_block(e, self._details)     # tool-card (edit→diff, write→código, etc.)
             if block is not None:
                 self.query_one("#log", RichLog).write(block)
@@ -321,17 +330,30 @@ if _HAS_TEXTUAL:
             return True
 
         def on_key(self, event) -> None:
-            # navega o menu de comandos pelo teclado (Input continua focado): ↑↓ move, Esc fecha.
+            # menu de comandos aberto: ↑↓ navegam o menu, Esc fecha. menu fechado: ↑↓ recuperam o histórico
+            # das mensagens enviadas (paridade Hermes), desde que o foco esteja no input.
             menu = self._cmdmenu()
-            if menu is None or not menu.display or not menu.option_count:
+            if menu is not None and menu.display and menu.option_count:
+                if event.key in ("down", "up"):
+                    (menu.action_cursor_down if event.key == "down" else menu.action_cursor_up)()
+                    event.stop()
+                    event.prevent_default()
+                elif event.key == "escape":
+                    menu.display = False
+                    event.stop()
                 return
-            if event.key in ("down", "up"):
-                (menu.action_cursor_down if event.key == "down" else menu.action_cursor_up)()
+            if event.key in ("up", "down"):               # menu fechado → ↑/↓ = histórico do input
+                try:
+                    inp = self.query_one("#input", Input)
+                except Exception:  # noqa: BLE001
+                    return
+                if not inp.has_focus:
+                    return
+                val = self._history.prev() if event.key == "up" else self._history.next()
+                inp.value = val
+                inp.cursor_position = len(val)
                 event.stop()
                 event.prevent_default()
-            elif event.key == "escape":
-                menu.display = False
-                event.stop()
 
         def on_option_list_option_selected(self, event) -> None:
             # clique do MOUSE (ou Enter dentro do menu) numa sugestão → completa.
@@ -348,6 +370,7 @@ if _HAS_TEXTUAL:
                 menu.display = False
             if not text.strip():
                 return
+            self._history.add(text)                       # ↑/↓ recall depois
             self.transcript.append(("user", text))
             self.query_one("#log", RichLog).write(self._user_block(text))
             self._input_q.put(text)
@@ -513,16 +536,25 @@ if _HAS_TEXTUAL:
         def _tick(self) -> None:
             from rich.text import Text
             self._spin = (self._spin + 1) % len(_SPINNER)
+            self._ticks += 1
             busy = self._busy()
+            if not busy:
+                self._running = None                       # turno acabou → garante que o indicador vivo some
             self._busy_since = (self._busy_since or time.monotonic()) if busy else None
             try:
                 act = self.query_one("#activity", Static)
-                if busy:                                   # indicador VIVO de "raciocinando", com relógio
-                    el = int(time.monotonic() - (self._busy_since or time.monotonic()))
-                    a = Text()
-                    a.append(f"{_SPINNER[self._spin]} ", style="bold #ff7527")
-                    a.append(f"{self._agent} está raciocinando…", style="#ffb86c")
-                    a.append(f"  {el}s", style="#3d3e50")
+                if busy:
+                    run = self._running
+                    if run:                                # uma TOOL está rodando → mostra ela viva (Hermes):
+                        tool, targs, t0 = run              # emoji + spinner + nome + arg + relógio
+                        a = _tui.running_tool_text(tool, targs, spin=_SPINNER[self._spin],
+                                                   elapsed=int(time.monotonic() - t0))
+                    else:                                  # senão: "pensando" com verbo que ROTACIONA (FaceTicker)
+                        el = int(time.monotonic() - (self._busy_since or time.monotonic()))
+                        a = Text()
+                        a.append(f"{_SPINNER[self._spin]} ", style="bold #ff7527")
+                        a.append(f"{self._agent} está {_tui.thinking_phrase(self._ticks)}…", style="#ffb86c")
+                        a.append(f"  {el}s", style="#3d3e50")
                     act.update(a)
                     act.display = True
                 elif act.display:

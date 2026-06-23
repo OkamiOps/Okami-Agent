@@ -57,11 +57,15 @@ def test_tool_block_write_file_shows_new_content():
     assert "novo.py" in out and "print('oi')" in out
 
 
-def test_tool_block_read_preview_only_in_expanded():
+def test_tool_block_read_preview_by_default_short_collapsed():
+    # paridade Hermes: a caixa de resultado aparece POR PADRÃO (collapsed), só mais curta que no expanded.
     e = {"kind": "step", "tool": "read_file", "ok": True,
-         "args": {"path": "a.txt"}, "out": "conteúdo lido linha 1\nlinha 2\nlinha 3"}
-    assert "conteúdo lido" in _render(tui.tool_block(e, "expanded"))   # preview no expanded
-    assert "conteúdo lido" not in _render(tui.tool_block(e, "collapsed"))  # collapsed = só a linha
+         "args": {"path": "a.txt"}, "out": "L1\nL2\nL3\nL4\nL5\nL6"}
+    exp = _render(tui.tool_block(e, "expanded"))
+    col = _render(tui.tool_block(e, "collapsed"))
+    assert "L1" in exp and "L6" in exp                    # expanded mostra até 12 linhas
+    assert "L1" in col                                    # collapsed JÁ mostra o resultado (antes: só no expanded)
+    assert "L6" not in col                                # …mas capado curto (3 linhas)
 
 
 def test_tool_block_non_step_falls_back_to_event_line():

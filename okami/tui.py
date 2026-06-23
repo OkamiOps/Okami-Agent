@@ -415,6 +415,36 @@ def tool_emoji(tool: str) -> str:
     return "🛠️"
 
 
+# Verbo que ROTACIONA enquanto a agente pensa (paridade FaceTicker do Hermes: em vez de "pensando…"
+# fixo por 30s, o verbo muda devagar e dá sensação de vida). _THINK_EVERY ticks por verbo (~2s a 0.12s/tick).
+_THINK_VERBS = ("raciocinando", "vasculhando o código", "ligando os pontos", "pensando alto",
+                "montando o plano", "lendo com calma", "cruzando os fatos", "afiando a resposta",
+                "investigando", "conferindo os detalhes")
+_THINK_EVERY = 16
+
+
+def thinking_phrase(tick: int) -> str:
+    """Verbo do indicador de 'pensando' para o tick atual — rotaciona devagar (FaceTicker do Hermes)."""
+    return _THINK_VERBS[(int(tick) // _THINK_EVERY) % len(_THINK_VERBS)]
+
+
+def running_tool_text(tool: str, args: dict, *, spin: str = "", elapsed: int = 0):
+    """Linha VIVA de uma tool RODANDO (emoji + spinner + nome + arg + relógio) — paridade Hermes: a tool
+    aparece com spinner e duração ENQUANTO executa, não só depois com ✓/✗. Vai pro painel #activity (mutável
+    a cada tick); o card final (com resultado) vai pro #log quando termina."""
+    from rich.text import Text
+    t = Text(no_wrap=True, overflow="ellipsis")
+    t.append(f"  {tool_emoji(tool)} ", style="")
+    if spin:
+        t.append(f"{spin} ", style=f"bold {ORANGE}")
+    t.append(str(tool), style=f"bold {SOFT}")
+    prev = _args_preview(args or {})
+    if prev:
+        t.append(f" {prev}", style=MUTE)
+    t.append(f"  {int(elapsed)}s", style=DIM)
+    return t
+
+
 def author_rule(name: str, *, color: str, when: str = ""):
     """Separador de turno FORTE: régua horizontal com a barra ▌ + nome + hora, na cor do autor, que
     CRUZA a tela. Resolve 'a corzinha do lado do nome não basta' mantendo um visual SÓBRIO/profissional
@@ -560,7 +590,6 @@ def tool_block(e: dict, detail: str = "collapsed"):
     if line is None:                                       # detail=hidden → suprime o passo
         return None
     from rich.console import Group
-    from rich.markup import escape
     args = e.get("args") or {}
     tool = e.get("tool", "")
     extra: list = []
@@ -568,13 +597,61 @@ def tool_block(e: dict, detail: str = "collapsed"):
         extra.append(diff_block(str(args.get("old", "")), str(args.get("new", "")), path=str(args.get("path", ""))))
     elif tool == "write_file" and args.get("content"):
         extra.append(_code_preview(str(args.get("content", "")), _lang_for(str(args.get("path", "")))))
-    elif detail == "expanded":                             # leitura/shell/etc.: preview da saída no expanded
-        out = (e.get("out") or "").strip()
-        if out:
-            preview = "\n".join(out.splitlines()[:12])
-            extra.append(Text.from_markup(
-                "\n".join(f"     [{MUTE}]{escape(ln)}[/]" for ln in preview.splitlines())))
+    else:                                                  # leitura/shell/etc.: preview da saída SEMPRE (paridade
+        out = (e.get("out") or "").strip()                # Hermes — caixa de resultado por padrão), CURTA no
+        if out:                                            # collapsed (3 linhas) e maior no expanded (12).
+            prev = _out_preview(out, 12 if detail == "expanded" else 3)
+            if prev is not None:
+                extra.append(prev)
     return Group(line, *extra) if extra else line
+
+
+def _out_preview(out: str, max_lines: int):
+    """Preview indentado e dim da saída de uma tool (read/shell/…), capado em max_lines com marcador de
+    truncamento — espelha a caixa de resultado do Hermes. None se vazio."""
+    from rich.markup import escape
+    out = (out or "").strip()
+    if not out:
+        return None
+    lines = out.splitlines()
+    shown = lines[:max_lines]
+    rows = [f"     [{MUTE}]{escape(ln)}[/]" for ln in shown]
+    if len(lines) > max_lines:
+        rows.append(f"     [{DIM}]… +{len(lines) - max_lines} linhas[/]")
+    return Text.from_markup("\n".join(rows))
+
+
+class InputHistory:
+    """Anel de histórico do input (↑/↓ recall das mensagens enviadas) — paridade Hermes (useInputHandlers).
+    Ignora vazios e dups consecutivas. `prev()` anda pro mais antigo, `next()` pro mais novo; passar do fim
+    volta pra linha nova (vazia). Puro/testável; o TUI só liga as setas quando o menu de comandos está fechado."""
+
+    def __init__(self, cap: int = 200):
+        self._items: list[str] = []
+        self._pos: int | None = None                       # None = na ponta "viva" (linha nova)
+        self._cap = max(1, int(cap))
+
+    def add(self, line: str) -> None:
+        s = (line or "").strip()
+        if s and (not self._items or self._items[-1] != s):
+            self._items.append(s)
+            del self._items[:-self._cap]                    # bounded
+        self._pos = None                                    # toda submissão volta o cursor pra ponta
+
+    def prev(self) -> str:
+        if not self._items:
+            return ""
+        self._pos = len(self._items) - 1 if self._pos is None else max(0, self._pos - 1)
+        return self._items[self._pos]
+
+    def next(self) -> str:
+        if self._pos is None:
+            return ""
+        self._pos += 1
+        if self._pos >= len(self._items):
+            self._pos = None
+            return ""
+        return self._items[self._pos]
 
 
 def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:

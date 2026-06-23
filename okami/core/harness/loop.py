@@ -757,7 +757,8 @@ class Harness:
                 _last_progress = _wt.monotonic()          # grupo executado = ATIVIDADE → reseta o anti-travamento
                 continue
             self._fingerprints.append(fp)
-            try:
+            self._emit("tool_start", n=step_n + 1, tool=action.tool, args=action.args)   # terminal VIVO:
+            try:                                           # anuncia ANTES de rodar (spinner+relógio na TUI)
                 res = tool.run(action.args, self.ctx)
             except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
                 res = ToolResult(False, f"erro na tool {action.tool}: {e}")
