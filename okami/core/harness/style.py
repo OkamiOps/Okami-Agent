@@ -9,7 +9,10 @@ from __future__ import annotations
 
 # Superfícies que renderizam tabela markdown → mantêm o esqueleto com tabela. Telegram entrou: o
 # markdown_telegram converte tabela em lista 'rótulo: valor' (renderiza limpo), então o modelo PODE usar.
-_RICH_MARKDOWN = {"cli", "tui", "subagent", "terminal", "api", "telegram"}
+_RICH_MARKDOWN = {"cli", "tui", "subagent", "terminal", "telegram"}
+# Canais que NÃO renderizam markdown (email/SMS/webhook/API): direção de TEXTO PURO — sem tabela pipe,
+# sem `##`, sem crases (apareceriam como lixo literal). Paridade Hermes (blocos plain-text por plataforma).
+_PLAINTEXT = {"email", "api", "webhook"}
 
 # Hint de FORMATO por canal: o que cada superfície renderiza (e o que NÃO renderiza).
 _SURFACE_HINT = {
@@ -63,6 +66,21 @@ não existe.
 </entrega>"""
 
 
+def _delivery_plaintext() -> str:
+    """Entrega TEXTO PURO — canais que NÃO renderizam markdown (email/SMS/webhook/API): `##`, tabela pipe
+    e crases viram lixo literal. Parágrafos curtos, listas com hífen simples, rótulo:valor pra dados."""
+    return """<entrega>
+A resposta final vai INTEIRA e legível em TEXTO PURO — este canal NÃO renderiza markdown (`##`, tabela
+`| col |` e crases apareceriam como lixo). REGRAS DE FORMATO, sempre:
+- Parágrafos CURTOS com linha em branco entre eles. NUNCA um paredão.
+- Listas com hífen simples (`- item`), uma por linha. Nada de tabela pipe.
+- COMPARAÇÃO/DADOS → "rótulo: valor", uma linha por item.
+- TESTES → a LISTA das falhas reais (qual teste/erro) + o placar, não só "X/Y".
+PROIBIDO: tabela pipe, `##`, crases/blocos de código; over-claim ("segue acima"); jogar o conteúdo só
+na memória e mandar resumo. Se não está ESCRITO aqui, não existe.
+</entrega>"""
+
+
 def _delivery_bullets() -> str:
     """Esqueleto de entrega SEM tabela — canais que não renderizam tabela pipe (Telegram/Slack/…)."""
     return """<entrega>
@@ -92,7 +110,8 @@ _FAMILY_OPENAI = ("AFINADO PRO SEU MODELO: aja, não prometa — se disse que va
                   "o resultado com tool antes de afirmar 'pronto'. Não pergunte o que dá pra descobrir sozinho.")
 _FAMILY_GEMINI = ("AFINADO PRO SEU MODELO: seja CONCISO — poucas frases, foco em ação e resultado, não "
                   "narração. Use CAMINHO ABSOLUTO nas ferramentas; rode leituras independentes em PARALELO "
-                  "(um lote); flags não-interativas no shell (-y/--no-input).")
+                  "(um lote); flags não-interativas no shell (-y/--no-input). Não presuma que uma lib "
+                  "existe — confira o manifesto (package.json/requirements.txt/Cargo.toml) antes de importar.")
 _FAMILY_WEAK_OPEN = ("AFINADO PRO SEU MODELO: emita UMA ação por turno — um único bloco ```json "
                      "{\"tool\":\"...\",\"args\":{...}}```. Não narre o que vai fazer: chame a ferramenta. "
                      "Não responda de memória o que uma tool confere (arquivo/sistema/data) — use a tool.")
@@ -168,7 +187,12 @@ def model_family_guidance(model: str, native: bool = False) -> str:
 def style_block(surface: str = "cli") -> str:
     """Orientação de ESTILO da resposta (markdown + idioma + formato do canal). Visível no prompt."""
     surf = (surface or "cli").lower()
-    delivery = _delivery_full() if surf in _RICH_MARKDOWN or surf not in _SURFACE_HINT else _delivery_bullets()
+    if surf in _PLAINTEXT:                                # email/SMS/webhook/API → texto puro (sem tabela/##)
+        delivery = _delivery_plaintext()
+    elif surf in _RICH_MARKDOWN or surf not in _SURFACE_HINT:
+        delivery = _delivery_full()                      # rico (tabela) — desconhecido cai aqui (back-compat)
+    else:
+        delivery = _delivery_bullets()                   # Slack/Discord/… markdown sem tabela pipe
     hint = _SURFACE_HINT.get(surf, "")
     parts = ["COMO ESCREVER PRA PESSOA (isto é o que ela vê na resposta final — capriche no formato):",
              delivery, _LANGUAGE]
