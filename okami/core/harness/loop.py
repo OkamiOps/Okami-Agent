@@ -16,7 +16,8 @@ from okami.core.harness.models import Budget, Generate, Step, Task, TaskState
 from okami.core.harness.parallel import paths_collide, run_parallel
 from okami.core.harness.parsing import (
     FUTURE_INTENT, _ACTION_RE, Action, _action_from_tool_calls, _actions_from_tool_calls, action_schema,
-    detect_malformed, parse_action, parse_actions, prose_outside_action, truncated_action_name,
+    detect_malformed, parse_action, parse_actions, prose_outside_action, strip_think_blocks,
+    truncated_action_name,
 )
 from okami.core.harness.prompt import (
     _TOOL_RESULT_BUDGET, _user_start, build_system_prompt, check_exit, format_observation,
@@ -606,7 +607,7 @@ class Harness:
                         and not FUTURE_INTENT.search(text)  # promessa "vou fazer" NÃO é resposta
                         and '"tool"' not in text and len(text.strip()) >= 2):
                     t.state = TaskState.COMPLETE
-                    t.result = text.strip()
+                    t.result = strip_think_blocks(text)        # tira <think> que vazaria pra resposta visível
                     self._emit("complete", summary=t.result)
                     return t
                 self._consecutive_violations += 1
@@ -951,7 +952,7 @@ class Harness:
                     "rode o que for preciso (read_file, list_dir, find_files, run_shell) e ENTREGUE o "
                     "resultado real — não responda de memória."})
                 return None
-            msg = (action.args.get("message") or action.args.get("summary") or "").strip()
+            msg = strip_think_blocks(action.args.get("message") or action.args.get("summary") or "")
             if not msg and not self._empty_nudged:       # respondeu VAZIO (nem prosa) → pede a resposta 1x
                 self._empty_nudged = True
                 self._emit("violation", n=0, text="respondeu vazio")

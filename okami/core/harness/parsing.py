@@ -148,10 +148,33 @@ def _jsonify(v):
     return v
 
 
+_THINK_TAGS = r"think|thinking|reasoning|thought|reflection"
+_THINK_BLOCK_RE = re.compile(rf"<({_THINK_TAGS})\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
+_THINK_OPEN_RE = re.compile(rf"<({_THINK_TAGS})\b", re.IGNORECASE)
+_THINK_OPEN_TAIL_RE = re.compile(rf"<({_THINK_TAGS})\b[^>]*>.*\Z", re.DOTALL | re.IGNORECASE)
+_THINK_CLOSE_RE = re.compile(rf"</({_THINK_TAGS})\s*>", re.IGNORECASE)
+
+
+def strip_think_blocks(text: str) -> str:
+    """Remove blocos de raciocínio (<think>…</think> e variantes) do TEXTO — paridade think_scrubber do
+    Hermes (versão não-streaming). Sem isso: (a) o parser varre o raciocínio e executa uma tool_call
+    RASCUNHO que o modelo só cogitava; (b) as tags vazam pra resposta visível. Trata par fechado,
+    aberto-sem-fechar (corta até o fim) e fecha-sem-abrir (corta o início até o </tag>)."""
+    if not text or "<" not in text:
+        return text
+    t = _THINK_BLOCK_RE.sub("", text)                          # 1) pares fechados
+    if _THINK_OPEN_RE.search(t):                               # 2) abertura sem fechamento → corta ao fim
+        t = _THINK_OPEN_TAIL_RE.sub("", t)
+    if _THINK_CLOSE_RE.search(t) and not _THINK_OPEN_RE.search(t):  # 3) fechamento órfão → corta o início
+        t = _THINK_CLOSE_RE.split(t, maxsplit=1)[-1]
+    return t.strip()
+
+
 def parse_actions(text: str) -> list[Action]:
     """TODAS as ações na ORDEM (batch — Hermes roda várias por turno). Suporta: vários blocos
     {"tool","args"} no texto, OU um envelope {"actions":[{...},{...}]}, OU um array top-level [{...}].
-    Vazio se não houver ação válida."""
+    Vazio se não houver ação válida. Tira blocos <think> antes (rascunho de tool não pode executar)."""
+    text = strip_think_blocks(text)
     candidates: list[str] = []
     for blk in _FENCE.findall(text):                 # 1) blocos fenced (o agente é instruído a usar)
         candidates += _balanced_json_objects(blk)
