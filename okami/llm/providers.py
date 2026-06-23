@@ -331,11 +331,12 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
     rf = _response_format(pc, response_schema)
     if rf is not None:
         overrides.setdefault("response_format", rf)
-    if getattr(pc, "native_tools", False) and "tools" not in overrides:   # P0.4: tool-calling nativo (opt-in)
+    from okami.llm.native_capability import native_supported
+    if native_supported(pc) and "tools" not in overrides:   # tool-calling nativo — SÓ se o probe confirmou
         from okami.core.tools import default_registry, openai_tools
         overrides["tools"] = openai_tools(default_registry())
-        if getattr(pc, "tool_choice", "") and "tool_choice" not in overrides:   # força chamada de tool (sem bail)
-            overrides["tool_choice"] = pc.tool_choice
+        if "tool_choice" not in overrides:                  # força chamada de tool (sem bail): respond/
+            overrides["tool_choice"] = pc.tool_choice or "required"   # task_complete SÃO tools → sempre válido
     resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     choice = resp.choices[0]
     return Completion(text=_message_text(choice.message),                   # content; vazio → reasoning_content

@@ -168,8 +168,10 @@ class Harness:
         remote=None,                    # alvo de execução remoto (RemoteTarget) — FS/shell rodam LÁ
         set_remote=None,                # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
         stream_tokens: bool = False,    # #16: streaming token-a-token → emite eventos 'token' ao gerar
+        native_tools: bool = False,     # provider honra function-calling NATIVO (probe confirmou) → ramo nativo do prompt
     ):
         self.stream_tokens = stream_tokens
+        self._native_proto = native_tools   # protocolo: nativo (function-calling) vs JSON-em-texto (default)
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
         self.model = model              # nome do modelo → guidance por família (gpt/gemini/qwen…)
         self.images = images or []      # caminhos/URLs de imagens (vision §6) — exige modelo multimodal
@@ -388,7 +390,7 @@ class Harness:
                                                               workspace=self.ctx.workspace,
                                                               surface=self.surface, model=self.model,
                                                               allow_paths=self.ctx.allow_paths,
-                                                              open_fs=self.ctx.open_fs)},
+                                                              open_fs=self.ctx.open_fs, native=self._native_proto)},
             {"role": "user", "content": first},
         ]
         self._emit("start", goal=t.goal)

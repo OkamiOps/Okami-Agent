@@ -339,8 +339,10 @@ def run_task(
         return t
     from okami.core.sandbox import effective_sandbox
     sandbox = effective_sandbox(cfg.sandbox, surface)   # #P1.1: superfície exposta endurece por padrão
+    from okami.llm.native_capability import native_supported
+    _native = native_supported(pc)   # provider honra function-calling? (False instantâneo se native_tools off)
     _hkw = dict(
-        budget=budget, stream_tokens=_streaming,
+        budget=budget, stream_tokens=_streaming, native_tools=_native,
         on_event=on_event, escalate=escalate, system_extra=system_extra,
         memory=mem, core_block=core_block, approve=approve,
         skills=skills_map, registry=registry, cancel=cancel,

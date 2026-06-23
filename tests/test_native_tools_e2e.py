@@ -93,6 +93,7 @@ def test_litellm_attaches_tools_when_native(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(P.litellm, "completion", fake_completion)
+    monkeypatch.setattr("okami.llm.native_capability.native_supported", lambda pc: True)   # probe confirmou
     pc = ProviderConfig(name="p", model="openai/x", native_tools=True, tool_choice="auto")
     P._complete_one(pc, [{"role": "user", "content": "hi"}], None, None, {})
     assert "tools" in captured and captured["tool_choice"] == "auto"

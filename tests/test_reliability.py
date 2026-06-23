@@ -209,6 +209,7 @@ def test_native_tools_sends_schemas_and_tool_choice(monkeypatch):
     monkeypatch.setattr(prov, "_response_format", lambda *a, **k: None)   # json_text não força JSON
     monkeypatch.setattr(prov.transports, "dispatch", lambda *a, **k: None)
     monkeypatch.setattr(prov.litellm, "completion", lambda **kw: seen.update(kw) or _Resp())
+    monkeypatch.setattr("okami.llm.native_capability.native_supported", lambda pc: True)   # probe confirmou MiniMax
     prov._complete_one(pc, [{"role": "user", "content": "oi"}], pc.model, {"type": "object"}, {})
     assert seen.get("tools") and len(seen["tools"]) > 0           # schemas das tools enviados (paralelo possível)
     assert seen.get("tool_choice") == "required"                  # força chamar tool (sem bail pra prosa)
