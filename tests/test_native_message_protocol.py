@@ -75,6 +75,30 @@ def test_native_invalid_tool_gets_tool_role_error(tmp_path):
     assert h.messages[i + 1]["role"] == "tool"                  # echoada + resposta → sem órfã
 
 
+def test_native_multiple_reads_run_in_one_turn(tmp_path):
+    (tmp_path / "a.txt").write_text("AAA", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("BBB", encoding="utf-8")
+    calls = {"n": 0}
+
+    def gen(messages, schema=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Completion(text="", tool_calls=[
+                {"id": "c1", "name": "read_file", "arguments": '{"path":"a.txt"}'},
+                {"id": "c2", "name": "read_file", "arguments": '{"path":"b.txt"}'}])
+        return Completion(text="", tool_calls=[
+            {"id": "c3", "name": "task_complete", "arguments": '{"summary":"li os dois"}'}])
+
+    h = Harness(gen, Task(goal="leia a e b"), tmp_path)
+    h.run()
+    assert calls["n"] == 2                                       # 2 leituras rodaram no MESMO turno (1 geração)
+    asst = _assistant_with_tool_calls(h.messages)
+    assert asst and asst[0][1]["tool_calls"][0]["id"] == "c1"   # 1ª echoada como tool_call
+    assert h.messages[asst[0][0] + 1]["role"] == "tool"         # sequência válida
+    blob = " ".join(str(m.get("content")) for m in h.messages)
+    assert "AAA" in blob and "BBB" in blob                      # AMBOS os arquivos foram lidos
+
+
 def test_json_rail_still_uses_user_observation(tmp_path):
     (tmp_path / "b.txt").write_text("x", encoding="utf-8")
     calls = {"n": 0}

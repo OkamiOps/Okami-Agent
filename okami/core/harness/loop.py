@@ -546,10 +546,10 @@ class Harness:
                     if _t is not None and getattr(_t, "arg_types", None):
                         _a.args = coerce_args(_a.args, _t.arg_types)
                 action = _acts[0] if _acts else None
-                if comp.tool_calls:               # NATIVO: 1 tool_call/turno (a echoada) — casa 1:1 com a
-                    self._batch = []              # resposta role=tool; as demais o modelo re-emite no próximo.
-                else:
-                    self._batch = _lead_readonly(_acts[1:], action)   # JSON: lote de leituras (sem nova call)
+                # VÁRIAS por turno (paridade Hermes): leituras seguras líderes rodam no MESMO turno (nativo E
+                # JSON). No nativo a 1ª é a tool_call DECLARADA na assistant (role=tool); as demais voltam como
+                # observação (sequência válida, sem órfã). Mutação/encerramento seguem 1-por-turno.
+                self._batch = _lead_readonly(_acts[1:], action)
 
             # --- Reparo de nome de tool ALUCINADO (Hermes): 'read'→'read_file' etc. antes de violar ---
             if action is not None and action.tool not in self.registry:
