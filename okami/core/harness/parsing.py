@@ -120,10 +120,22 @@ def _loads_forgiving(raw: str):
         import ast
         v = ast.literal_eval(s)                      # só literais Python → não executa código
         if isinstance(v, (dict, list)):
-            return v
+            return _jsonify(v)                       # set/tupla do ast → tipos JSON (senão crasha json.dumps)
     except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
         pass
     return None
+
+
+def _jsonify(v):
+    """Normaliza o resultado do ast.literal_eval pra tipos JSON-SAFE: set/frozenset/tupla → lista
+    (recursivo). Sem isto, um `{'a','b'}` (set Python) escapava pra dentro de action.args e o json.dumps
+    do _fingerprint/eventos DERRUBAVA o turno ('Object of type set is not JSON serializable')."""
+    if isinstance(v, dict):
+        return {k: _jsonify(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set, frozenset)):
+        items = sorted(v, key=str) if isinstance(v, (set, frozenset)) else v   # set é não-ordenado → estável
+        return [_jsonify(x) for x in items]
+    return v
 
 
 def parse_actions(text: str) -> list[Action]:

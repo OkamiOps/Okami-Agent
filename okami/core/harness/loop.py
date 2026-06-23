@@ -64,7 +64,7 @@ def _lead_readonly(actions: list[Action], first: Action | None) -> list[Action]:
     """A sequência LÍDER de leituras seguras (batchable), deduplicada (inclusive vs a 1ª ação). PARA na
     primeira ação que mute/encerre/peça aprovação — essa e as seguintes re-geram normalmente (1-por-turno)."""
     def _fp(a: Action) -> str:
-        return f"{a.tool}:{json.dumps(a.args, sort_keys=True, ensure_ascii=False)}"
+        return f"{a.tool}:{json.dumps(a.args, sort_keys=True, ensure_ascii=False, default=str)}"
     seen = {_fp(first)} if first is not None else set()
     out: list[Action] = []
     for a in actions:
@@ -365,7 +365,9 @@ class Harness:
 
     @staticmethod
     def _fingerprint(action: Action) -> str:
-        return f"{action.tool}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
+        # default=str: tipo não-JSON (set/etc) NUNCA derruba o turno no fingerprint (defesa; o parser já
+        # normaliza, mas tool/MCP pode injetar args exóticos).
+        return f"{action.tool}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False, default=str)}"
 
     def run(self) -> Task:
         t = self.task

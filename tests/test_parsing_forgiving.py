@@ -5,6 +5,8 @@ O reparo multi-passe existia mas só rodava no caminho de function-call NATIVO. 
 no caminho de texto, que é o que o modelo local usa de verdade (gap #1 vs Hermes message_sanitization)."""
 from __future__ import annotations
 
+import json
+
 from okami.core.harness.parsing import parse_action, parse_actions
 
 
@@ -49,3 +51,24 @@ def test_batch_with_single_quotes():
 
 def test_garbage_still_yields_no_action():
     assert parse_actions("isso é só conversa, sem json nenhum") == []
+
+
+def test_set_literal_becomes_json_safe_list():
+    # ast.literal_eval parseia {'a','b'} como SET do Python → tem que virar lista JSON-safe, senão o
+    # json.dumps do _fingerprint crasha o turno inteiro ("Object of type set is not JSON serializable").
+    a = parse_action(J("{'tool': 'apply_patch', 'args': {'cmds': {'a', 'b'}}}"))
+    assert a is not None and a.tool == "apply_patch"
+    json.dumps(a.args)                                  # NÃO pode crashar
+    assert isinstance(a.args["cmds"], list) and sorted(a.args["cmds"]) == ["a", "b"]
+
+
+def test_tuple_literal_becomes_list():
+    a = parse_action(J("{'tool': 'read_file', 'args': {'pair': (1, 2)}}"))
+    assert a is not None and a.args["pair"] == [1, 2]    # tupla → lista (JSON-safe)
+
+
+def test_fingerprint_never_crashes_on_stray_set():
+    from okami.core.harness.parsing import Action
+    from okami.core.harness.loop import Harness
+    fp = Harness._fingerprint(Action("x", {"s": {1, 2}}))   # defesa: mesmo que um set escape, não derruba
+    assert fp.startswith("x:")
