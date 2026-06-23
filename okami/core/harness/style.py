@@ -116,6 +116,18 @@ _EDIT_FORMAT_RULES = (
 )
 
 
+_WEAK_OPEN_NEEDLES = ("qwen", "deepseek", "glm", "minimax", "mimo", "kimi", "moonshot",
+                      "llama", "mistral", "devstral", "gemma")
+
+
+def is_weak_open_model(model: str) -> bool:
+    """True p/ modelo ABERTO/LOCAL 'fraco' (qwen/glm/minimax/llama/…). Sinaliza prompt ENXUTO: a cauda
+    longa de tools vira 1-linha (núcleo segue inteiro), porque um modelo 8-32B não segura 66 tools com
+    descrição inteira na atenção. Desconhecido/forte (Claude/GPT/Gemini) → False (prompt completo)."""
+    m = (model or "").lower()
+    return any(n in m for n in _WEAK_OPEN_NEEDLES)
+
+
 def _edit_format_line(model: str) -> str:
     """Linha de steering de formato de edição p/ a família do `model` ("" p/ Claude/desconhecido)."""
     m = (model or "").lower()

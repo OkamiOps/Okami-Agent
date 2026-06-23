@@ -9,6 +9,20 @@ from okami.core.harness.models import Task
 from okami.core.tools import Tool, ToolContext, ToolResult, sanitized_env
 
 
+# Núcleo SEMPRE renderizado inteiro (mesmo p/ modelo fraco): arquivo/código, shell/processo, memória/web,
+# skills e os terminais de turno. A cauda longa (vídeo/imagem/vision/x/home/feishu/computer-use/lsp/cron/
+# blueprint/kanban/…) vira 1-linha + tool_search p/ não estourar a atenção do modelo local.
+_CORE_TOOLS = frozenset({
+    "read_file", "write_file", "edit_file", "apply_patch", "list_dir", "find_files", "search_files",
+    "make_dir", "move_path", "copy_path", "delete_path", "read_extract",
+    "run_shell", "process_start", "process_poll", "process_log", "process_kill", "execute_code",
+    "remember", "remember_user", "recall", "browse", "web_search", "web_extract",
+    "use_skill", "install_skill", "tool_search",
+    "respond", "task_complete", "task_blocked", "need_input", "clarify",
+    "send_message", "notify", "generate_pdf",
+})
+
+
 def is_conversational(task: Task) -> bool:
     """Conversa (papo) vs TRABALHO (tem critério verificável de saída)."""
     return not [c for c in (task.exit_criteria or []) if c.get("type") not in (None, "model_declared")]
@@ -56,11 +70,21 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", 
     # schema completo vem sob demanda via tool_search. Poucas tools MCP → descrição inteira (sem custo).
     _mcp = [t for t in registry.values() if getattr(t, "mcp", False)]
     _compact_mcp = len(_mcp) > 8
+    # Tier ABERTO/FRACO (qwen/glm/minimax/…): a CAUDA LONGA de tools built-in também vira 1-linha (núcleo
+    # inteiro). 66 tools com descrição cheia = ~6K tokens que um modelo 8-32B não segura na atenção →
+    # alucina nome de tool / conversa em vez de agir (gap #3 vs Hermes, que manda poucas + tool_search).
+    from okami.core.harness.style import is_weak_open_model
+    _weak = is_weak_open_model(model)
     lines = []
     for t in registry.values():
         if _compact_mcp and getattr(t, "mcp", False):
             first = (t.description or "").split(". ", 1)[0][:80]
             lines.append(f'- {t.name} (MCP): {first} — schema completo: tool_search("{t.name}")')
+            continue
+        if _weak and t.name not in _CORE_TOOLS and not getattr(t, "mcp", False):
+            first = (t.description or "").split(". ", 1)[0][:70]
+            argk = ", ".join(t.args_schema.keys())
+            lines.append(f'- {t.name}: {first} — args: {{{argk}}} · detalhes: tool_search("{t.name}")')
             continue
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
         lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
