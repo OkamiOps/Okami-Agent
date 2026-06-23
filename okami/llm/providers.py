@@ -478,9 +478,9 @@ def complete_messages_ex(
                 _rg.note_overloaded(pc.name)
             if ce.rotate_key:
                 _park_key(ov.get("_api_key"), ce, provider=pc.name)   # parqueia (in-memory + persistente)
-            if ce.never_repeat:                       # content_policy: payload idêntico NUNCA re-enviado
-                do_fallback = False                   # (nem p/ outro provider — seria repetir igual)
-                break
+            if ce.never_repeat:                       # content_policy: NÃO re-envia na MESMA chave (o break
+                do_fallback = ce.fallback             # já garante isso), mas PODE failover p/ outro provider/
+                break                                 # família que talvez não recuse (o set `tried` corta loop)
             if not ce.retryable:                      # 400/auth-perm/model-retired → não insiste
                 do_fallback = ce.fallback
                 break

@@ -43,6 +43,40 @@ def _retry_after_of(exc) -> float | None:
     return float(m.group(1)) if m else None
 
 
+# Sinal de cota TRANSITÓRIA/periódica (reseta sozinha) — NÃO é billing permanente: martelar depois do
+# reset resolve, pedir humano não. Desambigua um 429-de-cota de uma conta sem crédito.
+_TRANSIENT_QUOTA = re.compile(r"resets?\s*(in|at)|try again in|requests?\s*remaining|per\s*(second|minute|hour|day)|"
+                              r"\bwindow\b|retry.?after|\brpm\b|\btpm\b|periodic|rate.?limit", re.I)
+# 5xx que na verdade é erro DETERMINÍSTICO de validação do request (alguns providers devolvem 500/502 p/
+# parâmetro inválido) — re-tentar igual martela pra sempre; trata como bad_request (não-retriável).
+_VALIDATION = re.compile(r"unknown parameter|unsupported parameter|unrecognized request argument|"
+                         r"invalid_request_error|unexpected keyword|no such parameter|invalid value for", re.I)
+
+
+def _msg_of(exc) -> str:
+    """Texto p/ classificar — junta str(exc) + a mensagem REAL aninhada no body do provider (OpenRouter/
+    litellm escondem o motivo em body['error']['message'] e ['metadata']['raw']). Defensivo: erro no parse
+    nunca derruba a classificação (cai no str(exc))."""
+    parts = [str(exc)]
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            if isinstance(err.get("message"), str):
+                parts.append(err["message"])
+            meta = err.get("metadata")
+            raw = meta.get("raw") if isinstance(meta, dict) else None
+            if isinstance(raw, str):
+                try:
+                    import json
+                    inner = json.loads(raw)
+                    im = (inner.get("error") or {}).get("message") if isinstance(inner, dict) else None
+                    parts.append(im if isinstance(im, str) else raw)
+                except Exception:  # noqa: BLE001
+                    parts.append(raw)
+    return "  ".join(parts)
+
+
 def _status_of(exc) -> int | None:
     for attr in ("status_code", "status", "code", "http_status"):
         v = getattr(exc, attr, None)
@@ -92,11 +126,12 @@ def classify(exc) -> ClassifiedError:
     quando é BILLING — backoff não resolve falta de crédito; rotacionar chave JÁ resolve), e
     model_retired/region/suspended antes dos genéricos 403/404."""
     s = _status_of(exc)
-    msg = str(exc)
+    msg = _msg_of(exc)                                  # inclui o motivo aninhado no body do provider
     if exc.__class__.__name__ == "EmptyResponse" or _EMPTY.search(msg):
         return ClassifiedError("empty_response", s, retryable=True, fallback=True)
-    if _BILLING.search(msg) or s == 402:
-        # sem crédito NESTA chave/conta: backoff é inútil — rotaciona JÁ e failover (Hermes: billing→rotaciona JÁ)
+    if (_BILLING.search(msg) or s == 402) and not _TRANSIENT_QUOTA.search(msg):
+        # sem crédito NESTA chave/conta (sem sinal de reset): backoff é inútil — rotaciona JÁ e failover.
+        # Cota TRANSITÓRIA (reset/try-again/window) NÃO entra aqui → cai no rate_limit abaixo e retenta.
         return ClassifiedError("billing", s, retryable=True, rotate_key=True, fallback=True)
     if s == 429 or _RATE.search(msg):
         return ClassifiedError("rate_limit", s, retryable=True, rotate_key=True, fallback=True,
@@ -129,6 +164,8 @@ def classify(exc) -> ClassifiedError:
         return ClassifiedError("network", s, retryable=True, fallback=True)
     if s == 400:
         return ClassifiedError("bad_request", s, retryable=False)
+    if s in (500, 502) and _VALIDATION.search(msg):       # 5xx que é validação determinística → não retenta
+        return ClassifiedError("bad_request", s, retryable=False, fallback=True)
     if s is not None and s >= 500:
         return ClassifiedError("server_error", s, retryable=True, fallback=True)
     return ClassifiedError("unknown", s, retryable=True)

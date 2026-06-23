@@ -115,4 +115,6 @@ def test_never_repeat_blocks_identical_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(prov, "_complete_one", fake_one)
     with pytest.raises(Exception):
         prov.complete_messages(cfg, [{"role": "user", "content": "x"}], _sleep=lambda s: None)
-    assert tried == ["a"]                             # NÃO mandou o payload idêntico pro 'b'
+    # paridade Hermes (#4): content_policy faz FAILOVER p/ outra família (que talvez não recuse), mas NÃO
+    # re-tenta o MESMO provider com o payload idêntico — 'a' aparece só 1x, depois tenta 'b'.
+    assert tried == ["a", "b"] and tried.count("a") == 1
