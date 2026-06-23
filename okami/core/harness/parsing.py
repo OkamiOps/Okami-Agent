@@ -101,6 +101,31 @@ def parse_action(text: str) -> Action | None:
     return acts[-1] if acts else None
 
 
+def _loads_forgiving(raw: str):
+    """json.loads TOLERANTE ao modelo local fraco (gap #1 vs Hermes). O modelo (minimax m3) cospe JSON
+    'quase-válido' — aspas SIMPLES (estilo dict do Python), None/True/False do Python, vírgula sobrando —
+    e o `json.loads` cru descartava TUDO isso → nenhuma ação → loop de 'REJEITADO'. Aqui:
+      1) JSON estrito (strict=False já aceita control-char cru dentro de string);
+      2) ast.literal_eval — SEGURO (só literais, nunca executa) → cobre aspas simples + None/True/False +
+         vírgula final do estilo Python, que é a falha #1 de modelo local.
+    Devolve dict/list, ou None se não der (NÃO inventa: objeto truncado/lixo → None → o harness re-pede)."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return json.loads(s, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        import ast
+        v = ast.literal_eval(s)                      # só literais Python → não executa código
+        if isinstance(v, (dict, list)):
+            return v
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        pass
+    return None
+
+
 def parse_actions(text: str) -> list[Action]:
     """TODAS as ações na ORDEM (batch — Hermes roda várias por turno). Suporta: vários blocos
     {"tool","args"} no texto, OU um envelope {"actions":[{...},{...}]}, OU um array top-level [{...}].
@@ -112,9 +137,8 @@ def parse_actions(text: str) -> list[Action]:
         candidates = _balanced_json_objects(text)    # 2) fallback: texto inteiro, balanceado
     out: list[Action] = []
     for raw in candidates:                           # ordem do documento (batch executa nessa ordem)
-        try:
-            obj = json.loads(raw)
-        except json.JSONDecodeError:
+        obj = _loads_forgiving(raw)
+        if obj is None:
             continue
         for d in (obj if isinstance(obj, list) else [obj]):
             if not isinstance(d, dict):
