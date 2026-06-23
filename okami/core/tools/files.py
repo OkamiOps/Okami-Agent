@@ -342,10 +342,11 @@ class FindFiles(Tool):
             return ToolResult(False, "find_files exige 'query' não-vazio.")
         hits = []
         for p in ctx.workspace.rglob("*"):
-            if any(part in self._SKIP for part in p.parts):
-                continue
+            rel = p.relative_to(ctx.workspace)               # _SKIP só vale DENTRO do workspace — senão um
+            if any(part in self._SKIP for part in rel.parts):  # ancestral skip-listed (o agente roda sob
+                continue                                     # ~/.okami/…) zerava TODA busca (find_files cego)
             if q in _norm_name(p.name):
-                hits.append(str(p.relative_to(ctx.workspace)) + ("/" if p.is_dir() else ""))
+                hits.append(str(rel) + ("/" if p.is_dir() else ""))
                 if len(hits) >= 60:
                     break
         return ToolResult(True, "\n".join(sorted(hits)) or f"(nada casou com '{args['query']}')", effect=False)
