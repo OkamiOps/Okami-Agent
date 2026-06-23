@@ -556,7 +556,7 @@ class Harness:
                 _fix = _repair_tool_name(action.tool, self.registry)
                 if _fix:
                     self._emit("tool_repaired", **{"from": action.tool, "to": _fix})
-                    action = Action(_fix, action.args)
+                    action = Action(_fix, action.args, call_id=action.call_id)   # preserva o id nativo
 
             # --- Action-or-Terminate (§3.2) ---
             if action is None or action.tool not in self.registry:
@@ -586,9 +586,10 @@ class Harness:
                     if self._try_escalate("violações de Action-or-Terminate"):
                         continue
                     return self._fail(t, "violações repetidas de Action-or-Terminate")
-                self.messages.append({"role": "user", "content":
-                    f"REJEITADO: nenhuma ação válida.{hint} Emita UM bloco ```json "
-                    f'{{"tool": "...", "args": {{...}}}}``` agora — ou task_blocked.'})
+                self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
+                             f"erro: ferramenta inválida.{hint} Chame uma ferramenta REAL.",
+                             f"REJEITADO: nenhuma ação válida.{hint} Emita UM bloco ```json "
+                             f'{{"tool": "...", "args": {{...}}}}``` agora — ou task_blocked.')
                 continue
             self._consecutive_violations = 0
 
@@ -619,9 +620,10 @@ class Harness:
                     if self._try_escalate("loop persistente"):
                         continue
                     return self._fail(t, "loop persistente de tool-calling")
-                self.messages.append({"role": "user", "content":
-                    "LOOP DETECTADO: você já repetiu essa ação. NÃO repita — faça algo "
-                    "diferente ou declare task_blocked com a razão."})
+                self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
+                             "erro: ação repetida (loop). NÃO repita — faça algo DIFERENTE ou conclua.",
+                             "LOOP DETECTADO: você já repetiu essa ação. NÃO repita — faça algo "
+                             "diferente ou declare task_blocked com a razão.")
                 self._fingerprints.append(fp)
                 continue
 
@@ -661,8 +663,9 @@ class Harness:
                         continue
                     return self._fail(t, f"ação '{action.tool}' veio sem argumento(s) obrigatório(s) "
                                          f"{missing} repetidas vezes — modelo não consegue formar a chamada.")
-                self.messages.append({"role": "user", "content":
-                    f"Ação '{action.tool}' sem argumento(s) obrigatório(s): {missing}. Reenvie completa."})
+                self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
+                             f"erro: faltou argumento obrigatório {missing}. Reenvie a chamada COMPLETA.",
+                             f"Ação '{action.tool}' sem argumento(s) obrigatório(s): {missing}. Reenvie completa.")
                 continue
 
             # --- Go/No-Go para ação sensível (§12): identidade, .env, segredos, shell destrutivo ---
@@ -739,6 +742,22 @@ class Harness:
             _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+
+    def _reject(self, action, native_err: str, user_msg: str) -> None:
+        """Recusa uma ação NÃO-dispatchada. NATIVO (action tem call_id e a assistant acima ainda não echoou):
+        injeta o erro como role=tool — o modelo vê a própria tool_call + o erro e se auto-corrige (paridade
+        Hermes), e a sequência fica válida (echo atômico → sem tool_call órfã). Senão: mensagem de user."""
+        _prev = self.messages[-1] if self.messages else None
+        if (action is not None and getattr(action, "call_id", "") and isinstance(_prev, dict)
+                and _prev.get("role") == "assistant" and "tool_calls" not in _prev):
+            from okami.core.harness.parsing import _oai_tool_call
+            _prev["tool_calls"] = [_oai_tool_call(
+                {"id": action.call_id, "name": action.tool, "arguments": action.args})]
+            if not _prev.get("content"):
+                _prev["content"] = None
+            self.messages.append({"role": "tool", "tool_call_id": action.call_id, "content": native_err})
+        else:
+            self.messages.append({"role": "user", "content": user_msg})
 
     def _handle_tool_result(self, t: Task, step_n: int, action: Action, res: ToolResult) -> int:
         """Pós-dispatch de UMA tool: conta o passo, emite eventos, audita, roda o circuit-breaker e o

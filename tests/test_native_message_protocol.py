@@ -54,6 +54,27 @@ def test_native_invalid_tool_leaves_no_orphan(tmp_path):
             assert nxt.get("role") == "tool", f"tool_call órfã na msg {i}"
 
 
+def test_native_invalid_tool_gets_tool_role_error(tmp_path):
+    # paridade Hermes: nome inválido vira ERRO role=tool (auto-correção nativa), não scold de user "emita json"
+    calls = {"n": 0}
+
+    def gen(messages, schema=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Completion(text="", tool_calls=[
+                {"id": "cBad", "name": "zzzqqqnaoexiste", "arguments": "{}"}])
+        return Completion(text="", tool_calls=[
+            {"id": "c2", "name": "task_complete", "arguments": '{"summary":"ok"}'}])
+
+    h = Harness(gen, Task(goal="x"), tmp_path)
+    h.run()
+    errs = [m for m in h.messages if m.get("role") == "tool" and m.get("tool_call_id") == "cBad"]
+    assert errs and "inválida" in errs[0]["content"]            # erro como role=tool, casando o id
+    i = next(j for j, m in enumerate(h.messages)
+             if m.get("role") == "assistant" and m.get("tool_calls", [{}])[0].get("id") == "cBad")
+    assert h.messages[i + 1]["role"] == "tool"                  # echoada + resposta → sem órfã
+
+
 def test_json_rail_still_uses_user_observation(tmp_path):
     (tmp_path / "b.txt").write_text("x", encoding="utf-8")
     calls = {"n": 0}
