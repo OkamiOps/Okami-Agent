@@ -81,10 +81,34 @@ class SandboxPolicy:
         return self.network or self.mode == "yolo"
 
     def effective_backend(self) -> str:
-        """Resolve o backend real (#4): 'auto' vira docker se houver Docker, senão local."""
+        """Resolve o backend real (#4): 'auto' vira docker SÓ se o Docker estiver REALMENTE utilizável
+        (daemon no ar), senão local. `shutil.which` sozinho via 'auto' escolher docker com o binário
+        instalado mas o DAEMON parado → todo run_shell morria com 'Cannot connect to the Docker daemon'."""
         if self.backend == "auto":
-            return "docker" if shutil.which("docker") else "local"
+            return "docker" if _docker_daemon_ok() else "local"
         return self.backend
+
+
+_DAEMON_OK: bool | None = None   # cache por processo do probe `docker info` (1ª chamada paga ~ms)
+
+
+def _docker_daemon_ok() -> bool:
+    """Docker utilizável de VERDADE? `shutil.which` só vê o binário no PATH — um daemon morto
+    (Docker instalado mas não rodando, caso comum em VPS/Mac do dono) fazia 'auto' escolher docker
+    e TODO comando falhar. Aqui checamos liveness real (`docker info`), com cache no processo."""
+    global _DAEMON_OK
+    if _DAEMON_OK is not None:
+        return _DAEMON_OK
+    if not shutil.which("docker"):
+        _DAEMON_OK = False
+        return False
+    try:
+        r = subprocess.run(["docker", "info"], stdin=subprocess.DEVNULL,   # noqa: S607
+                           capture_output=True, timeout=8)
+        _DAEMON_OK = (r.returncode == 0)
+    except (OSError, subprocess.TimeoutExpired):
+        _DAEMON_OK = False
+    return _DAEMON_OK
 
 
 def default_policy() -> SandboxPolicy:
@@ -285,12 +309,14 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
     """Executa `cmd` sob a política. docker se backend=docker E docker presente; senão local."""
     policy = policy or default_policy()
     eff = policy.effective_backend()
-    if eff == "docker" and not shutil.which("docker"):
-        # backend docker EXPLÍCITO sem Docker → NÃO cai no local inseguro em silêncio (review #4):
-        # run_shell fica desabilitado até ter o isolamento real.
-        return SandboxResult(126, "sandbox: backend=docker exigido, mas Docker não está disponível — "
-                             "run_shell DESABILITADO (não caio no local inseguro). Instale o Docker, "
-                             "ou use backend=auto (cai no local) / backend=local explícito.")
+    if eff == "docker" and not _docker_daemon_ok():
+        # backend docker EXPLÍCITO sem Docker UTILIZÁVEL (binário ausente OU daemon parado) → NÃO cai
+        # no local inseguro em silêncio (review #4) NEM cospe o erro cru do daemon: run_shell fica
+        # desabilitado até ter o isolamento real.
+        return SandboxResult(126, "sandbox: backend=docker exigido, mas o Docker não está utilizável "
+                             "(binário ausente ou daemon parado) — run_shell DESABILITADO (não caio no "
+                             "local inseguro). Suba o daemon, ou use backend=auto (cai no local) / "
+                             "backend=local explícito.")
     use_docker = (eff == "docker")
     proxy = None
     try:
