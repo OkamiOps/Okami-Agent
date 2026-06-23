@@ -479,6 +479,41 @@ class DeletePath(Tool):
         return ToolResult(True, f"movido pra lixeira: {rel} → {dst} (reversível)", effect=True)
 
 
+# Utilitários que usam exit≠0 como SINAL, não erro (paridade Hermes _interpret_exit_code): programa →
+# (código benigno, nota). Tratar como falha fazia o agente "investigar" um não-erro e alimentava o
+# circuit-breaker do harness → travava sem seguir em frente.
+_BENIGN_EXIT: dict[str, tuple[int, str]] = {
+    "grep": (1, "nenhuma linha casou — NÃO é erro"),
+    "egrep": (1, "nenhuma linha casou — NÃO é erro"),
+    "fgrep": (1, "nenhuma linha casou — NÃO é erro"),
+    "rg": (1, "nenhuma linha casou — NÃO é erro"),
+    "diff": (1, "os arquivos diferem — esperado, NÃO é erro"),
+    "cmp": (1, "os arquivos diferem — esperado, NÃO é erro"),
+    "test": (1, "condição falsa — NÃO é erro"),
+    "[": (1, "condição falsa — NÃO é erro"),
+}
+
+
+def interpret_exit_code(cmd: str, returncode: int) -> tuple[bool, str]:
+    """Semântica de exit-code por comando. Devolve (ok, nota). Default: ok = (returncode == 0). Para
+    grep/rg/diff/test o código benigno conhecido vira ok=True com uma nota — assim o modelo não confunde
+    'nada casou' com falha. Erro de VERDADE (grep exit 2, etc.) segue ok=False."""
+    if returncode == 0:
+        return True, ""
+    seg = (cmd or "").split("|")[-1].strip()                  # exit do pipeline = do ÚLTIMO comando
+    prog = ""
+    for t in seg.split():                                     # pula env-prefixos (VAR=val) e wrappers
+        if ("=" in t and not t.startswith(("-", "/"))) or t in ("sudo", "time", "command", "nice", "nohup"):
+            continue
+        prog = t
+        break
+    prog = prog.rsplit("/", 1)[-1].strip("'\"")               # basename, sem aspas
+    benign = _BENIGN_EXIT.get(prog)
+    if benign and returncode == benign[0]:
+        return True, benign[1]
+    return False, ""
+
+
 class RunShell(Tool):
     name = "run_shell"
     description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "
@@ -530,12 +565,18 @@ class RunShell(Tool):
         remote = getattr(ctx, "remote", None)           # AMBIENTE REMOTO: roda LÁ, não no sandbox local
         if remote is not None:                          # (as guardas hardline/read-only/sensível JÁ rodaram acima)
             rr = remote.run(cmd, timeout=policy.timeout)
+            ok, note = interpret_exit_code(cmd, rr.returncode)
             out = f"[📡 {getattr(remote, 'alias', 'remoto')}] exit={rr.returncode}\n{redact(rr.output)}"
-            return ToolResult(rr.returncode == 0, out, effect=eff)
+            if note:
+                out += f"\n[{note}]"
+            return ToolResult(ok, out, effect=eff)
         res = run_sandboxed(cmd, ctx.workspace, policy)
+        ok, note = interpret_exit_code(cmd, res.returncode)      # grep/rg/diff/test exit≠0 ≠ falha real
         out = f"exit={res.returncode}\n{redact(res.output)}"   # ir verbatim p/ o LLM/transcript (igual ao bg log)
+        if note:
+            out += f"\n[{note}]"
         if getattr(res, "timed_out", False):                     # cortou no teto → ensina a recuperar (não é "falha real")
             out += (f"\n[o comando passou de {policy.timeout}s e foi cortado. Se é legítimo e demora mesmo: "
                     f"rode de novo com timeout=N (máx {self._MAX_TIMEOUT}), ou use process_start p/ rodar "
                     "em background sem teto e acompanhar com process_poll/process_log.]")
-        return ToolResult(res.returncode == 0, out, effect=eff)
+        return ToolResult(ok, out, effect=eff)
