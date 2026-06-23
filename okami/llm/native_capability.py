@@ -25,11 +25,22 @@ def _is_known_native(model: str) -> bool:
     return any(n in m for n in _KNOWN_NATIVE)
 
 
+def _is_local(pc) -> bool:
+    """Backend LOCAL (LMStudio/Ollama/llama.cpp…)? tier=local OU api_base apontando p/ a própria máquina."""
+    if (getattr(pc, "tier", "") or "").lower() == "local":
+        return True
+    base = (getattr(pc, "api_base", "") or "").lower()
+    return any(h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "host.docker.internal"))
+
+
 def native_supported(pc, *, probe=None) -> bool:
-    """O provider honra function-calling NATIVO? False se `native_tools` desligado. Família conhecida
-    (gpt/claude/grok/gemini…) → True direto. Senão, roda UM probe (cacheado por provider). `probe`
-    injetável p/ teste."""
-    if not getattr(pc, "native_tools", False):
+    """O provider honra function-calling NATIVO? Política tri-estado (native_tools): False → JSON;
+    True → tenta nativo; None (default) → SMART: nuvem tenta nativo, LOCAL fica em JSON. Família conhecida
+    (gpt/claude/grok/gemini…) → True direto. Senão, roda UM probe (cacheado). `probe` injetável p/ teste."""
+    nt = getattr(pc, "native_tools", None)
+    if nt is False:                                         # desligado explícito (LMStudio / /native-tools off)
+        return False
+    if nt is None and _is_local(pc):                        # default + local → JSON-em-texto (sem probe)
         return False
     if _is_known_native(getattr(pc, "model", "")):          # endpoint sólido conhecido → sem probe
         return True

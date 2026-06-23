@@ -235,7 +235,8 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
         "store": False,    # exigido pelo endpoint ("Store must be set to false")
         "stream": True,     # exigido pelo endpoint ("Stream must be set to true")
     }
-    native = bool(getattr(pc, "native_tools", False))   # Onda 3 (opt-in): tool-calling nativo
+    from okami.llm.native_capability import native_supported
+    native = native_supported(pc)                       # nativo SÓ se a política/probe confirmar (tri-estado)
     if native:
         from okami.core.tools import default_registry
         payload["tools"] = _responses_tools(default_registry())

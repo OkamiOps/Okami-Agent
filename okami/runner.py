@@ -141,6 +141,7 @@ def run_task(
     depth: int = 0,
     images: list[str] | None = None,
     reasoning_effort: str | None = None,     # esforço de raciocínio p/ esta tarefa (/think) — vence o default
+    native_override: str | None = None,      # /native-tools: "on"/"off" força o rail; vazio/None = smart default
     prelearned_files: list[str] | None = None,  # arquivos já "conhecidos" (não exige read antes de sobrescrever)
     surface: str = "cli",                        # superfície (cli/telegram/group/paperclip/subagent) → tool policy
     chat_id: str = "",                           # #2: chat de origem → carimba no process_start p/ notificar o chat certo
@@ -310,6 +311,8 @@ def run_task(
 
     # Auto-compaction adaptativa à janela do modelo (§6.4): Qwen 32K comprime cedo, Claude 200K tarde.
     pc = cfg.provider(provider)
+    if native_override in ("on", "off"):                  # /native-tools desta sessão → cópia (não muta o
+        pc = pc.model_copy(update={"native_tools": native_override == "on"})   # provider compartilhado)
     tune_key = model or pc.name
     if (cfg.learning or {}).get("auto_tune"):         # §7: aplica calibração aprendida do modelo
         ov = learning.tuned_overrides(ws, tune_key)

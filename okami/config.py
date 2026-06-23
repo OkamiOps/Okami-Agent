@@ -143,10 +143,13 @@ class ProviderConfig(BaseModel):
     # "medium"|"high" (alguns aceitam mais). Vazio = default do modelo. Vai pro litellm
     # (reasoning_effort) e pro transport do codex (reasoning.effort). Trocável por sessão com /think.
     reasoning_effort: str = ""
-    # Tool-calling NATIVO (Onda 3): o transport manda os schemas das tools e o modelo emite
-    # function_call estruturado (não JSON-em-texto). EXPERIMENTAL, opt-in por provider — o codex
-    # converte o function_call de volta p/ o protocolo de ação; off = comportamento atual intacto.
-    native_tools: bool = False
+    # Tool-calling NATIVO: o transport manda os schemas das tools e o modelo emite function_call
+    # estruturado (não JSON-em-texto). TRI-ESTADO:
+    #   None (default) = SMART — nativo p/ provider de nuvem (o probe confirma e degrada se mentir),
+    #                    JSON-em-texto p/ LOCAL (tier=local / localhost). Ninguém precisa lembrar de ligar.
+    #   True  = força nativo (probe ainda confirma). False = força JSON-em-texto (ex.: LMStudio).
+    # Trocável em runtime com /native-tools.
+    native_tools: bool | None = None
     # tool_choice quando native_tools (OpenAI-compat): "auto" (modelo decide) | "required"/"any" (DEVE
     # chamar uma tool — como respond/task_complete SÃO tools, isto força ação sem deixar o modelo fraco
     # "só conversar"; substitui a função forçadora do json_constrained). Vazio = não envia (default do provider).

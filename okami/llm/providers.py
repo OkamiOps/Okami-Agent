@@ -303,8 +303,10 @@ def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
 
 
 def _response_format(pc: ProviderConfig, response_schema: dict | None) -> dict | None:
-    """Constrained decoding (§3.5): força JSON válido em modelos json_constrained."""
-    if response_schema and pc.effective_tool_mode() == "json_constrained":
+    """Constrained decoding (§3.5): força JSON válido em modelos json_constrained. NÃO no rail nativo —
+    response_format (json_object) + tools= confunde o provider; nativo já tem a garantia estrutural."""
+    from okami.llm.native_capability import native_supported
+    if response_schema and pc.effective_tool_mode() == "json_constrained" and not native_supported(pc):
         return {
             "type": "json_schema",
             "json_schema": {"name": "okami_action", "schema": response_schema, "strict": False},

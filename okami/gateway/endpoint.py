@@ -57,6 +57,7 @@ class Session:
         self.reasoning_effort = ""       # esforço de raciocínio desta sessão (/think) — vence o default
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
         self.provider_override = ""      # provider desta sessão (/model <provider>) — ex.: codex (OpenAI via assinatura)
+        self.native_override = ""        # /native-tools desta sessão: ""=smart default | "on" | "off"
         self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
         self.voice_off = False           # /voice off → NUNCA responde em áudio nesta sessão
         self.voice_always = False        # /voice on → SEMPRE áudio. Default (ambos False): ESPELHA a entrada
@@ -136,6 +137,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.persona_overlay = e.get("persona_overlay", "")
             s.resume_attempts = int(e.get("resume_attempts", 0))
             s.reasoning_effort = e.get("reasoning_effort", "")
+            s.native_override = e.get("native_override", "")
             s.title = e.get("title", "")
             s.voice_off = bool(e.get("voice_off", False))
             s.voice_always = bool(e.get("voice_always", False))
@@ -154,6 +156,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
                                 resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
+                                native_override=s.native_override,
                                 title=s.title, voice_off=s.voice_off, voice_always=s.voice_always,
                                 busy_mode=s.busy_mode, approved_cats=sorted(s.approved_cats))
 
@@ -681,6 +684,24 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.channel.send(chat_id, "🧠 " + _tr(
                     "gw.think_set", _default="think = {arg} (applies in this session).", arg=arg))
             self._save_meta(chat_id, s)
+            return
+        if low.startswith("/native-tools") or low.startswith("/native_tools"):
+            arg = text.split(None, 1)[1].strip().lower() if len(text.split(None, 1)) > 1 else ""
+            if arg in ("on", "true", "1", "sim", "ligar"):
+                s.native_override = "on"
+                msg = "🔧 function-calling NATIVO LIGADO nesta sessão (força o rail nativo)."
+            elif arg in ("off", "false", "0", "nao", "não", "desligar"):
+                s.native_override = "off"
+                msg = "📝 function-calling nativo DESLIGADO nesta sessão — usando JSON-em-texto."
+            elif arg in ("", "auto", "smart", "default", "status"):
+                s.native_override = ""
+                msg = ("🤖 native-tools = SMART (default): nativo p/ provider de nuvem (com probe que "
+                       "degrada se o endpoint não honrar), JSON p/ local (LMStudio). "
+                       "Use /native-tools on|off p/ forçar.")
+            else:
+                msg = "uso: /native-tools [on | off | auto]"
+            self._save_meta(chat_id, s)
+            self.channel.send(chat_id, msg)
             return
         if low.startswith("/persona"):                 # overlay TEMPORÁRIO de sessão (estilo /personality)
             from okami.learning import persona
@@ -1292,6 +1313,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                 kw["on_event"] = on_ev
             if s.reasoning_effort:                        # /think desta sessão → vence o default do provider
                 kw["reasoning_effort"] = s.reasoning_effort
+            if s.native_override:                         # /native-tools desta sessão → força o rail (on/off)
+                kw["native_override"] = s.native_override
             if s.provider_override:                       # /model <provider> → troca o provider da sessão (codex…)
                 kw["provider"] = s.provider_override
             if s.model_override:                          # /model desta sessão → vence o default
