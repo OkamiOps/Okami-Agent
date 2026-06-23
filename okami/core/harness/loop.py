@@ -232,6 +232,10 @@ class Harness:
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
         self._blocked_nudged = False                   # desistiu CEDO (task_blocked prematuro) → empurra a tentar (1x)
+        # Preview INLINE de saída grande persistida: em modelo LOCAL/fraco o custo por-passo é a observação
+        # reenviada → encolhe p/ ~1.5K (full no disco, relido com read_file/offset). Forte mantém o cheio.
+        from okami.core.harness.style import is_weak_open_model
+        self._preview_cap = 1500 if is_weak_open_model(model) else _TOOL_RESULT_BUDGET
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
         self._exec_refunds = 0                         # item 5: passos devolvidos p/ execute_code read-only (bounded)
@@ -832,7 +836,7 @@ class Harness:
             saved = self._persist_large_output(step_n, res.output)
             from okami.core.harness.persisted import persisted_output_wrapper
             wrapped = persisted_output_wrapper(saved, len(res.output),
-                                               res.output[:1000 if _over_turn else _TOOL_RESULT_BUDGET])
+                                               res.output[:1000 if _over_turn else self._preview_cap])
             obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
         _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
         self._obs_chars += len(_obs)
