@@ -187,6 +187,7 @@ if _HAS_TEXTUAL:
             self._running: tuple | None = None            # tool RODANDO agora (tool, args, t0) → indicador vivo
             self._ticks = 0                               # contador monotônico de ticks (verbo rotativo)
             self._history = _tui.InputHistory()           # ↑/↓ recall das mensagens enviadas
+            self._session_start = time.monotonic()        # relógio da sessão (StatusRule do Hermes)
             try:                                          # tema persistido de sessoes anteriores (/skin save)
                 saved = _load_theme()
                 if saved and saved in self.available_themes:
@@ -650,6 +651,14 @@ if _HAS_TEXTUAL:
             t.append("█" * gauge_n + "░" * (10 - gauge_n), style=gcolor)
             t.append(f" {pct}% ", style=gcolor)
             t.append(f"· {turns} trocas ", style="#6c6d80")
+            t.append(f"· ⏱ {_tui.fmt_elapsed(time.monotonic() - self._session_start)} ",
+                     style="#6c6d80")                     # relógio da sessão (paridade StatusRule)
+            try:                                           # tarefas de fundo ativas (spawn/delegate)
+                nbg = len(getattr(self.ep, "_bg", {}) or {})
+            except Exception:  # noqa: BLE001
+                nbg = 0
+            if nbg:
+                t.append(f"· {nbg} bg ", style="#ffb86c")
             if self.inflight:
                 t.append(f"· {len(self.inflight)} na fila ", style="#ffb86c")
             t.append("· ^C parar · ^D sair", style="#3d3e50")

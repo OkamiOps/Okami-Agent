@@ -654,6 +654,18 @@ class InputHistory:
         return self._items[self._pos]
 
 
+def fmt_elapsed(seconds) -> str:
+    """Duração humana e compacta (paridade StatusRule do Hermes): '45s' · '1m 30s' · '1h 1m'. Nunca negativa."""
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m"
+
+
 def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:
     """Barra de status compacta (impressa antes de cada prompt) — modelo · contexto · trocas · tempo."""
     bar_len = 12

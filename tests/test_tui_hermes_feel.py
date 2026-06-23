@@ -71,6 +71,14 @@ def test_input_history_recall_up_and_down():
     assert h.next() == ""                                  # ↓ além do fim → linha nova (vazia)
 
 
+def test_fmt_elapsed_formats():
+    assert tui.fmt_elapsed(0) == "0s"
+    assert tui.fmt_elapsed(45) == "45s"
+    assert tui.fmt_elapsed(90) == "1m 30s"
+    assert tui.fmt_elapsed(3661) == "1h 1m"
+    assert tui.fmt_elapsed(-5) == "0s"                     # nunca negativo
+
+
 def test_input_history_skips_empty_and_consecutive_dups():
     h = tui.InputHistory()
     h.add("x")

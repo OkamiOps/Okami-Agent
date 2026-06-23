@@ -37,6 +37,15 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
+def test_status_text_shows_session_timer(tmp_path):
+    # paridade Hermes (StatusRule mostra a duração da sessão)
+    import time as _t
+    app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                       run_task=_fake_runner, model_label="m", spawn=lambda fn: fn())
+    app._session_start = _t.monotonic() - 90               # 90s de sessão
+    assert "1m" in app._status_text().plain                # timer da sessão na barra
+
+
 def test_tui_slash_shows_navigable_command_menu(tmp_path):
     # digitar '/mo' mostra o MENU navegável (/model /models /mouse); Enter completa o destacado; texto some.
     out = {}
