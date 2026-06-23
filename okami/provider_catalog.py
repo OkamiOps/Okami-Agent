@@ -66,13 +66,17 @@ PRESETS: list[Preset] = [
                  "native_tools": False, "capability": {"tool_mode": "json_constrained"}},
            model_prefix="openai/", fields=[Field("api_base", "API base", "http://localhost:8080/v1")]),
     Preset("minimax", "MiniMax (Token Plan)", "assinatura via Subscription Key — OpenAI-compat (minimax.io)",
-           base={"model": "openai/MiniMax-M3", "api_base": "https://api.minimax.io/v1",
+           # native_tools=True EXPLÍCITO: MiniMax M-series suporta function-calling — sem isso o default None
+           # cai num PROBE ao vivo (tool_choice=required, timeout 150s, veredito cacheado/instável por processo)
+           # que podia derrubar o agente pro rail JSON-em-texto sozinho. Pinar mata o sorteio (achado da revisão).
+           base={"model": "openai/MiniMax-M3", "api_base": "https://api.minimax.io/v1", "native_tools": True,
                  "auth": "api_key", "tier": "weak", "context_window": 1000000},
            model_prefix="openai/", models=["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1"],
            fields=[Field("__secret__", "Subscription Key (Account ▸ Token Plan)", env="MINIMAX_API_KEY",
                          kind="secret")]),
     Preset("mimo", "Xiaomi MiMo (Token Plan)", "assinatura tp-xxxxx — OpenAI-compat regional",
            base={"api_base": "https://token-plan-ams.xiaomimimo.com/v1", "auth": "api_key",
+                 "native_tools": True,              # idem minimax: cloud OpenAI-compat com function-calling → pina
                  "tier": "weak", "context_window": 128000},
            model_prefix="openai/", models=["mimo-v2.5-pro", "mimo-v2.5"],
            fields=[Field("__secret__", "API key 'tp-...' (Subscription Management)", env="MIMO_API_KEY",

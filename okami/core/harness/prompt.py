@@ -96,10 +96,10 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", 
     # chama a tool pela API) e as tools NÃO vão no texto (vão no param tools=). No JSON, o manual de sempre.
     if native:
         _act_intro = (
-            "Você AGE chamando as FERRAMENTAS pela API de function-calling NATIVA do provider — NÃO escreva "
-            "blocos ```json``` na resposta nem descreva a chamada; emita o tool_call de verdade. Pode emitir "
-            "VÁRIOS tool_calls de LEITURA independentes de uma vez (paralelo). Para AGIR (escrever/editar/"
-            "rodar/apagar) é UMA por vez.")
+            "Você AGE chamando as FERRAMENTAS pela API de function-calling NATIVA do provider — emita o "
+            "tool_call de VERDADE pela API; não escreva a chamada como texto na resposta nem descreva o que "
+            "vai fazer. Pode emitir VÁRIOS tool_calls de LEITURA independentes de uma vez (paralelo). Para "
+            "AGIR (escrever/editar/rodar/apagar) é UMA por vez.")
         _tools_section = (
             "As ferramentas disponíveis chegam pela API (o provider te apresenta nome+schema de cada uma) — "
             "use-as direto, inclusive `respond` p/ FALAR e `task_complete` p/ encerrar. NÃO existe \"menu\" "
@@ -193,7 +193,7 @@ SEMPRE melhor que inventar um resultado.
                    "com caminho ABSOLUTO (read_file, list_dir, make_dir, move_path, copy_path…). Use o "
                    "caminho completo, não relativo ao workspace. Segredos (.env/.ssh/.aws) seguem bloqueados.")
     from okami.core.harness.style import model_family_guidance, style_block   # estilo VISÍVEL (markdown/idioma/canal)
-    _fam = model_family_guidance(model)
+    _fam = model_family_guidance(model, native=native)            # nativo: sem ```json``` no bloco do modelo fraco
     style = style_block(surface) + (f"\n\n{_fam}" if _fam else "")
     try:                                             # platform_hint (item 22): formatação por canal
         from okami.gateway.channel_registry import platform_hint
@@ -222,7 +222,7 @@ travar, `task_blocked`; se faltar algo que só a pessoa sabe, `need_input`):
 
 {manual}
 
-Próxima ação (um único bloco json)."""
+{"Próxima ação." if native else "Próxima ação (um único bloco json)."}"""
 
     # --- modo CONVERSA — grounding > performance: ancora no que sabe da pessoa, não "atua" de humano ---
     return f"""Você é o agente dessa pessoa. Abaixo está quem você é (SOUL/VOICE/PERSONA) e o que você
@@ -237,7 +237,8 @@ descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo execu
 
 {manual}
 
-Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."""
+{"Agora responda — use `respond` p/ falar, ou a ferramenta certa p/ agir." if native
+ else "Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."}"""
 
 
 # Teto do resultado de tool QUE VAI PRO CONTEXTO do modelo (chars). Output maior é truncado no

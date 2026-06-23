@@ -91,6 +91,11 @@ _FAMILY_GEMINI = ("AFINADO PRO SEU MODELO: seja CONCISO — poucas frases, foco 
 _FAMILY_WEAK_OPEN = ("AFINADO PRO SEU MODELO: emita UMA ação por turno — um único bloco ```json "
                      "{\"tool\":\"...\",\"args\":{...}}```. Não narre o que vai fazer: chame a ferramenta. "
                      "Não responda de memória o que uma tool confere (arquivo/sistema/data) — use a tool.")
+# Variante NATIVA do bloco fraco: SEM instrução de formato json (no nativo a tool vai pela API; instruir
+# ```json``` faria o modelo cuspir JSON-texto em vez de chamar a tool — bug real que travava tarefa simples).
+_FAMILY_WEAK_OPEN_NATIVE = ("AFINADO PRO SEU MODELO: aja, não prometa — CHAME a ferramenta de verdade "
+                            "(não narre o que vai fazer). UMA ação de escrita/edição/execução por turno. "
+                            "Não responda de memória o que uma tool confere (arquivo/sistema/data) — use a tool.")
 
 # Famílias por substring no nome do modelo (litellm: 'openai/gpt-5.4', 'gemini-3-pro', 'zai/glm-5'…).
 _FAMILY_RULES = (
@@ -137,15 +142,17 @@ def _edit_format_line(model: str) -> str:
     return ""
 
 
-def model_family_guidance(model: str) -> str:
-    """Bloco curto específico da família do `model` (vazio p/ Claude/forte e desconhecidos — não infla)."""
+def model_family_guidance(model: str, native: bool = False) -> str:
+    """Bloco curto específico da família do `model` (vazio p/ Claude/forte e desconhecidos — não infla).
+    `native`: no rail de function-calling, o bloco do modelo fraco NÃO instrui formato ```json``` (senão
+    o modelo cospe JSON-texto em vez de chamar a tool — bug que travava tarefa simples)."""
     m = (model or "").lower()
     if not m:
         return ""
     block = ""
     for needles, b in _FAMILY_RULES:
         if any(n in m for n in needles):
-            block = b
+            block = _FAMILY_WEAK_OPEN_NATIVE if (native and b is _FAMILY_WEAK_OPEN) else b
             break
     edit = _edit_format_line(m)
     if block and edit:
