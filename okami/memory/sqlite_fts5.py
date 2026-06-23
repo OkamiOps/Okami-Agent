@@ -25,6 +25,13 @@ from okami.memory.base import Memory, MemoryItem
 from okami.memory.embeddings import Embedder, cosine, from_blob, to_blob
 
 _WORD = re.compile(r"\w+", re.UNICODE)
+# Stopwords PT+EN: palavras vazias e interrogativas NÃO devem casar (um "o"/"de"/"qual" casando inflava
+# o BM25 normalizado e fazia memória irrelevante voltar). Filtradas antes do MATCH do FTS.
+_STOPWORDS = frozenset((
+    "o a os as um uma uns umas de do da dos das e ou que se em no na nos nas ao aos à às por para pra com "
+    "sem sob sobre entre meu minha seu sua o que qual quais onde quando como quem porque pq é foi ser tem "
+    "the a an of to in on at is are was were be been and or but if then this that these those it its for "
+    "with as by from").split())
 
 
 def _fold(s: str) -> str:
@@ -88,13 +95,17 @@ def _expired(row: tuple, now: float) -> bool:
 class SqliteFTS5Memory(Memory):
     def __init__(self, path: Path, clock=time.time, embedder: Embedder | None = None,
                  weights: tuple[float, float, float] = (1.5, 0.5, 1.0),
-                 dedup_threshold: float = 0.93, decay_per_hour: float = 0.99):
+                 dedup_threshold: float = 0.93, decay_per_hour: float = 0.99,
+                 min_rel: float = 0.1):
         self.path = Path(path)
         self.clock = clock
         self.embedder = embedder
         self.w_rel, self.w_rec, self.w_imp = weights
         self.dedup_threshold = dedup_threshold
         self.decay_per_hour = decay_per_hour
+        # PISO de relevância CRUA (paridade Hermes min_trust): candidato sem sinal real (kw+sem ~ 0, ex.: os
+        # 20 recentes unidos por padrão) NÃO entra no recall — senão injeta memória irrelevante todo turno.
+        self.min_rel = min_rel
         self.conn = sqlite3.connect(str(self.path))
         self.conn.execute("PRAGMA journal_mode=WAL")     # leitura rápida concorrente (como o Hermes)
         self.conn.execute("PRAGMA synchronous=NORMAL")
@@ -223,8 +234,8 @@ class SqliteFTS5Memory(Memory):
         """BM25 do FTS5 (ranking de verdade) normalizado [0,1] por rowid. {} se sem FTS."""
         if not self.fts:
             return {}
-        terms = _WORD.findall(query.lower())
-        if not terms:
+        terms = [t for t in _WORD.findall(query.lower()) if t not in _STOPWORDS]
+        if not terms:                                  # query só de stopwords → sem sinal (não casa tudo)
             return {}
         match = " OR ".join(terms)
         try:
@@ -314,10 +325,12 @@ class SqliteFTS5Memory(Memory):
             rec.append(self.decay_per_hour ** hours)
             imp.append(row[5] or 0.5)
         rel_n = _minmax(rel)  # min-max só na relevância; recência/importância cruas
-        scored = [(self.w_rel * rel_n[i] + self.w_rec * rec[i] + self.w_imp * imp[i], rows[i])
+        scored = [(self.w_rel * rel_n[i] + self.w_rec * rec[i] + self.w_imp * imp[i], rows[i], rel[i])
                   for i in range(len(rows))]
         scored.sort(key=lambda x: -x[0])
-        top = scored[:limit]
+        # FILTRA pelo piso de relevância CRUA (não a normalizada — _minmax forçaria o melhor a 1.0 mesmo
+        # quando todos são ~0). Sem casar nada → lista vazia (Hermes permite injetar NADA).
+        top = [(s, r) for s, r, raw in scored if raw >= self.min_rel][:limit]
         self._bump([r[0] for _s, r in top], now)
         self._log_retrieval(query, top, now)               # auditoria (#11)
         return [self._item(r, score=s) for s, r in top]

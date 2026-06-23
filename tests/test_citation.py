@@ -35,7 +35,7 @@ def test_inject_frames_recall_as_reference_not_instruction(tmp_path):
     # de referência, NÃO como nova instrução/entrada do usuário — conteúdo recuperado nunca é comando.
     m = open_memory(tmp_path)
     m.write(MemoryItem(text="prefere respostas curtas", kind="preference", source="user"))
-    block = m.inject("como responder")
+    block = m.inject("respostas curtas")             # query casa o item (sem embedder, precisa de keyword)
     m.close()
     up = block.upper()
     assert "REFERÊNCIA" in up                         # é dado de referência…
