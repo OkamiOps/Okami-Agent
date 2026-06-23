@@ -23,6 +23,7 @@ from okami.core.harness.prompt import (
     is_conversational,
 )
 from okami.core.tools import Tool, ToolContext, ToolResult, default_registry
+from okami.core.tools.base import coerce_args
 from okami.llm.usage import as_completion
 from okami.memory import compaction as _compaction
 
@@ -538,6 +539,10 @@ class Harness:
                 text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
                 self._truncated_parts = []             # episódio de truncamento fechado → texto completo
                 _acts = _actions_from_tool_calls(comp.tool_calls) or parse_actions(text)
+                for _a in _acts:                       # COERÇÃO schema-aware: nativo manda "false"/"30" string
+                    _t = self.registry.get(_a.tool)    # → coage pro tipo declarado (arg_types) p/ não bugar
+                    if _t is not None and getattr(_t, "arg_types", None):
+                        _a.args = coerce_args(_a.args, _t.arg_types)
                 action = _acts[0] if _acts else None
                 self._batch = _lead_readonly(_acts[1:], action)   # resto = leituras seguras → rodam sem nova call
 

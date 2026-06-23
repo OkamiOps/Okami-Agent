@@ -64,6 +64,7 @@ class ReadFile(Tool):
     args_schema = {"path": "caminho relativo ao workspace",
                    "offset": "(opcional) nº de linhas a pular do início",
                    "limit": "(opcional) máx. de linhas a retornar"}
+    arg_types = {"offset": "integer", "limit": "integer"}
     required = ("path",)
 
     def run(self, args, ctx):
@@ -233,6 +234,7 @@ class EditFile(Tool):
                    "'old' precisa casar literalmente (espaços/indentação) e ser ÚNICO, ou use replace_all.")
     args_schema = {"path": "caminho relativo", "old": "trecho exato a trocar (literal)",
                    "new": "novo trecho", "replace_all": "(opcional) trocar todas as ocorrências"}
+    arg_types = {"replace_all": "boolean"}   # nativo manda "false" (string) → bool("false") é True (bug) sem coerção
     required = ("path", "old")
 
     def run(self, args, ctx):
@@ -547,6 +549,7 @@ class RunShell(Tool):
                    "realmente longo (servidor/build), use process_start (background, sem teto).")
     args_schema = {"cmd": "comando a executar",
                    "timeout": "(opc) segundos até cortar o comando — default 120, máx 1800"}
+    arg_types = {"timeout": "integer"}
     required = ("cmd",)
     _MAX_TIMEOUT = 1800           # 30min de teto p/ UM comando — acima disso é trabalho de background (process_start)
 

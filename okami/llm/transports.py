@@ -239,7 +239,9 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     if native:
         from okami.core.tools import default_registry
         payload["tools"] = _responses_tools(default_registry())
-        payload["tool_choice"] = "auto"
+        # mesmo default do caminho LiteLLM: 'required' (respond/task_complete SÃO tools → sempre válido,
+        # força ação sem deixar 'só conversar'). Antes era 'auto' hard-coded → os dois rails divergiam.
+        payload["tool_choice"] = pc.tool_choice or "required"
     effort = (overrides or {}).get("reasoning_effort") or pc.reasoning_effort  # /think > default do provider
     if effort:
         from okami.llm.model_catalog import clamp_effort   # item 21: clampa TAMBÉM aqui (era furo no

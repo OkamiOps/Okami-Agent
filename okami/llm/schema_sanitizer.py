@@ -16,11 +16,12 @@ _STRIP_KEYS = ("pattern", "format")
 
 
 def _collapse_union(branches: list) -> dict | None:
-    """[T, {type:null}] / [{type:null}, T] → T (1º ramo não-null). None se não der."""
+    """SÓ colapsa o caso NULLABLE `[T, {type:null}]` → T. União GENUÍNA de 2+ tipos reais ([T1, T2]) NÃO
+    é colapsada (pegar só o 1º descartava o T2 em silêncio — Hermes preserva). None = não dá p/ colapsar."""
     non_null = [b for b in branches if isinstance(b, dict) and b.get("type") != "null"]
-    if len(non_null) == 1:
+    if len(non_null) == 1:                                # exatamente 1 não-null (resto era null) → colapsa
         return non_null[0]
-    return non_null[0] if non_null else None
+    return None                                          # 0 ou 2+ não-null → mantém a união como veio
 
 
 def sanitize_tool_schema(schema):

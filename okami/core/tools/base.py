@@ -175,6 +175,10 @@ class Tool:
     name: str = ""
     description: str = ""
     args_schema: dict[str, str] = {}
+    # Tipo JSON-schema por arg ("integer"/"number"/"boolean"/"array"/"object"); ausente = "string". Vai pro
+    # schema NATIVO (function-calling) e guia a COERÇÃO do harness — sem isto, o modelo nativo emite "false"
+    # (string) e bool("false") é True (bug). Só declare onde o tipo NÃO é string.
+    arg_types: dict[str, str] = {}
     required: tuple[str, ...] = ()   # args obrigatórios (validados pelo harness antes de rodar)
     terminal: bool = False
 
@@ -189,8 +193,16 @@ class Tool:
 
     def to_openai_schema(self) -> dict:
         """Schema function-calling (OpenAI) desta tool — p/ tool-calls NATIVO (§3.5). O protocolo
-        JSON-em-texto continua de pé; isto é a forma nativa equivalente, mesma `name`/args."""
-        props = {k: {"type": "string", "description": v} for k, v in (self.args_schema or {}).items()}
+        JSON-em-texto continua de pé; isto é a forma nativa equivalente, mesma `name`/args. Carrega o
+        TIPO real de cada arg (arg_types) — sem isso o modelo nativo manda tudo como string."""
+        _types = self.arg_types or {}
+        props: dict = {}
+        for k, v in (self.args_schema or {}).items():
+            t = _types.get(k, "string")
+            prop = {"type": t, "description": v}
+            if t == "array":
+                prop["items"] = {"type": "string"}          # itens genéricos (suficiente p/ o grammar)
+            props[k] = prop
         return {"type": "function", "function": {
             "name": self.name, "description": self.description,
             "parameters": {"type": "object", "properties": props, "required": list(self.required)}}}
@@ -203,6 +215,33 @@ def openai_tools(registry: dict) -> list[dict]:
     pattern/format) que o grammar-converter do llama.cpp rejeita (400). Nativo (tudo string) passa intacto."""
     from okami.llm.schema_sanitizer import sanitize_tool_schemas
     return sanitize_tool_schemas([t.to_openai_schema() for t in registry.values()])
+
+
+def coerce_args(args: dict, arg_types: dict) -> dict:
+    """Coage valores STRING pro tipo DECLARADO em arg_types (paridade Hermes model_tools.coerce_tool_args).
+    No rail nativo o modelo emite "false"/"30" como string; sem isto, bool("false") é True (bug). É
+    SCHEMA-AWARE: só toca arg COM tipo declarado, e só se o valor veio string (JSON nativo já-tipado fica).
+    Valor que não converte fica como veio (não quebra a chamada)."""
+    if not isinstance(args, dict) or not arg_types:
+        return args
+    out = dict(args)
+    for k, t in arg_types.items():
+        if k not in out or not isinstance(out[k], str):     # ausente ou já-tipado → não mexe
+            continue
+        v = out[k].strip()
+        try:
+            if t == "integer":
+                out[k] = int(v)
+            elif t == "number":
+                out[k] = float(v)
+            elif t == "boolean":
+                out[k] = v.lower() in ("true", "1", "yes", "sim", "on")
+            elif t in ("array", "object"):
+                import json as _json
+                out[k] = _json.loads(v)
+        except (ValueError, TypeError):
+            pass                                             # não converteu → deixa string (não derruba)
+    return out
 
 
 def _safe_path(ctx: ToolContext, rel: str) -> Path:
