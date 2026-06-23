@@ -98,6 +98,10 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", 
 A cada turno você emite UMA ação: um bloco ```json {{"tool": "...", "args": {{...}}}}```. EXCEÇÃO p/ ir
 mais RÁPIDO: vários passos de LEITURA INDEPENDENTES (ler/listar/buscar/grep — que não dependem um do
 resultado do outro) podem ir JUNTOS num lote ```json {{"actions": [{{"tool":"read_file","args":{{...}}}}, {{"tool":"find_files","args":{{...}}}}]}}``` — o resultado de TODOS volta de uma vez. Para AGIR (escrever/editar/rodar/apagar) é UMA por vez.
+EXEMPLO de uma ação válida — copie ESTE formato, com ASPAS DUPLAS (nada de aspas simples nem None/True do Python):
+```json
+{{"tool": "read_file", "args": {{"path": "okami/core/harness/loop.py"}}}}
+```
 • Para FALAR (responder, opinar, perguntar) → `respond`. Encerra o turno.
 • Para AGIR (ler/escrever arquivo, rodar shell, buscar, lembrar, gerar imagem) → use a ferramenta;
   você vê o resultado (OBSERVAÇÃO) e segue. Encadeie quantas ações precisar.
