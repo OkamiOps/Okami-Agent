@@ -83,6 +83,27 @@ def prune_observations(messages: list[dict], *, keep_tail: int = 6,
     return out, saved
 
 
+def _repair_tool_pairs(msgs: list[dict]) -> list[dict]:
+    """Conserta pares tool_call/role=tool órfãos após a compactação cortar o meio (senão o rail NATIVO
+    leva 400). (1) resultado role=tool cuja assistant que o declarou NÃO sobreviveu → remove; (2) tool_call
+    declarada SEM resultado em lugar nenhum → stub logo após a assistant. Par válido fica intocado."""
+    declared = {tc.get("id") for m in msgs if m.get("role") == "assistant"
+                for tc in (m.get("tool_calls") or []) if isinstance(tc, dict) and tc.get("id")}
+    kept = [m for m in msgs if not (m.get("role") == "tool" and m.get("tool_call_id") not in declared)]
+    answered = {m.get("tool_call_id") for m in kept if m.get("role") == "tool"}
+    out: list[dict] = []
+    for m in kept:
+        out.append(m)
+        if m.get("role") == "assistant" and isinstance(m.get("tool_calls"), list):
+            for tc in m["tool_calls"]:
+                cid = (tc or {}).get("id")
+                if cid and cid not in answered:          # chamada sem resultado → stub (resultado já distilado)
+                    out.append({"role": "tool", "tool_call_id": cid,
+                                "content": "[resultado de turno anterior — ver snapshot de compactação acima]"})
+                    answered.add(cid)
+    return out
+
+
 def compact(messages: list[dict], memory: Memory | None, *,
             keep_tail: int = 6, source: str = "compaction",
             pending_todos: str = "") -> tuple[list[dict], int]:
@@ -140,5 +161,5 @@ def compact(messages: list[dict], memory: Memory | None, *,
             merged = {**tail[0], "content": [{"type": "text", "text": note + "\n\n"}, *prev]}
         else:
             merged = {**tail[0], "content": note + "\n\n" + (prev or "")}
-        return [system, merged, *tail[1:]], distilled
-    return [system, {"role": "user", "content": note}, *tail], distilled
+        return _repair_tool_pairs([system, merged, *tail[1:]]), distilled
+    return _repair_tool_pairs([system, {"role": "user", "content": note}, *tail]), distilled
