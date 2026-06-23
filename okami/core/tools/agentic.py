@@ -41,7 +41,35 @@ class UseSkill(Tool):
             pass
         loc = (f"\n\n[arquivos desta skill em: {skill_dir} — run_shell roda no WORKSPACE, então use o caminho "
                f"ABSOLUTO p/ os scripts (ex.: `node {skill_dir}/scripts/run.js`) ou `cd` p/ lá primeiro]") if skill_dir else ""
-        return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}{loc}")
+        files_note = self._support_files_note(name, skill_dir)   # tier-3 confiável: LISTA os arquivos de apoio
+        return ToolResult(True, f"SKILL '{name}' (siga este procedimento):\n{body}{loc}{files_note}")
+
+    @staticmethod
+    def _support_files_note(name: str, skill_dir: str) -> str:
+        """Enumera os arquivos de apoio da skill (references/scripts/templates/assets) — sem isto o modelo
+        ADIVINHA o path no tier-3. Bounded; vazio se não há nenhum. Paridade Hermes (linked_files)."""
+        if not skill_dir:
+            return ""
+        try:
+            from pathlib import Path as _P
+            sd = _P(skill_dir)
+            rels: list[str] = []
+            for sub in ("references", "scripts", "templates", "assets"):
+                d = sd / sub
+                if d.is_dir():
+                    for f in sorted(d.rglob("*")):
+                        if f.is_file():
+                            rels.append(str(f.relative_to(sd)))
+                            if len(rels) >= 30:
+                                break
+                if len(rels) >= 30:
+                    break
+            if not rels:
+                return ""
+            return (f'\n\n[arquivos de apoio desta skill (carregue sob demanda com '
+                    f'use_skill(name="{name}", path="<arquivo>")): ' + ", ".join(rels) + "]")
+        except Exception:  # noqa: BLE001 — enumeração nunca derruba a tool
+            return ""
 
     def _read_file(self, name, rel, ctx):
         """Lê um arquivo de apoio DENTRO da skill (jailed na pasta da skill). Disclosure tier-3."""

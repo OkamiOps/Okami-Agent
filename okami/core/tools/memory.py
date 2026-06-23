@@ -57,7 +57,10 @@ class RememberUser(Tool):
             from okami.memory.staging import PendingStore
             pid = PendingStore(ctx.home).stage("user", args["text"], origin="review")
             return ToolResult(True, f"(staged p/ aprovação do dono: {pid} — /memory pending)", effect=True)
-        if not _f.append_user(ctx.home, args["text"]):    # CASA do agente (não o workspace/CWD); recusa segredo
+        if not _f.append_user(ctx.home, args["text"]):    # CASA do agente (não o workspace/CWD)
+            if _f.is_full(ctx.home, "USER.md"):           # cheia → fato novo sumiria no inject: peça consolidar
+                return ToolResult(False, "USER.md está no LIMITE do prompt — consolide/remova fatos antigos e "
+                                  "tente de novo (acima do teto, fato novo não chega ao modelo).", effect=False)
             return ToolResult(True, "(não anotei — parece conter um segredo; não guardo isso no USER.md)",
                               effect=False)
         return ToolResult(True, f"USER.md += {args['text'][:80]}", effect=True)

@@ -32,6 +32,23 @@ def _path(workspace: Path, name: str) -> Path:
     return Path(workspace) / name
 
 
+def _cap_for(name: str) -> int:
+    """Teto de char do arquivo (o mesmo que core_block injeta com [:cap]) — acima disso o conteúdo novo
+    nunca chega ao modelo, então não adianta gravar."""
+    for names, _key, _label, cap in _LAYERS:
+        if name in names:
+            return cap
+    return DEFAULT_CAP
+
+
+def is_full(workspace: Path, name: str) -> bool:
+    """True se o arquivo JÁ está no/acima do teto de injeção — append novo seria cortado no prompt."""
+    p = _path(workspace, name)
+    if not p.exists():
+        return False
+    return len(p.read_text(encoding="utf-8", errors="ignore")) >= _cap_for(name)
+
+
 def read_capped(workspace: Path, name: str, cap: int = DEFAULT_CAP) -> str:
     p = _path(workspace, name)
     if not p.exists():
@@ -171,6 +188,10 @@ def _append_bullet(workspace: Path, name: str, text: str, title: str, header: st
     if line in content:  # dedup simples
         _record_hash(workspace, name, content)       # re-sincroniza o hash mesmo sem mudança
         return True
+    if len(content) + len(line) + 2 > _cap_for(name):   # passaria do teto de injeção → recusa (consolide)
+        from okami import log
+        log.warn(f"memory: {name} no limite ({len(content)}/{_cap_for(name)}) — recusei o append.")
+        return False
     if header not in content:
         content += f"\n{header}\n"
     new = content.rstrip() + f"\n{line}\n"
