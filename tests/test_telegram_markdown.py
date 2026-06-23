@@ -88,8 +88,9 @@ def test_plain_text_unchanged():
     assert to_html("oi, tudo bem?") == "oi, tudo bem?"
 
 
-def test_bullet_list_kept():
-    assert to_html("- item um\n- item dois") == "- item um\n- item dois"
+def test_bullet_list_renders_as_dot():
+    # paridade Hermes 0.17: '-' vira '•' (bullet de verdade, mais legível no Telegram)
+    assert to_html("- item um\n- item dois") == "• item um\n• item dois"
 
 
 def test_spoiler():
@@ -181,4 +182,73 @@ def test_send_message_split_still_respects_limit(monkeypatch):
     sent: list[str] = []
     monkeypatch.setattr(c, "_call", lambda m, p, **k: (sent.append(p["text"]), {"ok": True})[1])
     c.send_message("1", "y" * 9000)
-    assert len(sent) >= 3 and all(len(s) <= 4000 for s in sent)
+    assert len(sent) >= 3 and all(len(s) <= 4096 for s in sent)   # +indicador (i/N); cap real é 4096
+
+
+def test_split_adds_chunk_indicator_when_multiple():
+    from okami.channels.telegram import _split_message
+    parts = _split_message("y" * 9000, 4000)
+    n = len(parts)
+    assert n >= 3
+    assert parts[0].rstrip().endswith(f"(1/{n})")          # paridade Hermes: (i/N) em msg partida
+    assert parts[-1].rstrip().endswith(f"({n}/{n})")
+
+
+def test_split_no_indicator_when_single():
+    from okami.channels.telegram import _split_message
+    assert _split_message("curto", 4000) == ["curto"]      # 1 parte → sem (1/1)
+
+
+# --------------------------------------------------- paridade Hermes 0.17: listas e tabelas bonitas
+def test_bullet_list_renders_as_dots():
+    out = to_html("- um\n- dois\n* tres")
+    assert "• um" in out and "• dois" in out and "• tres" in out   # -/* viram • (Hermes)
+    assert "<i>" not in out                                         # '* tres' NÃO virou itálico
+
+
+def test_bullet_does_not_touch_bold_or_hr():
+    out = to_html("**forte** no começo\n---")
+    assert "<b>forte</b>" in out                                    # **bold** intacto
+    assert "• " not in out                                          # '---' (hr) não vira bullet
+
+
+def test_markdown_table_becomes_key_value_bullets():
+    md = "| Nome | Status |\n|------|--------|\n| gog | falhou |\n| smtp | ok |"
+    out = to_html(md)
+    assert "|---" not in out and "|------" not in out               # linha separadora feia some
+    assert "gog" in out and "falhou" in out and "smtp" in out       # dados presentes
+    assert "<b>Nome:</b>" in out or "<b>Nome</b>" in out            # cabeçalho vira rótulo em negrito
+    assert "•" in out                                               # cada linha vira bullet (mobile-friendly)
+
+
+def test_table_without_outer_pipes_still_works():
+    md = "Conta | Token\n---|---\ngmail | vazio"
+    out = to_html(md)
+    assert "gmail" in out and "vazio" in out and "---" not in out
+
+
+# ----------------------------------------------------------------- aprovação formatada (não mais crua)
+def test_send_approval_uses_html_parse_mode(monkeypatch):
+    c = TelegramClient("tok")
+    calls = []
+    monkeypatch.setattr(c, "_call", lambda m, p, **k: (calls.append(dict(p)), {"ok": True})[1])
+    c.send_approval("123", "⚠ Aprovar [run_shell] · `rm -rf x`\n**risco=high**", nonce="n1")
+    assert calls[0]["parse_mode"] == "HTML"                 # aprovação agora vai FORMATADA (era crua)
+    assert "<b>" in calls[0]["text"] and "<code>" in calls[0]["text"]
+    assert "reply_markup" in calls[0]                       # …e mantém os botões ✅/❌
+
+
+def test_send_approval_falls_back_to_plain_on_parse_error(monkeypatch):
+    import urllib.error
+    c = TelegramClient("tok")
+    calls = []
+
+    def fake(method, p, **k):
+        calls.append(dict(p))
+        if p.get("parse_mode"):
+            raise urllib.error.HTTPError("u", 400, "bad", {}, None)
+        return {"ok": True}
+    monkeypatch.setattr(c, "_call", fake)
+    c.send_approval("123", "**x** `y`", nonce="n1")
+    assert "parse_mode" not in calls[1] and "**" not in calls[1]["text"]   # fallback plain legível
+    assert "reply_markup" in calls[1]                                      # botões preservados no fallback

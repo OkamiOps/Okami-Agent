@@ -44,7 +44,11 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
         rest = rest[cut:].lstrip()
     if rest:
         out.append(rest)
-    return _balance_fences(out)
+    parts = _balance_fences(out)
+    if len(parts) > 1:                        # indicador (i/N) em msg longa partida (paridade Hermes)
+        n = len(parts)
+        parts = [f"{p}\n\n({i}/{n})" for i, p in enumerate(parts, 1)]
+    return parts
 
 
 def _last_fence_lang(part: str) -> str:
@@ -186,12 +190,19 @@ class TelegramClient:
     def send_approval(self, chat_id, text: str, nonce: str = "", thread: int | None = None) -> dict:
         """Aprovação com BOTÕES inline (✅/❌). `nonce` (P1.3) amarra o clique a ESTE pedido — clique
         velho/deslocado de outra ação não aprova (anti-stale). Sem nonce mantém o formato antigo."""
+        from okami.channels.markdown_telegram import to_html, to_plain
         sfx = f"{nonce}:" if nonce else ""
         kb = {"inline_keyboard": [[{"text": "✅ Aprovar", "callback_data": f"okapprove:{sfx}yes"},
                                    {"text": "❌ Negar", "callback_data": f"okapprove:{sfx}no"}]]}
         p = {"chat_id": chat_id, "text": text, "reply_markup": kb}
         if thread is not None:
             p["message_thread_id"] = thread
+        rendered = to_html(text)                            # FORMATA a aprovação (era CRUA: ** e [tool] visíveis)
+        if rendered != text:
+            try:
+                return self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
+            except urllib.error.HTTPError:
+                p["text"] = to_plain(text)                  # parse recusado → plain legível (botões preservados)
         return self._call("sendMessage", p)
 
     def set_my_commands(self, commands: list[dict]) -> None:

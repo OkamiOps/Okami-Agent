@@ -30,6 +30,54 @@ def _quote_block(m: re.Match) -> str:
     return f"<blockquote>{inner}</blockquote>\n"
 
 
+_BULLET = re.compile(r"^([ \t]*)[-*+][ \t]+(?=\S)", re.M)   # '- '/'* '/'+ ' no início → '• ' (não toca **/---)
+_SEP_ROW = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")   # linha separadora de tabela (|---|:--:|)
+
+
+def _bulletize(text: str) -> str:
+    """Bullets markdown (-/*/+) viram '• ' (Hermes), preservando indentação. Não casa **bold** (char +
+    char != espaço) nem hr '---' (char + char). Itálico '*x*' tampouco (precisa de espaço após o marcador)."""
+    return _BULLET.sub(lambda m: f"{m.group(1)}• ", text)
+
+
+def _row_cells(line: str) -> list[str]:
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return [c.strip() for c in s.split("|")]
+
+
+def _md_tables_to_kv(text: str) -> str:
+    """Tabela markdown → bullets 'rótulo: valor' (Telegram não tem tabela; paridade Hermes adapter.py). Um
+    bloco = linha de cabeçalho com '|', linha separadora '|---|', e ≥1 linha de dados. Vira uma linha por
+    registro: '• **Col1:** v1 · **Col2:** v2'. Conteúdo fora de tabela passa intacto."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        ln = lines[i]
+        if ("|" in ln and i + 1 < n and _SEP_ROW.match(lines[i + 1]) and lines[i + 1].count("-") >= 1):
+            headers = _row_cells(ln)
+            j = i + 2
+            rows = []
+            while j < n and "|" in lines[j] and lines[j].strip():
+                rows.append(_row_cells(lines[j]))
+                j += 1
+            if rows:                                       # tabela válida → renderiza key:value
+                for cells in rows:
+                    pairs = [f"**{headers[k]}:** {cells[k]}" if k < len(headers) and headers[k] else cells[k]
+                             for k in range(len(cells)) if cells[k]]
+                    out.append("• " + " · ".join(pairs))
+                i = j
+                continue
+        out.append(ln)
+        i += 1
+    return "\n".join(out)
+
+
 def _html_to_md(text: str) -> str:
     """O modelo MUITAS vezes manda HTML cru (`<b>`, `<code>`…) — por hábito ou porque era instruído a
     isso. Sem normalizar, o html.escape transforma `<b>` em `&lt;b&gt;` e o usuário vê a TAG literal
@@ -59,6 +107,8 @@ def to_html(md: str) -> str:
     Tolera HTML cru do modelo (normaliza p/ markdown antes) — assim `<b>` renderiza em vez de virar tag
     literal pro usuário."""
     text = _html_to_md(md or "")
+    text = _md_tables_to_kv(text)          # tabela → bullets 'rótulo: valor' (Telegram não tem tabela)
+    text = _bulletize(text)                # -/*/+ → • (antes do escape; o • literal sobrevive)
     stash: dict[str, str] = {}
 
     def _keep(rendered: str) -> str:

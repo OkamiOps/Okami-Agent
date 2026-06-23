@@ -11,12 +11,14 @@ from okami.channels.telegram import TelegramChannel, TelegramClient, _split_mess
 
 
 def test_split_no_data_loss():
+    import re
     t = "\n".join(f"linha {i} " + "x" * 60 for i in range(200))   # bem > 4096
     chunks = _split_message(t, 4000)
-    assert len(chunks) > 1 and all(len(c) <= 4000 for c in chunks)
+    assert len(chunks) > 1 and all(len(c) <= 4096 for c in chunks)  # +indicador (i/N); cap real 4096
     def squash(s):
+        s = re.sub(r"\n\n\(\d+/\d+\)$", "", s)                    # tira o indicador antes de comparar
         return s.replace(" ", "").replace("\n", "")
-    assert "".join(squash(c) for c in chunks) == squash(t)        # nada perdido
+    assert "".join(squash(c) for c in chunks) == squash(t)        # nada perdido (fora o indicador)
 
 
 def test_send_message_splits(monkeypatch):
@@ -24,7 +26,7 @@ def test_send_message_splits(monkeypatch):
     sent: list[str] = []
     monkeypatch.setattr(c, "_call", lambda m, p, **k: (sent.append(p["text"]), {"ok": True})[1])
     c.send_message("1", "y" * 9000)
-    assert len(sent) >= 3 and all(len(s) <= 4000 for s in sent)   # 3 partes, todas no limite
+    assert len(sent) >= 3 and all(len(s) <= 4096 for s in sent)   # 3 partes; +indicador (i/N), cap 4096
 
 
 def test_call_retries_on_429(monkeypatch):
