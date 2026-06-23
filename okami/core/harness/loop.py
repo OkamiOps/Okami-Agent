@@ -839,7 +839,9 @@ class Harness:
         self._audit(event="tool", step=step_n, tool=action.tool, args=self._args_brief(action.args),
                     ok=res.ok, effect=res.effect, out_chars=len(res.output))
         if self.hooks is not None:
-            self.hooks.fire("after_tool", {"tool": action.tool, "ok": res.ok, "effect": res.effect})
+            self.hooks.fire("after_tool", {"tool": action.tool, "args": action.args, "ok": res.ok,
+                                           "effect": res.effect, "output": res.output,
+                                           "out_chars": len(res.output or "")})
 
         # circuit breaker de falha repetida
         if not res.ok:

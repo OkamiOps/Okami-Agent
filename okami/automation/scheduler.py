@@ -41,6 +41,21 @@ def _parse_iso(spec: str) -> float | None:
         return None
 
 
+# Preâmbulo de CONTEXTO HEADLESS — toda tarefa agendada roda SEM ninguém presente. Sem isto, num ponto
+# ambíguo o agente usaria need_input/clarify e travaria (não há quem responda). Aplicado no gateway E na
+# CLI p/ comportamento idêntico (paridade Hermes: bloco 'no user present' do cron).
+CRON_HEADLESS_PREAMBLE = (
+    "[TAREFA AGENDADA — rodando sozinha, SEM ninguém presente para responder agora. NÃO pergunte nem "
+    "peça confirmação (need_input/clarify travam aqui, ninguém responde): decida com o default mais "
+    "razoável e ENTREGUE tudo direto na resposta final.]\n\n")
+
+
+def headless_prompt(prompt: str) -> str:
+    """Prefixa o preâmbulo headless ao prompt de um job agendado (não-duplica se já tiver)."""
+    p = prompt or ""
+    return p if p.startswith("[TAREFA AGENDADA") else CRON_HEADLESS_PREAMBLE + p
+
+
 def parse_schedule(spec: str) -> dict:
     """Classifica o schedule: {'kind': 'cron'|'interval'|'once', ...}."""
     spec = spec.strip()

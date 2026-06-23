@@ -78,15 +78,21 @@ def _msg_of(exc) -> str:
 
 
 def _status_of(exc) -> int | None:
-    for attr in ("status_code", "status", "code", "http_status"):
-        v = getattr(exc, attr, None)
-        if isinstance(v, int) and 100 <= v < 600:
-            return v
-    resp = getattr(exc, "response", None)              # boto3 ClientError esconde o status aqui
-    if isinstance(resp, dict):
-        v = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
-        if isinstance(v, int) and 100 <= v < 600:
-            return v
+    cur = exc                                          # alguns SDKs embrulham o status real no __cause__
+    for _ in range(5):                                 # anda a cadeia de exceções (cause/context), bounded
+        if cur is None:
+            break
+        for attr in ("status_code", "status", "code", "http_status"):
+            v = getattr(cur, attr, None)
+            if isinstance(v, int) and 100 <= v < 600:
+                return v
+        resp = getattr(cur, "response", None)          # boto3 ClientError esconde o status aqui
+        if isinstance(resp, dict):
+            v = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+            if isinstance(v, int) and 100 <= v < 600:
+                return v
+        nxt = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
+        cur = nxt if nxt is not cur else None
     m = re.search(r"\b([45]\d\d)\b", str(exc))
     return int(m.group(1)) if m else None
 

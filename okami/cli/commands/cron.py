@@ -45,7 +45,8 @@ def _cron_execute(job: dict, workspace: str):
         # (use_skill <nome-fundido> ainda resolve); o run_consolidation model-driven não gravava alias.
         cur.consolidate_with_contract(cfg, root, emit=lambda m: None)
         return f"curator: arquivadas {len(archived)} skills sem uso + consolidação rodada"
-    t = run_task(cfg, ws, job["prompt"], emit=lambda m: None)
+    from okami.automation.scheduler import headless_prompt
+    t = run_task(cfg, ws, headless_prompt(job["prompt"]), emit=lambda m: None)   # roda headless: não trava pedindo
     return t.result or t.reason or t.state.value
 
 

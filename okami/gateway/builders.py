@@ -207,7 +207,9 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
         if job.get("script"):                          # job SCRIPT (item 30): roda comando, sem gastar LLM
             result = run_script(job["script"], cwd=str(ep.ws))
         else:
-            task = ep.run_task(ep.cfg, ep.ws, job["prompt"], agent_home=ep.home, open_fs=ep.open_fs)
+            from okami.automation.scheduler import headless_prompt
+            task = ep.run_task(ep.cfg, ep.ws, headless_prompt(job["prompt"]),   # roda headless: não trava pedindo
+                               agent_home=ep.home, open_fs=ep.open_fs)
             result = task.result or task.reason or task.state.value
         deliver, text = delivery_decision(result)      # [SILENT] → registra mas não manda pro chat
         sched.record_output(job["id"], text)           # item 30: histórico do output (não some após entregar)
