@@ -231,6 +231,7 @@ class Harness:
         self._nudged_action = False
         self._empty_nudged = False                     # respondeu VAZIO → re-pede a resposta de verdade (1x)
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
+        self._blocked_nudged = False                   # desistiu CEDO (task_blocked prematuro) → empurra a tentar (1x)
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
         self._exec_refunds = 0                         # item 5: passos devolvidos p/ execute_code read-only (bounded)
@@ -885,6 +886,19 @@ class Harness:
             self._emit("complete", summary=t.result)     # sem _extract: conversa não polui a memória
             return t
         if action.tool == "task_blocked":
+            # Anti-bail (rumo ao Hermes, que NEM tem tool de 'blocked'): se está desistindo CEDO — tarefa
+            # PEDE ação, quase nenhum passo executado, e NENHUMA tool falhou de verdade — empurra a tentar
+            # UMA vez (a "sensação de incompetência" é o modelo fraco bailando sem tentar). Bloqueio
+            # GENUÍNO (já tentou OU uma tool falhou de verdade) é honrado na hora, sem forçar spin.
+            if (self._action_expected and not self._blocked_nudged
+                    and len(t.steps) < 2 and not self._failures):
+                self._blocked_nudged = True
+                self._emit("blocked_rejected", reason=action.args.get("reason", ""))
+                self.messages.append({"role": "user", "content":
+                    "Antes de declarar bloqueio: você quase não TENTOU. Faça primeiro o lookup/abordagem "
+                    "óbvia (find_files/read_file/run_shell/browse/use_skill) — só declare task_blocked se "
+                    "uma ferramenta REAL falhar e não houver alternativa. Tente AGORA, sem pedir permissão."})
+                return None
             t.state = TaskState.BLOCKED
             t.reason = action.args.get("reason", "(sem razão)")
             self._emit("blocked", reason=t.reason)
