@@ -40,6 +40,23 @@ def _first_changed_line(text: str, old: str, new: str) -> int:
     return start
 
 
+def _fuzzy_replace(text: str, old: str, new: str):
+    """Substituição tolerante a WHITESPACE/indentação (paridade Hermes): casa o bloco `old` por LINHA
+    (rstrip→strip, via patch._find_block), exige match ÚNICO (não escolhe entre vários). Devolve o texto
+    editado, ou None se não casar de forma única. Aplica `new` como veio (o modelo controla o conteúdo)."""
+    old_lines = old.splitlines()
+    if not old_lines:
+        return None
+    from okami.core.tools.patch import _find_block
+    lines = text.splitlines()
+    i = _find_block(lines, old_lines, 0)
+    if i < 0:                                  # -1 não casou · -2 ambíguo → não inventa
+        return None
+    lines[i:i + len(old_lines)] = new.splitlines()
+    out = "\n".join(lines)
+    return out + "\n" if text.endswith("\n") else out
+
+
 def _short_diff(before: str, after: str) -> str:
     """Diff unified curto e CAPADO (item 8) — o modelo vê o que mudou sem reler o arquivo. Tira os
     cabeçalhos '--- '/'+++ ' (ruído) e corta em _DIFF_MAX_LINES p/ não despejar arquivo gigante."""
@@ -277,11 +294,11 @@ class EditFile(Tool):
             return ToolResult(False, str(e))
         if not p.exists():
             return ToolResult(False, f"'{rel}' não existe — use write_file para criar.")
-        # Grounding anti-alucinação (§3.7), igual ao write_file: não edita às cegas um arquivo não-lido
-        # (um 'old' adivinhado não basta). prelearned_files do harness já entram em ctx.read_files (exceção).
-        if rel not in ctx.read_files:
-            return ToolResult(False, f"'{rel}' existe mas você não o leu — use read_file antes de "
-                                     "editar (grounding; edição cega por trecho adivinhado é recusada).")
+        # Grounding (paridade Hermes): ler-antes-de-editar vira AVISO, não bloqueio. O `old` PRECISA casar
+        # conteúdo real (o match já É o grounding — não dá pra alucinar uma edição), então recusar a edição
+        # só forçava um read→edit em 2 passos + thrash de recuperação. Hermes só avisa e segue.
+        ground_warn = ("" if rel in ctx.read_files else
+                       f"⚠ editou {rel} sem ler antes — o trecho casou (ok), mas reler evita editar a versão errada.")
         from okami.core.tools.file_state import check_stale, record_read
         stale = check_stale(ctx, rel, p)               # item 7: mudou no disco depois da leitura? bloqueia
         if stale:
@@ -296,10 +313,14 @@ class EditFile(Tool):
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao ler {rel}: {e}")
         count = text.count(old)
-        if count == 0:
-            return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços)."
-                              + _edit_did_you_mean(text, old, rel), effect=False)
-        if count > 1 and not replace_all:
+        new_text = None
+        if count == 0:                                 # FUZZY (Hermes): tolera whitespace/indent errado no `old`
+            new_text = _fuzzy_replace(text, old, new)  # (o erro nº1 do modelo) — casa por linha, exige unicidade
+            if new_text is None:
+                return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços)."
+                                  + _edit_did_you_mean(text, old, rel), effect=False)
+            count = 1
+        elif count > 1 and not replace_all:
             return ToolResult(False, f"'old' aparece {count}× em {rel} — torne-o único (mais contexto) "
                                      "ou passe replace_all=true.")
         if ctx.checkpoints is not None:                # snapshot antes (rede de segurança / rollback)
@@ -307,7 +328,8 @@ class EditFile(Tool):
                 ctx.checkpoints.snapshot(rel)
             except Exception:  # noqa: BLE001
                 pass
-        new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        if new_text is None:                           # caminho EXATO (count==1 ou replace_all)
+            new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
         record_read(ctx, rel, p)              # conhece o conteúdo + atualiza baseline anti-stale
         n = count if replace_all else 1
@@ -320,7 +342,7 @@ class EditFile(Tool):
         line_no = _first_changed_line(text, old, new)                # item 8: nº da 1ª linha mudada
         diff = _short_diff(text, new_text)                           # item 8: diff unified curto (capado)
         head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'})"
-        extra = "".join(f"\n{w}" for w in (warn, sem, sem2, sec) if w)
+        extra = "".join(f"\n{w}" for w in (ground_warn, warn, sem, sem2, sec) if w)
         return ToolResult(True, head + (f"\n{diff}" if diff else "") + extra, effect=True)
 
 

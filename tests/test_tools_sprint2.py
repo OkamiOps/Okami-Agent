@@ -37,14 +37,16 @@ def test_edit_file_errors(tmp_path):
     assert EditFile().run({"path": "nope.py", "old": "a", "new": "b"}, ctx).ok is False     # não existe
 
 
-def test_edit_file_requires_read_first(tmp_path):
-    # #6 grounding: editar arquivo EXISTENTE não-lido é recusado (edição cega por trecho adivinhado)
+def test_edit_file_grounding_is_warning_not_block(tmp_path):
+    # paridade Hermes: editar sem ler antes NÃO é recusado (o `old` casar conteúdo real JÁ é o grounding);
+    # só AVISA. Antes bloqueava → forçava read→edit em 2 passos + thrash. O `old` que NÃO casa segue falhando.
     (tmp_path / "a.py").write_text("y = 2\n")
     r = EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ToolContext(workspace=tmp_path))
-    assert r.ok is False and "read_file" in r.output and (tmp_path / "a.py").read_text() == "y = 2\n"
-    # prelearned_files (em read_files pelo harness) são a exceção confiável:
-    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})
-    assert EditFile().run({"path": "a.py", "old": "y = 2", "new": "y = 3"}, ctx).ok is True
+    assert r.ok is True and "sem ler antes" in r.output                  # editou + avisou
+    assert (tmp_path / "a.py").read_text() == "y = 3\n"
+    ctx = ToolContext(workspace=tmp_path, read_files={"a.py"})           # lido → sem aviso
+    r2 = EditFile().run({"path": "a.py", "old": "y = 3", "new": "y = 4"}, ctx)
+    assert r2.ok is True and "sem ler antes" not in r2.output
 
 
 def test_edit_file_replace_all(tmp_path):

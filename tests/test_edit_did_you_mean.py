@@ -11,9 +11,10 @@ def test_no_match_shows_similar_section_and_escape(tmp_path):
     (tmp_path / "code.py").write_text(
         "def hello():\n    return 'hi'\n\ndef bye():\n    return 'bye'\n", encoding="utf-8")
     ctx = ToolContext(workspace=tmp_path, read_files={"code.py"})
-    # 'old' quase certo, mas indentação errada (2 espaços em vez de 4) → não casa exato
+    # 'old' com CONTEÚDO errado (não é só whitespace — a linha do corpo diverge de verdade) → não casa nem
+    # fuzzy → guia. (Whitespace-só agora casa via fuzzy; ver test_edit_fuzzy.)
     res = EditFile().run(
-        {"path": "code.py", "old": "def hello():\n  return 'hi'", "new": "def hello():\n  return 'yo'"}, ctx)
+        {"path": "code.py", "old": "def hello():\n    return 'NOPE'", "new": "def hello():\n    return 'yo'"}, ctx)
     assert res.ok is False
     assert "def hello" in res.output                       # mostra a seção parecida p/ copiar EXATO
     assert "write_file" in res.output.lower()              # oferece a rota de fuga
