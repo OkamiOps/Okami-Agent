@@ -13,6 +13,13 @@ Conservador: só normaliza; nunca inventa. Aplicado proativamente em openai_tool
 from __future__ import annotations
 
 _STRIP_KEYS = ("pattern", "format")
+_REF_FORBIDDEN_SIBLINGS = ("default",)                       # draft-07-strict: nada ao lado de $ref
+_TOP_LEVEL_FORBIDDEN = ("allOf", "anyOf", "oneOf", "enum", "not")   # Codex/strict: sem combinator no topo
+# Modo AGRESSIVO (retry reativo após um grammar-400): tira também enum/const e todas as restrições
+# numéricas/tamanho que alguns grammar-converters não digerem. Perde validação advisory, não correção.
+_AGGRESSIVE_STRIP = ("enum", "const", "examples", "minLength", "maxLength", "minimum", "maximum",
+                     "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems", "multipleOf",
+                     "uniqueItems", "minProperties", "maxProperties")
 
 
 def _collapse_union(branches: list) -> dict | None:
@@ -24,14 +31,18 @@ def _collapse_union(branches: list) -> dict | None:
     return None                                          # 0 ou 2+ não-null → mantém a união como veio
 
 
-def sanitize_tool_schema(schema):
-    """Devolve uma CÓPIA sanitizada do `schema` (recursivo). Não muta o original."""
+def sanitize_tool_schema(schema, *, aggressive: bool = False):
+    """Devolve uma CÓPIA sanitizada do `schema` (recursivo). Não muta o original. `aggressive` (retry
+    reativo) tira também enum/const/limites."""
     if isinstance(schema, list):
-        return [sanitize_tool_schema(x) for x in schema]
+        return [sanitize_tool_schema(x, aggressive=aggressive) for x in schema]
     if not isinstance(schema, dict):
         return schema
 
     node = dict(schema)
+    if aggressive:
+        for k in _AGGRESSIVE_STRIP:
+            node.pop(k, None)
 
     # união nullable anyOf/oneOf → tipo base
     for comb in ("anyOf", "oneOf"):
@@ -53,26 +64,54 @@ def sanitize_tool_schema(schema):
     for k in _STRIP_KEYS:
         node.pop(k, None)
 
-    # recursão em properties / items / definitions
+    # $ref com sibling proibido (ex.: `default`) → draft-07-strict (Fireworks) rejeita
+    if "$ref" in node:
+        for k in _REF_FORBIDDEN_SIBLINGS:
+            node.pop(k, None)
+
+    # recursão: properties / $defs / items / additionalProperties / anyOf|oneOf|allOf
     if isinstance(node.get("properties"), dict):
-        node["properties"] = {k: sanitize_tool_schema(v) for k, v in node["properties"].items()}
-    if "items" in node:
-        node["items"] = sanitize_tool_schema(node["items"])
+        node["properties"] = {k: sanitize_tool_schema(v, aggressive=aggressive)
+                              for k, v in node["properties"].items()}
     for defs_key in ("$defs", "definitions"):
         if isinstance(node.get(defs_key), dict):
-            node[defs_key] = {k: sanitize_tool_schema(v) for k, v in node[defs_key].items()}
+            node[defs_key] = {k: sanitize_tool_schema(v, aggressive=aggressive)
+                              for k, v in node[defs_key].items()}
+    if "items" in node:
+        node["items"] = sanitize_tool_schema(node["items"], aggressive=aggressive)
+    if "additionalProperties" in node and not isinstance(node["additionalProperties"], bool):
+        node["additionalProperties"] = sanitize_tool_schema(node["additionalProperties"], aggressive=aggressive)
+    for comb in ("anyOf", "oneOf", "allOf"):
+        if isinstance(node.get(comb), list):
+            node[comb] = [sanitize_tool_schema(x, aggressive=aggressive) for x in node[comb]]
+
+    # objeto sem properties → injeta {} (o grammar-converter rejeita objeto sem campos)
+    if node.get("type") == "object" and not isinstance(node.get("properties"), dict):
+        node["properties"] = {}
+
+    # poda `required` que não existe em properties (defesa: o handler revalida required de verdade)
+    if node.get("type") == "object" and isinstance(node.get("required"), list):
+        props = node.get("properties") or {}
+        valid = [r for r in node["required"] if isinstance(r, str) and r in props]
+        if valid:
+            node["required"] = valid
+        else:
+            node.pop("required", None)
 
     return node
 
 
-def sanitize_tool_schemas(schemas: list) -> list:
+def sanitize_tool_schemas(schemas: list, *, aggressive: bool = False) -> list:
     """Sanitiza cada schema de função (estrutura OpenAI {type:function, function:{parameters:{...}}})."""
     out = []
     for s in schemas or []:
         if isinstance(s, dict) and isinstance(s.get("function"), dict) and "parameters" in s["function"]:
             s = dict(s)
             fn = dict(s["function"])
-            fn["parameters"] = sanitize_tool_schema(fn["parameters"])
+            params = sanitize_tool_schema(fn["parameters"], aggressive=aggressive)
+            if isinstance(params, dict):                    # backend strict (Codex): sem combinator NO TOPO
+                params = {k: v for k, v in params.items() if k not in _TOP_LEVEL_FORBIDDEN}
+            fn["parameters"] = params
             s["function"] = fn
         out.append(s)
     return out

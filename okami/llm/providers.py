@@ -323,6 +323,18 @@ def _extract_tool_calls(msg) -> list[dict]:
     return out
 
 
+_SCHEMA_ERR_MARKERS = ("grammar", "json schema", "invalid schema for function", "schema must have type",
+                       "not allowed at the same level", "tool schema", "failed to parse schema",
+                       "tools[", "function parameters")
+
+
+def _is_tool_schema_error(e) -> bool:
+    """O erro do provider é sobre o SCHEMA das tools tropeçar no grammar-converter (não auth/rate/etc)?
+    → vale re-sanitizar agressivo e retentar 1x (paridade Hermes reactive strip+retry)."""
+    s = (str(getattr(e, "message", "") or "") + " " + str(e)).lower()
+    return any(m in s for m in _SCHEMA_ERR_MARKERS)
+
+
 def _complete_one(pc, messages, model, response_schema, overrides) -> Completion:
     via = transports.dispatch(pc, messages, model, overrides)
     if via is not None:
@@ -332,12 +344,22 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
     if rf is not None:
         overrides.setdefault("response_format", rf)
     from okami.llm.native_capability import native_supported
+    _native_sent = False
     if native_supported(pc) and "tools" not in overrides:   # tool-calling nativo — SÓ se o probe confirmou
         from okami.core.tools import default_registry, openai_tools
         overrides["tools"] = openai_tools(default_registry())
         if "tool_choice" not in overrides:                  # força chamada de tool (sem bail): respond/
             overrides["tool_choice"] = pc.tool_choice or "required"   # task_complete SÃO tools → sempre válido
-    resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
+        _native_sent = True
+    try:
+        resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
+    except Exception as e:  # noqa: BLE001
+        if _native_sent and _is_tool_schema_error(e):       # schema tropeçou no grammar-converter mesmo após
+            from okami.core.tools import default_registry, openai_tools   # sanitização proativa → re-sanitiza
+            overrides["tools"] = openai_tools(default_registry(), aggressive=True)   # AGRESSIVO e retenta 1x
+            resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
+        else:
+            raise
     choice = resp.choices[0]
     return Completion(text=_message_text(choice.message),                   # content; vazio → reasoning_content
                       tool_calls=_extract_tool_calls(choice.message),       # antes JOGADO FORA (P0.4)

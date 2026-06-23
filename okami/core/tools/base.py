@@ -208,13 +208,14 @@ class Tool:
             "parameters": {"type": "object", "properties": props, "required": list(self.required)}}}
 
 
-def openai_tools(registry: dict) -> list[dict]:
+def openai_tools(registry: dict, *, aggressive: bool = False) -> list[dict]:
     """Schemas OpenAI das tools (p/ enviar no payload quando o provider faz function-calling nativo).
 
     #11: passa pelo sanitizador de schema — schema de tool MCP externa pode ter construto (união nullable,
-    pattern/format) que o grammar-converter do llama.cpp rejeita (400). Nativo (tudo string) passa intacto."""
+    pattern/format) que o grammar-converter do llama.cpp rejeita (400). `aggressive` (retry reativo após um
+    grammar-400) tira também enum/const/limites."""
     from okami.llm.schema_sanitizer import sanitize_tool_schemas
-    return sanitize_tool_schemas([t.to_openai_schema() for t in registry.values()])
+    return sanitize_tool_schemas([t.to_openai_schema() for t in registry.values()], aggressive=aggressive)
 
 
 def coerce_args(args: dict, arg_types: dict) -> dict:
