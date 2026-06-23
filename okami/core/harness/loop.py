@@ -246,6 +246,8 @@ class Harness:
         self._consecutive_arg_fails = 0                # ações parseáveis mas SEM arg obrigatório, seguidas
         self._steps_without_effect = 0
         self._loop_breaks = 0
+        self._stall_breaks = 0                          # quantas vezes o watchdog de SEM-PROGRESSO disparou
+        self._stall_exceeded = False                    # estourou o teto → main loop escala/falha (não nudga ∞)
         self._escalated = False
         self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
         # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
@@ -467,6 +469,12 @@ class Harness:
                     self._emit("grace_step", step=step_n)
                 else:
                     return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+            if self._stall_exceeded:                 # watchdog de SEM-PROGRESSO estourou N vezes (nudge não
+                self._stall_exceeded = False         # resolveu): escala p/ modelo mais forte, senão FALHA
+                if self._try_escalate("sem progresso persistente"):   # (com salvage) — em vez de nudgar ∞
+                    self._stall_breaks = 0
+                else:
+                    return self._fail(t, "sem progresso: vários passos sem resultado e a abordagem não mudou")
             if self.cancel():                        # /stop do usuário (§13)
                 t.state = TaskState.BLOCKED
                 t.reason = "cancelado pelo usuário (/stop)"
@@ -870,6 +878,7 @@ class Harness:
                                                 or (action.tool == "run_shell" and not res.effect))
         if res.effect or _explored:                # PROGRESSO real → zera o contador de anti-thrash de
             self._low_gain_compactions = 0         # compactação (senão 2 compactações de baixo ganho
+            self._stall_breaks = 0                 # e o budget de sem-progresso (progresso solta o watchdog)
             #                                        DISTANTES, num trabalho longo legítimo, matavam o
             #                                        turno — review #1: o thrash só vale SEM progresso).
         if res.effect:                             # MUTAÇÃO bem-sucedida = progresso REAL → solta o budget
@@ -878,13 +887,17 @@ class Harness:
             #                                        prematuro). Loop patológico não tem effect → segue pego.
         self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
         if self._steps_without_effect >= self.budget.stall_limit:
-            self._emit("stall", steps=self._steps_without_effect)
-            self.messages.append({"role": "user", "content":
-                "SEM PROGRESSO: vários passos SEM RESULTADO (reads falhando / chutando caminho). Se está "
-                "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
-                "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
-                "Ou task_blocked."})
             self._steps_without_effect = 0
+            self._stall_breaks += 1
+            self._emit("stall", steps=self.budget.stall_limit, breaks=self._stall_breaks)
+            if self._stall_breaks >= self.budget.max_loop_breaks:   # nudge não resolveu N vezes → não nudga
+                self._stall_exceeded = True                         # mais p/ sempre: main loop escala/falha
+            else:
+                self.messages.append({"role": "user", "content":
+                    "SEM PROGRESSO: vários passos SEM RESULTADO (reads falhando / chutando caminho). Se está "
+                    "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
+                    "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
+                    "Ou task_blocked."})
 
         return step_n
 
