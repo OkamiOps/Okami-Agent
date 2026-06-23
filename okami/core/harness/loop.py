@@ -266,6 +266,7 @@ class Harness:
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
         self._truncated_action_reemits = 0             # teto de re-emissões de AÇÃO truncada (review #2b)
         self._next_max_tokens: int | None = None       # teto de tokens p/ a PRÓXIMA geração (boost de length)
+        self._grace_used = False                       # 1 iteração extra no limite de passos (grace, Hermes)
         from okami.core.harness.loopguard import ProgressTracker
         self._progress = ProgressTracker()             # não-progresso por OUTPUT (OpenClaw): poll/read que não muda
         self._stall_nudged: set[str] = set()           # já avisei que ESTA tool não anda? (1x por tool)
@@ -460,7 +461,11 @@ class Harness:
             if turns > self.budget.max_total_turns:
                 return self._fail(t, "backstop de turnos do harness atingido")
             if step_n >= self.budget.max_steps:
-                return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+                if not self._grace_used:             # GRACE (Hermes): 1 última iteração real no limite —
+                    self._grace_used = True          # muitas tarefas fecham no passo seguinte (task_complete)
+                    self._emit("grace_step", step=step_n)
+                else:
+                    return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
             if self.cancel():                        # /stop do usuário (§13)
                 t.state = TaskState.BLOCKED
                 t.reason = "cancelado pelo usuário (/stop)"
