@@ -172,6 +172,11 @@ class ReadFile(Tool):
         off = _as_int(args.get("offset"))
         lim = _as_int(args.get("limit"))
         if off is None and lim is None:
+            if len(text) > 100_000:                   # arquivo gigante sem range → não despeja inteiro no
+                nlines = text.count("\n") + 1          # contexto; manda paginar com offset/limit (por LINHA)
+                return ToolResult(False, f"'{rel}' é grande ({len(text):,} chars, {nlines:,} linhas) — não "
+                                  "leio inteiro de uma vez. Pagine: read_file com offset/limit (por linha), "
+                                  "ou use search_files p/ achar o trecho.", effect=False)
             return ToolResult(True, text + hint, effect=False)
         lines = text.splitlines()
         start = max(0, off or 0)

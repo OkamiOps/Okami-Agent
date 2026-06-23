@@ -30,6 +30,17 @@ _EXTRACT_SUMMARIZE_PROMPT = (
     "relevantes; corte navegação/boilerplate/repetição. Seja denso e fiel — não invente.")
 
 
+import re as _re
+
+_B64_IMG = _re.compile(r"data:image/[^;,\s]+;base64,[A-Za-z0-9+/=\s]+")
+
+
+def _strip_base64(text: str) -> str:
+    """Tira blobs base64 de imagem (data:image/...;base64,...) do conteúdo extraído — são lixo enorme que
+    estoura o contexto sem informação útil. Op de string pura."""
+    return _B64_IMG.sub("[imagem base64 removida]", text or "")
+
+
 def web_extract(url: str, *, max_chars: int = 8000, chunk: int = 8000, fetch=None, summarize=None) -> str:
     """Lê uma página e, se for grande, CHUNKA + resume via modelo auxiliar (preserva fato/código, corta
     tokens). Página pequena passa direto. `fetch(url)->texto` e `summarize(txt)->resumo` injetáveis."""
@@ -43,6 +54,7 @@ def web_extract(url: str, *, max_chars: int = 8000, chunk: int = 8000, fetch=Non
         raw = fetch(url)
     except Exception as e:  # noqa: BLE001
         return f"(erro ao buscar {url}: {e})"
+    raw = _strip_base64(raw)                          # blob base64 de imagem = lixo enorme no contexto → remove
     if len(raw) <= max_chars or summarize is None:
         return raw if len(raw) <= max_chars else raw[:max_chars] + "\n…[truncado]"
     parts = []
