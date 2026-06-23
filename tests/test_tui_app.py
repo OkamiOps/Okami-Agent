@@ -37,6 +37,25 @@ def test_status_text_has_model_gauge_and_ready_state(tmp_path):
     assert "codex/gpt-5.5" in plain and "pronto" in plain and "ctx" in plain and "trocas" in plain
 
 
+def test_sink_event_tool_start_sets_running_step_clears(tmp_path):
+    # terminal VIVO: tool_start arma o indicador (tool, args, t0); step o desarma (card final vai pro log)
+    out = {}
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test():
+            app.sink_event({"kind": "tool_start", "tool": "read_file", "args": {"path": "x.py"}})
+            out["after_start"] = app._running
+            app.sink_event({"kind": "step", "tool": "read_file", "args": {"path": "x.py"},
+                            "ok": True, "out": "dados"})
+            out["after_step"] = app._running
+
+    asyncio.run(scenario())
+    assert out["after_start"] is not None and out["after_start"][0] == "read_file"   # armou
+    assert out["after_step"] is None                                                 # desarmou no resultado
+
+
 def test_status_text_shows_session_timer(tmp_path):
     # paridade Hermes (StatusRule mostra a duração da sessão)
     import time as _t
