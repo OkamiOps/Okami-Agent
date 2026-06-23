@@ -74,6 +74,35 @@ def _short_diff(before: str, after: str) -> str:
     return "\n".join(body)
 
 
+_BIN_EXT = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff",
+    ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac",
+    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
+    ".zip", ".gz", ".tgz", ".tar", ".7z", ".rar", ".bz2", ".xz",
+    ".so", ".dll", ".dylib", ".bin", ".exe", ".o", ".a", ".class", ".pyc", ".pyd",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+})
+_IMG_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"})
+
+
+def _binary_guard(rel: str, p):
+    """ToolResult de recusa se `p` é binário (extensão conhecida OU NUL nos 1os bytes) — read_file é só p/
+    texto; binário viraria mojibake no contexto. Imagem → aponta o vision_analyze. None = é texto, segue."""
+    ext = p.suffix.lower()
+    binary = ext in _BIN_EXT
+    if not binary:
+        try:
+            from okami.core.tools.search import _is_binary
+            binary = _is_binary(p.read_bytes()[:1024])
+        except Exception:  # noqa: BLE001 — falha no probe → trata como texto (não bloqueia à toa)
+            binary = False
+    if not binary:
+        return None
+    extra = " — é IMAGEM: use vision_analyze para descrevê-la" if ext in _IMG_EXT else ""
+    return ToolResult(False, f"'{rel}' parece BINÁRIO ({ext or 'sem extensão'}) — read_file é só p/ "
+                      f"texto{extra}.", effect=False)
+
+
 class ReadFile(Tool):
     name = "read_file"
     description = ("Lê um arquivo de texto do workspace. Opcional: offset (pular N linhas) + limit "
@@ -123,6 +152,9 @@ class ReadFile(Tool):
                                   effect=False)
             ctx.read_files.add(rel)
             return ToolResult(True, text, effect=False)
+        _bg = _binary_guard(rel, p)           # PNG/áudio/vídeo/objeto → viraria mojibake no contexto: recusa clara
+        if _bg is not None:
+            return _bg
         try:
             text = read_text_capped(p)        # teto de tamanho → não estoura memória
         except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
@@ -568,7 +600,9 @@ class RunShell(Tool):
     description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "
                    "sanitizado; isolamento real com backend docker). Em perfil read-only, comando que "
                    "altera estado é bloqueado. Comando demorado: passe timeout=N (máx 1800s) ou, p/ algo "
-                   "realmente longo (servidor/build), use process_start (background, sem teto).")
+                   "realmente longo (servidor/build), use process_start (background, sem teto). Cada chamada "
+                   "roda do ZERO no workspace — cwd e env NÃO persistem entre comandos: encadeie com `&&` "
+                   "(ex.: `cd sub && npm test`) ou use caminho absoluto.")
     args_schema = {"cmd": "comando a executar",
                    "timeout": "(opc) segundos até cortar o comando — default 120, máx 1800"}
     arg_types = {"timeout": "integer"}
