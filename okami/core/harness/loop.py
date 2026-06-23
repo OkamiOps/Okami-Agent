@@ -800,6 +800,10 @@ class Harness:
             self._low_gain_compactions = 0         # compactação (senão 2 compactações de baixo ganho
             #                                        DISTANTES, num trabalho longo legítimo, matavam o
             #                                        turno — review #1: o thrash só vale SEM progresso).
+        if res.effect:                             # MUTAÇÃO bem-sucedida = progresso REAL → solta o budget
+            self._loop_breaks = 0                  # de loop (paridade Hermes: não acumula loops de FASES
+            #                                        DISTINTAS de uma tarefa longa e produtiva num _fail
+            #                                        prematuro). Loop patológico não tem effect → segue pego.
         self._steps_without_effect = 0 if (res.effect or _explored) else self._steps_without_effect + 1
         if self._steps_without_effect >= self.budget.stall_limit:
             self._emit("stall", steps=self._steps_without_effect)
