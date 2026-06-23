@@ -40,8 +40,12 @@ def genesis_pending(ws) -> bool:
 
 def _seal_genesis(ws) -> None:
     marker = Path(ws) / ".okami" / "genesis.done"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text("done\n", encoding="utf-8")
+    try:                                                 # roda em thread daemon do gateway: uma falha de FS
+        marker.parent.mkdir(parents=True, exist_ok=True)  # (cheio/permissão) não pode sumir em silêncio —
+        marker.write_text("done\n", encoding="utf-8")    # senão a gênese 're-dispara' a cada boot sem aviso
+    except OSError as e:
+        from okami import log
+        log.warn(f"genesis: não consegui selar genesis.done ({e}) — a gênese pode repetir no próximo boot.")
 
 
 def _history_block(history: list[tuple[str, str]], limit: int = 6, max_chars: int = 6000) -> str:
