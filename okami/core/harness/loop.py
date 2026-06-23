@@ -643,9 +643,11 @@ class Harness:
                     hint = f" {_diag}"
                 elif action is None and FUTURE_INTENT.search(text):
                     hint = " Você descreveu intenção em vez de agir."
-                elif action is not None:                   # nome de tool ALUCINADO e sem reparo → diz quais existem
-                    hint = (f" '{action.tool}' não existe. Ferramentas REAIS: "
-                            f"{', '.join(sorted(self.registry))}.")
+                elif action is not None:                   # nome de tool ALUCINADO e sem reparo → sugere as
+                    import difflib                          # MAIS PRÓXIMAS (não despeja o manual inteiro: o
+                    _near = difflib.get_close_matches(action.tool.lower(), list(self.registry), n=5, cutoff=0.3)
+                    hint = (f" '{action.tool}' não existe." +  # prompt já lista as tools; aqui só um empurrão
+                            (f" Quis dizer: {', '.join(_near)}?" if _near else ""))
                 self._emit("violation", n=self._consecutive_violations, text=text[:200])
                 if self._consecutive_violations >= self.budget.max_consecutive_violations:
                     if self._try_escalate("violações de Action-or-Terminate"):

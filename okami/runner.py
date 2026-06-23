@@ -67,8 +67,8 @@ def _maybe_background_review(cfg, ws, task, *, skills_dir, model, provider, emit
             if msg:
                 try:
                     notify(msg)
-                except Exception:  # noqa: BLE001 — aviso é best-effort
-                    pass
+                except Exception as e:  # noqa: BLE001 — aviso é best-effort, mas a falha NÃO é silenciosa
+                    emit(f"⚠ não consegui avisar o dono do que aprendi (o aprendizado FOI salvo): {e}")
     if lc.get("review_sync"):              # síncrono (testes / CLI one-shot que sai rápido)
         _bg()
     else:                                 # background: roda DEPOIS de a pessoa já ter a resposta

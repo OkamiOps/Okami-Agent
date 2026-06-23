@@ -67,8 +67,9 @@ def apply(memory, task: Task, model_name: str = "?") -> list[MemoryItem]:
                 item = prepare(lesson.text, source=lesson.source or "reflection", kind=lesson.kind)
                 if item is not None:
                     memory.write(item)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001 — uma lição que não grava NÃO derruba o turno, mas registra
+                from okami import log                       # (era silêncio total: memória podia falhar 100%
+                log.warn(f"learning: lição não persistida ({e}).")   # sem nenhum sinal — falha invisível)
     return lessons
 
 
