@@ -265,6 +265,7 @@ class Harness:
         self._truncated_parts: list[str] = []          # length-continuation (Hermes): partes de resposta cortada
         self._MAX_LENGTH_CONT = 6                      # teto de continuações por entrega (anti-loop)
         self._truncated_action_reemits = 0             # teto de re-emissões de AÇÃO truncada (review #2b)
+        self._next_max_tokens: int | None = None       # teto de tokens p/ a PRÓXIMA geração (boost de length)
         from okami.core.harness.loopguard import ProgressTracker
         self._progress = ProgressTracker()             # não-progresso por OUTPUT (OpenClaw): poll/read que não muda
         self._stall_nudged: set[str] = set()           # já avisei que ESTA tool não anda? (1x por tool)
@@ -295,15 +296,26 @@ class Harness:
         self.on_event({"kind": kind, **data})
         self.events.emit(kind, **data)      # persiste o timeline (start/step/loop/compact/complete/…)
 
+    def _length_max_tokens(self, attempt: int) -> int:
+        """Teto de tokens da continuação de length (paridade Hermes `_boost_base*(n+1)`, piso 32K): cresce
+        a cada tentativa pra a continuação ter ESPAÇO de fechar — senão re-trunca no mesmo ponto. Capado."""
+        return min(32768 * (max(0, int(attempt)) + 1), 200_000)
+
     def _do_generate(self, messages, schema):
         """Gera. Com stream_tokens, passa on_token (emite 'token' por delta) — mas tolera generate de 2
-        args (stubs de teste) via TypeError. Sem streaming, chamada de sempre."""
+        args (stubs de teste) via TypeError. `_next_max_tokens` (boost de length) é passado e CONSUMIDO."""
+        mt = self._next_max_tokens
+        self._next_max_tokens = None                  # consome: o boost vale só pra ESTA geração
+        kw = {"max_tokens": mt} if mt else {}
         if self.stream_tokens:
             try:
-                return self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t))
+                return self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t), **kw)
             except TypeError:
                 pass
-        return self.generate(messages, schema)
+        try:
+            return self.generate(messages, schema, **kw)
+        except TypeError:                              # stub/generate sem max_tokens → chamada simples
+            return self.generate(messages, schema)
 
     def _pending_todos(self) -> str:
         """Bloco de reinjeção da CHECKLIST operacional (item 9) — só os itens em aberto. "" se não há
@@ -538,6 +550,7 @@ class Harness:
                         # truncada não parseia → detect_malformed ENSINA / vira violação).
                         self._truncated_action_reemits += 1
                         if self._truncated_action_reemits <= self._MAX_LENGTH_CONT:
+                            self._next_max_tokens = self._length_max_tokens(self._truncated_action_reemits)
                             self._emit("length_continue", part=0, truncated_action=True)
                             self.messages.append({"role": "user", "content":
                                 "[Sua AÇÃO (json) foi CORTADA pelo limite de tamanho — o JSON não fechou. "
@@ -546,6 +559,7 @@ class Harness:
                                 "write_file da primeira parte, depois edit_file p/ anexar o resto).]"})
                             continue
                     self._truncated_parts.append(comp.text)
+                    self._next_max_tokens = self._length_max_tokens(len(self._truncated_parts))
                     self._emit("length_continue", part=len(self._truncated_parts))
                     self.messages.append({"role": "user", "content":
                         "[Sua resposta foi CORTADA pelo limite de tamanho. Continue EXATAMENTE de onde parou, "

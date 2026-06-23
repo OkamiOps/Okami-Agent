@@ -219,14 +219,18 @@ def run_task(
             res.usage = estimate_usage(_in, getattr(res, "text", "") or "", chars_per_token=_cpt)
         return res
 
-    def generate(messages, schema=None, on_token=None):
+    def generate(messages, schema=None, on_token=None, max_tokens=None):
+        eff2 = dict(eff)
+        if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
+            eff2["max_tokens"] = int(max_tokens)
+
         def _call():
             if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
                 from okami.llm.streaming import streaming_generate
                 return streaming_generate(cfg, messages, provider=provider, model=model,
-                                          response_schema=schema, on_token=on_token, **eff)
+                                          response_schema=schema, on_token=on_token, **eff2)
             return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                             response_schema=schema, **eff)
+                                             response_schema=schema, **eff2)
         res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
         _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
