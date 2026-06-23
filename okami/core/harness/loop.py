@@ -249,6 +249,7 @@ class Harness:
         self._stall_breaks = 0                          # quantas vezes o watchdog de SEM-PROGRESSO disparou
         self._stall_exceeded = False                    # estourou o teto → main loop escala/falha (não nudga ∞)
         self._escalated = False
+        self._empty_responses = 0                       # respostas vazias seguidas (reasoning-only content='')
         self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
         # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
         self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
@@ -538,6 +539,22 @@ class Harness:
                     return self._fail(t, friendly_failure(fail.reason))
                 comp = as_completion(out)          # tolera str (JSON-em-texto) E Completion (nativo)
                 self._shrunk_retry = False         # gerou com sucesso → libera novo encolhimento p/ falha futura
+                # RESPOSTA VAZIA (modelo de reasoning: tudo no reasoning_content, content=''): NÃO persiste
+                # {role:assistant, content:''} sem tool_calls — o histórico zumbi faz o PRÓXIMO request 400
+                # ('assistant precisa de content OU tool_calls'). Conta, recupera com nudge, e é BOUNDED.
+                if not (comp.text or "").strip() and not comp.tool_calls:
+                    self._empty_responses += 1
+                    self._emit("empty_response", n=self._empty_responses)
+                    if self._empty_responses >= 3:
+                        if self._try_escalate("respostas vazias repetidas"):
+                            self._empty_responses = 0
+                            continue
+                        return self._fail(t, "o modelo devolveu resposta vazia várias vezes seguidas")
+                    self.messages.append({"role": "assistant", "content": "(resposta vazia)"})  # não-zumbi
+                    self._append_user_note("[Sua resposta veio VAZIA. Emita UMA ação (tool) agora — ou, se a "
+                                           "tarefa já terminou, chame task_complete com um resumo.]")
+                    continue
+                self._empty_responses = 0          # veio conteúdo/ação → zera o contador de vazias
                 _u = comp.usage                     # usage POR CHAMADA no trajeto (P2 observabilidade)
                 self.events.emit("llm_call", provider=comp.provider, model=comp.model,
                                  surface=self.surface,        # /insights: breakdown por plataforma (item 21)
@@ -861,7 +878,13 @@ class Harness:
             self._failures[key] = self._failures.get(key, 0) + 1
             # determinístico (sandbox/bad_request) NÃO melhora repetindo → corta logo; senão, 3x.
             deterministic = fail.kind in (FailureKind.SANDBOX_DENY, FailureKind.BAD_REQUEST)
-            if deterministic or self._failures[key] >= 3:
+            transient = fail.kind == FailureKind.RATE_LIMIT      # 429/sobrecarga do modelo aux: NÃO é a tool
+            if transient and self._failures[key] == 1:           # quebrada — avisa LOGO p/ não martelar igual
+                self.messages.append({"role": "user", "content":
+                    f"'{action.tool}' bateu no LIMITE/sobrecarga do provedor auxiliar (não é a ferramenta "
+                    "quebrada). ESPERE alguns segundos antes de repetir IGUAL, ou siga com outra abordagem "
+                    "se for urgente."})
+            elif deterministic or self._failures[key] >= 3:
                 why = ("BLOQUEADO (determinístico/sandbox): repetir não resolve."
                        if deterministic else
                        "CIRCUIT BREAKER: essa abordagem falhou 3x com o mesmo erro.")
@@ -1073,6 +1096,8 @@ class Harness:
         self._loop_breaks = 0
         self._consecutive_violations = 0
         self._fingerprints.clear()
+        self._batch = []                                # descarta ações do lote antigo: o modelo NOVO reavalia
+        #                                                 do zero (ação órfã do modelo anterior = incoerência)
         self._emit("escalate", why=why)
         self.messages.append({"role": "user", "content":
             "Trocando para um modelo mais forte. Reavalie o estado e tome a PRÓXIMA "

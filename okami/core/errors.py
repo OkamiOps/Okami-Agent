@@ -84,6 +84,10 @@ _PROVIDER_MAP: dict[str, FailureKind] = {
 }
 
 _SANDBOX = re.compile(r"sandbox|read-only|fora do workspace|path.?escape|bloquead|permission denied|operation not permitted", re.I)
+# Falha de tool que NA VERDADE é provider transitório (a tool chamou um modelo auxiliar): repetir IGUAL só
+# martela a cota — o loop deve ESPERAR, não tratar como "abordagem quebrada".
+_TOOL_TRANSIENT = re.compile(r"rate.?limit|too many requests|overloaded|sobrecarregad|temporariamente|"
+                            r"try again in|tente de novo em|\b429\b|\b503\b|\b502\b|timed?.?out|\btimeout\b", re.I)
 
 
 def _mk(kind: FailureKind, reason: str, *, status: int | None = None) -> Failure:
@@ -146,6 +150,8 @@ def classify_tool(result) -> Failure:
         text = str(result)
     if _SANDBOX.search(text):
         return _mk(FailureKind.SANDBOX_DENY, _first_line(text))
+    if _TOOL_TRANSIENT.search(text):            # tool que chamou modelo aux levou 429/sobrecarga → NÃO é a
+        return _mk(FailureKind.RATE_LIMIT, _first_line(text))   # tool quebrada; repetir IGUAL martela a cota
     return _mk(FailureKind.TOOL_FAIL, _first_line(text))
 
 
