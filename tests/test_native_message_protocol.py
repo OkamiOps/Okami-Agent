@@ -99,6 +99,29 @@ def test_native_multiple_reads_run_in_one_turn(tmp_path):
     assert "AAA" in blob and "BBB" in blob                      # AMBOS os arquivos foram lidos
 
 
+def test_native_multiple_writes_run_serially_in_one_turn(tmp_path):
+    # paridade Hermes: várias MUTAÇÕES no mesmo turno (serial, gated), não 1/turno
+    calls = {"n": 0}
+
+    def gen(messages, schema=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return Completion(text="", tool_calls=[
+                {"id": "w1", "name": "write_file", "arguments": '{"path":"x.txt","content":"X"}'},
+                {"id": "w2", "name": "write_file", "arguments": '{"path":"y.txt","content":"Y"}'}])
+        return Completion(text="", tool_calls=[
+            {"id": "d", "name": "task_complete", "arguments": '{"summary":"escrevi os dois"}'}])
+
+    h = Harness(gen, Task(goal="crie x e y"), tmp_path)
+    h.run()
+    assert calls["n"] == 2                                       # 2 escritas no MESMO turno (1 geração)
+    assert (tmp_path / "x.txt").read_text(encoding="utf-8") == "X"
+    assert (tmp_path / "y.txt").read_text(encoding="utf-8") == "Y"
+    asst = _assistant_with_tool_calls(h.messages)
+    assert asst and asst[0][1]["tool_calls"][0]["id"] == "w1"   # 1ª declarada, sequência válida
+    assert h.messages[asst[0][0] + 1]["role"] == "tool"
+
+
 def test_json_rail_still_uses_user_observation(tmp_path):
     (tmp_path / "b.txt").write_text("x", encoding="utf-8")
     calls = {"n": 0}

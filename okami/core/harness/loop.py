@@ -76,6 +76,24 @@ def _lead_readonly(actions: list[Action], first: Action | None) -> list[Action]:
         out.append(a)
     return out
 
+
+def _lead_serial(actions: list[Action], first: Action | None) -> list[Action]:
+    """Cadeia LÍDER serial (paridade Hermes: VÁRIAS tool_calls/turno, INCLUSIVE mutações). PARA só no 1º
+    TERMINAL (respond/task_complete/task_blocked/need_input) — esse re-gera p/ ver o estado. Mutação ENTRA,
+    mas roda SERIAL (cada uma passa pelos gates/aprovação/anti-loop; NUNCA em paralelo — sem race)."""
+    def _fp(a: Action) -> str:
+        return f"{a.tool}:{json.dumps(a.args, sort_keys=True, ensure_ascii=False, default=str)}"
+    seen = {_fp(first)} if first is not None else set()
+    out: list[Action] = []
+    for a in actions:
+        if a.tool in _REPORT_META:                # terminal → encerra/precisa do estado → re-gera
+            break
+        if _fp(a) in seen:
+            continue
+        seen.add(_fp(a))
+        out.append(a)
+    return out
+
 # Aliases comuns de nome de tool ALUCINADO (modelo fraco erra o nome) → nome real. Hermes _repair_tool_call.
 _TOOL_ALIASES = {
     "read": "read_file", "readfile": "read_file", "cat": "read_file", "open": "read_file", "view": "read_file",
@@ -546,10 +564,12 @@ class Harness:
                     if _t is not None and getattr(_t, "arg_types", None):
                         _a.args = coerce_args(_a.args, _t.arg_types)
                 action = _acts[0] if _acts else None
-                # VÁRIAS por turno (paridade Hermes): leituras seguras líderes rodam no MESMO turno (nativo E
-                # JSON). No nativo a 1ª é a tool_call DECLARADA na assistant (role=tool); as demais voltam como
-                # observação (sequência válida, sem órfã). Mutação/encerramento seguem 1-por-turno.
-                self._batch = _lead_readonly(_acts[1:], action)
+                # VÁRIAS tool_calls por turno (paridade Hermes). NATIVO: cadeia SERIAL inclusive com mutações
+                # (cada uma gated/aprovada/anti-loop; a 1ª é a tool_call declarada na assistant=role=tool, as
+                # demais voltam como observação → sequência válida, sem órfã). JSON (modelo fraco): só leituras
+                # líderes (mutação 1/turno — protocolo de texto não tem o mesmo contrato de mensagem).
+                self._batch = (_lead_serial(_acts[1:], action) if comp.tool_calls
+                               else _lead_readonly(_acts[1:], action))
 
             # --- Reparo de nome de tool ALUCINADO (Hermes): 'read'→'read_file' etc. antes de violar ---
             if action is not None and action.tool not in self.registry:
@@ -725,7 +745,8 @@ class Harness:
             # MESMA geração, roda o GRUPO em paralelo (ThreadPool) — N reads em ~1 read de wall-clock.
             # Os resultados voltam na ORDEM DE ENTRADA e cada step/_audit/observação é emitido SERIAL na
             # thread principal (determinístico). Mutação/aprovação NUNCA entram aqui (segue 1-por-turno).
-            if self._batch and _is_batchable(action) and not paths_collide([action, *self._batch]):
+            if (self._batch and all(_is_batchable(a) for a in (action, *self._batch))   # mutação NUNCA em
+                    and not paths_collide([action, *self._batch])):                     # paralelo (race) → serial
                 group = [action, *self._batch]
                 self._batch = []                          # consumido inteiro no paralelo
                 self._emit("parallel", n=len(group), tools=[a.tool for a in group])
