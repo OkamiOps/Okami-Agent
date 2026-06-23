@@ -23,7 +23,11 @@ class RememberFact(Tool):
                               effect=False)
         if ctx.stage_writes:                          # background/review c/ write_approval → fila do dono
             from okami.memory.staging import PendingStore
-            pid = PendingStore(ctx.home).stage("fact", item.text, origin="review")
+            try:
+                pid = PendingStore(ctx.home).stage("fact", item.text, origin="review")
+            except Exception as e:  # noqa: BLE001 — FS cheio/permissão: NÃO finja que enfileirou ("staged")
+                return ToolResult(False, f"não consegui enfileirar o fato p/ aprovação ({e}) — verifique "
+                                  "permissão/espaço em .okami/pending/. NÃO foi salvo.", effect=False)
             return ToolResult(True, f"(staged p/ aprovação do dono: {pid} — /memory pending)", effect=True)
         ctx.memory.write(item)
         return ToolResult(True, f"lembrado [{item.kind}]: {item.text[:80]}", effect=True)
@@ -55,14 +59,20 @@ class RememberUser(Tool):
         from okami.memory import files as _f
         if ctx.stage_writes:                          # background/review c/ write_approval → fila do dono
             from okami.memory.staging import PendingStore
-            pid = PendingStore(ctx.home).stage("user", args["text"], origin="review")
+            try:
+                pid = PendingStore(ctx.home).stage("user", args["text"], origin="review")
+            except Exception as e:  # noqa: BLE001 — FS cheio/permissão: NÃO finja que enfileirou
+                return ToolResult(False, f"não consegui enfileirar a nota p/ aprovação ({e}) — verifique "
+                                  "permissão/espaço em .okami/pending/. NÃO foi salvo.", effect=False)
             return ToolResult(True, f"(staged p/ aprovação do dono: {pid} — /memory pending)", effect=True)
         if not _f.append_user(ctx.home, args["text"]):    # CASA do agente (não o workspace/CWD)
             if _f.is_full(ctx.home, "USER.md"):           # cheia → fato novo sumiria no inject: peça consolidar
                 return ToolResult(False, "USER.md está no LIMITE do prompt — consolide/remova fatos antigos e "
                                   "tente de novo (acima do teto, fato novo não chega ao modelo).", effect=False)
-            return ToolResult(True, "(não anotei — parece conter um segredo; não guardo isso no USER.md)",
-                              effect=False)
+            # recusa por SEGREDO/INJEÇÃO: status=False (não fingir sucesso) — senão o modelo segue achando
+            # que anotou e o dado nunca entrou no USER.md (falha silenciosa).
+            return ToolResult(False, "(conteúdo recusado — parece conter segredo ou padrão de injeção; não "
+                              "guardo isso no USER.md)", effect=False)
         return ToolResult(True, f"USER.md += {args['text'][:80]}", effect=True)
 
 
@@ -76,9 +86,11 @@ class FinishSetup(Tool):
     def run(self, args, ctx):
         from okami.memory import files as _f
         about = (args.get("about_user") or "").strip()
-        if about:
-            _f.append_user(ctx.home, about)               # identidade mora na CASA do agente
-        marker = ctx.home / ".okami" / "genesis.done"
-        marker.parent.mkdir(parents=True, exist_ok=True)
+        note = ""
+        if about and not _f.append_user(ctx.home, about):   # identidade mora na CASA do agente; se a escrita
+            note = (" (obs: não gravei a nota sobre você no USER.md — pode ser segredo, padrão de injeção "    # falhou,
+                    "ou limite; me conte de novo de outro jeito)")                       # NÃO esconde do dono
+        marker = ctx.home / ".okami" / "genesis.done"      # gênese conclui de qualquer forma (não trava por
+        marker.parent.mkdir(parents=True, exist_ok=True)   # causa da nota — mas o dono fica sabendo via 'note')
         marker.write_text("done\n", encoding="utf-8")
-        return ToolResult(True, "configuração inicial concluída ✓", effect=True)
+        return ToolResult(True, f"configuração inicial concluída ✓{note}", effect=True)
