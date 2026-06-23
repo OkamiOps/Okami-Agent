@@ -61,6 +61,11 @@ def _effective_model(pc: ProviderConfig, model: str | None) -> str:
 _TIER_WINDOW = {"strong": 128000, "weak": 32000, "local": 8192, "unknown": 16000}
 # Fração da janela em que disparamos a auto-compaction (§6.4). Ex.: 250K→~180K ≈ 0.72.
 COMPACT_RATIO = 0.72
+# Teto REALISTA da janela p/ tier local/weak. A janela do catálogo (ex.: minimax=1M) é ARQUITETURAL —
+# um modelo local no LMStudio NÃO serve 1M de contexto rápido. Sem teto, a auto-compaction (proporcional
+# à janela) só dispararia a ~2.88M chars → o histórico inteiro era REENVIADO a cada passo (lentidão
+# mortal, 1.5M tok de entrada). Capamos p/ a compaction disparar cedo. Dono sobe via `context_window:`.
+_LOCAL_WINDOW_CAP = 32_768
 
 
 def context_window_tokens(pc: ProviderConfig) -> int:
@@ -68,9 +73,10 @@ def context_window_tokens(pc: ProviderConfig) -> int:
         return pc.context_window
     from okami.llm.model_catalog import model_info     # janela REAL do modelo (models.dev-lite)
     info = model_info(pc.model)
-    if info:
-        return info.context_window
-    return _TIER_WINDOW.get(pc.tier, 16000)            # desconhecido → default por tier (antigo)
+    win = info.context_window if info else _TIER_WINDOW.get(pc.tier, 16000)
+    if pc.tier in ("local", "weak"):                  # nominal do catálogo não vale p/ deploy local
+        win = min(win, _LOCAL_WINDOW_CAP)
+    return win
 
 
 def compaction_threshold_chars(pc: ProviderConfig, ratio: float = COMPACT_RATIO) -> int:
