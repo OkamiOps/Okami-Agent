@@ -347,12 +347,12 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
         overrides.setdefault("response_format", rf)
     from okami.llm.native_capability import native_supported
     _native_sent = False
-    if native_supported(pc) and "tools" not in overrides:   # tool-calling nativo — SÓ se o probe confirmou
-        from okami.core.tools import default_registry, openai_tools
-        overrides["tools"] = openai_tools(default_registry())
-        if "tool_choice" not in overrides:                  # força chamada de tool (sem bail): respond/
-            overrides["tool_choice"] = pc.tool_choice or "required"   # task_complete SÃO tools → sempre válido
-        _native_sent = True
+    if native_supported(pc):                                # tool-calling nativo — SÓ se o probe confirmou
+        if "tools" not in overrides:                        # o runner pode JÁ passar o registry FILTRADO (surface/
+            from okami.core.tools import default_registry, openai_tools   # disponibilidade) — não sobrescreve;
+            overrides["tools"] = openai_tools(default_registry())         # só cai no default se ninguém passou.
+        overrides.setdefault("tool_choice", pc.tool_choice or "required")  # força chamada (sem bail): respond/
+        _native_sent = True                                 # task_complete SÃO tools → sempre válido
     try:
         resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     except Exception as e:  # noqa: BLE001

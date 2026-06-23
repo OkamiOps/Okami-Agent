@@ -67,3 +67,23 @@ def test_non_schema_error_does_not_retry(monkeypatch):
     with pytest.raises(RuntimeError):
         P._complete_one(pc, [{"role": "user", "content": "hi"}], None, None, {})
     assert len(calls) == 1                                 # erro não-schema → NÃO retenta aqui (sobe pro failover)
+
+
+def test_native_keeps_caller_supplied_filtered_tools(monkeypatch):
+    # paridade Hermes: se o runner já passa `tools` (registry FILTRADO que o harness despacha), o provider
+    # NÃO sobrescreve com o default_registry inteiro — senão o modelo veria tool que será rejeitada → violação.
+    import okami.llm.providers as P
+    from okami.config import ProviderConfig
+    monkeypatch.setattr("okami.llm.native_capability.native_supported", lambda pc: True)
+    calls = []
+
+    def fake(**kw):
+        calls.append(kw)
+        return _Resp()
+    monkeypatch.setattr(P.litellm, "completion", fake)
+    pc = ProviderConfig(name="p", model="openai/gpt-5.4", native_tools=True)
+    my_tools = [{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}]
+    res = P._complete_one(pc, [{"role": "user", "content": "hi"}], None, None, {"tools": my_tools})
+    assert res.text == "ok"
+    assert calls[0]["tools"] == my_tools                   # manteve as tools do chamador (não trocou pelo default)
+    assert calls[0].get("tool_choice")                     # mas ainda força tool_choice (sem bail)

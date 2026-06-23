@@ -223,6 +223,14 @@ def run_task(
         eff2 = dict(eff)
         if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
             eff2["max_tokens"] = int(max_tokens)
+        if "tools" not in eff2:             # NATIVO: oferece SÓ o registry FILTRADO que o harness DESPACHA
+            try:                            # (surface/disponibilidade) — não o default inteiro. Senão o modelo
+                from okami.llm.native_capability import native_supported   # chama tool podada → "ferramenta
+                if native_supported(cfg.provider(provider)):               # inválida" → violação (modelo fraco
+                    from okami.core.tools import openai_tools              # já sofre com 66 tools no payload).
+                    eff2["tools"] = openai_tools(registry)
+            except Exception:  # noqa: BLE001 — qualquer pepino → provider usa o default (comportamento antigo)
+                pass
 
         def _call():
             if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
