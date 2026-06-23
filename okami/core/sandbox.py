@@ -154,9 +154,14 @@ class SandboxResult:
 
 
 def _cap(text: str, limit: int) -> str:
+    """Trunca preservando HEAD + CAUDA — a cauda quase sempre tem o erro/traceback (head-only jogava fora
+    o que importa). ~40% começo, ~60% fim, marcador no meio."""
     if len(text) <= limit:
         return text
-    return text[:limit] + f"\n…[saída truncada em {limit:,} bytes]"
+    head = max(1, int(limit * 0.4))
+    tail = max(1, limit - head)
+    omitted = len(text) - head - tail
+    return f"{text[:head]}\n…[{omitted:,} bytes omitidos no meio]…\n{text[-tail:]}"
 
 
 def _rlimit_preexec(policy: SandboxPolicy):

@@ -18,7 +18,7 @@ def test_local_runs_and_caps_output(tmp_path):
     res = run_sandboxed("echo ola", tmp_path)
     assert res.returncode == 0 and "ola" in res.output
     big = run_sandboxed("python3 -c \"print('x' * 5000)\"", tmp_path, SandboxPolicy(max_output=100))
-    assert "truncada" in big.output and len(big.output) < 300       # teto de saída aplicado
+    assert "omitido" in big.output and len(big.output) < 300        # teto de saída (head+tail) aplicado
 
 
 def test_local_nonzero_exit(tmp_path):

@@ -611,18 +611,18 @@ class RunShell(Tool):
                 _ids = ", ".join(str(f.get("id", "?")) for f in _tir.get("findings", [])[:3]) or "ameaça"
                 return ToolResult(False, f"🛡 BLOQUEADO (tirith): ameaça de conteúdo no comando ({_ids}). "
                                   f"Use o perfil yolo se for de propósito. ({cmd[:80]})", effect=False)
-        from okami.core.redact import redact            # token impresso na saída (gh auth/build log) NÃO pode
+        from okami.core.redact import redact, strip_ansi   # token impresso na saída (gh auth/build log) NÃO pode
         remote = getattr(ctx, "remote", None)           # AMBIENTE REMOTO: roda LÁ, não no sandbox local
         if remote is not None:                          # (as guardas hardline/read-only/sensível JÁ rodaram acima)
             rr = remote.run(cmd, timeout=policy.timeout)
             ok, note = interpret_exit_code(cmd, rr.returncode)
-            out = f"[📡 {getattr(remote, 'alias', 'remoto')}] exit={rr.returncode}\n{redact(rr.output)}"
+            out = f"[📡 {getattr(remote, 'alias', 'remoto')}] exit={rr.returncode}\n{redact(strip_ansi(rr.output))}"
             if note:
                 out += f"\n[{note}]"
             return ToolResult(ok, out, effect=eff)
         res = run_sandboxed(cmd, ctx.workspace, policy)
         ok, note = interpret_exit_code(cmd, res.returncode)      # grep/rg/diff/test exit≠0 ≠ falha real
-        out = f"exit={res.returncode}\n{redact(res.output)}"   # ir verbatim p/ o LLM/transcript (igual ao bg log)
+        out = f"exit={res.returncode}\n{redact(strip_ansi(res.output))}"   # strip_ansi→redact (igual ao bg log)
         if note:
             out += f"\n[{note}]"
         if getattr(res, "timed_out", False):                     # cortou no teto → ensina a recuperar (não é "falha real")
