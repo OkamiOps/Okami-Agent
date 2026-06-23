@@ -32,11 +32,13 @@ def _is_binary(sample: bytes) -> bool:
 
 class SearchFiles(Tool):
     name = "search_files"
-    description = ("Busca por CONTEÚDO (regex) nos arquivos do workspace — é o 'grep' do agente. "
-                   "mode=content (linhas que casam, default) | files (só nomes) | count (nº por arquivo). "
-                   "Opcional: glob (ex.: '*.py'), context (linhas ao redor), ignore_case, offset "
-                   "(paginar). Para achar por NOME de arquivo use find_files.")
-    args_schema = {"query": "regex a buscar no conteúdo", "path": "(opc) subdir (default raiz)",
+    description = ("Busca no workspace — é o grep+find do agente. target=content (regex no CONTEÚDO, default) "
+                   "OU target=files (acha por NOME de arquivo, fuzzy: caso/hífen/underscore). Opcional: glob "
+                   "(ex.: '*.py'), context (linhas ao redor), ignore_case, offset (paginar). É a ÚNICA tool "
+                   "de busca de que você precisa.")
+    args_schema = {"query": "regex (target=content) ou parte do nome (target=files)",
+                   "target": "(opc) content (grep, default) | files (busca por nome)",
+                   "path": "(opc) subdir (default raiz)",
                    "glob": "(opc) filtro de nome ex.: *.py", "mode": "(opc) content|files|count",
                    "context": "(opc) nº de linhas ao redor de cada match", "ignore_case": "(opc) true/false",
                    "offset": "(opc) pular N matches (paginação)"}
@@ -44,6 +46,9 @@ class SearchFiles(Tool):
 
     def run(self, args, ctx):
         from okami.core.redact import redact
+        if (args.get("target") or "").lower() == "files":   # paridade Hermes (search_files target=files):
+            from okami.core.tools.files import FindFiles     # busca por NOME → delega ao find_files (fuzzy)
+            return FindFiles().run({"query": args.get("query")}, ctx)
         q = args.get("query")
         if not isinstance(q, str) or not q:
             return ToolResult(False, "search_files: 'query' precisa ser uma string não-vazia.", effect=False)

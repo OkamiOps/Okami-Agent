@@ -88,7 +88,10 @@ class HookManager:
             return r.returncode == 0
         except Exception as e:  # noqa: BLE001 — hook que explode não derruba o agente
             self.emit(f"[hook {event}] erro: {e}")
-            return True
+            # FAIL-CLOSED em evento de BLOQUEIO (paridade Hermes): um before_* de política/segurança que
+            # erra (timeout/interpretador ruim/OOM) NÃO pode liberar a ação que existe pra barrar → veta.
+            # Evento observador (after_*) não gateia nada → erro não tem efeito (segue True).
+            return event not in _BLOCKABLE
 
     def fire(self, event: str, payload: dict | None = None) -> bool:
         """Dispara todos os hooks do evento. Devolve False se algum `before_*` VETOU."""
