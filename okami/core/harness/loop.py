@@ -221,6 +221,7 @@ class Harness:
         self._fingerprints: deque[str] = deque(maxlen=12)
         self._failures: dict[str, int] = {}
         self._consecutive_violations = 0
+        self._consecutive_arg_fails = 0                # ações parseáveis mas SEM arg obrigatório, seguidas
         self._steps_without_effect = 0
         self._loop_breaks = 0
         self._escalated = False
@@ -630,6 +631,19 @@ class Harness:
             if missing:
                 self._stats["violations"] += 1
                 self._fingerprints.append(fp)
+                # Contador PRÓPRIO: o re-prompt não conta passo, e o anti-loop por args idênticos não pega
+                # quando o modelo varia os OUTROS args a cada tentativa (só erra o obrigatório). Sem isto, um
+                # modelo fraco girava até o backstop de 1000 turns mandando a mesma tool incompleta. Reseta
+                # a cada dispatch de verdade (_handle_tool_result) → só conta SEGUIDAS.
+                self._consecutive_arg_fails += 1
+                self._emit("malformed_args", tool=action.tool, missing=missing,
+                           n=self._consecutive_arg_fails)
+                if self._consecutive_arg_fails >= self.budget.max_consecutive_violations:
+                    if self._try_escalate("ação repetidamente sem argumento obrigatório"):
+                        self._consecutive_arg_fails = 0
+                        continue
+                    return self._fail(t, f"ação '{action.tool}' veio sem argumento(s) obrigatório(s) "
+                                         f"{missing} repetidas vezes — modelo não consegue formar a chamada.")
                 self.messages.append({"role": "user", "content":
                     f"Ação '{action.tool}' sem argumento(s) obrigatório(s): {missing}. Reenvie completa."})
                 continue
@@ -714,6 +728,7 @@ class Harness:
         watchdog, e anexa a observação. Devolve o novo step_n. Compartilhado pelo caminho SERIAL e pelo
         PARALELO (item 20) — assim o lote read-only emite step/_audit/observação idêntico ao serial."""
         step_n += 1
+        self._consecutive_arg_fails = 0               # dispatch de verdade → zera o contador de args malformados
         t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
         self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
                    out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
