@@ -7,17 +7,20 @@ Slack usa mrkdwn, CLI/TUI renderiza tabela/seção). Espelhar o idioma da pessoa
 
 from __future__ import annotations
 
-# Superfícies que renderizam tabela markdown de verdade (CLI/TUI) → mantêm o esqueleto com tabela.
-_RICH_MARKDOWN = {"cli", "tui", "subagent", "terminal", "api"}
+# Superfícies que renderizam tabela markdown → mantêm o esqueleto com tabela. Telegram entrou: o
+# markdown_telegram converte tabela em lista 'rótulo: valor' (renderiza limpo), então o modelo PODE usar.
+_RICH_MARKDOWN = {"cli", "tui", "subagent", "terminal", "api", "telegram"}
 
 # Hint de FORMATO por canal: o que cada superfície renderiza (e o que NÃO renderiza).
 _SURFACE_HINT = {
-    "telegram": ("FORMATO NESTE CANAL (Telegram, vira HTML): SEMPRE formate — NUNCA um parágrafo gigante. "
-                 "Todo comando/caminho/valor/flag entre `crases` (vira monospace). Listas com `-` (uma "
-                 "linha por item). **Negrito** no rótulo/título. Em vez de tabela, lista `rótulo: valor`. "
-                 "`##` vira negrito; `> ` vira citação; blocos ```lang … ```; [link](url); `||spoiler||`. "
-                 "Ex.: em vez de 'rodei gog auth list e deu vazio', escreva: **gog** — `gog auth list` → "
-                 "conta: `nenhuma`. Capriche: tem que ser legível no celular, não um paredão."),
+    "telegram": ("VOCÊ ESTÁ NO TELEGRAM (plataforma de mensagens). O seu Markdown é convertido "
+                 "AUTOMATICAMENTE no formato do Telegram e renderiza de verdade — então USE markdown à "
+                 "vontade, nunca mande texto cru. Renderizam: **negrito**, _itálico_, ~~riscado~~, "
+                 "`código`, blocos ```lang … ```, [link](url), `> citação`, `||spoiler||`, listas com `-`, "
+                 "e TABELAS markdown (`| col | col |` — viram lista legível, pode usar). REGRA PRINCIPAL: "
+                 "prefira formato ESTRUTURADO a parágrafo denso — em QUALQUER comparação, lista de passos, "
+                 "resumo `rótulo: valor` ou conjunto de dados, escreva tabela/lista, NUNCA um paredão. Todo "
+                 "comando/caminho/flag/valor vai entre `crases` (monospace). Capriche: legível no celular."),
     "slack": ("FORMATO NESTE CANAL (Slack/mrkdwn): *negrito* com um asterisco, _itálico_, `código`, "
               "blocos ``` e listas com `-`. Slack NÃO tem tabela — use lista com `rótulo: valor`."),
     "discord": ("FORMATO NESTE CANAL (Discord): **negrito**, *itálico*, `código`, blocos ``` e listas. "
@@ -32,7 +35,7 @@ _SURFACE_HINT = {
 def _delivery_full() -> str:
     """Esqueleto de entrega COM tabela — superfícies que renderizam markdown rico (CLI/TUI)."""
     return """<entrega>
-A resposta final vai INTEIRA e ESTRUTURADA em MARKDOWN — a TUI renderiza tabela, seção e cor; texto
+A resposta final vai INTEIRA e ESTRUTURADA em MARKDOWN — o app renderiza tabela, seção e cor; texto
 corrido num parágrafo único fica FEIO e ilegível (é a entrega ruim). REGRAS DE FORMATO, sempre:
 - Seções com `## Título` e LINHA EM BRANCO entre elas. NUNCA um parágrafo gigante.
 - COMPARAÇÃO → TABELA markdown (`| aspecto | A | B | C |`, uma linha por aspecto), nunca prosa.

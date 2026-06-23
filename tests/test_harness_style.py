@@ -21,12 +21,14 @@ def test_style_block_cli_keeps_table_skeleton():
     assert "parágrafo corrido" in s
 
 
-def test_style_block_telegram_swaps_tables_for_bullets():
+def test_style_block_telegram_directs_like_hermes():
+    # paridade Hermes: enquadra como PLATAFORMA ('você está no Telegram'), garante que o markdown CONVERTE,
+    # e exige ESTRUTURADO em vez de paredão. Tabela agora é permitida (o renderer converte em lista).
     s = style_block("telegram")
-    assert "| suíte | passou | falhou |" not in s      # Telegram NÃO tem tabela pipe
     low = s.lower()
-    assert "telegram" in low and ("não tem tabela" in low or "sem tabela" in low)
-    assert "lista" in low or "bullet" in low or "rótulo" in low
+    assert "telegram" in low and "convert" in low                # garante ao modelo que vai renderizar
+    assert "estrutura" in low and ("paredão" in low or "parágrafo" in low)   # anti-wall-of-text
+    assert "tabela" in low                                       # tabela liberada (renderer converte)
 
 
 def test_style_block_slack_and_discord_have_surface_hint():
@@ -55,9 +57,9 @@ def test_prompt_style_is_visible_not_buried_in_internal_manual():
     assert p.index("<entrega>") < p.index(_MANUAL_MARK)
 
 
-def test_prompt_telegram_surface_injects_bullet_hint():
+def test_prompt_telegram_surface_injects_platform_direction():
     p = build_system_prompt(Task(goal="faz X"), {}, surface="telegram").lower()
-    assert "telegram" in p and ("não tem tabela" in p or "sem tabela" in p)
+    assert "telegram" in p and "convert" in p and "estrutura" in p   # direção estilo Hermes no prompt
 
 
 def test_prompt_default_surface_is_cli_backcompat():
