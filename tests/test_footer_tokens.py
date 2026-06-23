@@ -17,7 +17,6 @@ def test_fmt_elapsed_short_and_long():
 
 
 def _ep():
-    ch = type("Ch", (), {"name": "telegram", "supports_media": True})()
     return AgentEndpoint.__new__(AgentEndpoint)     # só p/ chamar _turn_footer (método puro)
 
 

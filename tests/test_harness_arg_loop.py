@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from okami.core import Budget, Harness, Task, TaskState
+from okami.core import Harness, Task, TaskState
 
 
 def J(tool: str, **args) -> str:
