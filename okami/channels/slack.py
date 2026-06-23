@@ -46,5 +46,8 @@ class SlackChannel(RestChannel):
                 out.append(Inbound("slack", self.channel_id, text=text, msg_id=str(ts)))
         return out
 
+    MAX_LEN = 3900                                       # Slack rende mal/recusa msg muito longa → fatia
+
     def send(self, chat_id, text: str) -> None:
-        self._post("/chat.postMessage", {"channel": str(chat_id), "text": text})
+        for chunk in self._chunks(text):                # manda INTEIRO em partes (não trunca)
+            self._post("/chat.postMessage", {"channel": str(chat_id), "text": chunk})

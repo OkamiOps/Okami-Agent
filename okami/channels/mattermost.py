@@ -46,5 +46,8 @@ class MattermostChannel(RestChannel):
                 out.append(Inbound("mattermost", self.channel_id, text=msg, msg_id=str(pid)))
         return out
 
+    MAX_LEN = 16000                                      # Mattermost corta msg ~16383 chars → fatia
+
     def send(self, chat_id, text: str) -> None:
-        self._post("/posts", {"channel_id": str(chat_id), "message": text})
+        for chunk in self._chunks(text):                # manda INTEIRO em partes (não trunca)
+            self._post("/posts", {"channel_id": str(chat_id), "message": chunk})

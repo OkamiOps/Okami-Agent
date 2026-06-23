@@ -22,10 +22,36 @@ class Inbound:
     msg_id: str = ""           # id único da mensagem no canal → idempotência por turno (#3)
 
 
+def split_text(text: str, limit: int) -> list[str]:
+    """Quebra `text` em pedaços ≤limit preferindo fronteira (parágrafo > linha > frase > espaço > corte
+    duro) — manda a resposta INTEIRA em partes em vez de o canal truncar/recusar uma msg longa. limit<=0
+    ou texto curto → uma parte só."""
+    text = text or ""
+    if limit <= 0 or len(text) <= limit:
+        return [text] if text else [text]
+    out, rest = [], text
+    while len(rest) > limit:
+        window = rest[:limit]
+        cut = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(". "), window.rfind(" "))
+        if cut <= 0:
+            cut = limit                                   # sem fronteira → corte duro
+        out.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    if rest:
+        out.append(rest)
+    return out
+
+
 class Channel:
     name: str = "channel"
     supports_media: bool = False   # canal entrega anexo nativo? (liga a convenção MEDIA:<path>)
     supports_edit: bool = False    # canal edita msg já enviada? (liga streaming-by-edit do status)
+    MAX_LEN: int = 0               # teto de chars por mensagem do canal (0 = sem limite/não fatiar)
+
+    def _chunks(self, text: str) -> list[str]:
+        """Fatia `text` no teto do canal (MAX_LEN) preferindo fronteira — o canal que tem limite manda em
+        partes em vez de a plataforma cortar/recusar. Sem MAX_LEN → uma parte só."""
+        return split_text(text, self.MAX_LEN)
 
     def start(self) -> None:
         """Inicialização opcional (handshake, getMe, etc.)."""

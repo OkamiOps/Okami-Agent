@@ -44,5 +44,8 @@ class DiscordChannel(RestChannel):
                 out.append(Inbound("discord", self.channel_id, text=text, msg_id=mid))
         return out
 
+    MAX_LEN = 2000                                       # Discord RECUSA mensagem > 2000 chars → fatia
+
     def send(self, chat_id, text: str) -> None:
-        self._post(f"/channels/{chat_id}/messages", {"content": text})
+        for chunk in self._chunks(text):                # manda INTEIRO em partes (senão a API recusa)
+            self._post(f"/channels/{chat_id}/messages", {"content": chunk})
