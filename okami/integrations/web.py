@@ -6,6 +6,8 @@ Backends com chave (Tavily/Exa/Firecrawl) podem ser somados depois sob a mesma `
 """
 from __future__ import annotations
 
+import re as _re
+
 
 class SearchUnavailable(RuntimeError):
     """Nenhum backend de busca disponível (ex.: pacote ddgs não instalado)."""
@@ -29,8 +31,6 @@ _EXTRACT_SUMMARIZE_PROMPT = (
     "Resuma o trecho de página web abaixo PRESERVANDO fatos, números, nomes e trechos de código "
     "relevantes; corte navegação/boilerplate/repetição. Seja denso e fiel — não invente.")
 
-
-import re as _re
 
 _B64_IMG = _re.compile(r"data:image/[^;,\s]+;base64,[A-Za-z0-9+/=\s]+")
 
