@@ -357,8 +357,10 @@ def _complete_one(pc, messages, model, response_schema, overrides) -> Completion
         resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
     except Exception as e:  # noqa: BLE001
         if _native_sent and _is_tool_schema_error(e):       # schema tropeçou no grammar-converter mesmo após
-            from okami.core.tools import default_registry, openai_tools   # sanitização proativa → re-sanitiza
-            overrides["tools"] = openai_tools(default_registry(), aggressive=True)   # AGRESSIVO e retenta 1x
+            from okami.llm.schema_sanitizer import sanitize_tool_schemas   # sanitização proativa → re-sanitiza
+            # AGRESSIVO sobre as MESMAS tools que já estavam no payload (preserva o registry FILTRADO por
+            # surface que o runner passou) — reverter p/ default_registry reintroduziria run_shell/spawn etc.
+            overrides["tools"] = sanitize_tool_schemas(overrides["tools"], aggressive=True)   # e retenta 1x
             resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
         else:
             raise

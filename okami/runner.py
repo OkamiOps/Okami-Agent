@@ -118,6 +118,23 @@ def _run_with_deadline(fn, timeout):
     return box.get("r")
 
 
+def _native_tools_for(pc, registry, eff_dict):
+    """Injeta no payload as tools do registry JÁ FILTRADO (surface/disponibilidade) quando o provider faz
+    function-calling nativo — usado em TODO caminho de geração (generate E escalate). Sem isto, o caminho
+    de ESCALADA mandava o default inteiro (ou nada): na superfície Telegram o modelo recebia run_shell/spawn
+    (negados) e os chamava → 'ferramenta inválida'. Idempotente: não sobrescreve `tools` já passadas."""
+    if not registry or pc is None or "tools" in eff_dict:
+        return eff_dict
+    try:
+        from okami.llm.native_capability import native_supported
+        if native_supported(pc):
+            from okami.core.tools import openai_tools
+            eff_dict["tools"] = openai_tools(registry)
+    except Exception:  # noqa: BLE001 — qualquer pepino → provider cai no default (comportamento antigo)
+        pass
+    return eff_dict
+
+
 def run_task(
     cfg: OkamiConfig,
     workspace,
@@ -223,14 +240,8 @@ def run_task(
         eff2 = dict(eff)
         if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
             eff2["max_tokens"] = int(max_tokens)
-        if "tools" not in eff2:             # NATIVO: oferece SÓ o registry FILTRADO que o harness DESPACHA
-            try:                            # (surface/disponibilidade) — não o default inteiro. Senão o modelo
-                from okami.llm.native_capability import native_supported   # chama tool podada → "ferramenta
-                if native_supported(cfg.provider(provider)):               # inválida" → violação (modelo fraco
-                    from okami.core.tools import openai_tools              # já sofre com 66 tools no payload).
-                    eff2["tools"] = openai_tools(registry)
-            except Exception:  # noqa: BLE001 — qualquer pepino → provider usa o default (comportamento antigo)
-                pass
+        _native_tools_for(cfg.provider(provider), registry, eff2)   # NATIVO: SÓ o registry FILTRADO (não o
+        #                                    default inteiro) — senão tool podada → "ferramenta inválida"
 
         def _call():
             if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
@@ -249,7 +260,9 @@ def run_task(
     escalate = None
     if escalate_to:
         def escalate(messages, schema=None):  # noqa: F811
-            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema, **eff)
+            eff_esc = _native_tools_for(cfg.provider(escalate_to), registry, dict(eff))  # MESMO registry
+            #                                FILTRADO da geração normal (senão Telegram recebia run_shell/spawn)
+            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema, **eff_esc)
             _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
