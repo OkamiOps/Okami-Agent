@@ -203,6 +203,30 @@ class WriteFile(Tool):
         return ToolResult(True, f"escrito {rel} ({n} chars)" + extra, effect=True)
 
 
+def _edit_did_you_mean(text: str, old: str, rel: str, *, max_lines: int = 10) -> str:
+    """Quando 'old' não casa EXATO, acha a seção mais PARECIDA no arquivo e devolve um snippet p/ o modelo
+    copiar o texto literal (paridade Hermes 'did you mean'). Tira o agente do loop de re-chutar `old`. ''
+    se não houver nada minimamente parecido."""
+    import difflib
+    anchor = next((ln.strip() for ln in old.splitlines() if ln.strip()), "")
+    if not anchor:
+        return ""
+    file_lines = text.splitlines()
+    best_i, best_r = -1, 0.0
+    for i, ln in enumerate(file_lines):
+        r = difflib.SequenceMatcher(None, anchor, ln.strip()).ratio()
+        if r > best_r:
+            best_r, best_i = r, i
+    if best_i < 0 or best_r < 0.55:                       # nada parecido o suficiente → sem palpite
+        return ""
+    lo = max(0, best_i - 2)
+    hi = min(len(file_lines), best_i + max(1, len(old.splitlines())) + 2)
+    snippet = "\n".join(file_lines[lo:hi][:max_lines])
+    return (f" Trecho PARECIDO em {rel}:{best_i + 1} (~{int(best_r * 100)}%) — copie o texto EXATO daqui "
+            f"(espaços/indentação contam):\n```\n{snippet}\n```\n"
+            "Se ainda não casar, re-leia com read_file, ou reescreva o arquivo com write_file.")
+
+
 class EditFile(Tool):
     name = "edit_file"
     description = ("Edita um arquivo por substituição EXATA de trecho (old→new) — sem reescrever tudo. "
@@ -233,7 +257,7 @@ class EditFile(Tool):
             count = text.count(old)
             if count == 0:
                 return ToolResult(False, f"[📡 {remote.alias}] trecho não encontrado em {rel} — precisa ser "
-                                  "EXATO (incl. espaços).", effect=False)
+                                  "EXATO (incl. espaços)." + _edit_did_you_mean(text, old, rel), effect=False)
             if count > 1 and not replace_all:
                 return ToolResult(False, f"[📡 {remote.alias}] 'old' aparece {count}× em {rel} — torne-o único "
                                   "ou passe replace_all=true.", effect=False)
@@ -271,7 +295,8 @@ class EditFile(Tool):
             return ToolResult(False, f"erro ao ler {rel}: {e}")
         count = text.count(old)
         if count == 0:
-            return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços).")
+            return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços)."
+                              + _edit_did_you_mean(text, old, rel), effect=False)
         if count > 1 and not replace_all:
             return ToolResult(False, f"'old' aparece {count}× em {rel} — torne-o único (mais contexto) "
                                      "ou passe replace_all=true.")
