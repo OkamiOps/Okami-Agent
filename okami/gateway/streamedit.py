@@ -8,8 +8,9 @@ from collections import deque
 
 
 class StreamEditor:
-    def __init__(self, *, min_interval: float = 1.2, keep: int = 6, header: str = ""):
-        self.min_interval = min_interval     # mín. de segundos entre edições (anti-flood/429)
+    def __init__(self, *, min_interval: float = 1.2, keep: int = 6, header: str = "", adaptive: bool = True):
+        self.min_interval = min_interval     # TETO de segundos entre edições (anti-flood/429)
+        self.adaptive = adaptive             # conteúdo curto edita mais rápido (UX); longo usa o teto cheio
         self.header = header
         self._lines: deque[str] = deque(maxlen=keep)
         self._last_sent = -1e9
@@ -22,9 +23,21 @@ class StreamEditor:
             return
         self._lines.append(line)
 
+    def _interval(self) -> float:
+        """Intervalo efetivo até a PRÓXIMA edição (batch-delay adaptativo, paridade Hermes). Curto edita mais
+        rápido (resposta snappy), longo throttle cheio (eficiência/anti-429). Nunca passa do teto min_interval."""
+        if not self.adaptive:
+            return self.min_interval
+        n = len(self.render())
+        if n <= 320:
+            return min(0.5, self.min_interval)       # resposta curta → atualiza ~2x mais rápido
+        if n <= 1024:
+            return min(0.8, self.min_interval)
+        return self.min_interval                     # longo → teto cheio (poucas edições, anti-429)
+
     def due(self, now: float) -> bool:
-        """True se já passou o intervalo desde a última edição enviada (ou se nunca enviou)."""
-        return (now - self._last_sent) >= self.min_interval
+        """True se já passou o intervalo (adaptativo) desde a última edição enviada (ou se nunca enviou)."""
+        return (now - self._last_sent) >= self._interval()
 
     def mark_sent(self, now: float) -> None:
         self._last_sent = now

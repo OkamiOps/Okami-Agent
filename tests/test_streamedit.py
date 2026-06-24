@@ -15,7 +15,7 @@ def test_first_feed_is_due():
 
 
 def test_throttled_within_interval():
-    ed = StreamEditor(min_interval=1.0)
+    ed = StreamEditor(min_interval=1.0, adaptive=False)    # contrato do throttle FIXO (adaptativo tem teste próprio)
     ed.feed("a", now=100.0)
     ed.mark_sent(now=100.0)
     ed.feed("b", now=100.5)
