@@ -303,8 +303,18 @@ class Harness:
 
     def _length_max_tokens(self, attempt: int) -> int:
         """Teto de tokens da continuação de length (paridade Hermes `_boost_base*(n+1)`, piso 32K): cresce
-        a cada tentativa pra a continuação ter ESPAÇO de fechar — senão re-trunca no mesmo ponto. Capado."""
-        return min(32768 * (max(0, int(attempt)) + 1), 200_000)
+        a cada tentativa pra a continuação ter ESPAÇO de fechar — senão re-trunca no mesmo ponto. Capado ao
+        que CABE (multi-vendor: num provider de contexto pequeno, pedir 200K de output = 400 na hora)."""
+        return self._cap_output_tokens(min(32768 * (max(0, int(attempt)) + 1), 200_000))
+
+    def _cap_output_tokens(self, want: int) -> int:
+        """Não pede mais output do que cabe na janela: available ≈ (teto de contexto − prompt atual)/4 tokens.
+        AGNÓSTICO: Ollama/LMStudio/etc com janela pequena estouravam pedindo output gigante. Piso de 1024."""
+        try:
+            avail = (self.budget.max_context_chars - _compaction.estimate_chars(self.messages)) // 4 - 256
+        except Exception:  # noqa: BLE001 — estimativa falhou → não capa (comportamento antigo)
+            return want
+        return max(1024, min(want, int(avail))) if avail > 0 else 1024
 
     def _do_generate(self, messages, schema):
         """Gera. Com stream_tokens, passa on_token (emite 'token' por delta) — mas tolera generate de 2
