@@ -285,6 +285,8 @@ class Harness:
         self._empty_responses = 0                       # respostas vazias seguidas (reasoning-only content='')
         self._turn_output_tokens = 0                    # tokens de OUTPUT acumulados no turno (backstop runaway)
         self._token_grace_used = False
+        self._json_recoveries = 0                       # rodadas de RECUPERAÇÃO de formato (modelo fraco erra JSON)
+        self._MAX_JSON_RECOVERIES = 2
         self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
         # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
         self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
@@ -666,7 +668,15 @@ class Harness:
                     # zero; concatenar duplicaria/quebraria o JSON — usa a fresca e descarta o parcial.
                     self._truncated_parts = []
                 text = "".join(self._truncated_parts) + comp.text if self._truncated_parts else comp.text
+                # ESGOTOU a continuação e a resposta AINDA veio cortada (finish_reason=length): não entrega
+                # pela metade FINGINDO que fechou. Marca claro (paridade Hermes: não dá done silencioso num
+                # turno truncado). Ação truncada não parseia → cai na violação normal; relatório leva o aviso.
+                _unresolved_trunc = bool(self._truncated_parts) and getattr(comp, "finish_reason", "") == "length"
                 self._truncated_parts = []             # episódio de truncamento fechado → texto completo
+                if _unresolved_trunc and not _actions_from_tool_calls(comp.tool_calls) and not parse_actions(text):
+                    self._emit("truncation_unresolved", parts=self._MAX_LENGTH_CONT)
+                    text += ("\n\n[⚠ resposta truncada no limite de tamanho — não consegui FECHAR mesmo "
+                             "continuando; peça pra eu continuar de onde parei se faltou conteúdo]")
                 _acts = _actions_from_tool_calls(comp.tool_calls) or parse_actions(text)
                 for _a in _acts:                       # COERÇÃO schema-aware: nativo manda "false"/"30" string
                     _t = self.registry.get(_a.tool)    # → coage pro tipo declarado (arg_types) p/ não bugar
@@ -716,7 +726,20 @@ class Harness:
                 if self._consecutive_violations >= self.budget.max_consecutive_violations:
                     if self._try_escalate("violações de Action-or-Terminate"):
                         continue
-                    return self._fail(t, "violações repetidas de Action-or-Terminate")
+                    # JSON-RECOVERY (Hermes): antes de DESISTIR, injeta uma recuperação CLARÍSSIMA e dá +N
+                    # rodadas — modelo fraco (sem escalate) que erra o formato 3x merece um empurrão, não fail
+                    # seco. BOUNDED por _MAX_JSON_RECOVERIES (anti-loop infinito); depois disso, falha.
+                    if self._json_recoveries < self._MAX_JSON_RECOVERIES:
+                        self._json_recoveries += 1
+                        self._consecutive_violations = 0
+                        self._emit("json_recovery", attempt=self._json_recoveries)
+                        self._append_user_note(
+                            "[RECUPERAÇÃO: suas últimas saídas NÃO foram ações válidas. PARE e emita AGORA UM "
+                            'ÚNICO bloco json EXATO, nada antes nem depois: {"tool":"<nome>","args":{...}}. '
+                            'Terminou? {"tool":"task_complete","args":{"summary":"..."}}. Travou? '
+                            '{"tool":"task_blocked","args":{"reason":"..."}}.]')
+                        continue
+                    return self._fail(t, "violações repetidas de Action-or-Terminate (mesmo após recuperação)")
                 self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
                              f"erro: ferramenta inválida.{hint} Chame uma ferramenta REAL.",
                              f"REJEITADO: nenhuma ação válida.{hint} Emita UM bloco ```json "
