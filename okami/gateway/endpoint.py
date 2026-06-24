@@ -879,7 +879,10 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         with self._sess_lock:                           # check-then-set ATÔMICO vs. o drain do finally (race)
             if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
-                s.queued.append((text, self._img.pop(cid, None), surface_override))   # surface PRÓPRIA na fila
+                # COLAPSA reenvio IDÊNTICO (paridade Hermes): double-tap / reenvio por ansiedade não roda N×.
+                _dup = bool(s.queued) and s.queued[-1][0] == text and s.queued[-1][2] == surface_override
+                if not _dup:
+                    s.queued.append((text, self._img.pop(cid, None), surface_override))   # surface PRÓPRIA na fila
                 decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
                 if decision == "interrupt":
                     s.cancel = True
