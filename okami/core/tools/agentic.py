@@ -31,13 +31,12 @@ class UseSkill(Tool):
                 record_skill_use(root, name)
             except Exception:  # noqa: BLE001 — telemetria nunca derruba a tool
                 pass
-        skill_dir = ""
-        try:                                          # #9: expande ${OKAMI_SKILL_DIR/SESSION_ID/DATE} (sem shell)
-            from pathlib import Path as _P
-            from okami.skills.preprocess import expand_skill_body
-            skill_dir = str((_P(root) / name).resolve()) if root else ""
+        from pathlib import Path as _P
+        skill_dir = str((_P(root) / name).resolve()) if root else ""   # FORA do try: o path NÃO depende do
+        try:                                          # expand (se o import falhar, ainda damos o caminho abs)
+            from okami.skills.preprocess import expand_skill_body   # #9: expande ${OKAMI_SKILL_DIR/...} sem shell
             body = expand_skill_body(body, skill_dir=skill_dir)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — expansão é opcional; nunca apaga o skill_dir
             pass
         loc = (f"\n\n[arquivos desta skill em: {skill_dir} — run_shell roda no WORKSPACE, então use o caminho "
                f"ABSOLUTO p/ os scripts (ex.: `node {skill_dir}/scripts/run.js`) ou `cd` p/ lá primeiro]") if skill_dir else ""
@@ -54,20 +53,25 @@ class UseSkill(Tool):
             from pathlib import Path as _P
             sd = _P(skill_dir)
             rels: list[str] = []
+            extra = 0                                  # arquivos ALÉM dos 30 listados (p/ avisar '+N mais')
             for sub in ("references", "scripts", "templates", "assets"):
                 d = sd / sub
-                if d.is_dir():
-                    for f in sorted(d.rglob("*")):
-                        if f.is_file():
-                            rels.append(str(f.relative_to(sd)))
-                            if len(rels) >= 30:
-                                break
-                if len(rels) >= 30:
+                if not d.is_dir():
+                    continue
+                for f in sorted(d.rglob("*")):
+                    if not f.is_file():
+                        continue
+                    if len(rels) < 30:
+                        rels.append(str(f.relative_to(sd)))
+                    else:
+                        extra += 1                     # não despeja tudo, mas CONTA (senão o modelo acha que
+                if extra > 500:                        # a lista é completa e perde um arquivo crítico)
                     break
             if not rels:
                 return ""
+            more = f" … (+{extra} arquivo(s) — abra com use_skill(path=))" if extra else ""
             return (f'\n\n[arquivos de apoio desta skill (carregue sob demanda com '
-                    f'use_skill(name="{name}", path="<arquivo>")): ' + ", ".join(rels) + "]")
+                    f'use_skill(name="{name}", path="<arquivo>")): ' + ", ".join(rels) + more + "]")
         except Exception:  # noqa: BLE001 — enumeração nunca derruba a tool
             return ""
 
@@ -215,18 +219,27 @@ class InstallSkill(Tool):
             tried.add(source)                              # marca a fonte como falha → não re-tenta
             return ToolResult(False, f"install_skill: {res.reason}")
         # injeta no catálogo EM MEMÓRIA → o agente pode use_skill já, sem reiniciar o gateway.
-        if isinstance(getattr(ctx, "skills", None), dict):
+        skills_cat = getattr(ctx, "skills", None)
+        failed: list[str] = []
+        if isinstance(skills_cat, dict):
             from okami.skills import parse_skill
             from pathlib import Path as _P
             for nm in res.installed:
                 try:
-                    ctx.skills[nm] = parse_skill(_P(root) / nm / "SKILL.md").body
-                except OSError:
-                    pass
+                    skills_cat[nm] = parse_skill(_P(root) / nm / "SKILL.md").body
+                except Exception as e:  # noqa: BLE001 — inclui UnicodeDecodeError (NÃO é OSError): não crasha
+                    failed.append(nm)
+                    from okami import log
+                    log.warn(f"install_skill: '{nm}' instalada em disco mas NÃO injetada no catálogo ({e}).")
         dep_note = ("\n⚠ ANTES de usar, instale as deps externas (run_shell): " + "; ".join(res.deps)) if res.deps else ""
+        warn = (f"\n⚠ {', '.join(failed)} ficou INVISÍVEL no catálogo (erro de leitura/parse) — reinstale ou "
+                "reinicie o gateway antes de use_skill") if failed else ""
+        # effect=True SÓ se nada falhou na injeção (catálogo em memória): senão o watchdog acha que houve
+        # progresso real mas use_skill vai falhar p/ a skill não-injetada → mini-loop de re-instalação.
+        full = (not failed) or not isinstance(skills_cat, dict)
         return ToolResult(True, f"skill(s) instalada(s): {', '.join(res.installed)} "
                           f"(fonte {res.kind}·confiança {res.trust}, scan {res.verdict}). "
-                          f"Carregue o procedimento com use_skill.{dep_note}", effect=True)
+                          f"Carregue o procedimento com use_skill.{dep_note}{warn}", effect=full)
 
 
 class Spawn(Tool):
