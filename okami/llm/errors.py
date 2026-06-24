@@ -155,6 +155,15 @@ _SUSPENDED = re.compile(r"account.{0,30}(suspended|deactivated|banned)|"
 _EMPTY = re.compile(r"resposta vazia|stream vazio|empty (response|completion)", re.I)
 
 
+def _LONG_CTX_TIER(msg: str) -> bool:
+    """True se o erro é de TIER de long-context: precisa de 'long context' E de um sinal de faixa/uso-extra
+    ('extra usage'/'tier'/'not included'). 'tier' sozinho (ex.: 'rate limit do seu tier') NÃO casa — o
+    discriminador é o 'long context' junto, p/ não confundir com throttle normal."""
+    m = (msg or "").lower()
+    return ("long context" in m or "long-context" in m) and (
+        "extra usage" in m or "tier" in m or "not included" in m)
+
+
 def classify(exc) -> ClassifiedError:
     """Mapeia uma exceção (status code e/ou mensagem) numa decisão acionável.
 
@@ -169,6 +178,12 @@ def classify(exc) -> ClassifiedError:
         # sem crédito NESTA chave/conta (sem sinal de reset): backoff é inútil — rotaciona JÁ e failover.
         # Cota TRANSITÓRIA (reset/try-again/window) NÃO entra aqui → cai no rate_limit abaixo e retenta.
         return ClassifiedError("billing", s, retryable=True, rotate_key=True, fallback=True)
+    if (s == 429 or _RATE.search(msg)) and _LONG_CTX_TIER(msg):
+        # 429 de TIER de long-context (Anthropic 'extra usage'+'long context', e qualquer proxy que repasse):
+        # backoff não resolve (não é throttle) e failover queima a assinatura à toa — o request é grande demais
+        # p/ a faixa INCLUÍDA. compress=True → mapeia p/ CONTEXT_OVERFLOW: o harness compacta e re-tenta o MESMO
+        # provider. fallback=False p/ não pular pro backup antes de encolher. Multi-vendor (regex no corpo).
+        return ClassifiedError("long_context_tier", s, retryable=True, compress=True, fallback=False)
     if s == 429 or _RATE.search(msg):
         return ClassifiedError("rate_limit", s, retryable=True, rotate_key=True, fallback=True,
                                retry_after=_retry_after_of(exc))

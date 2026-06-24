@@ -66,6 +66,7 @@ _PROVIDER_MAP: dict[str, FailureKind] = {
     "rate_limit": FailureKind.RATE_LIMIT,
     "overloaded": FailureKind.TRANSIENT,
     "context_overflow": FailureKind.CONTEXT_OVERFLOW,
+    "long_context_tier": FailureKind.CONTEXT_OVERFLOW,   # 429 de tier long-context → compacta e retenta (não failover)
     "content_policy": FailureKind.CONTENT_POLICY,
     "auth": FailureKind.AUTH,
     "auth_permanent": FailureKind.AUTH_PERMANENT,
