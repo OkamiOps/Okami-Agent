@@ -127,6 +127,11 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._bgreg = BackgroundRegistry(ws)   # registro PERSISTIDO (sobrevive a restart) das tarefas /background
         self.reactions = reactions           # reações 👀/👍/👎 na mensagem (Telegram) — opt-in
         self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
+        try:                                     # slash-commands contribuídos por plugins (register_command)
+            from okami.plugins import discover_plugins, load_plugin_commands, plugin_roots
+            self._plugin_commands = load_plugin_commands(discover_plugins(plugin_roots()), cfg=cfg)
+        except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do gateway
+            self._plugin_commands = {}
         self.running = True
 
     def _evict_idle_sessions(self) -> None:
@@ -504,6 +509,15 @@ class AgentEndpoint(EndpointCommandsMixin):
             tok = low.split(maxsplit=1)[0]
             cdef = _cmds.resolve(tok)
             if cdef is None:
+                _pcmd = getattr(self, "_plugin_commands", {}).get(tok.lstrip("/"))
+                if _pcmd:                                  # slash-command de PLUGIN → roda o handler(args)→str
+                    try:
+                        _reply = _pcmd["handler"](text[len(tok):].strip())
+                    except Exception as e:  # noqa: BLE001 — handler de plugin que explode não derruba o turno
+                        _reply = f"❌ /{tok.lstrip('/')}: {e}"
+                    if _reply:
+                        self.channel.send(chat_id, str(_reply))
+                    return
                 sg = _cmds.suggest(tok)
                 hint = ((" " + _tr("gw.did_you_mean", _default="Did you mean")
                          + " " + ", ".join("/" + x for x in sg) + "?") if sg

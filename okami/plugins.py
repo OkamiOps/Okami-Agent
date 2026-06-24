@@ -149,6 +149,7 @@ class PluginRegistrar:
         self.ctx = ctx
         self.cfg = cfg
         self.tools: dict = {}
+        self.commands: dict = {}
 
     @property
     def llm(self) -> PluginLlm:
@@ -159,6 +160,14 @@ class PluginRegistrar:
         if not name:
             raise ValueError("register_tool: tool precisa de um atributo .name não-vazio")
         self.tools[str(name)] = tool
+
+    def register_command(self, name: str, handler, help: str = "") -> None:
+        """Plugin contribui um slash-command `/name` (port do ctx.register_command do Hermes). `handler(args)`
+        → str de resposta. O gateway despacha quando vê `/name` que não é built-in."""
+        nm = str(name or "").lstrip("/").strip()
+        if not nm or not callable(handler):
+            raise ValueError("register_command: precisa de um nome não-vazio e um handler chamável")
+        self.commands[nm] = {"handler": handler, "help": help}
 
 
 def _resolve_register(plugin: "Plugin"):
@@ -189,13 +198,11 @@ def _resolve_register(plugin: "Plugin"):
     return None
 
 
-def load_plugin_tools(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> dict:
-    """Roda `register(ctx)` de cada plugin e COLETA as tools registradas (foundation do sistema de plugins,
-    paridade Hermes). Isolado por plugin: um `register` que explode NÃO derruba os outros. Trust:
-    folder=untrusted, entry_point=trusted. Quem chama (runner) reaplica a tool-policy por superfície e impede
-    sombrear tool nativa."""
+def _run_registrars(plugins, *, cfg=None, emit=lambda m: None, _resolve=None):
+    """Roda `register(ctx)` de cada plugin UMA vez e devolve [(plugin, registrar), …]. Isolado por plugin: um
+    `register` que explode NÃO derruba os outros. Trust: folder=untrusted, entry_point=trusted."""
     resolve = _resolve or _resolve_register
-    out: dict = {}
+    out = []
     for plugin in plugins or []:
         reg = resolve(plugin)
         if reg is None:
@@ -207,9 +214,29 @@ def load_plugin_tools(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) 
         except Exception as e:  # noqa: BLE001 — register que explode não derruba os outros plugins
             emit(f"[plugin {plugin.name}] register() falhou: {e}")
             continue
+        out.append((plugin, registrar))
+    return out
+
+
+def load_plugin_tools(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> dict:
+    """COLETA as tools que os plugins registram em register(ctx) (foundation do sistema de plugins, paridade
+    Hermes). Quem chama (runner) reaplica a tool-policy por superfície e impede sombrear tool nativa."""
+    out: dict = {}
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
         for name, tool in registrar.tools.items():
             out[name] = tool
             emit(f"[plugin {plugin.name}] +tool {name}")
+    return out
+
+
+def load_plugin_commands(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> dict:
+    """COLETA os slash-commands que os plugins registram (ctx.register_command). {nome: {handler, help, plugin}}
+    — o gateway despacha `/nome` quando não é built-in. Isolado por plugin (igual às tools)."""
+    out: dict = {}
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
+        for name, spec in registrar.commands.items():
+            out[name] = {**spec, "plugin": plugin.name}
+            emit(f"[plugin {plugin.name}] +command /{name}")
     return out
 
 
@@ -231,4 +258,4 @@ def plugin_roots() -> list[Path]:
 
 
 __all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
-           "load_plugin_tools", "plugin_context", "plugin_roots"]
+           "load_plugin_commands", "load_plugin_tools", "plugin_context", "plugin_roots"]
