@@ -102,8 +102,19 @@ def _first_line(text: str) -> str:
     return (text or "").strip()
 
 
+_LOCAL_BUG = (TypeError, AttributeError, KeyError, IndexError, NameError)
+
+
 def classify_provider(exc) -> Failure:
-    """Falha de provider/transporte → reusa o classifier de provider e mapeia p/ a taxonomia única."""
+    """Falha de provider/transporte → reusa o classifier de provider e mapeia p/ a taxonomia única.
+
+    ANTES disso: erro LOCAL de programação (TypeError/ValueError/etc — um bug NOSSO, não do provider) →
+    ABORT. Retentar/escalar martelaria o MESMO bug 3x. Exceções de DADO/transporte (JSONDecodeError ⊂
+    ValueError, UnicodeError) NÃO contam — essas podem melhorar numa nova resposta (seguem o classifier)."""
+    import json as _json
+    if isinstance(exc, _LOCAL_BUG) or (isinstance(exc, ValueError)
+                                       and not isinstance(exc, (_json.JSONDecodeError, UnicodeError))):
+        return _mk(FailureKind.BAD_REQUEST, f"erro interno ({type(exc).__name__}): {str(exc)[:120]}")
     from okami.llm.errors import classify as _classify
     ce = _classify(exc)
     return _mk(_PROVIDER_MAP.get(ce.reason, FailureKind.UNKNOWN), ce.reason, status=ce.status)
