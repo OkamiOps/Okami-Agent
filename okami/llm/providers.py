@@ -204,6 +204,9 @@ def _kwargs(
         nc = resolve_num_ctx(pc, kw["model"])
         if nc:
             kw["num_ctx"] = nc
+    routing = getattr(pc, "provider_routing", None)   # hints de roteamento OpenRouter → extra_body.provider
+    if routing and "openrouter.ai" in (pc.api_base or "").lower():   # SÓ p/ base OpenRouter (não quebra outros)
+        kw.setdefault("extra_body", {})["provider"] = dict(routing)
     kw.setdefault("timeout", 150)                    # FALHA RÁPIDO (era 600s) → harness encolhe+failover
     return kw
 

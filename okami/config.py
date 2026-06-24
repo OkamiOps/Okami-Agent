@@ -168,6 +168,10 @@ class ProviderConfig(BaseModel):
     # reasoning_content in the thinking mode must be passed back"). "auto" (default): detecta a família e
     # garante o campo; "require": sempre garante; "strip": nunca (comportamento antigo, p/ vendor que recusa).
     reasoning_echo: str = "auto"
+    # provider_routing: hints de roteamento do OpenRouter (order/allow_fallbacks/require_parameters/sort/only/
+    # ignore/data_collection). Vira extra_body.provider SÓ se a api_base for openrouter.ai (senão é ignorado —
+    # não quebra Ollama/OpenAI/etc.). Guardado genérico p/ qualquer base OpenRouter-compat.
+    provider_routing: dict[str, Any] = Field(default_factory=dict)
     # vision_tool_messages: False remove blocos image_url de mensagens role=="tool" antes do envio —
     # alguns providers dão 400 com imagem dentro de resultado de tool (só aceitam vision em user/assistant).
     vision_tool_messages: bool = True
