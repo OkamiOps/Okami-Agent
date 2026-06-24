@@ -293,18 +293,21 @@ def docker_exec_argv(cmd: str, name: str) -> list[str]:
 def _ensure_container(name: str, workspace: Path, policy: SandboxPolicy) -> bool:
     """Garante o container long-lived no ar (sobe se não existir). True se utilizável."""
     try:
-        running = subprocess.run(["docker", "ps", "-q", "-f", f"name=^{name}$"],
-                                 capture_output=True, text=True, timeout=10).stdout.strip()
-        if running:
+        ps = subprocess.run(["docker", "ps", "-q", "-f", f"name=^{name}$"],
+                            capture_output=True, text=True, timeout=10)
+        if ps.returncode != 0:                        # daemon fora/erro → NÃO assume estado; cai no efêmero
+            return False
+        if ps.stdout.strip():
             return True
-        exists = subprocess.run(["docker", "ps", "-aq", "-f", f"name=^{name}$"],
-                                capture_output=True, text=True, timeout=10).stdout.strip()
-        if exists:                                    # parado → religa (preserva o FS do container)
-            subprocess.run(["docker", "start", name], capture_output=True, timeout=20)
-            return True
-        subprocess.run(docker_run_persistent_argv(workspace, policy, name=name),
-                       capture_output=True, timeout=60)
-        return True
+        psa = subprocess.run(["docker", "ps", "-aq", "-f", f"name=^{name}$"],
+                            capture_output=True, text=True, timeout=10)
+        if psa.returncode != 0:
+            return False
+        if psa.stdout.strip():                        # parado → religa (preserva o FS do container)
+            return subprocess.run(["docker", "start", name], capture_output=True, timeout=20).returncode == 0
+        # sobe limpo — só True se o `docker run` REALMENTE deu 0 (senão exec posterior estoura)
+        return subprocess.run(docker_run_persistent_argv(workspace, policy, name=name),
+                              capture_output=True, timeout=60).returncode == 0
     except Exception:  # noqa: BLE001 — falha ao subir → caller cai no efêmero
         return False
 

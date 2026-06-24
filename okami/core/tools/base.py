@@ -38,15 +38,15 @@ _SHELL_MUTATES = re.compile(
     # 2026-06-07). O tratamento granular de `-delete` / `-exec ... rm` vem na 2ª alternativa
     # do regex (lê qualquer flag antes/depois do find).
     r"\b(rm|rmdir|mv|cp|mkdir|touch|ln|dd|chmod|chown|tee|truncate|install|make|cmake|npm|pnpm|yarn|"
-    r"pip|pip3|uv|cargo|go|gradle|mvn|docker|kubectl|terraform|apt|brew|systemctl|kill|pkill|find)\b"
+    r"pip|pip3|uv|cargo|go|gradle|mvn|docker|kubectl|terraform|apt|brew|systemctl|kill|pkill)\b"
     r"|>>?|sed\s+-i|git\s+(commit|push|add|merge|rebase|reset|checkout|clean|stash|tag|init|rm|mv|apply)"
-    r"|\bfind\b[^|&;]*?\s-(delete|exec(?:dir)?\s+[^|&;]*?rm)\b",
+    r"|\bfind\b[^|&;]*?\s-(delete|exec(?:dir)?\s+[^|&;]*?rm)\b",   # find DESTRUTIVO; find puro = read-only
     re.IGNORECASE,
 )
-# find saiu da allowlist de read-only — agora é MUTANTE (sempre). Comandos find SEM flag destrutiva
-# (`find -name x`) caem no fallback "desconhecido → assume efeito" do `shell_has_effect`
-# (conservador, §3.3) — efeito real disso é 1 classificação a mais no watchdog, NÃO execução.
-_SHELL_READONLY = {"ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "which", "wc",
+# `find` puro (`find -name x`, busca) é READ-ONLY — pode rodar em read-only mode e em lote. O find
+# DESTRUTIVO (`find -delete`, `find -exec rm`) continua MUTANTE pela 3ª alternativa do _SHELL_MUTATES, e
+# `find -exec <mv|cp|chmod|…>` é pego pelo token destrutivo na lista genérica. Antes find-puro era bloqueado.
+_SHELL_READONLY = {"find", "ls", "grep", "rg", "cat", "head", "tail", "pwd", "echo", "which", "wc",
                    "file", "stat", "tree", "awk", "du", "df", "ps", "env", "printenv", "date",
                    "whoami", "uname", "hostname", "sort", "uniq", "cut", "diff", "sed",
                    # navegação/no-op SEM efeito → `cd X && grep`/`cd X && cat` é read-only e PODE rodar em
