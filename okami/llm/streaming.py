@@ -43,6 +43,7 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
     from okami.llm import providers as _p
     pc = cfg.provider(provider)
     messages = _p._sanitize_messages(messages)       # surrogate/control char não estoura o encode (idem complete)
+    messages = _p._ensure_reasoning_echo(messages, pc)   # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
     via = _p.transports.dispatch(pc, messages, model, overrides)
     if via is not None:                              # transports CLI/OAuth não streamam → entrega de uma vez
         yield getattr(via, "text", "") or ""

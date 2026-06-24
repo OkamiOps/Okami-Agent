@@ -35,6 +35,31 @@ def _sanitize_messages(messages: list[dict]) -> list[dict]:
     from okami.llm.sanitize import sanitize_messages
     return sanitize_messages(messages)
 
+
+# Famílias de reasoner que EXIGEM reasoning_content de volta em msg assistant com tool_calls (thinking-mode):
+# DeepSeek-reasoner/R1, Kimi (Moonshot k2/kimi-thinking), Xiaomi MiMo. Sem o campo → HTTP 400 multi-turn.
+_REASONING_ECHO_RE = re.compile(r"deepseek.*(reasoner|r1|v3\.\d)|\bkimi\b|moonshot|\bmimo\b", re.I)
+
+
+def _ensure_reasoning_echo(messages: list[dict], pc) -> list[dict]:
+    """Garante reasoning_content em CADA msg assistant COM tool_calls quando o provider exige (port do
+    chat_completion_helpers do Hermes). Sem isso, DeepSeek-reasoner/Kimi/MiMo dão HTTP 400 no multi-turno
+    ('The reasoning_content in the thinking mode must be passed back'). Placeholder ' ' (fallback do Hermes)
+    quando não há reasoning real — NÃO sobrescreve um existente. 'strip' desliga; 'require' força p/ qualquer
+    modelo; 'auto' (default) detecta a família. Copia (não muta o histórico)."""
+    mode = (getattr(pc, "reasoning_echo", "auto") or "auto").lower()
+    if mode == "strip":
+        return messages
+    if mode != "require" and not _REASONING_ECHO_RE.search(getattr(pc, "model", "") or ""):
+        return messages                              # 'auto' + família que não exige → nada muda
+    out = []
+    for m in messages or []:
+        if (isinstance(m, dict) and m.get("role") == "assistant" and m.get("tool_calls")
+                and not m.get("reasoning_content")):
+            m = {**m, "reasoning_content": " "}      # campo presente satisfaz o contrato (sem custo de CoT real)
+        out.append(m)
+    return out
+
 # Tolera params não suportados por um provider específico e reduz ruído de log.
 litellm.drop_params = True
 litellm.suppress_debug_info = True
@@ -461,6 +486,7 @@ def complete_messages_ex(
     e trata RESPOSTA VAZIA como falha (não sucesso) — senão o harness vê turno em branco."""
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
+    messages = _ensure_reasoning_echo(messages, pc)  # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
     attempts = max(1, len(pc.key_pool()))
     # Guarda CROSS-SESSÃO (Hermes nous_rate_guard): outro processo (gateway/cron/CLI) tomou
     # 429/529 deste provider → UMA sonda no máximo, sem rodar todas as chaves (era a amplificação

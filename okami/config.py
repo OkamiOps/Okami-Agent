@@ -163,6 +163,11 @@ class ProviderConfig(BaseModel):
     #                             o reasoning_effort vira budget de tokens e é removido.
     #   "none"                  → não manda nenhum dos dois (modelo que recusa ambos / não-reasoning).
     reasoning_style: str = ""
+    # reasoning_echo: alguns reasoners em thinking-mode (DeepSeek-reasoner/Kimi-Moonshot/MiMo) EXIGEM um campo
+    # reasoning_content em CADA mensagem assistant com tool_calls no multi-turno, senão dão HTTP 400 ("The
+    # reasoning_content in the thinking mode must be passed back"). "auto" (default): detecta a família e
+    # garante o campo; "require": sempre garante; "strip": nunca (comportamento antigo, p/ vendor que recusa).
+    reasoning_echo: str = "auto"
     # vision_tool_messages: False remove blocos image_url de mensagens role=="tool" antes do envio —
     # alguns providers dão 400 com imagem dentro de resultado de tool (só aceitam vision em user/assistant).
     vision_tool_messages: bool = True
