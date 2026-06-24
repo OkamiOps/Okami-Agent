@@ -14,6 +14,12 @@ import re
 # \t (\x09), \n (\x0a), \r (\x0d), que são whitespace legítimo.
 _BAD = re.compile(r"[\ud800-\udfff\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
+# Campos NÃO-padrão que um provider ESTRITO (Mistral/Fireworks/…) recusa no objeto-mensagem → 400. Aparecem
+# quando um Completion de modelo de reasoning é ecoado/persistido cru. Tira ANTES de mandar. Os campos
+# VÁLIDOS do OpenAI (role/content/tool_calls/tool_call_id/name) NUNCA entram aqui.
+_STRIP_FIELDS = ("reasoning_content", "reasoning", "finish_reason", "_thinking", "_thinking_prefill",
+                 "thinking", "thinking_blocks", "redacted_thinking")
+
 
 def sanitize_text(s):
     """Remove surrogates solitários e control chars de UM texto. Não-str / vazio → devolve como veio."""
@@ -30,6 +36,8 @@ def sanitize_messages(messages):
             if not isinstance(m, dict):
                 out.append(m)
                 continue
+            if any(k in m for k in _STRIP_FIELDS):       # campo estranho no objeto → tira (provider estrito 400)
+                m = {k: v for k, v in m.items() if k not in _STRIP_FIELDS}
             c = m.get("content")
             if isinstance(c, str):
                 m = {**m, "content": sanitize_text(c)}

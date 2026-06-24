@@ -112,6 +112,39 @@ _TOOL_ALIASES = {
 }
 
 
+_EMPTY_PLACEHOLDER = "(resposta vazia)"
+
+
+def _is_thinking_only(m) -> bool:
+    """Turno SÓ-DE-THINKING: assistant SEM tool_calls e SEM texto visível (vazio, whitespace, o placeholder
+    de resposta-vazia, ou lista de blocos só-thinking). Modelo de reasoning (minimax/DeepSeek) gera isso."""
+    if not isinstance(m, dict) or m.get("role") != "assistant" or m.get("tool_calls"):
+        return False
+    c = m.get("content")
+    if isinstance(c, str):
+        return c.strip() in ("", _EMPTY_PLACEHOLDER)
+    if isinstance(c, list):
+        return all(not (isinstance(b, dict) and (b.get("text") or "").strip()) for b in c)
+    return c is None
+
+
+def _filter_thinking_only(messages):
+    """Cópia das mensagens SEM os turnos só-de-thinking (paridade Hermes _drop_thinking_only_and_merge_users):
+    dropa assistant vazio/placeholder e MESCLA users adjacentes p/ preservar a alternância. NÃO muta a
+    entrada (o histórico persistido fica intacto p/ transcript)."""
+    out: list = []
+    for m in messages or []:
+        if _is_thinking_only(m):
+            continue
+        if (out and isinstance(m, dict) and m.get("role") == "user"          # drop deixou 2 users juntos →
+                and isinstance(out[-1], dict) and out[-1].get("role") == "user"   # funde p/ não quebrar a
+                and isinstance(out[-1].get("content"), str) and isinstance(m.get("content"), str)):  # alternância
+            out[-1] = {**out[-1], "content": out[-1]["content"] + "\n\n" + m["content"]}
+            continue
+        out.append(m)
+    return out
+
+
 def _repair_tool_name(name: str, registry: dict) -> str | None:
     """Nome de tool ALUCINADO (modelo fraco erra) → nome REAL, se houver correspondência confiável.
     Hermes repara antes de tratar como erro. Ordem: alias conhecido → match por prefixo/substring → fuzzy."""
@@ -323,6 +356,7 @@ class Harness:
         args (stubs de teste) via TypeError. `_next_max_tokens` (boost de length) é passado e CONSUMIDO."""
         mt = self._next_max_tokens
         self._next_max_tokens = None                  # consome: o boost vale só pra ESTA geração
+        messages = _filter_thinking_only(messages)    # dropa turno só-de-thinking/placeholder da CÓPIA enviada
         kw = {"max_tokens": mt} if mt else {}
         if self.stream_tokens:
             try:
