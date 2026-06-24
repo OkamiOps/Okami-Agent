@@ -19,7 +19,7 @@ _BAD = re.compile(r"[\ud800-\udfff\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # VÁLIDOS do OpenAI (role/content/tool_calls/tool_call_id/name) NUNCA entram aqui.
 _STRIP_FIELDS = ("reasoning_content", "reasoning", "reasoning_details", "finish_reason", "_thinking",
                  "_thinking_prefill", "thinking", "thinking_blocks", "redacted_thinking", "tool_name",
-                 "timestamp", "codex_reasoning_items", "codex_message_items")
+                 "timestamp", "codex_reasoning_items", "codex_message_items", "reasoning_items")
 
 
 def _strip_nonstandard(m: dict) -> dict:
@@ -52,15 +52,17 @@ def sanitize_text(s):
     return _BAD.sub("", s)
 
 
-def sanitize_messages(messages):
-    """Limpa o `content` (str OU lista de blocos com `text`) de cada mensagem, copiando. Fail-open."""
+def sanitize_messages(messages, *, strip_fields: bool = True):
+    """Limpa o `content` (str OU lista de blocos com `text`) de cada mensagem, copiando. Fail-open.
+    `strip_fields=False` PRESERVA os campos não-padrão (ex.: reasoning_items p/ replay do Codex) — usado SÓ
+    no caminho que monta o próprio payload e não passa o dict cru pra API estrita (transport Responses)."""
     try:
         out = []
         for m in messages or []:
             if not isinstance(m, dict):
                 out.append(m)
                 continue
-            if any(k in m for k in _STRIP_FIELDS) or any(k.startswith("_") for k in m):
+            if strip_fields and (any(k in m for k in _STRIP_FIELDS) or any(k.startswith("_") for k in m)):
                 m = _strip_nonstandard(m)             # campo estranho/_-prefixado → tira (provider estrito 400)
             c = m.get("content")
             if isinstance(c, str):

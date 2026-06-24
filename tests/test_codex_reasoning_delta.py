@@ -20,7 +20,7 @@ def test_reasoning_deltas_forwarded_to_callback():
         {"type": "response.output_text.delta", "delta": "resposta"},
         {"type": "response.completed", "response": {"usage": {"input_tokens": 1}}},
     )
-    text, usage, tcs, finish = _codex_sse(lines, on_reasoning=seen.append)
+    text, usage, tcs, finish, _rs = _codex_sse(lines, on_reasoning=seen.append)
     assert text == "resposta"                         # texto normal intacto
     assert seen == ["pensando A", "pensando B"]       # ambos os deltas de raciocínio capturados
 

@@ -28,12 +28,13 @@ class EmptyResponse(RuntimeError):
 _SURROGATE = re.compile(r"[\ud800-\udfff]")
 
 
-def _sanitize_messages(messages: list[dict]) -> list[dict]:
+def _sanitize_messages(messages: list[dict], *, strip_fields: bool = True) -> list[dict]:
     """Remove surrogates UTF-16 soltos + control chars que estouram `.encode('utf-8')`/`json.dumps` do SDK
     ANTES da requisição (ex.: histórico de modelo local byte-level). Cobre content STR e LISTA-DE-BLOCOS
-    (multimodal). Um char ruim no transcript não pode travar TODO turno até o /new. Fail-open."""
+    (multimodal). Um char ruim no transcript não pode travar TODO turno até o /new. Fail-open.
+    `strip_fields=False` mantém campos não-padrão (reasoning_items) p/ o replay do Codex."""
     from okami.llm.sanitize import sanitize_messages
-    return sanitize_messages(messages)
+    return sanitize_messages(messages, strip_fields=strip_fields)
 
 
 # Famílias de reasoner que EXIGEM reasoning_content de volta em msg assistant com tool_calls (thinking-mode):
@@ -388,8 +389,10 @@ def _is_tool_schema_error(e) -> bool:
     return any(m in s for m in _SCHEMA_ERR_MARKERS)
 
 
-def _complete_one(pc, messages, model, response_schema, overrides) -> Completion:
-    via = transports.dispatch(pc, messages, model, overrides)
+def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=None) -> Completion:
+    # só passa raw_messages quando há (codex c/ replay) → mantém compat com mocks de dispatch de 4 args
+    via = (transports.dispatch(pc, messages, model, overrides, raw_messages=raw_messages)
+           if raw_messages is not None else transports.dispatch(pc, messages, model, overrides))
     if via is not None:
         return as_completion(via)
     messages = apply_prompt_caching(messages, _effective_model(pc, model))   # Claude → cache explícito
@@ -487,9 +490,13 @@ def complete_messages_ex(
     usage + provider/model que REALMENTE respondeu). Robustez (dor nº1): classifica o erro p/ a
     alavanca (rotacionar chave vs back off vs failover), espera com jitter, parqueia chave em 429,
     e trata RESPOSTA VAZIA como falha (não sucesso) — senão o harness vê turno em branco."""
+    _orig = messages                                 # pré-sanitize (carrega reasoning_items) p/ o replay Codex
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
     messages = _ensure_reasoning_echo(messages, pc)  # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
+    # REPLAY de reasoning (Codex store=false): SÓ o transport codex recebe a versão field-kept (com
+    # reasoning_items); litellm/minimax/etc seguem com o `messages` totalmente sanitizado (sem vazar campo).
+    _raw = _sanitize_messages(_orig, strip_fields=False) if getattr(pc, "transport", "") == "codex_oauth" else None
     attempts = max(1, len(pc.key_pool()))
     # Guarda CROSS-SESSÃO (Hermes nous_rate_guard): outro processo (gateway/cron/CLI) tomou
     # 429/529 deste provider → UMA sonda no máximo, sem rodar todas as chaves (era a amplificação
@@ -511,7 +518,9 @@ def complete_messages_ex(
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            res = as_completion(_complete_one(pc, send, model, response_schema, ov))
+            res = as_completion(_complete_one(pc, send, model, response_schema, ov, raw_messages=_raw)
+                                if _raw is not None                       # codex c/ replay → passa o field-kept;
+                                else _complete_one(pc, send, model, response_schema, ov))   # resto: assinatura antiga
             if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada…
                 from okami.llm.stream_diag import classify_completion
                 # …MAS vazio por finish_reason='length' (modelo gastou tudo em reasoning) é TRUNCAÇÃO, não

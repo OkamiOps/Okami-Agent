@@ -630,7 +630,10 @@ class Harness:
                                  cache=getattr(_u, "cache_read_tokens", 0),
                                  tool_call=bool(comp.tool_calls),
                                  secs=round(_wt.monotonic() - _g0, 1))   # quanto a CHAMADA demorou
-                self.messages.append({"role": "assistant", "content": comp.text})
+                _amsg = {"role": "assistant", "content": comp.text}
+                if getattr(comp, "reasoning_items", None):   # Codex/o-series store=false: guarda p/ REPLAY no
+                    _amsg["reasoning_items"] = comp.reasoning_items   # mesmo turno (só o transport codex lê)
+                self.messages.append(_amsg)
 
                 # LENGTH-CONTINUATION (Hermes): resposta CORTADA pelo limite (finish_reason='length') →
                 # continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar a entrega pela metade.

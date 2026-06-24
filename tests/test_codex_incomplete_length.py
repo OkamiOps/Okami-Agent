@@ -19,7 +19,7 @@ def test_incomplete_max_output_with_text_is_length():
         {"type": "response.incomplete",
          "response": {"incomplete_details": {"reason": "max_output_tokens"}, "usage": {"input_tokens": 5}}},
     )
-    text, usage, tool_calls, finish = _codex_sse(lines)
+    text, usage, tool_calls, finish, _rs = _codex_sse(lines)
     assert text == "resposta parcial que foi cortada"
     assert finish == "length"                       # dispara a length-continuation
 
@@ -29,6 +29,6 @@ def test_normal_completed_is_stop():
         {"type": "response.output_text.delta", "delta": "ok"},
         {"type": "response.completed", "response": {"usage": {"input_tokens": 1}}},
     )
-    text, usage, tool_calls, finish = _codex_sse(lines)
+    text, usage, tool_calls, finish, _rs = _codex_sse(lines)
     assert text == "ok"
     assert finish in ("stop", "")                    # resposta completa NÃO leva length

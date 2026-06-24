@@ -145,6 +145,8 @@ class Completion:
     finish_reason: str = "stop"                          # stop | tool_calls | length
     provider: str = ""                                   # quem REALMENTE respondeu (served-by §E5)
     model: str = ""
+    reasoning_items: list = field(default_factory=list)  # itens de raciocínio (encrypted_content) da Responses
+    #                                                      API p/ replay no MESMO turno (store=false; codex/o-series)
 
 
 def as_completion(x) -> Completion:
