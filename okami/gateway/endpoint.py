@@ -521,6 +521,9 @@ class AgentEndpoint(EndpointCommandsMixin):
             cq.put(ans)
             return
         s = self.session(chat_id)
+        _pfx = getattr(self.channel, "command_prefix", "/") or "/"   # canal com prefixo '!' (Slack/Matrix):
+        if _pfx != "/" and text.startswith(_pfx):                    # normaliza p/ '/' ANTES de tudo → o
+            text = "/" + text[len(_pfx):]                           # pipeline de comando (que usa '/') casa
         low = text.lower()
         # --- slash registry: canonicaliza alias + "did you mean" (1 vez, no topo) ---
         import re as _re

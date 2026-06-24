@@ -47,6 +47,7 @@ class Channel:
     supports_media: bool = False   # canal entrega anexo nativo? (liga a convenção MEDIA:<path>)
     supports_edit: bool = False    # canal edita msg já enviada? (liga streaming-by-edit do status)
     MAX_LEN: int = 0               # teto de chars por mensagem do canal (0 = sem limite/não fatiar)
+    command_prefix: str = "/"      # prefixo de comando do canal (Hermes): Slack/Matrix interceptam '/', usam '!'
 
     def _chunks(self, text: str) -> list[str]:
         """Fatia `text` no teto do canal (MAX_LEN) preferindo fronteira — o canal que tem limite manda em
