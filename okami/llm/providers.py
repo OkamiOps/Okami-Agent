@@ -241,11 +241,29 @@ def complete(
     return _message_text(resp.choices[0].message)
 
 
+def _stringify_content(content) -> str:
+    """`content` → string. Server OpenAI-compat/local (LMStudio, shims) às vezes devolve LISTA de blocos
+    ([{type:text,text:..}]) ou dict em vez de string — sem normalizar, o `.strip()` abaixo estoura."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict):
+                parts.append(str(b.get("text") or b.get("content") or ""))
+            elif isinstance(b, str):
+                parts.append(b)
+        return "".join(parts)
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "")
+    return "" if content is None else str(content)
+
+
 def _message_text(message) -> str:
     """Texto da resposta = `content`. Se vier VAZIO, cai no `reasoning_content`/`reasoning` — modelos de
     REASONING (MiniMax-M3, DeepSeek-R1…) jogam a saída no campo de pensamento e deixam `content` vazio;
     sem este fallback a fala se perde (output só-reasoning → resposta vazia / '(COMPLETE)' mudo)."""
-    txt = getattr(message, "content", None) or ""
+    txt = _stringify_content(getattr(message, "content", None))
     if txt.strip():
         return txt
     for attr in ("reasoning_content", "reasoning"):
