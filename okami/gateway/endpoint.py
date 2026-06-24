@@ -109,7 +109,9 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._goals = GoalStore(self.home or self.ws)   # /goal: objetivo persistente por chat (item 41)
         from okami.gateway.circuit import PlatformBreaker
         self._breaker = PlatformBreaker()               # item 23: circuit breaker por plataforma
-        self.sessions: dict[str, Session] = {}
+        from collections import OrderedDict as _OD
+        self.sessions: dict[str, Session] = _OD()    # LRU: bound de memória p/ VPS 24/7 (despeja idle antigas)
+        self.max_live_sessions = 256                  # teto de sessões VIVAS em RAM (idle reconstrói do disco)
         self._sess_lock = threading.Lock()   # serializa a transição busy/fila (check-then-set + drain) → 1
         #                                      tarefa por sessão mesmo com canal e _run em threads diferentes
         self._pending: dict[str, queue.Queue] = {}
@@ -127,10 +129,22 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
         self.running = True
 
+    def _evict_idle_sessions(self) -> None:
+        """Bound de memória (VPS 24/7, paridade Hermes agent-LRU): despeja as sessões IDLE mais ANTIGAS além
+        do teto. Evictada é REconstruída do transcript no próximo acesso (append-only) → seguro. NUNCA despeja
+        uma sessão BUSY (tem estado vivo: busy/queued/cancel). Se TODAS estão busy, não força (cap é soft)."""
+        while len(self.sessions) > self.max_live_sessions:
+            victim = next((c for c, ss in self.sessions.items() if not ss.busy), None)
+            if victim is None:                       # todas ocupadas (raro) → respeita o estado vivo
+                break
+            del self.sessions[victim]
+
     def session(self, chat_id) -> Session:
         """Sessão por chat — rebuild do transcript append-only (sobrevive a restart)."""
         cid = str(chat_id)
-        if cid not in self.sessions:
+        if cid in self.sessions:
+            self.sessions.move_to_end(cid)           # LRU: marca como recém-usada (não despeja agora)
+        else:
             s = Session()
             e = self.store.entry(cid)
             s.history = self.store.history(cid, limit=16)
@@ -145,6 +159,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             s.busy_mode = e.get("busy_mode", "queue")
             s.approved_cats = set(e.get("approved_cats", []) or [])   # aprovações de sessão (sobrevivem a restart)
             self.sessions[cid] = s
+            self._evict_idle_sessions()              # mantém o bound de memória (despeja idle antigas)
         return self.sessions[cid]
 
     def _append_turn(self, chat_id, s: Session, role: str, text: str) -> None:
