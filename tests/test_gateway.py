@@ -817,3 +817,23 @@ def _i18n_pt_locale():
     _i18n.set_lang("pt")
     yield
     _i18n.set_lang(None)
+
+
+def test_queued_message_keeps_its_own_surface():
+    """Segurança (hunt#2): mensagem enfileirada enquanto outra roda NÃO pode herdar a surface (tool policy)
+    da mensagem anterior. Um webhook (shell negado) enfileirado durante um turno telegram (shell liberado)
+    rodava com a surface do telegram → bypass. Agora cada uma carrega a PRÓPRIA surface na fila."""
+    seen = {}
+
+    def runner(cfg, ws, goal, **kw):
+        seen[goal] = kw.get("surface")
+        return _ok_task(goal)
+
+    ep = _ep(runner=runner)
+    s = ep.session("7")
+    s.busy = True                                         # ocupado → a próxima vai pra fila
+    ep.handle("7", "B-webhook", surface_override="webhook")
+    s.busy = False
+    ep._run("7", "A-telegram", s, surface_override="telegram")   # roda A; no finally drena B
+    assert seen.get("A-telegram") == "telegram"
+    assert seen.get("B-webhook") == "webhook"             # B mantém a PRÓPRIA surface, não herda a de A

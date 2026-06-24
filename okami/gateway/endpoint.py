@@ -867,7 +867,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         with self._sess_lock:                           # check-then-set ATÔMICO vs. o drain do finally (race)
             if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
-                s.queued.append((text, self._img.pop(cid, None)))
+                s.queued.append((text, self._img.pop(cid, None), surface_override))   # surface PRÓPRIA na fila
                 decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
                 if decision == "interrupt":
                     s.cancel = True
@@ -1445,9 +1445,12 @@ class AgentEndpoint(EndpointCommandsMixin):
                 if nxt is not None:                      # vai rodar a próxima da fila → segura o busy ligado
                     s.busy = True
             if nxt is not None:                          # spawn FORA do lock (não segura a trava no trabalho)
-                nxt_text, nxt_img = nxt
-                self._spawn(lambda t=nxt_text, im=nxt_img: self._run(  # #13: continuação herda a surface
-                    chat_id, t, s, images=im, surface_override=surface_override))
+                nxt_text, nxt_img = nxt[0], nxt[1]
+                # a fila guarda a surface PRÓPRIA da msg (segurança): NÃO herda a deste turno — senão um
+                # webhook (shell negado) enfileirado num turno telegram rodaria com a tool policy do telegram.
+                nxt_override = nxt[2] if len(nxt) > 2 else surface_override
+                self._spawn(lambda t=nxt_text, im=nxt_img, ov=nxt_override: self._run(
+                    chat_id, t, s, images=im, surface_override=ov))
 
     def _status_on_event(self, chat_id, status_id, header: str, base):
         """on_event que EDITA a msg de status ao vivo com o progresso (tool-calls), com throttle. Encadeia
