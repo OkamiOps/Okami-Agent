@@ -150,6 +150,7 @@ class PluginRegistrar:
         self.cfg = cfg
         self.tools: dict = {}
         self.commands: dict = {}
+        self.context_providers: list = []
 
     @property
     def llm(self) -> PluginLlm:
@@ -168,6 +169,14 @@ class PluginRegistrar:
         if not nm or not callable(handler):
             raise ValueError("register_command: precisa de um nome não-vazio e um handler chamável")
         self.commands[nm] = {"handler": handler, "help": help}
+
+    def register_context(self, provider, name: str = "") -> None:
+        """Plugin injeta CONTEXTO dinâmico a cada turno (port do pre_llm_call do Hermes). `provider()` → str é
+        chamado por turno e o texto entra no extra_context (sem mutar o system prompt). Ex.: status do projeto,
+        hora atual, fila externa. Best-effort no consumidor: provider que explode é ignorado."""
+        if not callable(provider):
+            raise ValueError("register_context: precisa de um callable provider()->str")
+        self.context_providers.append({"fn": provider, "name": name})
 
 
 def _resolve_register(plugin: "Plugin"):
@@ -240,6 +249,17 @@ def load_plugin_commands(plugins, *, cfg=None, emit=lambda m: None, _resolve=Non
     return out
 
 
+def load_plugin_context(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> list:
+    """COLETA os provedores de contexto por-turno (ctx.register_context). [{fn, name, plugin}, …] — o gateway
+    chama cada `fn()` por turno e injeta o texto no extra_context. Isolado por plugin (igual às tools)."""
+    out: list = []
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
+        for spec in registrar.context_providers:
+            out.append({**spec, "plugin": plugin.name})
+            emit(f"[plugin {plugin.name}] +context {spec.get('name') or ''}")
+    return out
+
+
 def plugin_roots() -> list[Path]:
     """Raízes: projeto (.) + home do Okami + NATIVOS do pacote (viajam no pip install). O projeto vem 1º →
     vence o nativo de mesmo nome (discover_plugins dedup por nome, 1ª raiz ganha)."""
@@ -258,4 +278,5 @@ def plugin_roots() -> list[Path]:
 
 
 __all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
-           "load_plugin_commands", "load_plugin_tools", "plugin_context", "plugin_roots"]
+           "load_plugin_commands", "load_plugin_context", "load_plugin_tools", "plugin_context",
+           "plugin_roots"]

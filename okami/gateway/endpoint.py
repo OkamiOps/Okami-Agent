@@ -44,6 +44,23 @@ def _fmt_elapsed(s: float) -> str:
     return f"{m}m{sec:02d}s"
 
 
+def _inject_plugin_context(ctx: str, providers) -> str:
+    """Chama cada provider de contexto de plugin (register_context) e PREPENDA o texto não-vazio ao
+    extra_context do turno (pre_llm_call do Hermes). Best-effort: provider que explode é ignorado."""
+    parts = []
+    for p in providers or []:
+        try:
+            v = p["fn"]()
+        except Exception:  # noqa: BLE001 — provider de plugin que explode não derruba o turno
+            continue
+        if v and str(v).strip():
+            parts.append(str(v).strip())
+    if not parts:
+        return ctx
+    block = "\n\n".join(parts)
+    return block + ("\n\n" + ctx if ctx else "")
+
+
 class Session:
     """Estado de uma conversa (um chat × um agente)."""
 
@@ -127,11 +144,14 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._bgreg = BackgroundRegistry(ws)   # registro PERSISTIDO (sobrevive a restart) das tarefas /background
         self.reactions = reactions           # reações 👀/👍/👎 na mensagem (Telegram) — opt-in
         self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
-        try:                                     # slash-commands contribuídos por plugins (register_command)
-            from okami.plugins import discover_plugins, load_plugin_commands, plugin_roots
-            self._plugin_commands = load_plugin_commands(discover_plugins(plugin_roots()), cfg=cfg)
+        try:                                     # slash-commands + context-providers contribuídos por plugins
+            from okami.plugins import (discover_plugins, load_plugin_commands, load_plugin_context,
+                                       plugin_roots)
+            _plugs = discover_plugins(plugin_roots())
+            self._plugin_commands = load_plugin_commands(_plugs, cfg=cfg)
+            self._plugin_context_providers = load_plugin_context(_plugs, cfg=cfg)
         except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do gateway
-            self._plugin_commands = {}
+            self._plugin_commands, self._plugin_context_providers = {}, []
         self.running = True
 
     def _evict_idle_sessions(self) -> None:
@@ -1350,6 +1370,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                     pass
                 if _base is not None:
                     return _base(e)
+            ctx = _inject_plugin_context(ctx, getattr(self, "_plugin_context_providers", None))   # pre_llm_call
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
             if kw_pre:
                 kw["prelearned_files"] = kw_pre
