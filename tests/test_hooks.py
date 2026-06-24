@@ -39,10 +39,24 @@ def test_config_command_runs_and_vetoes(tmp_path):
     assert [c[0] for c in calls] == ["log", "deny"]
 
 
-def test_handler_exception_does_not_break():
+def test_handler_exception_fail_closed_on_blockable():
     hm = HookManager()
     hm.on("before_task", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert hm.fire("before_task", {"goal": "x"}) is True   # hook que explode não derruba nem veta
+    assert hm.fire("before_task", {"goal": "x"}) is False  # before_* que explode VETA (fail-closed, igual ao shell)
+
+
+def test_handler_exception_observer_event_stays_true():
+    hm = HookManager()
+    hm.on("after_task", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert hm.fire("after_task", {"goal": "x"}) is True    # after_* não gateia nada → erro não veta
+
+
+def test_string_config_treated_as_single_command():
+    ran = []
+    hm = HookManager(config={"before_tool": "exit 1"},     # STRING (config errada) — não pode iterar char-a-char
+                     runner=lambda cmd, ev, pl: ran.append(cmd) or False)
+    assert hm.fire("before_tool", {}) is False             # roda 'exit 1' como UM comando e veta
+    assert ran == ["exit 1"]
 
 
 def test_dir_convention_scripts(tmp_path):

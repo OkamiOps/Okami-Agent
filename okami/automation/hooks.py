@@ -101,9 +101,14 @@ class HookManager:
             try:
                 if fn(payload) is False and event in _BLOCKABLE:
                     ok = False
-            except Exception:  # noqa: BLE001
-                pass
-        for cmd in self.config.get(event, []) or []:
+            except Exception as e:  # noqa: BLE001 — handler que explode num evento de BLOQUEIO VETA (paridade
+                self.emit(f"[hook {event}] erro do handler: {e}")    # com _run): política que erra não pode
+                if event in _BLOCKABLE:                              # LIBERAR a ação que existe pra barrar
+                    ok = False
+        _cmds = self.config.get(event, []) or []
+        if isinstance(_cmds, str):                      # config errada (string em vez de lista) → trata como UM
+            _cmds = [_cmds]                             # comando (senão itera char-a-char e quebra a política)
+        for cmd in _cmds:
             if self._run(cmd, event, payload) is False and event in _BLOCKABLE:
                 ok = False
         for script in self._scripts(event):

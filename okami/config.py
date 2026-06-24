@@ -249,6 +249,10 @@ class OkamiConfig(BaseModel):
     #                                                            integração nasciam MORTAS (cfg de runtime descartava o bloco)
     media: dict[str, Any] = Field(default_factory=dict)         # {"video": {backend,url,model,api_key_env}} — generate_video
     computer_use: dict[str, Any] = Field(default_factory=dict)  # {"enabled": bool, "backend": ...} — tool computer_use
+    mixture: dict[str, Any] = Field(default_factory=dict)       # {"reference_providers": [...]} — MoA (mixture.py lia vazio → morto)
+    security: dict[str, Any] = Field(default_factory=dict)      # {"advisories": ..., ...} — lazy_deps/tirith liam vazio → morto
+    notifications: dict[str, Any] = Field(default_factory=dict)  # {"desktop": bool} — endpoint._desktop_enabled lia vazio → morto
+    #  NOTA: `channels` fica DE FORA de propósito (contém token=SEGREDO — nunca entra no OkamiConfig).
 
     def provider(self, name: str | None = None) -> ProviderConfig:
         key = name or self.default_provider
@@ -453,6 +457,9 @@ def build_config(raw: dict) -> OkamiConfig:
         integrations=raw.get("integrations") or {},   # SEM propagar, x_search/homeassistant/feishu liam vazio → mortas
         media=raw.get("media") or {},                 # idem generate_video (media.video)
         computer_use=raw.get("computer_use") or {},   # idem computer_use (enabled)
+        mixture=raw.get("mixture") or {},             # idem MoA (mixture.py); SEM isto nascia morto
+        security=raw.get("security") or {},           # idem lazy_deps/tirith (supply-chain)
+        notifications=raw.get("notifications") or {},  # idem endpoint._desktop_enabled
     )
 
 

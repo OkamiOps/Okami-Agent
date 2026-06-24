@@ -274,8 +274,19 @@ class McpTool(Tool):
         self.description = (spec.get("description") or f"tool MCP {self._remote}")[:200]
         schema = spec.get("inputSchema") or {}
         props = schema.get("properties") or {}
-        self.args_schema = {k: (v.get("description") or v.get("type") or "") for k, v in props.items()}
-        self.required = tuple(schema.get("required") or ())
+        self.args_schema = {k: (v.get("description") or "") for k, v in props.items()}   # só descrição (não o tipo)
+        # arg_types p/ o coerce_args do rail NATIVO: sem isto, "42"/"false"/"[..]" chegam como STRING e a tool
+        # quebra (to_openai_schema também usava 'string' p/ tudo). type lista (["string","null"]) → pega o não-null.
+        self.arg_types = {}
+        for k, v in props.items():
+            t = v.get("type")
+            if isinstance(t, list):
+                t = next((x for x in t if x != "null"), None)
+            if t and t != "string":
+                self.arg_types[k] = t
+        # required SÓ p/ campos que existem em properties (servidor MCP malformado podia exigir um campo
+        # ausente → o harness barraria a chamada por um campo que o schema nem oferece).
+        self.required = tuple(r for r in (schema.get("required") or ()) if r in props)
         self.capabilities = set(capabilities) if capabilities is not None else infer_capabilities(spec)
         self.trusted = trusted              # servidor de confiança → não força go/no-go por capability (#8)
         # política de aprovação do MANIFESTO (#11): auto (gate por capability) | never (liberada) | always.
