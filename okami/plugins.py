@@ -165,7 +165,8 @@ class PluginRegistrar:
     def register_command(self, name: str, handler, help: str = "") -> None:
         """Plugin contribui um slash-command `/name` (port do ctx.register_command do Hermes). `handler(args)`
         → str de resposta. O gateway despacha quando vê `/name` que não é built-in."""
-        nm = str(name or "").lstrip("/").strip()
+        nm = str(name or "").lstrip("/").strip().lower()   # case-insensitive (slash-command convenção) → casa o
+        #                                                    dispatch que usa o token lowercased
         if not nm or not callable(handler):
             raise ValueError("register_command: precisa de um nome não-vazio e um handler chamável")
         self.commands[nm] = {"handler": handler, "help": help}
@@ -249,6 +250,20 @@ def load_plugin_commands(plugins, *, cfg=None, emit=lambda m: None, _resolve=Non
     return out
 
 
+def load_plugin_gateway(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> tuple[dict, list]:
+    """Carrega commands + context-providers de plugins numa ÚNICA passada de register() (o gateway precisa dos
+    dois no boot; chamar load_plugin_commands + load_plugin_context separado rodava register() 2× — e o
+    exec_module do register.py de pasta 2×). Devolve (commands, context_providers)."""
+    commands: dict = {}
+    context: list = []
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
+        for name, spec in registrar.commands.items():
+            commands[name] = {**spec, "plugin": plugin.name}
+        for spec in registrar.context_providers:
+            context.append({**spec, "plugin": plugin.name})
+    return commands, context
+
+
 def load_plugin_context(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> list:
     """COLETA os provedores de contexto por-turno (ctx.register_context). [{fn, name, plugin}, …] — o gateway
     chama cada `fn()` por turno e injeta o texto no extra_context. Isolado por plugin (igual às tools)."""
@@ -278,5 +293,5 @@ def plugin_roots() -> list[Path]:
 
 
 __all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
-           "load_plugin_commands", "load_plugin_context", "load_plugin_tools", "plugin_context",
-           "plugin_roots"]
+           "load_plugin_commands", "load_plugin_context", "load_plugin_gateway", "load_plugin_tools",
+           "plugin_context", "plugin_roots"]

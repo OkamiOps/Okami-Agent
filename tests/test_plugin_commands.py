@@ -52,3 +52,35 @@ def test_gateway_plugin_command_handler_error_is_contained():
     ep._plugin_commands = {"boom": {"handler": boom, "help": ""}}
     ep.handle("7", "/boom")                              # não pode propagar/derrubar
     assert any("/boom" in t for t in ep.channel.sent)
+
+
+def test_command_with_hyphen_and_digits_dispatches():
+    import tempfile as _tf
+    ep = AgentEndpoint("dev", cfg=None, ws=_tf.mkdtemp(), channel=_Ch(),
+                       run_task=lambda *a, **k: None, spawn=lambda fn: fn())
+    ep._plugin_commands = {"deploy-prod2": {"handler": lambda a: f"deployed {a}", "help": ""}}
+    ep.handle("7", "/deploy-prod2 web")
+    assert any("deployed web" in t for t in ep.channel.sent)   # hífen+dígito agora dispatcha
+
+
+def test_register_command_lowercases_name():
+    r = PluginRegistrar(plugin_context("p"))
+    r.register_command("GetStatus", lambda a: "ok")
+    assert "getstatus" in r.commands                    # case-insensitive
+
+
+def test_load_plugin_gateway_runs_register_once(tmp_path):
+    import textwrap as _tw
+    calls = tmp_path / "calls.txt"
+    d = tmp_path / "plugins" / "once"
+    d.mkdir(parents=True)
+    (d / "plugin.yaml").write_text("name: once\n", encoding="utf-8")
+    (d / "register.py").write_text(_tw.dedent(f"""
+        open({str(calls)!r}, 'a').write('x')
+        def register(ctx):
+            ctx.register_command('c', lambda a: 'ok')
+    """), encoding="utf-8")
+    from okami.plugins import load_plugin_gateway
+    cmds, ctxs = load_plugin_gateway(discover_plugins([str(tmp_path)]))
+    assert "c" in cmds
+    assert calls.read_text() == "x"                     # module exec UMA vez (não 2)

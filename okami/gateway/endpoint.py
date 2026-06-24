@@ -144,12 +144,12 @@ class AgentEndpoint(EndpointCommandsMixin):
         self._bgreg = BackgroundRegistry(ws)   # registro PERSISTIDO (sobrevive a restart) das tarefas /background
         self.reactions = reactions           # reações 👀/👍/👎 na mensagem (Telegram) — opt-in
         self._last_msg_id: dict[str, str] = {}   # última msg_id por chat → alvo da reação
-        try:                                     # slash-commands + context-providers contribuídos por plugins
-            from okami.plugins import (discover_plugins, load_plugin_commands, load_plugin_context,
-                                       plugin_roots)
-            _plugs = discover_plugins(plugin_roots())
-            self._plugin_commands = load_plugin_commands(_plugs, cfg=cfg)
-            self._plugin_context_providers = load_plugin_context(_plugs, cfg=cfg)
+        self._sessions_lock = threading.Lock()   # serializa mutações de self.sessions (OrderedDict NÃO é
+        #                                           thread-safe: poll + webhook + _run mexem concorrente)
+        try:                                     # slash-commands + context-providers de plugins — UMA passada
+            from okami.plugins import discover_plugins, load_plugin_gateway, plugin_roots
+            self._plugin_commands, self._plugin_context_providers = load_plugin_gateway(
+                discover_plugins(plugin_roots()), cfg=cfg)
         except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do gateway
             self._plugin_commands, self._plugin_context_providers = {}, []
         self.running = True
@@ -157,35 +157,48 @@ class AgentEndpoint(EndpointCommandsMixin):
     def _evict_idle_sessions(self) -> None:
         """Bound de memória (VPS 24/7, paridade Hermes agent-LRU): despeja as sessões IDLE mais ANTIGAS além
         do teto. Evictada é REconstruída do transcript no próximo acesso (append-only) → seguro. NUNCA despeja
-        uma sessão BUSY (tem estado vivo: busy/queued/cancel). Se TODAS estão busy, não força (cap é soft)."""
+        uma sessão BUSY (tem estado vivo: busy/queued/cancel). Se TODAS estão busy, não força (cap é soft).
+        CHAMADO SOB self._sessions_lock. O `for` quebra ANTES do `del` → sem 'mutated during iteration'."""
         while len(self.sessions) > self.max_live_sessions:
-            victim = next((c for c, ss in self.sessions.items() if not ss.busy), None)
+            victim = None
+            for c, ss in self.sessions.items():      # a idle mais antiga (OrderedDict = ordem de inserção/uso)
+                if not ss.busy:
+                    victim = c
+                    break
             if victim is None:                       # todas ocupadas (raro) → respeita o estado vivo
                 break
             del self.sessions[victim]
 
     def session(self, chat_id) -> Session:
-        """Sessão por chat — rebuild do transcript append-only (sobrevive a restart)."""
+        """Sessão por chat — rebuild do transcript append-only (sobrevive a restart). Thread-safe: mutações de
+        self.sessions sob _sessions_lock; o rebuild (I/O de disco) roda FORA do lock p/ não bloquear."""
         cid = str(chat_id)
-        if cid in self.sessions:
-            self.sessions.move_to_end(cid)           # LRU: marca como recém-usada (não despeja agora)
-        else:
-            s = Session()
-            e = self.store.entry(cid)
-            s.history = self.store.history(cid, limit=16)
-            s.yolo = bool(e.get("yolo", False))
-            s.persona_overlay = e.get("persona_overlay", "")
-            s.resume_attempts = int(e.get("resume_attempts", 0))
-            s.reasoning_effort = e.get("reasoning_effort", "")
-            s.native_override = e.get("native_override", "")
-            s.title = e.get("title", "")
-            s.voice_off = bool(e.get("voice_off", False))
-            s.voice_always = bool(e.get("voice_always", False))
-            s.busy_mode = e.get("busy_mode", "queue")
-            s.approved_cats = set(e.get("approved_cats", []) or [])   # aprovações de sessão (sobrevivem a restart)
+        with self._sessions_lock:
+            s = self.sessions.get(cid)
+            if s is not None:
+                self.sessions.move_to_end(cid)       # LRU: marca como recém-usada
+                return s
+        s = Session()                                # NÃO existe → constrói FORA do lock (store.entry/history = I/O)
+        e = self.store.entry(cid)
+        s.history = self.store.history(cid, limit=16)
+        s.yolo = bool(e.get("yolo", False))
+        s.persona_overlay = e.get("persona_overlay", "")
+        s.resume_attempts = int(e.get("resume_attempts", 0))
+        s.reasoning_effort = e.get("reasoning_effort", "")
+        s.native_override = e.get("native_override", "")
+        s.title = e.get("title", "")
+        s.voice_off = bool(e.get("voice_off", False))
+        s.voice_always = bool(e.get("voice_always", False))
+        s.busy_mode = e.get("busy_mode", "queue")
+        s.approved_cats = set(e.get("approved_cats", []) or [])   # aprovações de sessão (sobrevivem a restart)
+        with self._sessions_lock:
+            existing = self.sessions.get(cid)        # outra thread pode ter criado nesse meio-tempo → reusa
+            if existing is not None:
+                self.sessions.move_to_end(cid)
+                return existing
             self.sessions[cid] = s
-            self._evict_idle_sessions()              # mantém o bound de memória (despeja idle antigas)
-        return self.sessions[cid]
+            self._evict_idle_sessions()              # sob o lock → bound de memória sem corrida
+        return s
 
     def _append_turn(self, chat_id, s: Session, role: str, text: str) -> None:
         """Grava um turno: append-only no transcript + memória (trim p/ contexto)."""
@@ -527,7 +540,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         low = text.lower()
         # --- slash registry: canonicaliza alias + "did you mean" (1 vez, no topo) ---
         import re as _re
-        if text.startswith("/") and _re.match(r"^/[a-z?]+$", low.split(maxsplit=1)[0]):
+        if text.startswith("/") and _re.match(r"^/[a-z0-9_?-]+$", low.split(maxsplit=1)[0]):
             from okami import commands as _cmds
             tok = low.split(maxsplit=1)[0]
             cdef = _cmds.resolve(tok)
@@ -1541,7 +1554,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 tok["text"] = (tok["text"] + e.get("text", ""))[-4000:]   # buffer LIMITADO: a edição só usa
                 #                                  os últimos 3500; resposta longa não incha memória sem teto
                 now = _t.monotonic()
-                if ed.due(now):
+                if ed.due(now, len(tok["text"])):    # passa o tamanho do buffer → adaptativo funciona no stream
                     try:
                         self.channel.edit_message(chat_id, status_id, (header + "\n" + tok["text"][-3500:]).strip())
                         ed.mark_sent(now)

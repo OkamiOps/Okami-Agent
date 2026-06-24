@@ -23,21 +23,24 @@ class StreamEditor:
             return
         self._lines.append(line)
 
-    def _interval(self) -> float:
+    def _interval(self, size: int | None = None) -> float:
         """Intervalo efetivo até a PRÓXIMA edição (batch-delay adaptativo, paridade Hermes). Curto edita mais
-        rápido (resposta snappy), longo throttle cheio (eficiência/anti-429). Nunca passa do teto min_interval."""
+        rápido (resposta snappy), longo throttle cheio (eficiência/anti-429). Nunca passa do teto min_interval.
+        `size`: tamanho do conteúdo a editar — o caminho de STREAMING token-a-token tem o texto FORA do
+        deque (_lines), então PRECISA passar len(buffer) aqui, senão o intervalo trava no piso curto."""
         if not self.adaptive:
             return self.min_interval
-        n = len(self.render())
+        n = size if size is not None else len(self.render())
         if n <= 320:
             return min(0.5, self.min_interval)       # resposta curta → atualiza ~2x mais rápido
         if n <= 1024:
             return min(0.8, self.min_interval)
         return self.min_interval                     # longo → teto cheio (poucas edições, anti-429)
 
-    def due(self, now: float) -> bool:
-        """True se já passou o intervalo (adaptativo) desde a última edição enviada (ou se nunca enviou)."""
-        return (now - self._last_sent) >= self._interval()
+    def due(self, now: float, size: int | None = None) -> bool:
+        """True se já passou o intervalo (adaptativo) desde a última edição enviada (ou se nunca enviou).
+        Passe `size` no caminho de streaming token-a-token (texto fora do deque)."""
+        return (now - self._last_sent) >= self._interval(size)
 
     def mark_sent(self, now: float) -> None:
         self._last_sent = now

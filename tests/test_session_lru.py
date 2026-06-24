@@ -35,3 +35,37 @@ def test_busy_session_never_evicted():
     for i in range(1, 8):
         ep.session(f"c{i}")
     assert "c0" in ep.sessions                      # nunca despejada (estado vivo)
+
+
+def test_session_concurrent_access_no_crash():
+    """Regressão (verificação adversarial): session() concorrente (poll + webhook) com >cap NÃO pode dar
+    'OrderedDict mutated during iteration'. Stress: muitas threads martelando cids distintos + alguns busy."""
+    import threading
+    import tempfile as _tf
+    from okami.gateway import AgentEndpoint
+
+    class _Ch:
+        def poll(self): return []
+        def send(self, cid, text): pass
+        def allowed(self, cid): return True
+
+    ep = AgentEndpoint("dev", cfg=None, ws=_tf.mkdtemp(), channel=_Ch(),
+                       run_task=lambda *a, **k: None, spawn=lambda fn: None)
+    ep.max_live_sessions = 8
+    errors = []
+
+    def hammer(base):
+        try:
+            for i in range(120):
+                s = ep.session(f"{base}-{i}")
+                if i % 5 == 0:
+                    s.busy = True                      # alguns busy (não podem ser despejados)
+        except Exception as e:  # noqa: BLE001
+            errors.append(repr(e))
+
+    ts = [threading.Thread(target=hammer, args=(b,)) for b in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errors, errors                          # zero 'mutated during iteration'

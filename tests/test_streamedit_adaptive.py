@@ -49,3 +49,13 @@ def test_adaptive_never_exceeds_cap():
     ed.feed("curta", 0.0)
     ed.mark_sent(0.0)
     assert ed.due(0.35) is True
+
+
+def test_streaming_size_param_drives_interval():
+    """Regressão: o caminho de streaming token-a-token tem o texto FORA do deque → due(now, size) precisa
+    usar o size, senão trava no piso 0.5s e mata o teto anti-429."""
+    ed = StreamEditor(min_interval=1.2)                 # _lines vazio (stream não usa feed)
+    ed.mark_sent(0.0)
+    assert ed.due(0.6, size=2000) is False             # buffer grande → teto cheio 1.2s (NÃO 0.5)
+    assert ed.due(1.3, size=2000) is True
+    assert ed.due(0.6, size=100) is True               # buffer pequeno → 0.5s (snappy)
