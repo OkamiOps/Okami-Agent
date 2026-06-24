@@ -110,7 +110,7 @@ CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 _CODEX_TERMINAL = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 
-def _codex_sse(lines) -> tuple[str, dict | None, list, str]:
+def _codex_sse(lines, on_reasoning=None) -> tuple[str, dict | None, list, str]:
     """Parseia o stream SSE da Responses API do Codex → (texto, usage, tool_calls, finish_reason).
 
     Texto: deltas `response.output_text.delta` (fallback: `output` do terminal). USAGE: capturado do
@@ -140,6 +140,11 @@ def _codex_sse(lines) -> tuple[str, dict | None, list, str]:
         t = obj.get("type", "")
         if t == "response.output_text.delta":
             chunks.append(obj.get("delta", ""))
+        elif on_reasoning and "reasoning" in t and t.endswith(".delta"):
+            try:                                       # deltas de raciocínio (💭) de qualquer endpoint Responses
+                on_reasoning(obj.get("delta", "") or "")
+            except Exception:  # noqa: BLE001 — callback de reasoning é best-effort; nunca trunca a saída
+                pass
         elif t in ("response.output_item.added", "response.output_item.done"):
             item = obj.get("item") or {}
             if isinstance(item, dict) and item.get("type") == "function_call":
