@@ -98,6 +98,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         self.approval_timeout = approval_timeout
         self.max_history_chars = max_history_chars
         self.auto_resume = auto_resume       # retomar tarefa interrompida no boot (com guarda anti-loop)
+        self.resume_freshness = 3600.0       # só auto-resume se a interrupção for < 1h (Hermes): não ressuscita turno velho
         self.max_sessions = max_sessions
         self.store = TranscriptStore(self.home)  # 2 camadas: metadados + transcript (na CASA, não no projeto)
         from okami.gateway.approvals import ApprovalStore
@@ -229,13 +230,20 @@ class AgentEndpoint(EndpointCommandsMixin):
 
     def resume_interrupted(self, auto_resume: bool = False, max_attempts: int = 1) -> None:
         """No boot: detecta sessões cuja última fala foi do USER (tarefa interrompida por restart/crash).
-        Default = AVISA + oferece /retry. Com auto_resume, re-executa UMA vez (guarda anti-loop #7536)."""
+        Default = AVISA + oferece /retry. Com auto_resume, re-executa UMA vez (guarda anti-loop #7536) — MAS só
+        se a interrupção for RECENTE (janela resume_freshness, default 1h; paridade Hermes
+        _is_fresh_gateway_interruption): uma VPS que reinicia dias depois NÃO ressuscita um turno morto com
+        contexto/tool-tail velho. Velho/sem-timestamp → cai no aviso + /retry (retomada manual)."""
+        import time
+        fresh_window = getattr(self, "resume_freshness", 3600.0)
         for cid in self._all_session_ids():
             s = self.session(cid)
             if not s.interrupted():
                 continue
             last = s.history[-1][1]
-            if auto_resume and s.resume_attempts < max_attempts:
+            last_ts = (self.store.entry(cid) or {}).get("last_interaction_at", 0) or 0
+            fresh = bool(last_ts) and (time.time() - last_ts) <= fresh_window
+            if auto_resume and fresh and s.resume_attempts < max_attempts:
                 s.resume_attempts += 1
                 self._save_meta(cid, s)                # marca a tentativa ANTES (sobrevive a novo crash)
                 self.channel.send(cid, _tr("gw.resuming", _default="↻ resuming the task interrupted by the restart…"))
