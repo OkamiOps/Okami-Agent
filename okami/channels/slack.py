@@ -50,4 +50,6 @@ class SlackChannel(RestChannel):
 
     def send(self, chat_id, text: str) -> None:
         for chunk in self._chunks(text):                # manda INTEIRO em partes (não trunca)
-            self._post("/chat.postMessage", {"channel": str(chat_id), "text": chunk})
+            res = self._post("/chat.postMessage", {"channel": str(chat_id), "text": chunk})
+            if isinstance(res, dict) and res.get("ok") is False:   # 200 OK + {ok:false} → entrega FALHOU
+                raise RuntimeError(f"Slack recusou o envio: {res.get('error') or 'erro'}")   # (não em silêncio)

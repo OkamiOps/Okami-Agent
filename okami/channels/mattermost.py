@@ -50,4 +50,6 @@ class MattermostChannel(RestChannel):
 
     def send(self, chat_id, text: str) -> None:
         for chunk in self._chunks(text):                # manda INTEIRO em partes (não trunca)
-            self._post("/posts", {"channel_id": str(chat_id), "message": chunk})
+            res = self._post("/posts", {"channel_id": str(chat_id), "message": chunk})
+            if isinstance(res, dict) and int(res.get("status_code") or 0) >= 400:   # 200 + erro semântico
+                raise RuntimeError(f"Mattermost recusou o envio: {res.get('message') or res.get('id')}")

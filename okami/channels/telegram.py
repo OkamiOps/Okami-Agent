@@ -6,6 +6,7 @@ Long polling (getUpdates) + sendMessage. Cada agente usa o seu token (no agent.y
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import tempfile
 import time
@@ -44,7 +45,7 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
         rest = rest[cut:].lstrip()
     if rest:
         out.append(rest)
-    parts = _balance_fences(out)
+    parts = _balance_bold(_balance_fences(out))
     if len(parts) > 1:                        # indicador (i/N) em msg longa partida (paridade Hermes)
         n = len(parts)
         parts = [f"{p}\n\n({i}/{n})" for i, p in enumerate(parts, 1)]
@@ -74,6 +75,23 @@ def _balance_fences(parts: list[str]) -> list[str]:
             part = part.rstrip() + "\n```"      # fecha aqui
         else:
             carry = None
+        out.append(part)
+    return out
+
+
+def _balance_bold(parts: list[str]) -> list[str]:
+    """`**negrito**` que atravessa o corte → fecha o `**` na parte atual e REABRE na próxima, pra cada parte
+    renderizar sozinha (senão o Telegram mostra `**` LITERAL). Ignora `**` dentro de bloco ```…``` (lá é
+    literal, não negrito). Espelha _balance_fences (que já faz isso p/ blocos de código)."""
+    out: list[str] = []
+    carry = False
+    for part in parts:
+        if carry:
+            part = "**" + part                 # reabre o negrito aberto na parte anterior
+        masked = re.sub(r"```.*?```", "", part, flags=re.DOTALL)   # `**` em code é literal → não conta
+        carry = masked.count("**") % 2 == 1     # ficou um `**` aberto ao fim desta parte?
+        if carry:
+            part = part.rstrip() + "**"          # fecha aqui (reabre na próxima)
         out.append(part)
     return out
 

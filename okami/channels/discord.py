@@ -48,4 +48,6 @@ class DiscordChannel(RestChannel):
 
     def send(self, chat_id, text: str) -> None:
         for chunk in self._chunks(text):                # manda INTEIRO em partes (senão a API recusa)
-            self._post(f"/channels/{chat_id}/messages", {"content": chunk})
+            res = self._post(f"/channels/{chat_id}/messages", {"content": chunk})
+            if isinstance(res, dict) and res.get("code") and res.get("message"):   # 200 + erro semântico
+                raise RuntimeError(f"Discord recusou o envio: {res.get('message')}")   # (não em silêncio)
