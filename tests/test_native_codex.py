@@ -18,7 +18,7 @@ def test_sse_parses_function_call_from_terminal_output():
         b'"call_id":"c1","name":"write_file","arguments":"{\\"path\\":\\"a.txt\\",\\"content\\":\\"oi\\"}"}],'
         b'"usage":{"input_tokens":5}}}',
     ]
-    text, usage, tcs = transports._codex_sse(lines)
+    text, usage, tcs, _finish = transports._codex_sse(lines)
     assert text == "" and tcs and tcs[0]["name"] == "write_file"
     assert "a.txt" in tcs[0]["arguments"] and usage == {"input_tokens": 5}
 
@@ -31,7 +31,7 @@ def test_sse_parses_streamed_function_call_with_arg_deltas():
         b'data: {"type":"response.function_call_arguments.delta","item_id":"i1","delta":"\\"ls\\"}"}',
         b'data: {"type":"response.completed","response":{"output":[],"usage":{}}}',
     ]
-    _text, _usage, tcs = transports._codex_sse(lines)
+    _text, _usage, tcs, _finish = transports._codex_sse(lines)
     assert tcs[0]["name"] == "run_shell" and tcs[0]["arguments"] == '{"cmd":"ls"}'
 
 
@@ -51,5 +51,5 @@ def test_text_only_response_still_parses_to_3_tuple():
     """Sem function_call, segue idêntico ao texto de antes (caminho default)."""
     lines = [b'data: {"type":"response.output_text.delta","delta":"oi"}',
              b'data: {"type":"response.completed","response":{"output":[],"usage":{}}}']
-    text, _usage, tcs = transports._codex_sse(lines)
+    text, _usage, tcs, _finish = transports._codex_sse(lines)
     assert text == "oi" and tcs == []

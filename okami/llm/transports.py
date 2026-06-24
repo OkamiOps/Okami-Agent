@@ -110,12 +110,14 @@ CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 _CODEX_TERMINAL = frozenset({"response.completed", "response.incomplete", "response.failed"})
 
 
-def _codex_sse(lines) -> tuple[str, dict | None, list]:
-    """Parseia o stream SSE da Responses API do Codex → (texto, usage).
+def _codex_sse(lines) -> tuple[str, dict | None, list, str]:
+    """Parseia o stream SSE da Responses API do Codex → (texto, usage, tool_calls, finish_reason).
 
     Texto: deltas `response.output_text.delta` (fallback: `output` do terminal). USAGE: capturado do
     evento terminal (`response.usage`) — keystone de custo, antes a gente jogava fora. Robustez (Hermes
     `codex_runtime`): exige TERMINAL; corte sem texto nem terminal → RuntimeError (vira retry/failover).
+    finish_reason="length" quando incomplete por max_output_tokens COM texto parcial → reusa a
+    length-continuation já existente (agnóstico a qualquer endpoint Responses).
     """
     chunks: list[str] = []
     final = ""
@@ -180,7 +182,9 @@ def _codex_sse(lines) -> tuple[str, dict | None, list]:
             raise RuntimeError("codex: stream encerrou sem evento terminal (resposta vazia)")
         if incomplete_reason:
             raise RuntimeError(f"codex: resposta incompleta sem texto ({incomplete_reason})")
-    return text, usage, tool_calls
+    # incomplete por max_output_tokens COM texto parcial → "length" (não "stop"): a length-continuation pega.
+    finish = "length" if (incomplete_reason and "token" in incomplete_reason.lower()) else "stop"
+    return text, usage, tool_calls, finish
 
 
 def _codex_sse_text(lines) -> str:
@@ -258,13 +262,13 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     req.add_header("Accept", "text/event-stream")
     try:
         with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT) as resp:  # noqa: S310
-            text, usage, tool_calls = _codex_sse(resp)
+            text, usage, tool_calls, finish = _codex_sse(resp)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:300]
         raise RuntimeError(f"codex HTTP {e.code}: {detail}") from e
     if native and tool_calls:                    # function_call nativo → protocolo de ação (pipeline atual)
         text = _toolcalls_to_action_text(tool_calls)
-    return Completion(text=text, tool_calls=tool_calls,
+    return Completion(text=text, tool_calls=tool_calls, finish_reason=finish,
                       usage=normalize_usage(usage, transport="codex_oauth"),
                       provider=pc.name, model=model_short)
 

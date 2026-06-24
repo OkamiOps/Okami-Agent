@@ -33,3 +33,19 @@ def test_still_sanitizes_content_text():
 def test_clean_message_unchanged():
     msgs = [{"role": "user", "content": "normal"}]
     assert sanitize_messages(msgs) == msgs
+
+
+def test_generic_underscore_prefix_and_extra_keys_stripped():
+    from okami.llm.sanitize import sanitize_messages
+    msgs = [{
+        "role": "assistant", "content": "oi", "tool_calls": [{"id": "c", "type": "function"}],
+        "tool_name": "x", "timestamp": 123, "codex_reasoning_items": [{"a": 1}],
+        "reasoning_details": [{"b": 2}], "_internal_marker": "drop-me", "_thinking": "secreto",
+    }]
+    out = sanitize_messages(msgs)[0]
+    # campos válidos do OpenAI sobrevivem
+    assert out["role"] == "assistant" and out["content"] == "oi" and out["tool_calls"]
+    # belt do Hermes: qualquer chave _-prefixada + extras estritos somem (provider estrito 400)
+    for bad in ("tool_name", "timestamp", "codex_reasoning_items", "reasoning_details",
+                "_internal_marker", "_thinking"):
+        assert bad not in out

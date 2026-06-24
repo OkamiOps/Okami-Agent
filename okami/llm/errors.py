@@ -109,22 +109,28 @@ _CTX = re.compile(r"context length|maximum context|context window|too long|\b413
 _CTX_LIMIT = re.compile(
     r"(?:maximum context length|context length|context window|max(?:imum)? context)\D{0,40}(\d{3,8})"
     r"|(\d{3,8})\s*tokens?\D{0,30}(?:maximum|context)", re.I)
+# DELTA de overflow (NÃO é o teto): minimax & co. dizem "context window exceeds limit (2013)" / "exceeded by
+# 4096 tokens" — o número é o EXCESSO. Lê-lo como limite despencava a janela p/ ~6K (delta*3.2). Casa o número
+# que vem logo depois de exceed(s/ed)/over/by, p/ IGNORÁ-LO na extração.
+_CTX_DELTA = re.compile(r"(?:exceed(?:s|ed)?|over|by)\b\D{0,30}?(\d{3,8})", re.I)
 
 
 def _extract_ctx_limit(msg: str) -> int | None:
-    """O limite de contexto (tokens) reportado no erro, ou None. Faixa sã (256..10M) p/ não pegar lixo."""
-    m = _CTX_LIMIT.search(msg or "")
-    if not m:
-        return None
-    for g in m.groups():
-        if not g:
-            continue
-        try:
-            v = int(g)
-        except ValueError:
-            continue
-        if 256 <= v <= 10_000_000:
-            return v
+    """O limite de contexto (tokens) reportado no erro, ou None. Faixa sã (256..10M) p/ não pegar lixo.
+    Ignora número em posição de DELTA de overflow (senão o excesso vira 'limite' e a janela despenca)."""
+    msg = msg or ""
+    delta_spans = {m.span(1) for m in _CTX_DELTA.finditer(msg)}   # posições dos números-EXCESSO (a pular)
+    for m in _CTX_LIMIT.finditer(msg):
+        for gi in (1, 2):
+            g = m.group(gi)
+            if not g or m.span(gi) in delta_spans:    # vazio OU é o delta de overflow → não é teto
+                continue
+            try:
+                v = int(g)
+            except ValueError:
+                continue
+            if 256 <= v <= 10_000_000:
+                return v
     return None
 _POLICY = re.compile(r"content.?policy|content.?filter|safety|moderation|refus", re.I)
 _NOTFOUND = re.compile(r"\b404\b|not found|model.*(does not exist|unavailable|invalid)", re.I)

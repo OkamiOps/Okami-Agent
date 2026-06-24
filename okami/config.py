@@ -196,11 +196,13 @@ class ProviderConfig(BaseModel):
         if self.api_key_env:
             env = os.getenv(self.api_key_env) or ""
             pool.extend(k.strip() for k in env.split(",") if k.strip())
+        from okami.llm.sanitize import header_safe_key   # lazy: evita ciclo de import no boot
         seen, out = set(), []
         for k in pool:
-            if k and k not in seen:
-                seen.add(k)
-                out.append(k)
+            safe = header_safe_key(k)                # salva quebras de paste; DESCARTA não-ASCII/control char
+            if safe and safe not in seen:            # key malformada não vira resolved_key → failover p/ a próxima
+                seen.add(safe)
+                out.append(safe)
         return out
 
     @property
