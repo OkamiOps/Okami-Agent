@@ -121,14 +121,38 @@ def plugin_context(plugin: str, *, trust: str = "untrusted", cfg=None) -> Plugin
     )
 
 
+class PluginLlm:
+    """Capacidade de chamar o modelo que um plugin recebe via `ctx.llm`, GATED por confiança (port do
+    PluginLlm do Hermes). Pedir o provider default sempre passa; trocar de provider exige
+    trusted + allow_provider_override + allowlist (senão PermissionError). Faz o trust-gating ENFORÇAR numa
+    chamada LLM real — antes era só definição morta."""
+
+    def __init__(self, ctx: PluginContext, cfg):
+        self.ctx = ctx
+        self.cfg = cfg
+
+    def complete(self, messages, *, provider: str | None = None, model: str | None = None,
+                 _complete=None, **kw):
+        prov = self.ctx.resolve_provider(provider)   # GATING: PermissionError se não autorizado a trocar
+        comp = _complete
+        if comp is None:
+            from okami.llm.providers import complete_messages_ex as comp
+        return comp(self.cfg, messages, provider=prov, model=model, **kw)
+
+
 class PluginRegistrar:
     """Contexto que um plugin recebe em `register(ctx)` p/ CONTRIBUIR capacidades (port do ctx.register_* do
-    Hermes). Hoje: register_tool. O PluginContext (trust-gating de provider) viaja junto p/ futuras chamadas
-    LLM gated. Antes disso o register/PluginContext era código MORTO — ninguém chamava em runtime."""
+    Hermes). Hoje: register_tool + `ctx.llm` (chamada LLM gated). O PluginContext (trust-gating de provider)
+    viaja junto. Antes disso o register/PluginContext era código MORTO — ninguém chamava em runtime."""
 
-    def __init__(self, ctx: PluginContext):
+    def __init__(self, ctx: PluginContext, cfg=None):
         self.ctx = ctx
+        self.cfg = cfg
         self.tools: dict = {}
+
+    @property
+    def llm(self) -> PluginLlm:
+        return PluginLlm(self.ctx, self.cfg)
 
     def register_tool(self, tool) -> None:
         name = getattr(tool, "name", None)
@@ -177,7 +201,7 @@ def load_plugin_tools(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) 
         if reg is None:
             continue
         trust = "trusted" if plugin.source == "entry_point" else "untrusted"
-        registrar = PluginRegistrar(plugin_context(plugin.name, trust=trust, cfg=cfg))
+        registrar = PluginRegistrar(plugin_context(plugin.name, trust=trust, cfg=cfg), cfg=cfg)
         try:
             reg(registrar)
         except Exception as e:  # noqa: BLE001 — register que explode não derruba os outros plugins
@@ -206,5 +230,5 @@ def plugin_roots() -> list[Path]:
     return roots
 
 
-__all__ = ["Plugin", "PluginContext", "PluginRegistrar", "discover_plugins", "load_plugin_tools",
-           "plugin_context", "plugin_roots"]
+__all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
+           "load_plugin_tools", "plugin_context", "plugin_roots"]
