@@ -33,7 +33,14 @@ def _quote_block(m: re.Match) -> str:
     return f"<{tag}>{inner}</blockquote>\n"
 
 
+# task list GFM: '- [ ] x' → '☐ x', '- [x] x' → '☑ x' (paridade Hermes, adaptado ao HTML; roda ANTES do
+# bullet p/ consumir o '- [ ] ' e não virar '• [ ] x'). ☐/☑ são BMP → renderizam limpo no Telegram.
+_TASK = re.compile(r"^([ \t]*)[-*+][ \t]+\[([ xX])\][ \t]+", re.M)
 _BULLET = re.compile(r"^([ \t]*)[-*+][ \t]+(?=\S)", re.M)   # '- '/'* '/'+ ' no início → '• ' (não toca **/---)
+
+
+def _tasklist(text: str) -> str:
+    return _TASK.sub(lambda m: f"{m.group(1)}{'☑' if m.group(2) in 'xX' else '☐'} ", text)
 _SEP_ROW = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")   # linha separadora de tabela (|---|:--:|)
 
 
@@ -129,6 +136,7 @@ def to_html(md: str) -> str:
     text = _INLINE_CODE.sub(lambda m: _keep(f"<code>{html.escape(m.group(1), quote=False)}</code>"), text)
     # 2) AGORA tabela → bullets 'rótulo: valor' + bullets -/*/+ → •  (o código já saiu, protegido na stash)
     text = _md_tables_to_kv(text)          # tabela → bullets (Telegram não tem tabela)
+    text = _tasklist(text)                 # - [ ]/[x] → ☐/☑ (ANTES do bullet, consome o marcador)
     text = _bulletize(text)                # -/*/+ → • (o • literal sobrevive ao escape)
     # 3) escapa o texto normal (&<>) — as tags que NÓS geramos entram depois disso
     text = html.escape(text, quote=False)
