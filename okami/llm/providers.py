@@ -413,18 +413,27 @@ def _with_empty_nudge(messages: list[dict]) -> list[dict]:
     return out
 
 
-def _interruptible_sleep(total: float, cancel=None, _sleep=time.sleep) -> bool:
+def _interruptible_sleep(total: float, cancel=None, on_heartbeat=None, _sleep=time.sleep) -> bool:
     """Dorme `total`s em fatias de 0.25s, checando cancel() a cada fatia. True = foi CANCELADO no meio.
     Multi-vendor: um backoff de rate-limit/overloaded acontece em TODO provider; sem isto, /stop do dono
-    esperava o sleep INTEIRO (até 60s) antes de responder. Sem cancel → dorme normal."""
+    esperava o sleep INTEIRO (até 60s) antes de responder. `on_heartbeat()` é chamado a cada ~30s (best-effort)
+    p/ o status 'ainda trabalhando' NÃO congelar durante a espera (o heartbeat normal só roda entre passos)."""
     if not total or total <= 0:
         return bool(cancel and cancel())
     slept = 0.0
+    since_beat = 0.0
     while slept < total:
         if cancel and cancel():
             return True
+        if on_heartbeat and since_beat >= 30.0:
+            try:
+                on_heartbeat()
+            except Exception:  # noqa: BLE001 — heartbeat é best-effort; nunca derruba o retry
+                pass
+            since_beat = 0.0
         _sleep(min(0.25, total - slept))
         slept += 0.25
+        since_beat += 0.25
     return bool(cancel and cancel())
 
 
@@ -438,6 +447,7 @@ def complete_messages_ex(
     _tried: set | None = None,
     _sleep=time.sleep,
     cancel=None,
+    on_heartbeat=None,
     **overrides,
 ) -> Completion:
     """Completa a partir de uma lista de mensagens (harness §3) e devolve um `Completion` (texto +
@@ -524,7 +534,7 @@ def complete_messages_ex(
             if attempt < attempts:                    # ainda há chave → espera e tenta de novo
                 # backoff INTERRUPTÍVEL: /stop do dono durante a espera para o retry NA HORA (não failover —
                 # cancelou = parar tudo), em vez de esperar o sleep inteiro (até 60s).
-                if _interruptible_sleep(retry_delay(attempt, ce.retry_after), cancel, _sleep):
+                if _interruptible_sleep(retry_delay(attempt, ce.retry_after), cancel, on_heartbeat, _sleep):
                     do_fallback = False
                     break
     # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
@@ -544,7 +554,8 @@ def complete_messages_ex(
                 continue
             try:
                 return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
-                                            _tried=tried, _sleep=_sleep, cancel=cancel, **overrides)
+                                            _tried=tried, _sleep=_sleep, cancel=cancel,
+                                            on_heartbeat=on_heartbeat, **overrides)
             except Exception:  # noqa: BLE001
                 continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")

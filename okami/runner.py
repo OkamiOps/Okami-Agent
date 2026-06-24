@@ -236,6 +236,10 @@ def run_task(
             res.usage = estimate_usage(_in, getattr(res, "text", "") or "", chars_per_token=_cpt)
         return res
 
+    # heartbeat best-effort durante backoff de retry: mantém o status 'ainda trabalhando' vivo (o heartbeat
+    # normal só roda ENTRE passos; um backoff longo é UM passo bloqueado). Sem on_event → no-op.
+    _retry_hb = (lambda: on_event({"type": "retry_wait"})) if on_event else None
+
     def generate(messages, schema=None, on_token=None, max_tokens=None):
         eff2 = dict(eff)
         if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
@@ -249,7 +253,8 @@ def run_task(
                 return streaming_generate(cfg, messages, provider=provider, model=model,
                                           response_schema=schema, on_token=on_token, **eff2)
             return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                             response_schema=schema, cancel=cancel, **eff2)   # /stop corta o backoff
+                                             response_schema=schema, cancel=cancel,   # /stop corta o backoff;
+                                             on_heartbeat=_retry_hb, **eff2)            # status vivo no backoff
         res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
         _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
@@ -263,7 +268,7 @@ def run_task(
             eff_esc = _native_tools_for(cfg.provider(escalate_to), registry, dict(eff))  # MESMO registry
             #                                FILTRADO da geração normal (senão Telegram recebia run_shell/spawn)
             res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema,
-                                            cancel=cancel, **eff_esc)
+                                            cancel=cancel, on_heartbeat=_retry_hb, **eff_esc)
             _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
