@@ -325,9 +325,13 @@ class AgentEndpoint(EndpointCommandsMixin):
         msg = "❓ " + str(question)
         if opts:
             msg += "\n" + "\n".join(f"  {i + 1}. {o}" for i, o in enumerate(opts))
-            msg += "\n" + _tr("gw.clarify_hint", _default="(reply with the number or the text)")
+            msg += "\n" + _tr("gw.clarify_hint", _default="(tap a button or reply with the number/text)")
+        _sc = getattr(self.channel, "send_clarify", None)    # BOTÕES inline se o canal suportar (Telegram)
         try:
-            self.channel.send(chat_id, msg)
+            if opts and callable(_sc):
+                _sc(chat_id, msg, opts)                      # o dono TOCA; o clique vira o nº → resolve no handle()
+            else:
+                self.channel.send(chat_id, msg)
         except Exception:  # noqa: BLE001 — falha de entrega não trava o turno (cai no timeout/None)
             pass
         try:

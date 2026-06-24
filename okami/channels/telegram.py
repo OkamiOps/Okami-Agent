@@ -223,6 +223,27 @@ class TelegramClient:
                 p["text"] = to_plain(text)                  # parse recusado → plain legível (botões preservados)
         return self._call("sendMessage", p)
 
+    def send_clarify(self, chat_id, text: str, options, thread: int | None = None) -> dict:
+        """Clarify com BOTÕES inline (um por opção) — o dono TOCA em vez de digitar o número (paridade
+        Hermes). callback_data 'okclarify:<idx>'; o clique vira o NÚMERO da opção, que o endpoint já mapeia
+        p/ o texto. Label truncado (limite do Telegram). Mantém o texto formatado + fallback plain (idem
+        send_approval). Sem opções → vira mensagem normal (sem teclado)."""
+        from okami.channels.markdown_telegram import to_html, to_plain
+        rows = [[{"text": (str(o)[:60] or f"#{i + 1}"), "callback_data": f"okclarify:{i}"}]
+                for i, o in enumerate(options or [])]
+        p = {"chat_id": chat_id, "text": text}
+        if rows:
+            p["reply_markup"] = {"inline_keyboard": rows}
+        if thread is not None:
+            p["message_thread_id"] = thread
+        rendered = to_html(text)
+        if rendered != text:
+            try:
+                return self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
+            except urllib.error.HTTPError:
+                p["text"] = to_plain(text)                  # parse recusado → plain legível (botões preservados)
+        return self._call("sendMessage", p)
+
     def set_my_commands(self, commands: list[dict]) -> None:
         """Registra o menu do botão '/' (setMyCommands). Best-effort — menu é cosmético."""
         try:
@@ -351,16 +372,21 @@ class TelegramChannel(Channel):
                 cmsg = cq.get("message") or {}
                 chat = (cmsg.get("chat") or {}).get("id")
                 frm = str((cq.get("from") or {}).get("id"))
-                if chat is None or not data.startswith("okapprove:"):
+                if chat is None or not (data.startswith("okapprove:") or data.startswith("okclarify:")):
                     continue
                 if self.allow and frm not in self.allow and not self.allow_all:  # auth POR CLICADOR
                     continue
-                rest = data[len("okapprove:"):]                  # "yes" (antigo) | "<nonce>:yes" (P1.3)
-                nonce, verdict = rest.rsplit(":", 1) if ":" in rest else ("", rest)
-                cmd = "/yes" if verdict == "yes" else "/no"
                 thr = cmsg.get("message_thread_id")              # tópico → casa com a sessão chat:thread
                 cid_cb = f"{chat}:{thr}" if (cmsg.get("is_topic_message") and thr) else str(chat)
-                out.append(Inbound("telegram", cid_cb, text=(f"{cmd}:{nonce}" if nonce else cmd)))
+                if data.startswith("okapprove:"):
+                    rest = data[len("okapprove:"):]              # "yes" (antigo) | "<nonce>:yes" (P1.3)
+                    nonce, verdict = rest.rsplit(":", 1) if ":" in rest else ("", rest)
+                    cmd = "/yes" if verdict == "yes" else "/no"
+                    out.append(Inbound("telegram", cid_cb, text=(f"{cmd}:{nonce}" if nonce else cmd)))
+                else:                                            # okclarify:<idx> → nº da opção (1-based): o
+                    idx = data[len("okclarify:"):]               # endpoint mapeia p/ o texto no clarify pendente
+                    if idx.isdigit():
+                        out.append(Inbound("telegram", cid_cb, text=str(int(idx) + 1)))
                 continue
             msg = u.get("message") or {}
             chat = (msg.get("chat") or {}).get("id")
@@ -447,6 +473,10 @@ class TelegramChannel(Channel):
     def send_approval(self, chat_id, text: str, nonce: str = "") -> None:
         chat, thread = self._decode(chat_id)
         self.client.send_approval(chat, text, nonce, thread=thread)
+
+    def send_clarify(self, chat_id, text: str, options) -> None:
+        chat, thread = self._decode(chat_id)               # tópico de fórum vai junto (igual aprovação)
+        self.client.send_clarify(chat, text, options, thread=thread)
 
     def send_audio(self, chat_id, audio_path) -> None:
         chat, _ = self._decode(chat_id)
