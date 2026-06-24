@@ -249,7 +249,7 @@ def run_task(
                 return streaming_generate(cfg, messages, provider=provider, model=model,
                                           response_schema=schema, on_token=on_token, **eff2)
             return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                             response_schema=schema, **eff2)
+                                             response_schema=schema, cancel=cancel, **eff2)   # /stop corta o backoff
         res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
         _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
@@ -262,7 +262,8 @@ def run_task(
         def escalate(messages, schema=None):  # noqa: F811
             eff_esc = _native_tools_for(cfg.provider(escalate_to), registry, dict(eff))  # MESMO registry
             #                                FILTRADO da geração normal (senão Telegram recebia run_shell/spawn)
-            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema, **eff_esc)
+            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema,
+                                            cancel=cancel, **eff_esc)
             _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:

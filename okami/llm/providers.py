@@ -413,6 +413,21 @@ def _with_empty_nudge(messages: list[dict]) -> list[dict]:
     return out
 
 
+def _interruptible_sleep(total: float, cancel=None, _sleep=time.sleep) -> bool:
+    """Dorme `total`s em fatias de 0.25s, checando cancel() a cada fatia. True = foi CANCELADO no meio.
+    Multi-vendor: um backoff de rate-limit/overloaded acontece em TODO provider; sem isto, /stop do dono
+    esperava o sleep INTEIRO (até 60s) antes de responder. Sem cancel → dorme normal."""
+    if not total or total <= 0:
+        return bool(cancel and cancel())
+    slept = 0.0
+    while slept < total:
+        if cancel and cancel():
+            return True
+        _sleep(min(0.25, total - slept))
+        slept += 0.25
+    return bool(cancel and cancel())
+
+
 def complete_messages_ex(
     cfg: OkamiConfig,
     messages: list[dict],
@@ -422,6 +437,7 @@ def complete_messages_ex(
     response_schema: dict | None = None,
     _tried: set | None = None,
     _sleep=time.sleep,
+    cancel=None,
     **overrides,
 ) -> Completion:
     """Completa a partir de uma lista de mensagens (harness §3) e devolve um `Completion` (texto +
@@ -506,7 +522,11 @@ def complete_messages_ex(
                 break
             do_fallback = do_fallback or ce.fallback
             if attempt < attempts:                    # ainda há chave → espera e tenta de novo
-                _sleep(retry_delay(attempt, ce.retry_after))   # honra o retry_after do provider (capado)
+                # backoff INTERRUPTÍVEL: /stop do dono durante a espera para o retry NA HORA (não failover —
+                # cancelou = parar tudo), em vez de esperar o sleep inteiro (até 60s).
+                if _interruptible_sleep(retry_delay(attempt, ce.retry_after), cancel, _sleep):
+                    do_fallback = False
+                    break
     # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
     tried = (_tried or set()) | {pc.name}
     if do_fallback:
@@ -524,7 +544,7 @@ def complete_messages_ex(
                 continue
             try:
                 return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
-                                            _tried=tried, _sleep=_sleep, **overrides)
+                                            _tried=tried, _sleep=_sleep, cancel=cancel, **overrides)
             except Exception:  # noqa: BLE001
                 continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")
