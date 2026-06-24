@@ -729,7 +729,10 @@ class Harness:
                     # JSON-RECOVERY (Hermes): antes de DESISTIR, injeta uma recuperação CLARÍSSIMA e dá +N
                     # rodadas — modelo fraco (sem escalate) que erra o formato 3x merece um empurrão, não fail
                     # seco. BOUNDED por _MAX_JSON_RECOVERIES (anti-loop infinito); depois disso, falha.
-                    if self._json_recoveries < self._MAX_JSON_RECOVERIES:
+                    if self._json_recoveries < self._MAX_JSON_RECOVERIES and self._truncated_action_reemits == 0:
+                        # SÓ p/ erro de FORMATO genuíno (prosa/garbage). Se o modelo está preso TRUNCANDO ação
+                        # (re-emits > 0), a recuperação multiplicaria com o ciclo de continuação → deixa o cap
+                        # de truncamento falhar limpo.
                         self._json_recoveries += 1
                         self._consecutive_violations = 0
                         self._emit("json_recovery", attempt=self._json_recoveries)

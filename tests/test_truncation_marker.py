@@ -3,7 +3,7 @@ AINDA vem cortada (finish_reason=length), o relatório entregue leva um AVISO cl
 um 'concluído' silencioso de algo cortado no meio da frase."""
 from __future__ import annotations
 
-from okami.core import Harness, Task, TaskState
+from okami.core import Harness, Task
 from okami.core.tools.registry import default_registry
 from okami.llm.usage import Completion
 
