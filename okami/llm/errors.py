@@ -28,6 +28,8 @@ class ClassifiedError:
     compress: bool = False        # contexto estourou → compacta e retenta
     retry_after: float | None = None  # quanto o PROVIDER pediu p/ esperar (header/mensagem) — vence o TTL default
     never_repeat: bool = False    # NUNCA re-enviar o MESMO payload (content_policy) — nem p/ outro provider
+    context_limit: int | None = None  # limite de contexto (TOKENS) que o provider REPORTOU no erro de overflow —
+    #                                   crucial p/ Ollama/LMStudio: o contexto carregado raramente bate o catálogo
 
 
 _RETRY_AFTER = re.compile(r"(?:retry.?after|try again in|wait)\s*:?\s*(\d+(?:\.\d+)?)\s*(?:s\b|sec)", re.I)
@@ -102,6 +104,28 @@ _OVERLOAD = re.compile(r"overloaded|\b529\b|\b503\b|temporarily unavailable|capa
 _AUTH = re.compile(r"\b401\b|unauthorized|invalid api key|authentication", re.I)
 _AUTHPERM = re.compile(r"\b403\b|forbidden|permission denied|account.*(disabled|revoked)", re.I)
 _CTX = re.compile(r"context length|maximum context|context window|too long|\b413\b|payload too large", re.I)
+# Extrai o limite de contexto (em TOKENS) que o provider cita no erro — ex.: "maximum context length is 8192
+# tokens", "context window of 32768", "8192 tokens ... context". Multi-vendor: cada um escreve diferente.
+_CTX_LIMIT = re.compile(
+    r"(?:maximum context length|context length|context window|max(?:imum)? context)\D{0,40}(\d{3,8})"
+    r"|(\d{3,8})\s*tokens?\D{0,30}(?:maximum|context)", re.I)
+
+
+def _extract_ctx_limit(msg: str) -> int | None:
+    """O limite de contexto (tokens) reportado no erro, ou None. Faixa sã (256..10M) p/ não pegar lixo."""
+    m = _CTX_LIMIT.search(msg or "")
+    if not m:
+        return None
+    for g in m.groups():
+        if not g:
+            continue
+        try:
+            v = int(g)
+        except ValueError:
+            continue
+        if 256 <= v <= 10_000_000:
+            return v
+    return None
 _POLICY = re.compile(r"content.?policy|content.?filter|safety|moderation|refus", re.I)
 _NOTFOUND = re.compile(r"\b404\b|not found|model.*(does not exist|unavailable|invalid)", re.I)
 _TIMEOUT = re.compile(r"timeout|timed out|deadline|read timed", re.I)
@@ -145,7 +169,8 @@ def classify(exc) -> ClassifiedError:
     if s in (503, 529) or _OVERLOAD.search(msg):
         return ClassifiedError("overloaded", s, retryable=True, rotate_key=False, fallback=True)
     if s == 413 or _CTX.search(msg):
-        return ClassifiedError("context_overflow", s, retryable=True, compress=True)
+        return ClassifiedError("context_overflow", s, retryable=True, compress=True,
+                               context_limit=_extract_ctx_limit(msg))
     if _POLICY.search(msg):
         # NUNCA re-enviar o payload idêntico (nem p/ outro provider): vai ser recusado igual.
         # fallback=True fica p/ camadas que REFORMULAM antes de tentar de novo.

@@ -43,6 +43,7 @@ class Failure:
     action: Action
     reason: str
     status: int | None = None
+    context_limit: int | None = None   # tokens reportados pelo provider no overflow → recalibra a compactação
 
 
 _ACTION: dict[FailureKind, Action] = {
@@ -117,7 +118,9 @@ def classify_provider(exc) -> Failure:
         return _mk(FailureKind.BAD_REQUEST, f"erro interno ({type(exc).__name__}): {str(exc)[:120]}")
     from okami.llm.errors import classify as _classify
     ce = _classify(exc)
-    return _mk(_PROVIDER_MAP.get(ce.reason, FailureKind.UNKNOWN), ce.reason, status=ce.status)
+    f = _mk(_PROVIDER_MAP.get(ce.reason, FailureKind.UNKNOWN), ce.reason, status=ce.status)
+    f.context_limit = getattr(ce, "context_limit", None)   # leva o limite reportado p/ o loop recalibrar
+    return f
 
 
 # Mensagem HUMANA por motivo de falha — o usuário no chat vê isto em vez de "provider falhou: overloaded".

@@ -516,6 +516,15 @@ class Harness:
                     fail = classify_provider(e)
                     self.events.emit("failure", scope="generate", kind=fail.kind.value,
                                      action=fail.action.value, reason=fail.reason, status=fail.status)
+                    # RECALIBRAÇÃO multi-vendor: o provider REPORTOU o limite REAL de contexto (tokens) no erro
+                    # — crucial p/ Ollama/LMStudio, onde o contexto carregado quase nunca bate o catálogo. Baixa
+                    # o teto de compactação p/ ~80% do limite real (tokens→chars ≈ ×4) → compacta no ponto certo
+                    # daqui pra frente em vez de estourar de novo. Só ENCOLHE (nunca aumenta).
+                    if fail.context_limit:
+                        _real = int(fail.context_limit * 3.2)
+                        if 0 < _real < self.budget.max_context_chars:
+                            self.budget.max_context_chars = _real
+                            self._emit("context_limit_calibrated", tokens=fail.context_limit, chars=_real)
                     # RECUPERAÇÃO 1ª: timeout/lento ≈ CONTEXTO GRANDE. ENCOLHE forte (keep_tail=3) e re-gera 1x —
                     # chamada menor = mais rápida, cabe até no fallback local. Antes só escalava p/ modelo mais
                     # forte com o MESMO contexto gigante → pendurava de novo e morria.
