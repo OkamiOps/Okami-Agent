@@ -27,7 +27,10 @@ _QUOTE_LINE = re.compile(r"(?:^&gt;[ \t]?.*(?:\n|$))+", re.M)
 
 def _quote_block(m: re.Match) -> str:
     inner = "\n".join(re.sub(r"^&gt;[ \t]?", "", ln) for ln in m.group(0).rstrip("\n").split("\n"))
-    return f"<blockquote>{inner}</blockquote>\n"
+    # citação LONGA (>4 linhas) → expandable: o Telegram colapsa e o usuário expande se quiser (paridade
+    # Hermes; sem isso um quote gigante toma a tela toda no celular).
+    tag = "blockquote expandable" if inner.count("\n") >= 4 else "blockquote"
+    return f"<{tag}>{inner}</blockquote>\n"
 
 
 _BULLET = re.compile(r"^([ \t]*)[-*+][ \t]+(?=\S)", re.M)   # '- '/'* '/'+ ' no início → '• ' (não toca **/---)
@@ -107,8 +110,6 @@ def to_html(md: str) -> str:
     Tolera HTML cru do modelo (normaliza p/ markdown antes) — assim `<b>` renderiza em vez de virar tag
     literal pro usuário."""
     text = _html_to_md(md or "")
-    text = _md_tables_to_kv(text)          # tabela → bullets 'rótulo: valor' (Telegram não tem tabela)
-    text = _bulletize(text)                # -/*/+ → • (antes do escape; o • literal sobrevive)
     stash: dict[str, str] = {}
 
     def _keep(rendered: str) -> str:
@@ -116,7 +117,8 @@ def to_html(md: str) -> str:
         stash[key] = rendered
         return key
 
-    # 1) código primeiro (fence e inline): escapa o CONTEÚDO e protege de formatação posterior
+    # 1) CÓDIGO PRIMEIRO — ANTES de tabela/bullet — senão uma tabela ou lista mostrada DENTRO de um bloco
+    #    ```…``` (exemplo de código) era convertida em bullet/'rótulo: valor' e o exemplo virava lixo (bug).
     def _fence(m: re.Match) -> str:
         lang = m.group(1).strip()
         body = html.escape(m.group(2).strip("\n"), quote=False)
@@ -125,7 +127,10 @@ def to_html(md: str) -> str:
 
     text = _FENCE.sub(_fence, text)
     text = _INLINE_CODE.sub(lambda m: _keep(f"<code>{html.escape(m.group(1), quote=False)}</code>"), text)
-    # 2) escapa o texto normal (&<>) — as tags que NÓS geramos entram depois disso
+    # 2) AGORA tabela → bullets 'rótulo: valor' + bullets -/*/+ → •  (o código já saiu, protegido na stash)
+    text = _md_tables_to_kv(text)          # tabela → bullets (Telegram não tem tabela)
+    text = _bulletize(text)                # -/*/+ → • (o • literal sobrevive ao escape)
+    # 3) escapa o texto normal (&<>) — as tags que NÓS geramos entram depois disso
     text = html.escape(text, quote=False)
     # 3) formatação (ordem: link → negrito ** e __ → itálico * e _ → riscado → spoiler → header)
     text = _LINK.sub(r'<a href="\2">\1</a>', text)
