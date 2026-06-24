@@ -22,6 +22,45 @@ _UPLOAD_MAX = 50 * 1024 * 1024     # upload do Bot API público capa em 50MB
 _DOWNLOAD_MAX = 20 * 1024 * 1024   # getFile capa em 20MB (entrada)
 
 
+_ENTITY_MARK = {"bold": ("**", "**"), "italic": ("_", "_"), "code": ("`", "`"),
+                "underline": ("__", "__"), "strikethrough": ("~~", "~~"), "spoiler": ("||", "||")}
+
+
+def _flatten_entities(text, entities) -> str:
+    """Reconstrói markdown a partir das `entities` que o Telegram manda numa mensagem RECEBIDA formatada
+    (negrito/código/link/…) — o agente vê **negrito**/`código`/[texto](url) em vez do texto plano. Sweep O(n):
+    fecha ANTES de abrir em cada fronteira. SEGURANÇA: offsets do Telegram são em unidades UTF-16; se o texto
+    tem char fora do BMP (emoji), os índices não casam com os do Python → devolve CRU (não corrompe)."""
+    if not text or not entities:
+        return text or ""
+    if any(ord(c) > 0xFFFF for c in text):          # surrogate pair → offsets UTF-16 ≠ índice Python → cru
+        return text
+    opens: dict[int, list[str]] = {}
+    closes: dict[int, list[str]] = {}
+    for e in entities:
+        t = e.get("type")
+        off, ln = int(e.get("offset", 0)), int(e.get("length", 0))
+        if ln <= 0 or off < 0 or off + ln > len(text):
+            continue
+        if t == "text_link":
+            o, c = "[", "](" + (e.get("url") or "") + ")"
+        elif t == "pre":
+            o, c = "```\n", "\n```"
+        else:
+            o, c = _ENTITY_MARK.get(t, ("", ""))
+        if not o and not c:
+            continue
+        opens.setdefault(off, []).append(o)
+        closes.setdefault(off + ln, []).append(c)
+    res = []
+    for i in range(len(text) + 1):
+        res.extend(closes.get(i, ()))               # fecha primeiro no mesmo ponto (adjacência correta)
+        res.extend(opens.get(i, ()))
+        if i < len(text):
+            res.append(text[i])
+    return "".join(res)
+
+
 def _file_size(path) -> int:
     try:
         return Path(path).stat().st_size
@@ -440,7 +479,8 @@ class TelegramChannel(Channel):
                     pass
             txt = msg.get("text")
             if txt:
-                out.append(Inbound("telegram", cid, text=txt, msg_id=mid))
+                out.append(Inbound("telegram", cid, text=_flatten_entities(txt, msg.get("entities")),
+                                   msg_id=mid))
         return out
 
     def start(self) -> None:
