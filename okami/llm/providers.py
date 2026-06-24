@@ -174,6 +174,11 @@ def _kwargs(
         from okami.llm.model_catalog import clamp_effort   # teto do modelo — cost-safe (item 15a): high→medium
         kw["reasoning_effort"] = clamp_effort(_effective_model(pc, model), kw["reasoning_effort"])
     _apply_reasoning(kw, pc)                          # reasoning_style: thinking XOR reasoning_effort (item 12)
+    if "num_ctx" not in kw:                           # Ollama default 2048 TRUNCA silencioso → descobre o teto
+        from okami.llm.local_ctx import resolve_num_ctx   # REAL e seta num_ctx (só local; cloud devolve None)
+        nc = resolve_num_ctx(pc, kw["model"])
+        if nc:
+            kw["num_ctx"] = nc
     kw.setdefault("timeout", 150)                    # FALHA RÁPIDO (era 600s) → harness encolhe+failover
     return kw
 
