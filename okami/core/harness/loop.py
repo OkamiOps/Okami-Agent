@@ -250,6 +250,8 @@ class Harness:
         self._stall_exceeded = False                    # estourou o teto → main loop escala/falha (não nudga ∞)
         self._escalated = False
         self._empty_responses = 0                       # respostas vazias seguidas (reasoning-only content='')
+        self._turn_output_tokens = 0                    # tokens de OUTPUT acumulados no turno (backstop runaway)
+        self._token_grace_used = False
         self._stats = {"violations": 0, "loops": 0, "gate_rejections": 0, "denials": 0}
         # backstop anti-preguiça (modelo fraco): pedido com verbo de ação exige EXECUTAR, não só falar
         self._action_expected = bool(_ACTION_RE.search(task.goal or ""))
@@ -480,6 +482,14 @@ class Harness:
                     self._emit("grace_step", step=step_n)
                 else:
                     return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
+            if (self.budget.max_turn_output_tokens                          # backstop de TOKENS (runaway de
+                    and self._turn_output_tokens >= self.budget.max_turn_output_tokens):   # geração) — protege
+                if not self._token_grace_used:                             # provider por-token de queimar $$$
+                    self._token_grace_used = True                          # GRACE: 1 última chamada (fecha no
+                    self._emit("token_budget_grace", tokens=self._turn_output_tokens)    # passo seguinte)
+                else:
+                    return self._fail(t, f"orçamento de tokens do turno esgotado (~{self._turn_output_tokens} "
+                                      "tokens de saída) — runaway protegido")
             if self._stall_exceeded:                 # watchdog de SEM-PROGRESSO estourou N vezes (nudge não
                 self._stall_exceeded = False         # resolveu): escala p/ modelo mais forte, senão FALHA
                 if self._try_escalate("sem progresso persistente"):   # (com salvage) — em vez de nudgar ∞
@@ -575,6 +585,7 @@ class Harness:
                     continue
                 self._empty_responses = 0          # veio conteúdo/ação → zera o contador de vazias
                 _u = comp.usage                     # usage POR CHAMADA no trajeto (P2 observabilidade)
+                self._turn_output_tokens += int(getattr(_u, "output_tokens", 0) or 0)   # backstop runaway
                 self.events.emit("llm_call", provider=comp.provider, model=comp.model,
                                  surface=self.surface,        # /insights: breakdown por plataforma (item 21)
                                  finish_reason=getattr(comp, "finish_reason", ""),

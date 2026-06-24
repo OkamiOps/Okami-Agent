@@ -60,6 +60,10 @@ class Budget:
     # durante atividade nunca dispara — só quando a agente fica de fato parada (provider pendurado/spinning).
     # 0 = desliga. Hang de uma chamada já tem timeout por-chamada no transporte; isto é a rede de segurança.
     max_stall_seconds: float = 300.0
+    # Backstop de tokens de OUTPUT do turno (runaway de geração): protege provider POR-TOKEN (OpenAI/DeepSeek/
+    # Qwen/Grok) de um turno disparado queimar orçamento. Generoso (trabalho legítimo longo não chega perto);
+    # 0 = desligado. max_steps já bound o nº de chamadas; este pega o caso de poucas chamadas GIGANTES.
+    max_turn_output_tokens: int = 4_000_000
 
 
 # ----------------------------------------------------------------------------- protocolo
