@@ -337,6 +337,22 @@ def run_task(
         mcp_tools = filter_mcp_registry(mcp_tools, surface, config=getattr(cfg, "tools", None),
                                         sandbox=getattr(cfg, "sandbox", None), emit=emit)
         registry.update(mcp_tools)
+    # Plugins (paridade Hermes): cada plugin roda `register(ctx)` e pode CONTRIBUIR tools. Igual ao MCP, entram
+    # DEPOIS do filtro por superfície → reaplica a tool-policy (capability × surface × sandbox) e NÃO podem
+    # sombrear uma tool NATIVA/MCP de mesmo nome (core vence — um plugin de pasta não sequestra `run_shell`).
+    try:
+        from okami.plugins import discover_plugins, load_plugin_tools, plugin_roots
+        ptools = load_plugin_tools(discover_plugins(plugin_roots()), cfg=cfg, emit=emit)
+        if ptools:
+            from okami.core.tool_policy import filter_mcp_registry
+            ptools = filter_mcp_registry(ptools, surface, config=getattr(cfg, "tools", None),
+                                         sandbox=getattr(cfg, "sandbox", None), emit=emit)
+            for _nm, _tool in ptools.items():
+                if _nm not in registry:                  # core/MCP vencem: plugin não sombreia tool existente
+                    registry[_nm] = _tool
+    except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do agente
+        from okami.log import warn
+        warn("falha ao carregar tools de plugins", exc_info=True)
     if registry_filter is not None:                  # review: restringe ao conjunto seguro (memória/skill)
         registry = {k: v for k, v in registry.items() if k in registry_filter}
 

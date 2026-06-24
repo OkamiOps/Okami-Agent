@@ -99,18 +99,94 @@ class PluginContext:
         return requested
 
 
-def plugin_context(plugin: str, *, trust: str = "untrusted", cfg: dict | None = None) -> PluginContext:
+def _cfg_get(cfg, key, default=None):
+    """Lê `key` de um cfg que pode ser dict OU OkamiConfig (objeto). Sem isto, passar o OkamiConfig real dava
+    AttributeError (.get) e a config de plugins era DROPADA silenciosamente (config-drop trap)."""
+    if isinstance(cfg, dict):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
+
+
+def plugin_context(plugin: str, *, trust: str = "untrusted", cfg=None) -> PluginContext:
     """Monta o PluginContext a partir do config (`default_provider` + `plugins.allowed_providers/
-    allow_provider_override`). Trust vem da fonte do plugin (pasta=untrusted; entry-point assinado=trusted)."""
-    cfg = cfg or {}
-    pl = (cfg.get("plugins") or {}) if isinstance(cfg, dict) else {}
+    allow_provider_override`). Aceita dict OU OkamiConfig. Trust vem da fonte do plugin (pasta=untrusted;
+    entry-point assinado=trusted)."""
+    pl = _cfg_get(cfg or {}, "plugins") or {}
     return PluginContext(
         plugin=plugin,
         trust=trust,
-        default_provider=str(cfg.get("default_provider") or ""),
+        default_provider=str(_cfg_get(cfg or {}, "default_provider") or ""),
         allowed_providers=tuple(pl.get("allowed_providers") or ()),
         allow_provider_override=bool(pl.get("allow_provider_override", False)),
     )
+
+
+class PluginRegistrar:
+    """Contexto que um plugin recebe em `register(ctx)` p/ CONTRIBUIR capacidades (port do ctx.register_* do
+    Hermes). Hoje: register_tool. O PluginContext (trust-gating de provider) viaja junto p/ futuras chamadas
+    LLM gated. Antes disso o register/PluginContext era código MORTO — ninguém chamava em runtime."""
+
+    def __init__(self, ctx: PluginContext):
+        self.ctx = ctx
+        self.tools: dict = {}
+
+    def register_tool(self, tool) -> None:
+        name = getattr(tool, "name", None)
+        if not name:
+            raise ValueError("register_tool: tool precisa de um atributo .name não-vazio")
+        self.tools[str(name)] = tool
+
+
+def _resolve_register(plugin: "Plugin"):
+    """Acha o callable `register(ctx)` do plugin. entry_point: importa 'modulo:objeto' e usa .register (ou o
+    próprio objeto se for callable). folder: importa `<path>/register.py` e usa `register`. None se não houver
+    — plugin que só tem hooks de shell (sem register) segue funcionando como antes."""
+    try:
+        if plugin.source == "entry_point" and plugin.value:
+            import importlib
+            mod_name, _, attr = plugin.value.partition(":")
+            obj = importlib.import_module(mod_name)
+            for part in (attr.split(".") if attr else []):
+                obj = getattr(obj, part)
+            reg = getattr(obj, "register", obj)
+            return reg if callable(reg) else None
+        if plugin.source == "folder" and plugin.path:
+            reg_file = Path(plugin.path) / "register.py"
+            if not reg_file.is_file():
+                return None
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(f"okami_plugin_{plugin.name}", reg_file)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            reg = getattr(mod, "register", None)
+            return reg if callable(reg) else None
+    except Exception:  # noqa: BLE001 — plugin que não importa não derruba o boot; AVISA e segue
+        warn(f"plugin {plugin.name!r}: falha ao carregar register()", exc_info=True)
+    return None
+
+
+def load_plugin_tools(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> dict:
+    """Roda `register(ctx)` de cada plugin e COLETA as tools registradas (foundation do sistema de plugins,
+    paridade Hermes). Isolado por plugin: um `register` que explode NÃO derruba os outros. Trust:
+    folder=untrusted, entry_point=trusted. Quem chama (runner) reaplica a tool-policy por superfície e impede
+    sombrear tool nativa."""
+    resolve = _resolve or _resolve_register
+    out: dict = {}
+    for plugin in plugins or []:
+        reg = resolve(plugin)
+        if reg is None:
+            continue
+        trust = "trusted" if plugin.source == "entry_point" else "untrusted"
+        registrar = PluginRegistrar(plugin_context(plugin.name, trust=trust, cfg=cfg))
+        try:
+            reg(registrar)
+        except Exception as e:  # noqa: BLE001 — register que explode não derruba os outros plugins
+            emit(f"[plugin {plugin.name}] register() falhou: {e}")
+            continue
+        for name, tool in registrar.tools.items():
+            out[name] = tool
+            emit(f"[plugin {plugin.name}] +tool {name}")
+    return out
 
 
 def plugin_roots() -> list[Path]:
@@ -130,4 +206,5 @@ def plugin_roots() -> list[Path]:
     return roots
 
 
-__all__ = ["Plugin", "PluginContext", "discover_plugins", "plugin_context", "plugin_roots"]
+__all__ = ["Plugin", "PluginContext", "PluginRegistrar", "discover_plugins", "load_plugin_tools",
+           "plugin_context", "plugin_roots"]

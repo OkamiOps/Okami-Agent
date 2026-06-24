@@ -252,6 +252,7 @@ class OkamiConfig(BaseModel):
     mixture: dict[str, Any] = Field(default_factory=dict)       # {"reference_providers": [...]} — MoA (mixture.py lia vazio → morto)
     security: dict[str, Any] = Field(default_factory=dict)      # {"advisories": ..., ...} — lazy_deps/tirith liam vazio → morto
     notifications: dict[str, Any] = Field(default_factory=dict)  # {"desktop": bool} — endpoint._desktop_enabled lia vazio → morto
+    plugins: dict[str, Any] = Field(default_factory=dict)        # {"allowed_providers": [...], "allow_provider_override": bool} — trust-gating do plugin (plugin_context lia vazio → trust-gating morto)
     #  NOTA: `channels` fica DE FORA de propósito (contém token=SEGREDO — nunca entra no OkamiConfig).
 
     def provider(self, name: str | None = None) -> ProviderConfig:
@@ -460,6 +461,7 @@ def build_config(raw: dict) -> OkamiConfig:
         mixture=raw.get("mixture") or {},             # idem MoA (mixture.py); SEM isto nascia morto
         security=raw.get("security") or {},           # idem lazy_deps/tirith (supply-chain)
         notifications=raw.get("notifications") or {},  # idem endpoint._desktop_enabled
+        plugins=raw.get("plugins") or {},             # idem plugin_context (trust-gating); SEM isto nascia morto
     )
 
 
