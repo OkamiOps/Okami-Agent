@@ -121,7 +121,9 @@ def test_litellm_no_tools_when_not_native(monkeypatch):
         usage = None
 
     monkeypatch.setattr(P.litellm, "completion", lambda **kw: (captured.update(kw), _Resp())[1])
-    pc = ProviderConfig(name="p", model="openai/x")        # native_tools=False (default)
+    # native_tools=False EXPLÍCITO: default agora é None (SMART) e, p/ um modelo/tier desconhecido não
+    # sendo local, dispararia o probe de verdade (FIX 1) em vez de assumir 'não suporta' de graça.
+    pc = ProviderConfig(name="p", model="openai/x", native_tools=False)
     P._complete_one(pc, [{"role": "user", "content": "hi"}], None, None, {})
     assert "tools" not in captured                          # não envia schemas → protocolo JSON-em-texto
 

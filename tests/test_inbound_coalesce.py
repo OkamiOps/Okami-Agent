@@ -9,7 +9,7 @@ import tempfile
 from okami.channels.base import Inbound
 from okami.core import Task, TaskState
 from okami.gateway import AgentEndpoint
-from okami.gateway.coalesce import coalesce_inbound
+from okami.gateway.coalesce import WindowCoalescer, coalesce_inbound
 
 
 def _t(chat, text, mid=""):
@@ -102,3 +102,64 @@ def test_poll_once_dedup_still_works():
     ep.poll_once()
     ep.poll_once()
     assert goals == ["oi"]                                  # idempotência intacta
+
+
+# ----------------------------------------------------------------- fix #3: debounce por janela (cross-poll)
+def test_window_coalescer_merges_across_polls_within_window():
+    wc = WindowCoalescer(window=3.0)
+    out1 = wc.feed([_t("7", "primeira parte")], now=0.0)
+    assert out1 == []                                       # segurado — pode vir mais coisa
+    out2 = wc.feed([_t("7", "segunda parte")], now=1.0)      # chegou 1s depois (dentro da janela)
+    assert out2 == []                                        # ainda segurado, relógio reiniciado
+    out3 = wc.feed([], now=1.0 + 3.1)                        # 3.1s sem novidade → libera
+    assert len(out3) == 1 and out3[0].text == "primeira parte\nsegunda parte"
+
+
+def test_window_coalescer_releases_after_window_with_no_more_messages():
+    wc = WindowCoalescer(window=3.0)
+    wc.feed([_t("7", "oi")], now=0.0)
+    out = wc.feed([], now=3.5)
+    assert len(out) == 1 and out[0].text == "oi"
+
+
+def test_window_coalescer_flushes_on_nonmergeable_message():
+    wc = WindowCoalescer(window=3.0)
+    wc.feed([_t("7", "oi")], now=0.0)
+    cmd = Inbound("fake", "7", text="/stop")
+    out = wc.feed([cmd], now=0.5)                             # comando fecha o grupo aberto na hora
+    assert [m.text for m in out] == ["oi", "/stop"]
+
+
+def test_window_coalescer_different_chats_independent():
+    wc = WindowCoalescer(window=3.0)
+    wc.feed([_t("7", "a")], now=0.0)
+    wc.feed([_t("9", "x")], now=0.5)
+    out = wc.feed([], now=10.0)                               # os dois esfriaram, cada um vira 1 msg
+    assert sorted(m.chat_id for m in out) == ["7", "9"]
+
+
+def test_window_coalescer_disabled_when_window_zero():
+    wc = WindowCoalescer(window=0)
+    out1 = wc.feed([_t("7", "a")], now=0.0)
+    assert len(out1) == 1                                     # opt-out: não segura nada, sai na hora
+    out2 = wc.feed([_t("7", "b")], now=0.1)
+    assert len(out2) == 1 and out2[0].text == "b"              # sem merge (window desligada)
+
+
+def test_endpoint_default_coalesce_window_is_disabled():
+    """Default é opt-in DESLIGADO: sem config explícita, poll_once não segura mensagem nenhuma
+    (comportamento igual ao coalesce_inbound por-lote puro — sem latência extra pro caso comum)."""
+    ep = AgentEndpoint("dev", cfg=None, ws=tempfile.mkdtemp(), channel=_ChStub([]),
+                       run_task=lambda *a, **k: None, spawn=lambda fn: fn())
+    assert ep._coalescer.window == 0
+
+
+class _ChStub:
+    def __init__(self, msgs):
+        self._msgs = msgs
+    def poll(self):
+        return []
+    def send(self, cid, text):
+        pass
+    def allowed(self, c):
+        return True

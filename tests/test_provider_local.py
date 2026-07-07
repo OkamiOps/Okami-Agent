@@ -58,6 +58,7 @@ def test_empty_but_length_truncated_is_not_treated_as_empty(monkeypatch):
 
     class FakePC:
         name = "p"
+        max_retries = 3
         def key_pool(self):
             return []
 

@@ -208,8 +208,25 @@ def _kwargs(
     routing = getattr(pc, "provider_routing", None)   # hints de roteamento OpenRouter → extra_body.provider
     if routing and "openrouter.ai" in (pc.api_base or "").lower():   # SÓ p/ base OpenRouter (não quebra outros)
         kw.setdefault("extra_body", {})["provider"] = dict(routing)
-    kw.setdefault("timeout", 150)                    # FALHA RÁPIDO (era 600s) → harness encolhe+failover
+    kw.setdefault("timeout", resolve_timeout(pc))     # FALHA RÁPIDO por TIER (harness encolhe+failover)
     return kw
+
+
+# Timeout (s) por tier quando `timeout_seconds` não vem explícito na config. LOCAL (LMStudio/Ollama/
+# llama.cpp) é sabidamente mais lento (CPU/GPU do usuário, sem escala de datacenter) → folga bem maior;
+# nuvem mantém o corte curto (era 150s FIXO p/ todo mundo — penalizava reasoning/contexto grande de
+# provider rápido só p/ compensar o local devagar, ou o contrário: local devagar cortava cedo demais).
+_TIER_TIMEOUT = {"local": 1800.0}
+_DEFAULT_TIMEOUT = 600.0
+
+
+def resolve_timeout(pc: ProviderConfig) -> float:
+    """Timeout (s) da chamada: explícito na config SEMPRE vence; senão default por tier (local ganha
+    folga; nuvem/weak/strong/unknown ficam no corte padrão de nuvem). Fail-fast continua o padrão —
+    só o número muda por capacidade REAL do backend."""
+    if pc.timeout_seconds is not None:
+        return pc.timeout_seconds
+    return _TIER_TIMEOUT.get((pc.tier or "").lower(), _DEFAULT_TIMEOUT)
 
 
 _key_cursor: dict[str, int] = {}      # rotação round-robin do pool de chaves por provider
@@ -497,7 +514,9 @@ def complete_messages_ex(
     # REPLAY de reasoning (Codex store=false): SÓ o transport codex recebe a versão field-kept (com
     # reasoning_items); litellm/minimax/etc seguem com o `messages` totalmente sanitizado (sem vazar campo).
     _raw = _sanitize_messages(_orig, strip_fields=False) if getattr(pc, "transport", "") == "codex_oauth" else None
-    attempts = max(1, len(pc.key_pool()))
+    # piso de tentativas = pc.max_retries (default 3) — provider de UMA chave (sem pool) não pode ficar
+    # com ZERO retry em erro transiente (429/503/timeout); pool maior que o piso ainda vale (giro de chave).
+    attempts = max(pc.max_retries, len(pc.key_pool()))
     # Guarda CROSS-SESSÃO (Hermes nous_rate_guard): outro processo (gateway/cron/CLI) tomou
     # 429/529 deste provider → UMA sonda no máximo, sem rodar todas as chaves (era a amplificação
     # de retry que aprofundava o buraco da quota). Fail-open: a sonda re-testa e atualiza a marca.

@@ -10,7 +10,9 @@ from okami.llm.native_capability import native_supported, reset_native_cache
 
 
 @pytest.fixture(autouse=True)
-def _reset():
+def _reset(monkeypatch, tmp_path):
+    # isola o cache L2 (disco) num tmp_path — sem isso os testes leriam/escreveriam em ~/.okami de verdade.
+    monkeypatch.setattr("okami.home.okami_home", lambda: tmp_path)
     reset_native_cache()
     yield
     reset_native_cache()

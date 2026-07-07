@@ -40,12 +40,14 @@ def test_default_tools_have_no_check_or_pass():
     # exceto as que dependem de extra/credencial REAL: generate_image (login codex), audio_analyze
     # (extra `voice`/faster-whisper), text_to_speech (edge-tts), computer_use (opt-in + backend de
     # desktop) e as integrações config-driven generate_video/homeassistant/feishu_doc_read/x_search
-    # (sem a integração no okami.yaml → indisponíveis). Degradam via check() de propósito.
+    # (sem a integração no okami.yaml → indisponíveis). web_search depende do extra `ddgs`
+    # (instale via `.[web]`). Degradam via check() de propósito.
     reg = default_registry()
     out = prune_unavailable(reg, emit=lambda m: None)
     missing = set(reg) - set(out)
     assert missing <= {"generate_image", "audio_analyze", "text_to_speech", "computer_use",
-                       "generate_video", "homeassistant", "feishu_doc_read", "x_search", "email"}
+                       "generate_video", "homeassistant", "feishu_doc_read", "x_search", "email",
+                       "web_search"}
 
 
 def test_generate_image_check_depends_on_codex_login(monkeypatch):

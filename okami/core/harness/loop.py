@@ -20,7 +20,7 @@ from okami.core.harness.parsing import (
     truncated_action_name,
 )
 from okami.core.harness.prompt import (
-    _TOOL_RESULT_BUDGET, _user_start, build_system_prompt, check_exit, format_observation,
+    _user_start, budget_for_context_window, build_system_prompt, check_exit, format_observation,
     is_conversational,
 )
 from okami.core.tools import Tool, ToolContext, ToolResult, default_registry
@@ -43,6 +43,39 @@ _PUNT_RE = _re.compile(
 def _looks_like_punt(text: str) -> bool:
     """O texto final ENCERRA pedindo permissão / oferecendo menu de próximos passos (bail do modelo fraco)?"""
     return bool(_PUNT_RE.search(text or ""))
+
+
+def _resolve_context_window_tokens(cfg, model: str) -> int:
+    """Janela de contexto (tokens) do modelo EM USO, best-effort — alimenta budget_for_context_window
+    (escala do orçamento de tool-result). Tenta o nome EXPLÍCITO do modelo (model_catalog: mais
+    específico, cobre override de `-m`) e cai pro provider default do cfg (okami/llm/providers.py,
+    que já resolve tier→janela). 0 = desconhecida (cfg de teste sem provider, modelo não catalogado) —
+    o chamador cai nos defaults históricos, fail-open (nunca derruba o boot do turno por isso).
+
+    Modelo ABERTO/LOCAL (is_weak_open_model): a janela do model_catalog é ARQUITETURAL (ex.: minimax
+    catalogado com 1M) — mesma ressalva de providers.py `_LOCAL_WINDOW_CAP`: um deploy local (LMStudio/
+    Ollama) não serve essa janela nominal rápido de verdade. Aplica o MESMO teto aqui (reconcilia com
+    o valor de providers.py em vez de duplicar um número mágico solto)."""
+    if model:
+        try:
+            from okami.core.harness.style import is_weak_open_model
+            from okami.llm.model_catalog import model_info
+            info = model_info(model)
+            if info:
+                win = info.context_window
+                if is_weak_open_model(model):
+                    from okami.llm.providers import _LOCAL_WINDOW_CAP
+                    win = min(win, _LOCAL_WINDOW_CAP)
+                return win
+        except Exception:  # noqa: BLE001 — best-effort, nunca quebra o turno por causa de janela desconhecida
+            pass
+    try:
+        if cfg is not None:
+            from okami.llm.providers import context_window_tokens
+            return context_window_tokens(cfg.provider())
+    except Exception:  # noqa: BLE001 — idem (cfg de teste pode não ter .provider())
+        pass
+    return 0
 
 
 _REPORT_META = {"respond", "task_complete", "task_blocked", "need_input"}
@@ -295,9 +328,20 @@ class Harness:
         self._punt_nudged = False                      # encerrou pedindo permissão/menu → empurra a concluir (1x)
         self._blocked_nudged = False                   # desistiu CEDO (task_blocked prematuro) → empurra a tentar (1x)
         # Preview INLINE de saída grande persistida: em modelo LOCAL/fraco o custo por-passo é a observação
-        # reenviada → encolhe p/ ~1.5K (full no disco, relido com read_file/offset). Forte mantém o cheio.
+        # reenviada → encolhe (full no disco, relido com read_file/offset). Forte mantém o cheio. Ambos os
+        # orçamentos (por-resultado e o preview do fraco) escalam pela JANELA REAL do modelo (porte Hermes
+        # tools/budget_config.py budget_for_context_window) — um teto fixo de 8K/1.5K era cego à janela:
+        # sub-usava modelos de 200K+ ctx e, pro caso oposto, um preview de 1500 chars fixo era migalha até
+        # p/ modelo local de 32K ctx. Janela desconhecida (cfg/model_catalog sem entrada) → cai nos
+        # defaults históricos (byte-idêntico ao comportamento anterior a esta escala).
         from okami.core.harness.style import is_weak_open_model
-        self._preview_cap = 1500 if is_weak_open_model(model) else _TOOL_RESULT_BUDGET
+        _window_tokens = _resolve_context_window_tokens(cfg, model)
+        self._tool_result_budget, _per_turn_budget, _preview_weak = budget_for_context_window(_window_tokens)
+        # só sobrescreve o teto agregado do turno se o caller não passou um customizado (guardrails/config) —
+        # reconcilia com o campo JÁ EXISTENTE (models.py) em vez de duplicar um novo teto paralelo.
+        if self.budget.max_turn_tool_chars == Budget().max_turn_tool_chars:
+            self.budget.max_turn_tool_chars = _per_turn_budget
+        self._preview_cap = _preview_weak if is_weak_open_model(model) else self._tool_result_budget
         self._thin_nudged = False                      # entrega rasa vs trabalho feito → re-pede o relatório (1x)
         self._poll_waits = 0                           # esperas repetidas num processo bg (não é loop de FAIL)
         self._exec_refunds = 0                         # item 5: passos devolvidos p/ execute_code read-only (bounded)
@@ -1046,14 +1090,15 @@ class Harness:
         # persistido, com preview curto (1K). O teto por-resultado sozinho deixava N resultados
         # médios inundarem o contexto.
         _over_turn = self._obs_chars > self.budget.max_turn_tool_chars
-        _limit = 2000 if _over_turn else _TOOL_RESULT_BUDGET
+        _limit = 2000 if _over_turn else self._tool_result_budget
         if len(res.output) > _limit:
             saved = self._persist_large_output(step_n, res.output)
             from okami.core.harness.persisted import persisted_output_wrapper
             wrapped = persisted_output_wrapper(saved, len(res.output),
                                                res.output[:1000 if _over_turn else self._preview_cap])
             obs_res = ToolResult(res.ok, wrapped, res.effect)   # tag estruturada + read_file(offset/limit)
-        _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace)
+        _obs = format_observation(step_n, action.tool, obs_res, workspace=self.ctx.workspace,
+                                  result_budget=self._tool_result_budget)
         self._obs_chars += len(_obs)
         # FUNCTION-CALLING NATIVO (paridade Hermes): se a ação veio de uma tool_call nativa E a mensagem
         # logo acima é a assistant deste turno, ECHOA a tool_call nela (ATÔMICO: só agora que há resposta →

@@ -111,12 +111,42 @@ def _html_to_md(text: str) -> str:
     return t
 
 
+def _sanitize_unbalanced(text: str) -> str:
+    """Marcador (`**`, `__`, `` ` ``) SEM PAR vaza LITERAL pro usuário (ex.: `**negrito` nunca fechado
+    mostra os asteriscos crus). Conta cada marcador FORA de blocos ``` (protegidos por _FENCE antes de
+    contar) e, se a contagem for ímpar, derruba a ÚLTIMA ocorrência (o resto do texto sobrevive)."""
+    stash: list[str] = []
+
+    def _mask(m: re.Match) -> str:
+        stash.append(m.group(0))
+        return f"\x00TGFENCE{len(stash) - 1}\x00"
+
+    masked = _FENCE.sub(_mask, text)
+    for marker in ("**", "__", "`"):
+        if masked.count(marker) % 2 == 1:
+            idx = masked.rfind(marker)
+            masked = masked[:idx] + masked[idx + len(marker):]
+    for i, block in enumerate(stash):
+        masked = masked.replace(f"\x00TGFENCE{i}\x00", block)
+    return masked
+
+
+def html_to_plain(html_text: str) -> str:
+    """Tira as tags de um HTML JÁ RENDERIZADO (não reprocessa markdown) — usado no fallback por-PARTE
+    do TelegramClient.send_message quando o Telegram recusa parse_mode=HTML num pedaço específico
+    (depois do split em _split_html; reprocessar com to_plain(md) reconverteria do zero e perderia a
+    correspondência com o pedaço já cortado)."""
+    stripped = re.sub(r"<[^>]+>", "", html_text)
+    return html.unescape(stripped)
+
+
 def to_html(md: str) -> str:
     """Converte um subconjunto de markdown p/ as tags HTML que o Telegram aceita: <b> <i> <s> <code>
     <pre> <a> <tg-spoiler> <blockquote>. Conteúdo de código é protegido (não formata por dentro).
     Tolera HTML cru do modelo (normaliza p/ markdown antes) — assim `<b>` renderiza em vez de virar tag
     literal pro usuário."""
     text = _html_to_md(md or "")
+    text = _sanitize_unbalanced(text)          # marcador órfão (**/__/`) → não vaza literal (FIX 3)
     stash: dict[str, str] = {}
 
     def _keep(rendered: str) -> str:

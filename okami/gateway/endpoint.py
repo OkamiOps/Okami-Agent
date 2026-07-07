@@ -24,6 +24,10 @@ from okami.i18n import t as _tr
 # (recebe código, dono aprova pelo CLI). CLI/terminal a pessoa já é o dono → recusa seca.
 _REMOTE_SURFACES = {"telegram", "group", "slack", "discord", "mattermost", "api"}
 
+# Fila da sessão (paridade Hermes _BUSY_QUEUE_MAX_PENDING): teto duro pra queued() em busy_mode=queue
+# (e pro demote de interrupt→queue). Sem teto, um agente travado + usuário insistindo cresce sem limite.
+_QUEUE_CAP = 32
+
 # Convenção de anexos (estilo Hermes): entra no system_extra quando o canal entrega mídia nativa.
 MEDIA_HINT = (
     "ENVIO DE ARQUIVOS NESTE CANAL: para entregar um arquivo ao usuário (imagem, PDF, planilha, "
@@ -81,6 +85,9 @@ class Session:
         #                                  (mandou voz → responde em voz; mandou texto → só texto)
         self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
         self.queued: list = []           # mensagens em fila (runtime; não persiste)
+        self.no_interrupt = False        # fase não-interruptível da tarefa em curso (compactação/subagente,
+        #                                   paridade Hermes #30170/#56391) — settable pelo runner via kw;
+        #                                   interrupt vira queue enquanto True (demote, não cancela)
         self.remote_spec: str | None = None  # alias/host do ambiente remoto ATIVO (SSH/Tailscale) — multi-turno
         self.approved_cats: set[str] = set()  # categorias aprovadas PRA SESSÃO (Hermes): não pergunta de
         #                                       novo (ex.: aprovou 'destructive_shell' uma vez → libera o resto)
@@ -153,6 +160,28 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do gateway
             self._plugin_commands, self._plugin_context_providers = {}, []
         self.running = True
+        # Fix #3 (debounce por janela): rajada do mesmo chat que atravessa POLLS diferentes (não só o
+        # mesmo lote) ainda coalesce se chegar em <window segundos. Opt-IN via channels.coalesce_window
+        # (mesmo padrão de channels.link_understanding): default DESLIGADO (sem latência extra no caso
+        # comum de 1 mensagem); `true` liga com a janela padrão, número troca a janela.
+        from okami.gateway.coalesce import WindowCoalescer
+        self._coalescer = WindowCoalescer(window=self._coalesce_window_cfg(cfg))
+
+    @staticmethod
+    def _coalesce_window_cfg(cfg) -> float:
+        from okami.gateway.coalesce import COALESCE_WINDOW_SECONDS, DEFAULT_COALESCE_WINDOW
+        ch = getattr(cfg, "channels", None)
+        if ch is None and isinstance(cfg, dict):
+            ch = cfg.get("channels")
+        raw = ch.get("coalesce_window") if isinstance(ch, dict) else getattr(ch, "coalesce_window", None)
+        if raw is None or raw is False:                   # ausente/desligado → sem hold extra (default)
+            return DEFAULT_COALESCE_WINDOW
+        if raw is True:                                    # `coalesce_window: true` → janela padrão (3s)
+            return COALESCE_WINDOW_SECONDS
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return DEFAULT_COALESCE_WINDOW
 
     def _evict_idle_sessions(self) -> None:
         """Bound de memória (VPS 24/7, paridade Hermes agent-LRU): despeja as sessões IDLE mais ANTIGAS além
@@ -946,11 +975,20 @@ class AgentEndpoint(EndpointCommandsMixin):
             if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
                 # COLAPSA reenvio IDÊNTICO (paridade Hermes): double-tap / reenvio por ansiedade não roda N×.
                 _dup = bool(s.queued) and s.queued[-1][0] == text and s.queued[-1][2] == surface_override
+                _dropped = False
                 if not _dup:
-                    s.queued.append((text, self._img.pop(cid, None), surface_override))   # surface PRÓPRIA na fila
+                    if len(s.queued) >= _QUEUE_CAP:      # teto duro (paridade Hermes _BUSY_QUEUE_MAX_PENDING)
+                        _dropped = True
+                    else:
+                        s.queued.append((text, self._img.pop(cid, None), surface_override))  # surface PRÓPRIA
                 decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
                 if decision == "interrupt":
-                    s.cancel = True
+                    if s.no_interrupt:                   # fase não-interruptível → DEMOTE p/ queue (não cancela)
+                        decision = "queued"
+                    else:
+                        s.cancel = True
+                if _dropped:
+                    decision = "dropped"
             else:
                 s.busy, s.cancel, decision = True, False, "start"
         if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
@@ -959,6 +997,13 @@ class AgentEndpoint(EndpointCommandsMixin):
         elif decision == "interrupt":
             self.channel.send(chat_id, "⏹ " + _tr(
                 "gw.interrupting", _default="interrupting the current one — starting your new message now."))
+        elif decision == "dropped":
+            from okami import log
+            log.warn(f"fila da sessão {cid} no teto ({_QUEUE_CAP}) — mensagem descartada")
+            self.channel.send(chat_id, "⚠ " + _tr(
+                "gw.queue_full",
+                _default="you're on a roll, but the queue is full ({n} pending) — this message was dropped. "
+                         "Wait for the current task or use /stop.", n=_QUEUE_CAP))
         else:
             self.channel.send(chat_id, "⏳ " + _tr(
                 "gw.queued", _default="queued (#{n}) — I'll start when the current one finishes.", n=qn))
@@ -1422,6 +1467,9 @@ class AgentEndpoint(EndpointCommandsMixin):
                 except Exception:  # noqa: BLE001 — spec inválido (host saiu da allowlist) → volta ao local
                     s.remote_spec = None
             kw["set_remote"] = lambda rt, _s=s: setattr(_s, "remote_spec", getattr(rt, "alias", None) if rt else None)
+            # Guarda de demote (fix 2): o runner marca fases não-interruptíveis (compactação/subagente) via
+            # este setter — /busy interrupt vira queue enquanto True, em vez de cancelar no meio de um passo sensível.
+            kw["set_no_interrupt"] = lambda v, _s=s: setattr(_s, "no_interrupt", bool(v))
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             _hb_stop = self._start_heartbeat(chat_id, _t0, live)  # #11: "ainda trabalhando ~N min · passo M · ~Nk tok"
             try:
@@ -1522,6 +1570,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             with self._sess_lock:                        # reset+drain ATÔMICO vs. o check-then-set do dispatch
                 s.busy = False
                 s.cancel = False
+                s.no_interrupt = False                   # turno acabou → nenhuma fase pendente segurando o cancel
                 nxt = s.queued.pop(0) if s.queued else None
                 if nxt is not None:                      # vai rodar a próxima da fila → segura o busy ligado
                     s.busy = True
@@ -1628,49 +1677,75 @@ class AgentEndpoint(EndpointCommandsMixin):
                     self._seen_msgs.popitem(last=False)
                 self._last_msg_id[str(msg.chat_id)] = mid  # alvo das reações 👀/👍/👎
             fresh.append(msg)
+        # Fix #1 (latência): NADA de I/O lento (Whisper síncrono, fetch de link) roda aqui — o poll é
+        # COMPARTILHADO por todos os chats do canal, então uma transcrição/URL demorada de um chat
+        # atrasaria o intake de todo mundo. Agrupa por chat (preserva ordem) e despacha 1 tarefa por
+        # chat via self._spawn: cada chat processa suas próprias mensagens em ORDEM, mas chats
+        # diferentes nunca esperam um pelo outro.
+        # Fix #3: self._coalescer.feed (em vez de coalesce_inbound puro) também segura rajadas que
+        # atravessam ciclos de poll (janela opt-in) — libera mensagens PRONTAS, sem I/O bloqueante aqui.
+        # getattr com fallback: endpoints "bare" (AgentEndpoint.__new__ em teste, sem __init__) não têm
+        # _coalescer/_spawn — comporta-se como coalesce por-lote simples + despacho síncrono, igual antes.
+        coalescer = getattr(self, "_coalescer", None)
         from okami.gateway.coalesce import coalesce_inbound
-        for msg in coalesce_inbound(fresh):                # rajada do MESMO chat no lote → 1 turno
-            text = msg.text
-            _fv = bool(msg.audio and self.stt)         # ENTRADA por voz → resposta espelha em áudio
-            if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper)
-                if getattr(self.stt, "_model", "ready") is None:   # 1ª vez: instala+baixa o modelo (lento) → avisa
-                    self.channel.send(msg.chat_id, "🎤 " + _tr(
-                        "gw.transcribing", _default="transcribing your audio… (first time may take a moment)"))
-                try:
-                    text = self.stt.transcribe(msg.audio)
-                    self.channel.send(msg.chat_id, "🎤 " + _tr("gw.heard", _default="heard: «{text}»", text=text))
-                except Exception as e:  # noqa: BLE001
-                    self.channel.send(msg.chat_id, "❌ " + _tr(
-                        "gw.audio_unclear", _default="couldn't understand the audio: {e}", e=e))
-                    continue
-            elif msg.audio and not self.stt:           # áudio mas STT desligado → não engole em silêncio
-                self.channel.send(msg.chat_id, "🔇 " + _tr(
-                    "gw.stt_off", _default="received your audio, but voice transcription is off "
-                    "(set voice.stt.enabled: true)"))
-                continue
-            imgs = list(getattr(msg, "images", None) or ([] if not getattr(msg, "image", None) else [msg.image]))
-            if not imgs and text:                      # #11: auto-extrai caminho LOCAL de imagem do texto
-                from okami.gateway.image_refs import extract_image_refs
-                from pathlib import Path as _P
-                local, _urls = extract_image_refs(text)
-                imgs = [p for p in (str(_P(x).expanduser()) for x in local) if _P(p).is_file()]
-            if imgs:                                   # foto(s) → vision (§6); lista cobre álbum/rajada
-                self._img[str(msg.chat_id)] = imgs     # LISTA (corrige iteração + suporta múltiplas imagens)
-                self.handle(msg.chat_id, text or "Analise a imagem que enviei.")
-                continue
-            if getattr(msg, "file", None):             # documento/vídeo → inbox do workspace + nota
-                rel = self._inbox_file(msg.file, getattr(msg, "file_name", "") or None)
-                note = _tr("gw.file_received",
-                           _default="[the user sent a file: `{rel}` — saved in the workspace]", rel=rel)
-                self.handle(msg.chat_id, f"{text}\n\n{note}" if text else note)
-                continue
-            if text:
-                # Compreensão de links (#7 item 11): mensagem que é SÓ uma URL (não-comando) → resume na
-                # hora SEM gastar um turno LLM (sem run_task). Idempotente via _seen_msgs (dedup no topo).
-                if self._link_understanding_enabled() and self._maybe_summarize_link(msg.chat_id, text):
-                    continue
-                self.handle(msg.chat_id, text, from_voice=_fv)   # voz→voz, texto→texto (espelha)
+        merged = coalescer.feed(fresh) if coalescer is not None else coalesce_inbound(fresh)
+        grouped: dict[str, list] = {}
+        for msg in merged:                                  # rajada do MESMO chat (lote OU janela) → 1 turno
+            grouped.setdefault(str(msg.chat_id), []).append(msg)
+        spawn = getattr(self, "_spawn", None) or (lambda fn: fn())
+        for msgs in grouped.values():
+            spawn(lambda msgs=msgs: self._process_chat_inbound(msgs))
         self._notify_completed_processes()
+
+    def _process_chat_inbound(self, msgs: list) -> None:
+        """Processa em ORDEM as mensagens coalescidas de UM chat (rodando FORA do poll compartilhado —
+        fix #1): transcrição de voz e resumo de link entram aqui, antes do handle() de cada mensagem."""
+        for msg in msgs:
+            self._process_inbound_one(msg)
+
+    def _process_inbound_one(self, msg) -> None:
+        text = msg.text
+        _fv = bool(msg.audio and self.stt)         # ENTRADA por voz → resposta espelha em áudio
+        if msg.audio and self.stt:                 # nota de voz → transcreve (Whisper, síncrono e LENTO —
+            #                                          por isso roda no spawn per-chat, não no poll compartilhado)
+            if getattr(self.stt, "_model", "ready") is None:   # 1ª vez: instala+baixa o modelo (lento) → avisa
+                self.channel.send(msg.chat_id, "🎤 " + _tr(
+                    "gw.transcribing", _default="transcribing your audio… (first time may take a moment)"))
+            try:
+                text = self.stt.transcribe(msg.audio)
+                self.channel.send(msg.chat_id, "🎤 " + _tr("gw.heard", _default="heard: «{text}»", text=text))
+            except Exception as e:  # noqa: BLE001
+                self.channel.send(msg.chat_id, "❌ " + _tr(
+                    "gw.audio_unclear", _default="couldn't understand the audio: {e}", e=e))
+                return
+        elif msg.audio and not self.stt:           # áudio mas STT desligado → não engole em silêncio
+            self.channel.send(msg.chat_id, "🔇 " + _tr(
+                "gw.stt_off", _default="received your audio, but voice transcription is off "
+                "(set voice.stt.enabled: true)"))
+            return
+        imgs = list(getattr(msg, "images", None) or ([] if not getattr(msg, "image", None) else [msg.image]))
+        if not imgs and text:                      # #11: auto-extrai caminho LOCAL de imagem do texto
+            from okami.gateway.image_refs import extract_image_refs
+            from pathlib import Path as _P
+            local, _urls = extract_image_refs(text)
+            imgs = [p for p in (str(_P(x).expanduser()) for x in local) if _P(p).is_file()]
+        if imgs:                                   # foto(s) → vision (§6); lista cobre álbum/rajada
+            self._img[str(msg.chat_id)] = imgs     # LISTA (corrige iteração + suporta múltiplas imagens)
+            self.handle(msg.chat_id, text or "Analise a imagem que enviei.")
+            return
+        if getattr(msg, "file", None):             # documento/vídeo → inbox do workspace + nota
+            rel = self._inbox_file(msg.file, getattr(msg, "file_name", "") or None)
+            note = _tr("gw.file_received",
+                       _default="[the user sent a file: `{rel}` — saved in the workspace]", rel=rel)
+            self.handle(msg.chat_id, f"{text}\n\n{note}" if text else note)
+            return
+        if text:
+            # Compreensão de links (#7 item 11): mensagem que é SÓ uma URL (não-comando) → resume na
+            # hora SEM gastar um turno LLM (sem run_task). Idempotente via _seen_msgs (dedup no topo).
+            # Fetch de URL é I/O potencialmente LENTO — por isso roda aqui (spawn per-chat), não no poll.
+            if self._link_understanding_enabled() and self._maybe_summarize_link(msg.chat_id, text):
+                return
+            self.handle(msg.chat_id, text, from_voice=_fv)   # voz→voz, texto→texto (espelha)
 
     def _link_understanding_enabled(self) -> bool:
         """True se channels.link_understanding está ligado na config (fail-open p/ dict/objeto/None)."""

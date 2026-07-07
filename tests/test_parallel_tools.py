@@ -89,6 +89,33 @@ def test_run_parallel_isolates_exception(tmp_path):
     assert results[2].output == "out-ok"               # a falha de uma não derruba as outras
 
 
+class _HangTool:
+    """Tool stub que demora bem mais que o teto de lote — simula processo travado (run_shell sem
+    saída). Usa um sleep FINITO (não infinito) só p/ o worker abandonado não segurar o `atexit` do
+    ThreadPoolExecutor (que junta threads não-daemon) além do necessário no fim da suíte de testes."""
+
+    def run(self, args, ctx):
+        time.sleep(2.0)
+        return ToolResult(True, "chegou tarde demais p/ o lote", False)
+
+
+def test_run_parallel_batch_timeout_returns_partial_results(tmp_path):
+    # uma tool travada não pode segurar o LOTE inteiro até o watchdog de 300s do turno — o teto de
+    # lote (batch_timeout, curto aqui p/ o teste não demorar) devolve as que JÁ terminaram + um
+    # ToolResult(False, …) de timeout p/ a travada, dentro de um prazo previsível.
+    registry = {"fast": _SleepTool(0.01, "fast"), "hang": _HangTool()}
+    acts = [Action("fast", {}), Action("hang", {}), Action("fast", {})]
+    ctx = ToolContext(workspace=tmp_path)
+    t0 = time.monotonic()
+    results = parallel.run_parallel(acts, registry, ctx, batch_timeout=0.3)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 2.0                                # muito abaixo do sleep(3600) da tool travada
+    assert len(results) == 3
+    assert results[0].output == "out-fast"
+    assert results[1].ok is False and "timeout" in results[1].output.lower()
+    assert results[2].output == "out-fast"
+
+
 # ----------------------------------------------------------------- integração no loop (lote read-only)
 def test_loop_runs_readonly_batch_in_parallel(tmp_path):
     """O loop, com um lote LÍDER de leituras, executa via run_parallel e emite cada step em ordem."""

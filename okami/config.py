@@ -178,6 +178,15 @@ class ProviderConfig(BaseModel):
     # omit_temperature: True tira `temperature` do payload (de params E de override) — modelos de
     # reasoning (o-series/gpt-5) que SÓ aceitam o default e dão 400 se a temperature vier setada.
     omit_temperature: bool = False
+    # max_retries: piso de tentativas ANTES do failover pra outro provider (§3.5). Antes o loop de retry
+    # ficava preso a `len(key_pool())` — provider de UMA chave só (sem pool) tomava ZERO retry em erro
+    # transiente (429/503/timeout) e caía pro fallback antes de dar uma segunda chance. Pool com mais
+    # chaves que o piso ainda usa o tamanho do pool (giro de chave continua valendo).
+    max_retries: int = 3
+    # timeout_seconds: timeout (s) da chamada. None = default por TIER (fail-fast continua o padrão —
+    # só o número muda por capacidade do backend): local (LMStudio/Ollama, mais lento) ganha folga maior;
+    # nuvem fica mais curto. Explícito na config SEMPRE vence o default do tier.
+    timeout_seconds: float | None = None
     notes: str | None = None
 
     def effective_tool_mode(self) -> str:

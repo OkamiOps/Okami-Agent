@@ -83,3 +83,26 @@ def test_default_shell_timeout_is_120():
     # paridade com o critério shell_ok (120s) — menos cortes espúrios em pytest/npm install.
     from okami.core.sandbox import default_policy
     assert default_policy().timeout == 120
+
+
+def test_timeout_preserves_partial_output(tmp_path):
+    # ANTES: subprocess.run(timeout=…) no POSIX mata o processo e DESCARTA a saída já produzida
+    # (TimeoutExpired.stdout só vem populado no Windows) → "timeout (Ns): cmd" pelado, sem o que o
+    # comando já tinha impresso. Popen+Timer (porte execute_code.py) preserva essa saída parcial.
+    res = run_sandboxed("printf ANTES-DO-CORTE; sleep 5; printf DEPOIS-NUNCA-SAI", tmp_path,
+                        SandboxPolicy(timeout=1))
+    assert res.timed_out and res.returncode == 124
+    assert "timeout (1s):" in res.output              # marcador de timeout continua presente
+    # a saída REAL do processo (linha após o marcador) tem a parte de ANTES do kill — não é só o
+    # "timeout (Ns): cmd" pelado de antes desta correção. (cmd fica ecoado na msg — não comparamos o
+    # segundo marcador aqui pra não confundir "apareceu no output do processo" com "apareceu pq é
+    # parte do texto do comando ecoado".)
+    body = res.output.split("\n", 1)[1] if "\n" in res.output else ""
+    assert "ANTES-DO-CORTE" in body
+
+
+def test_timeout_with_no_output_still_reports_timeout(tmp_path):
+    # comando que não imprime NADA antes do kill → sem output parcial, mas o marcador de timeout segue.
+    res = run_sandboxed("sleep 5", tmp_path, SandboxPolicy(timeout=1))
+    assert res.timed_out and res.returncode == 124
+    assert "timeout (1s): sleep 5" in res.output

@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,6 +151,16 @@ def effective_sandbox(cfg_sandbox, surface: str = "") -> "SandboxPolicy":
 class SandboxResult:
     returncode: int
     output: str
+    timed_out: bool = False
+
+
+@dataclass
+class _CapturedRun:
+    """Resultado de `_run_shell_capturing` — mesma forma mínima de um CompletedProcess (.returncode/
+    .stdout/.stderr) + `.timed_out`, p/ o chamador tratar timeout SEM perder a saída parcial."""
+    returncode: int
+    stdout: str
+    stderr: str
     timed_out: bool = False
 
 
@@ -348,15 +359,52 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
             # shell=True é o PROPÓSITO do sandbox local (rodar o comando); a defesa é o backend docker, não evitar shell.
             # stdin=DEVNULL: comando que ESPERA input (read, prompt, cat sem args) recebe EOF e SAI — não
             # pendura os 60s do timeout esperando algo que nunca vem (era causa de "trava no shell").
-            r = subprocess.run(  # nosec B602
-                cmd, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,  # nosemgrep — sandbox (B602 liberado abaixo)
-                capture_output=True, text=True,
-                timeout=policy.timeout, env=env, preexec_fn=_rlimit_preexec(policy),
-            )
+            #
+            # Popen+Timer manual (NÃO subprocess.run(timeout=…)) porque no POSIX subprocess.run() KILLA o
+            # processo no timeout mas descarta a saída já produzida (TimeoutExpired.stdout/stderr só vêm
+            # preenchidos no Windows — no Linux/Mac o run() faz process.wait() sem communicate() de novo).
+            # Resultado: um comando que já tinha imprimido 90% do output e travou nos 10% finais devolvia
+            # "timeout (Ns): cmd" pelado — o modelo perdia justamente a saída que ajudaria a diagnosticar.
+            # Mesmo padrão do execute_code.py (_kill via threading.Timer, lê o que já saiu antes do kill).
+            r = _run_shell_capturing(cmd, workspace, env, policy)
     except subprocess.TimeoutExpired:
         return SandboxResult(124, f"timeout ({policy.timeout}s): {cmd}", timed_out=True)
     finally:
         if proxy is not None:
             proxy.stop()
-    out = ((r.stdout or "") + (r.stderr or "")).strip() or "(sem saída)"
-    return SandboxResult(r.returncode, _cap(out, policy.max_output))
+    out = ((r.stdout or "") + (r.stderr or "")).strip()
+    if getattr(r, "timed_out", False):
+        # timeout do backend LOCAL: preserva o que já saiu (r.stdout já é a saída parcial capturada até
+        # o kill — ver _run_shell_capturing) em vez do "timeout (Ns): cmd" pelado de antes.
+        msg = f"timeout ({policy.timeout}s): {cmd}"
+        if out:
+            msg += f"\n{out}"
+        return SandboxResult(124, _cap(msg, policy.max_output), timed_out=True)
+    return SandboxResult(r.returncode, _cap(out or "(sem saída)", policy.max_output))
+
+
+def _run_shell_capturing(cmd: str, workspace: Path, env: dict, policy: "SandboxPolicy"):
+    """Roda `cmd` via Popen (backend local) com timeout por threading.Timer (mesmo padrão do
+    execute_code.py `_kill`/timer): ao contrário de `subprocess.run(timeout=…)`, que no POSIX descarta
+    a saída já produzida quando mata o processo (só popula stdout/stderr no Windows), aqui a saída é
+    lida ATÉ o kill — o timeout devolve o que o comando já tinha impresso, não silêncio."""
+    proc = subprocess.Popen(  # nosec B602
+        cmd, shell=True, cwd=str(workspace), stdin=subprocess.DEVNULL,  # nosemgrep — sandbox (B602 liberado acima)
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace",
+        env=env, preexec_fn=_rlimit_preexec(policy),
+    )
+    timed_out = threading.Event()
+
+    def _kill():
+        timed_out.set()
+        proc.kill()
+    timer = threading.Timer(policy.timeout, _kill)
+    timer.start()
+    try:
+        stdout, stderr = proc.communicate()
+    finally:
+        timer.cancel()
+        if proc.poll() is None:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+    return _CapturedRun(proc.returncode, stdout, stderr, timed_out.is_set())

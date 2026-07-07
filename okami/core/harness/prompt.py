@@ -243,17 +243,59 @@ descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo execu
 
 # Teto do resultado de tool QUE VAI PRO CONTEXTO do modelo (chars). Output maior é truncado no
 # contexto e persistido inteiro em .okami/tool_outputs/ (o registro/transcrição guardam o completo).
-# 8K (era 12K): 6 resultados grandes na cauda inchavam o contexto → chamadas lentas → timeout.
+# 8K é o FLOOR (era o único valor, fixo, cego à janela do modelo) — ver budget_for_context_window
+# abaixo, que escala isto p/ cima em modelos de janela grande (porte Hermes tools/budget_config.py).
 _TOOL_RESULT_BUDGET = 8_000
 
+# ---- escala do orçamento de tool-result pela JANELA do modelo (porte Hermes budget_for_context_window) ----
+# Um teto fixo (8K/200K) é cego à janela real: num modelo de 32K tokens (~128K chars) um único
+# resultado de 8K já é ~6% da janela (razoável), mas um de 256K+ tokens (Claude/GPT-5) o mesmo 8K é
+# migalha — sub-usa o espaço disponível E força persist/preview em situação que cabia inline. Escala
+# proporcional à janela, com FLOOR (modelo minúsculo continua usável) e CAP (modelo gigante não veio
+# valer mais que o comportamento histórico).
+_CHARS_PER_TOKEN = 4                          # mesma convenção chars≈4*tokens usada no resto do Okami
+_PER_RESULT_WINDOW_FRACTION = 0.15            # fração da janela que UM resultado pode ocupar
+_PER_TURN_WINDOW_FRACTION = 0.30              # fração da janela que o TURNO INTEIRO de tool-output pode ocupar
+_PER_RESULT_BUDGET_CAP = 100_000              # nunca passa disto mesmo em janela gigante (defesa: 1 read não afoga o turno)
+_PER_TURN_BUDGET_CAP = 200_000                # == Budget.max_turn_tool_chars default (models.py) — não duplica, é o teto
+_PER_RESULT_BUDGET_FLOOR = _TOOL_RESULT_BUDGET  # 8K — modelo local minúsculo ainda recebe um preview usável
+_PER_TURN_BUDGET_FLOOR = 16_000
+# Preview inline p/ modelo FRACO (§ loop.py _preview_cap): antes fixo em 1500 chars — migalha em
+# QUALQUER janela, inclusive local grande (32K ctx local já comporta bem mais que isso). Escala com o
+# per-result budget, mas menor que ele (o fraco ainda ganha por manter a observação curta), floor bem
+# acima do 1500 antigo.
+_PREVIEW_WEAK_FRACTION = 0.1875               # == proporção antiga 1500/8000, agora aplicada ao budget ESCALADO
+_PREVIEW_WEAK_FLOOR = _TOOL_RESULT_BUDGET     # 8K — "muito maior que 1500" (era literal 1500)
 
-def format_observation(step_n: int, tool: str, res: ToolResult, workspace=None) -> str:
+
+def budget_for_context_window(context_window_tokens: int | None) -> tuple[int, int, int]:
+    """(per_result_budget, per_turn_budget, preview_weak_budget) em CHARS, escalados pela janela do
+    modelo (em tokens). Janela desconhecida/0 → devolve os defaults históricos (byte-idênticos ao
+    comportamento anterior a esta escala)."""
+    if not context_window_tokens or context_window_tokens <= 0:
+        return _TOOL_RESULT_BUDGET, _PER_TURN_BUDGET_CAP, _PREVIEW_WEAK_FLOOR
+    window_chars = context_window_tokens * _CHARS_PER_TOKEN
+    per_result = int(window_chars * _PER_RESULT_WINDOW_FRACTION)
+    per_turn = int(window_chars * _PER_TURN_WINDOW_FRACTION)
+    per_result = max(_PER_RESULT_BUDGET_FLOOR, min(per_result, _PER_RESULT_BUDGET_CAP))
+    per_turn = max(_PER_TURN_BUDGET_FLOOR, min(per_turn, _PER_TURN_BUDGET_CAP))
+    preview_weak = max(_PREVIEW_WEAK_FLOOR, min(int(per_result * _PREVIEW_WEAK_FRACTION), per_result))
+    return per_result, per_turn, preview_weak
+
+
+def format_observation(step_n: int, tool: str, res: ToolResult, workspace=None,
+                       result_budget: int = _TOOL_RESULT_BUDGET) -> str:
     """Formata o tool-result p/ o modelo. Saída GRANDE: o meio sai do contexto (head/tail), mas a
     ÍNTEGRA (já redigida) vai pra .okami/results/ do workspace — recuperável com read_file
-    (offset/limit) sem rodar a tool de novo (porta do tool_result_storage do Hermes)."""
+    (offset/limit) sem rodar a tool de novo (porta do tool_result_storage do Hermes).
+    `result_budget`: teto (chars) do head+tail — default é o antigo fixo de 8K; o loop passa o valor
+    ESCALADO pela janela do modelo (budget_for_context_window) p/ não re-clampar abaixo dele."""
     status = "ok" if res.ok else "ERRO"
     from okami.core.redact import clean_output, redact, strip_ansi   # ANSI + segredo + head/tail (P1.1)
-    cleaned = clean_output(res.output)
+    # head/tail preservam a proporção original (6000/2000 = 75%/25% de 8000) escalada ao novo orçamento.
+    head = max(1, int(result_budget * 0.75))
+    tail = max(1, result_budget - head)
+    cleaned = clean_output(res.output, head=head, tail=tail)
     if workspace is not None and "chars omitidos" in cleaned:        # houve corte → persiste a íntegra
         try:
             from pathlib import Path

@@ -66,4 +66,12 @@ class Budget:
     max_turn_output_tokens: int = 4_000_000
 
 
+# Teto de RELÓGIO p/ um LOTE de tools em paralelo (run_parallel, porta Hermes agent/tool_executor.py
+# _resolve_concurrent_tool_timeout). Sem isto, UMA tool travada (ex.: run_shell sem timeout próprio,
+# processo que nunca sai) segura o lote inteiro até o watchdog de 300s do TURNO — que só dispara bem
+# depois e derruba o turno inteiro, não só a tool travada. 420s: folgado o bastante p/ lote de leituras
+# legítimas (grep grande, N reads), curto o bastante p/ não parecer travado antes do watchdog do turno.
+PARALLEL_BATCH_TIMEOUT_S: float = 420.0
+
+
 # ----------------------------------------------------------------------------- protocolo

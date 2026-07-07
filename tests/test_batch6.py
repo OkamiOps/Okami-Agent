@@ -22,8 +22,10 @@ def test_credential_pool_rotates_then_failover(monkeypatch, tmp_path):
     monkeypatch.setenv("OKAMI_HOME", str(tmp_path))
     prov._key_cursor.clear()
     prov._key_cooldown.clear()
+    # max_retries=2: teste é sobre ROTAÇÃO DE CHAVE (não sobre o piso de retry do FIX 3) — trava as
+    # tentativas de 'a' no tamanho do pool p/ continuar provando exatamente k1→k2→failover.
     cfg = build_config({"default_provider": "a", "providers": {
-        "a": {"model": "ma", "api_keys": ["k1", "k2"], "fallback": ["b"]},
+        "a": {"model": "ma", "api_keys": ["k1", "k2"], "fallback": ["b"], "max_retries": 2},
         "b": {"model": "mb", "api_key": "kb"}}})
     used = []
 

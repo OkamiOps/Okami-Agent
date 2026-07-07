@@ -12,8 +12,9 @@ from okami.integrations.references import expand_references
 def test_provider_failover_to_backup(monkeypatch):
     import okami.llm.providers as prov
 
+    # max_retries=1: teste é sobre FAILOVER (não sobre a fila de retry do FIX 3) — 1 tentativa em 'a' basta.
     cfg = build_config({"default_provider": "a", "providers": {
-        "a": {"model": "ma", "fallback": ["b"]}, "b": {"model": "mb"}}})
+        "a": {"model": "ma", "fallback": ["b"], "max_retries": 1}, "b": {"model": "mb"}}})
     calls = []
 
     def fake_one(pc, messages, model, schema, overrides):
@@ -31,7 +32,7 @@ def test_failover_skips_experimental_provider(monkeypatch):
     # provider experimental NUNCA entra no failover automático (opt-in só explícito) → vai direto p/ 'c'.
     import okami.llm.providers as prov
     cfg = build_config({"default_provider": "a", "providers": {
-        "a": {"model": "ma", "fallback": ["x", "c"]},
+        "a": {"model": "ma", "fallback": ["x", "c"], "max_retries": 1},
         "x": {"model": "mx", "experimental": True},
         "c": {"model": "mc"}}})
     calls = []
@@ -53,7 +54,8 @@ def test_failover_raises_if_all_fail(monkeypatch):
 
     import okami.llm.providers as prov
     cfg = build_config({"default_provider": "a", "providers": {
-        "a": {"model": "ma", "fallback": ["b"]}, "b": {"model": "mb"}}})
+        "a": {"model": "ma", "fallback": ["b"], "max_retries": 1},
+        "b": {"model": "mb", "max_retries": 1}}})
     monkeypatch.setattr(prov, "_complete_one",
                         lambda *a: (_ for _ in ()).throw(RuntimeError("tudo caiu")))
     with pytest.raises(RuntimeError):

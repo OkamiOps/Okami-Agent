@@ -6,6 +6,7 @@ Long polling (getUpdates) + sendMessage. Cada agente usa o seu token (no agent.y
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import tempfile
@@ -68,18 +69,39 @@ def _file_size(path) -> int:
         return 0
 
 
+def utf16_len(s: str) -> int:
+    """Telegram conta limites (4096, offset/length de entidade…) em UNIDADES UTF-16, não em chars
+    Python: char fora do BMP (a maioria dos emoji, ex. 😀) vira SURROGATE PAIR = 2 unidades. len()
+    puro subestima esses textos — usar isto em TODO limite/truncamento de tamanho do canal."""
+    n = 0
+    for ch in s:
+        n += 2 if ord(ch) > 0xFFFF else 1
+    return n
+
+
+def _utf16_slice(text: str, limit: int) -> str:
+    """Maior prefixo de `text` cujo utf16_len cabe em `limit` (corte seguro p/ emoji fora do BMP)."""
+    total, i = 0, 0
+    for i, ch in enumerate(text):
+        u = 2 if ord(ch) > 0xFFFF else 1
+        if total + u > limit:
+            return text[:i]
+        total += u
+    return text
+
+
 def _split_message(text: str, limit: int = 4000) -> list[str]:
-    """Quebra em pedaços ≤limit preferindo fronteira (parágrafo>linha>frase>espaço>corte duro).
+    """Quebra em pedaços ≤limit (UTF-16) preferindo fronteira (parágrafo>linha>frase>espaço>corte duro).
     Telegram corta em 4096 — ANTES a gente TRUNCAVA (perdia o resto); agora manda tudo, em partes."""
     text = text or ""
-    if len(text) <= limit:
+    if utf16_len(text) <= limit:
         return [text]
     out, rest = [], text
-    while len(rest) > limit:
-        window = rest[:limit]
+    while utf16_len(rest) > limit:
+        window = _utf16_slice(rest, limit)
         cut = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(". "), window.rfind(" "))
         if cut <= 0:
-            cut = limit                       # sem fronteira → corte duro
+            cut = len(window)                 # sem fronteira → corte duro
         out.append(rest[:cut].rstrip())
         rest = rest[cut:].lstrip()
     if rest:
@@ -88,6 +110,55 @@ def _split_message(text: str, limit: int = 4000) -> list[str]:
     if len(parts) > 1:                        # indicador (i/N) em msg longa partida (paridade Hermes)
         n = len(parts)
         parts = [f"{p}\n\n({i}/{n})" for i, p in enumerate(parts, 1)]
+    return parts
+
+
+_HTML_TOKEN = re.compile(r"</?[a-zA-Z][^<>]*>|&#?[a-zA-Z0-9]+;|.", re.S)
+_TAG_NAME = re.compile(r"</?([a-zA-Z][a-zA-Z0-9-]*)")
+
+
+def _split_html(html_text: str, limit: int) -> list[str]:
+    """FIX 1 (bug real): quebra HTML JÁ RENDERIZADO em pedaços ≤limit (UTF-16) sem cortar tag/entidade
+    no meio, fechando as tags abertas na fronteira do corte e REABRINDO-as na parte seguinte (mesma
+    ideia de _balance_fences/_balance_bold, mas operando no HTML final — quem chama já converteu a
+    mensagem INTEIRA antes de cortar, então tag nunca infla um pedaço além do limite do Telegram)."""
+    if utf16_len(html_text) <= limit:
+        return [html_text]
+    tokens = _HTML_TOKEN.findall(html_text)
+    parts: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    stack: list[tuple[str, str]] = []   # (nome da tag, string de abertura original) — pilha de tags abertas
+
+    def _closing_len(st: list[tuple[str, str]]) -> int:
+        return sum(utf16_len(f"</{name}>") for name, _ in reversed(st))
+
+    for tok in tokens:
+        tlen = utf16_len(tok)
+        is_close = tok.startswith("</")
+        is_open = tok.startswith("<") and not is_close
+        m = _TAG_NAME.match(tok) if (is_open or is_close) else None
+        name = m.group(1) if m else ""
+        prospective = list(stack)
+        if is_open:
+            prospective.append((name, tok))
+        elif is_close and prospective and prospective[-1][0] == name:
+            prospective.pop()
+        budget = cur_len + tlen + _closing_len(prospective)
+        if cur and budget > limit:
+            cur.extend(f"</{n}>" for n, _ in reversed(stack))    # fecha o que tá aberto nesta parte
+            parts.append("".join(cur))
+            cur = [o for _, o in stack]                          # reabre na mesma ordem, na próxima
+            cur_len = utf16_len("".join(cur))
+        cur.append(tok)
+        cur_len += tlen
+        if is_open:
+            stack.append((name, tok))
+        elif is_close and stack and stack[-1][0] == name:
+            stack.pop()
+    if cur:
+        cur.extend(f"</{n}>" for n, _ in reversed(stack))
+        parts.append("".join(cur))
     return parts
 
 
@@ -144,10 +215,13 @@ def _is_connect_error(e: Exception) -> bool:
 
 
 class TelegramClient:
+    _POLL_FAIL_THRESHOLD = 5   # FIX 4: N falhas seguidas de getUpdates → força reconexão (watchdog)
+
     def __init__(self, token: str, api_base: str = "https://api.telegram.org"):
         self.api_base = api_base
         self.token = token
         self.base = f"{api_base}/bot{token}"
+        self._poll_fail_count = 0
 
     def _call(self, method: str, params: dict, timeout: float = 35.0, *, _sleep=time.sleep) -> dict:
         """POST com RETRY/BACKOFF: 429 respeita retry_after; 5xx/rede instável → backoff; 4xx → erro.
@@ -192,44 +266,80 @@ class TelegramClient:
         return self._call("getMe", {}).get("result", {})
 
     def get_updates(self, offset: int = 0, timeout: int = 30) -> list[dict]:
-        res = self._call("getUpdates", {"offset": offset, "timeout": timeout}, timeout=timeout + 5)
+        try:
+            res = self._call("getUpdates", {"offset": offset, "timeout": timeout}, timeout=timeout + 5)
+        except Exception:
+            # FIX 4 (watchdog): getUpdates falhando repetido (rede pachurra, opener travado…) sem PTB
+            # pra cuidar disso pra gente — depois de N falhas SEGUIDAS, recria o opener urllib e loga
+            # alto (best-effort: não esconde o erro do chamador, só reseta o estado de conexão).
+            self._poll_fail_count += 1
+            if self._poll_fail_count >= self._POLL_FAIL_THRESHOLD:
+                self._force_reconnect()
+            raise
+        self._poll_fail_count = 0
         return res.get("result", [])
 
+    def _force_reconnect(self) -> None:
+        """N falhas seguidas de polling → recria o opener global do urllib (conexões/sockets podem ter
+        ficado num estado ruim) e loga BEM alto — sinal de operação, não silencioso."""
+        logging.getLogger(__name__).error(
+            "telegram: %d falhas seguidas em getUpdates — forçando reconexão", self._poll_fail_count)
+        urllib.request.install_opener(urllib.request.build_opener())
+        self._poll_fail_count = 0
+
     def send_message(self, chat_id, text: str, thread: int | None = None) -> dict:
-        from okami.channels.markdown_telegram import to_html, to_plain
+        from okami.channels.markdown_telegram import html_to_plain, to_html
         res: dict = {}
-        for chunk in _split_message(text, 4000):          # >4096 → várias partes (não trunca mais)
+        # FIX 1 (bug real): converte a MENSAGEM INTEIRA p/ HTML PRIMEIRO, só DEPOIS corta em partes.
+        # Antes cortava o markdown CRU em pedaços de 4000 chars e só então convertia cada pedaço — as
+        # tags <b>/<code>/… inflam o texto, então um pedaço "cabia" no corte cru e estourava os 4096 do
+        # Telegram depois de virar HTML → sendMessage recusava (400) → caía no fallback plain, perdendo
+        # TODA a formatação à toa (e gastando um round-trip extra). Agora o corte acontece no HTML já
+        # pronto (_split_html), então cada parte enviada JÁ cabe no limite renderizada.
+        rendered_full = to_html(text)
+        if rendered_full != text:
+            html_parts = _split_html(rendered_full, 4096 - 24)   # margem p/ o indicador "(i/N)"
+            if len(html_parts) > 1:                               # paridade Hermes: numera partes
+                n = len(html_parts)
+                html_parts = [f"{p}\n\n({i}/{n})" for i, p in enumerate(html_parts, 1)]
+            for part in html_parts:
+                p = {"chat_id": chat_id, "text": part}
+                if thread is not None:
+                    p["message_thread_id"] = thread           # tópico de fórum (conversa paralela)
+                try:
+                    res = self._call("sendMessage", dict(p, parse_mode="HTML"))
+                except urllib.error.HTTPError:
+                    # parse recusado (raro: tag exótica) → plain LEGÍVEL deste pedaço (nunca cru)
+                    p["text"] = html_to_plain(part)
+                    res = self._call("sendMessage", p)
+            return res
+        for chunk in _split_message(text, 4000):          # sem formatação → split simples de texto puro
             p = {"chat_id": chat_id, "text": chunk}
             if thread is not None:
-                p["message_thread_id"] = thread           # tópico de fórum (conversa paralela)
-            # FORMATAÇÃO (Hermes): markdown do agente (e HTML cru que ele às vezes manda) vira HTML do
-            # Telegram (negrito/código/link de verdade). Se a API recusar o parse (entidade quebrada/tag
-            # partida no split), cai p/ TEXTO PURO LIMPO (to_plain) — NUNCA cru com ** e tags visíveis.
-            rendered = to_html(chunk)
-            if rendered != chunk:
-                try:
-                    res = self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
-                    continue
-                except urllib.error.HTTPError:
-                    p["text"] = to_plain(chunk)            # parse recusado → plain legível (sem markup)
+                p["message_thread_id"] = thread
             res = self._call("sendMessage", p)
         return res
 
     def edit_message(self, chat_id, message_id, text: str, thread: int | None = None) -> bool:
         """Edita uma mensagem (editMessageText) — base do streaming-by-edit. HTML com fallback p/ cru;
-        ignora o 'message is not modified' (texto igual) e erros best-effort (edição nunca quebra o turno)."""
-        from okami.channels.markdown_telegram import to_html, to_plain
-        p = {"chat_id": chat_id, "message_id": int(message_id), "text": text[:4000]}
+        ignora o 'message is not modified' (texto igual) e erros best-effort (edição nunca quebra o turno).
+        Mesma ordem do FIX 1: converte a mensagem INTEIRA antes de cortar (edição é 1 msg só → usa a
+        1ª parte de _split_html, já com as tags balanceadas)."""
+        from okami.channels.markdown_telegram import html_to_plain, to_html
+        p = {"chat_id": chat_id, "message_id": int(message_id)}
         if thread is not None:
             p["message_thread_id"] = thread
-        rendered = to_html(p["text"])
+        rendered_full = to_html(text)
         try:
-            if rendered != p["text"]:
+            if rendered_full != text:
+                html_part = _split_html(rendered_full, 4000)[0]
                 try:
-                    self._call("editMessageText", dict(p, text=rendered, parse_mode="HTML"))
+                    self._call("editMessageText", dict(p, text=html_part, parse_mode="HTML"))
                     return True
                 except urllib.error.HTTPError:
-                    p["text"] = to_plain(p["text"])        # parse recusado → plain legível (não cru)
+                    p["text"] = html_to_plain(html_part)   # parse recusado → plain legível (não cru)
+            else:
+                p["text"] = _utf16_slice(text, 4000)       # FIX 2: limite em UTF-16, não em len() puro
             self._call("editMessageText", p)
             return True
         except Exception:  # noqa: BLE001 — "not modified"/rede → best-effort
