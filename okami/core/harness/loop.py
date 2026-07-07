@@ -1245,21 +1245,27 @@ class Harness:
         return True
 
     def _extract_on_complete(self, t: Task) -> None:
-        """Extract (§6.2 passo 4): promove o resumo da tarefa para memória + MEMORY.md.
+        """Extract (§6.2 passo 4): promove o resumo da tarefa para a memória RANKED (não MEMORY.md).
 
-        SÓ p/ tarefa que fez TRABALHO durável (≥1 passo com efeito) — papo/exploração read-only não
-        viram 'fato' de memória (era a mesma fábrica de lixo da skill/reflexão, ancorada na frase)."""
+        Era gravação MECÂNICA de 'goal → result' pra TODA tarefa com ≥1 passo com efeito — o mesmo
+        anti-padrão já diagnosticado e corrigido em `learning.reflect` (docstring de
+        okami/learning/__init__.py:22-34): memória de longo prazo só guarda o que é DURÁVEL e
+        GENERALIZÁVEL, não post-mortem re-descobrível de toda tarefa (isso enchia o recall de lixo que
+        sequestrava o pedido seguinte). Alinhado ao mesmo padrão: só passa quem teve trabalho REAL
+        (≥2 passos com efeito — 1 mutação isolada é trivial demais pra virar 'fato'), e SÓ vai pra
+        memória semântica via policy.prepare (que já filtra temp/do-not-capture/etc). MEMORY.md deixou
+        de receber escrita automática daqui — arquivo é só p/ remember/remember_user/reflect; histórico
+        de tarefa (o que rodou, quando) já é buscável via sessão (session search), não via memória
+        semântica."""
         if self.memory is None or not t.result:
             return
-        if not any(s.effect for s in t.steps):       # nada durável aconteceu → não persiste resumo
+        if len([s for s in t.steps if s.effect]) < 2:   # trabalho trivial (0-1 efeito) → não persiste
             return
-        from okami.memory import files as _mfiles
         from okami.memory.policy import prepare
         item = prepare(f"{t.goal} → {t.result}", source="task", kind="summary")   # passa pela política
         if item is not None:
             self.memory.write(item)
             self.events.emit("memory_write", kind=item.kind, text=item.text[:200])
-        _mfiles.append_fact(self.ctx.home, f"{t.goal} → {t.result}")   # CASA do agente, não o CWD
 
     def _fail(self, t: Task, reason: str) -> Task:
         # REDE DE SEGURANÇA GERAL (não-específica da tarefa): qualquer que seja o motivo do corte

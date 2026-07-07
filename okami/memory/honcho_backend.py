@@ -12,6 +12,9 @@ contra a sua instância. `client` é injetável para teste.
 
 from __future__ import annotations
 
+import threading
+import time
+
 from okami.memory.base import Memory, MemoryItem
 
 
@@ -43,6 +46,15 @@ class HonchoMemory(Memory):
             self.session.add_peers([self.user, self.assistant])
         except Exception as e:  # noqa: BLE001 — já adicionados / versão diferente
             self._fail(e)
+        # prefetch/cache (porta Hermes memory_provider.py:94-114): inject() fazia até 3 chamadas
+        # SÍNCRONAS de dialética (LLM remoto) no hot path de CADA turno — latência inaceitável. Cache
+        # por query com TTL: 1ª vez por query é síncrona (com timeout curto); turnos seguintes servem
+        # do cache e disparam refresh em BACKGROUND (alimenta o PRÓXIMO turno, não bloqueia o atual).
+        self._inject_cache: dict[str, tuple[str, float]] = {}
+        self._inject_ttl = 120.0
+        self._inject_lock = threading.Lock()
+        self._inject_inflight: set[str] = set()
+        self._inject_timeout = 5.0
 
     def _fail(self, e: Exception) -> None:
         self._failures += 1
@@ -139,7 +151,9 @@ class HonchoMemory(Memory):
         text = self._dialectic(query)
         return [MemoryItem(text=text, kind="summary", source="honcho", score=1.0)] if text else []
 
-    def inject(self, query: str = "", limit: int = 5) -> str:
+    def _compute_inject(self, query: str, limit: int) -> str:
+        """Corpo REAL do inject (até 3 chamadas de dialética — cada uma pode ser um LLM remoto).
+        Chamado tanto pela 1ª busca síncrona quanto pelo refresh em background; nunca direto no hot path."""
         # Duas camadas (estilo Hermes): (1) contexto base do session.context() +
         # (2) dialética SEMPRE-ON no nível da PESSOA (não só da tarefa). É o que faz a resposta soar
         # ancorada em QUEM é a pessoa, não genérica. Cold start vs sessão em andamento usam queries
@@ -159,6 +173,58 @@ class HonchoMemory(Memory):
         # Header de USO (não rótulo passivo): convida o modelo a se ancorar sem recitar.
         return ("O que você já sabe dessa pessoa (use pra calibrar nível/tom e respeitar o que ela já "
                 f"decidiu — não recite):\n{block}") if block else ""
+
+    def _queue_refresh(self, key: str, query: str, limit: int) -> None:
+        """Dispara o recompute em background (não bloqueia o turno atual) e atualiza o cache p/ o
+        PRÓXIMO. No-op se já há um refresh dessa query em voo (evita empilhar threads)."""
+        with self._inject_lock:
+            if key in self._inject_inflight:
+                return
+            self._inject_inflight.add(key)
+
+        def _run() -> None:
+            try:
+                text = self._compute_inject(query, limit)
+                with self._inject_lock:
+                    self._inject_cache[key] = (text, time.time())
+            except Exception as e:  # noqa: BLE001 — refresh de fundo não pode derrubar nada
+                self._fail(e)
+            finally:
+                with self._inject_lock:
+                    self._inject_inflight.discard(key)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def inject(self, query: str = "", limit: int = 5) -> str:
+        key = query or "\x00cold"
+        now = time.time()
+        with self._inject_lock:
+            cached = self._inject_cache.get(key)
+        if cached is not None:
+            text, ts = cached
+            if now - ts > self._inject_ttl:           # servido do cache MESMO vencido; refresh corre
+                self._queue_refresh(key, query, limit)  # em paralelo, alimenta a PRÓXIMA chamada
+            return text
+        # nunca visto: 1ª busca é síncrona (senão a 1ª resposta da sessão sai sem contexto nenhum),
+        # mas com timeout curto — se a rede/LLM travar, não segura o turno; o resultado, quando chegar,
+        # ainda populará o cache p/ a próxima chamada (thread roda até o fim, mesmo após o timeout).
+        done = threading.Event()
+
+        def _run() -> None:
+            try:
+                text = self._compute_inject(query, limit)
+            except Exception as e:  # noqa: BLE001
+                self._fail(e)
+                text = ""
+            with self._inject_lock:
+                self._inject_cache[key] = (text, time.time())
+            done.set()
+
+        threading.Thread(target=_run, daemon=True).start()
+        done.wait(timeout=self._inject_timeout)
+        with self._inject_lock:
+            cached = self._inject_cache.get(key)
+        return cached[0] if cached else ""
 
     def recent(self, limit: int = 10) -> list[MemoryItem]:
         try:

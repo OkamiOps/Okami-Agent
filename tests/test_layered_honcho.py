@@ -45,6 +45,44 @@ def test_layered_inject_concatenates(tmp_path):
     layered.close()
 
 
+def test_layered_inject_single_preamble_and_capped():
+    """Antes: cada backend contribuía o BLOCO INTEIRO (preâmbulo próprio) → N preâmbulos + 2x volume
+    pro mesmo conteúdo. Agora: UM preâmbulo (do 1º backend com header) + itens deduplicados, capados."""
+
+    class StubA:
+        def inject(self, query="", limit=5):
+            return "HEADER A\n- fato um\n- fato dois\n- fato três"
+        def recall(self, q, limit=5):
+            return []
+        def recent(self, limit=10):
+            return []
+        def write(self, item):
+            return 0
+        def count(self):
+            return 0
+
+    class StubB:
+        """Traz a MESMA linha ('- fato um') que StubA já injetou — camadas sabendo a mesma coisa."""
+        def inject(self, query="", limit=5):
+            return "HEADER B\n- fato um\n- fato quatro"
+        def recall(self, q, limit=5):
+            return []
+        def recent(self, limit=10):
+            return []
+        def write(self, item):
+            return 0
+        def count(self):
+            return 0
+
+    layered = LayeredMemory([StubA(), StubB()])
+    block = layered.inject("query", limit=3)
+    lines = block.splitlines()
+    assert lines[0] == "HEADER A"                        # só o header do 1º backend (não HEADER B também)
+    assert lines.count("HEADER B") == 0
+    assert lines.count("- fato um") == 1                 # duplicata entre backends não repete
+    assert len(lines) <= 1 + 3                            # preâmbulo + no máximo `limit` itens
+
+
 def test_open_memory_list_builds_layered(tmp_path):
     m = open_memory(tmp_path, backend=["sqlite-fts5", "holographic"])
     assert isinstance(m, LayeredMemory) and len(m.backends) == 2
@@ -137,6 +175,40 @@ def test_honcho_user_fallback_when_assistant_silent():
     hits = m.recall("preferências")
     assert hits and "modo escuro" in hits[0].text   # veio de user.chat (fallback)
     assert m.user.calls and m.user.calls[0]["target"] is None   # user.chat global (sem target)
+
+
+def test_honcho_inject_serves_cache_without_network_on_second_call():
+    """P0 latência: inject() fazia até 3 chamadas SÍNCRONAS de dialética (LLM remoto) TODO turno.
+    Porta o prefetch do Hermes: 1ª chamada por query é síncrona (popula cache); a 2ª, dentro do TTL,
+    serve do cache SEM tocar peer.chat/session.context de novo."""
+    client = FakeHonchoClient()
+    m = HonchoMemory(client=client)
+    block1 = m.inject("preferências")
+    calls_after_first = len(m.assistant.calls) + len(m.session.ctx_calls)
+    assert calls_after_first > 0                         # 1ª vez: rede/LLM tocado de verdade
+    block2 = m.inject("preferências")                    # 2ª vez, mesma query, dentro do TTL
+    assert block2 == block1
+    assert len(m.assistant.calls) + len(m.session.ctx_calls) == calls_after_first  # SEM chamada nova
+
+
+def test_honcho_inject_cache_expands_ttl_triggers_background_refresh(monkeypatch):
+    """Cache vencido: ainda serve o valor cacheado NA HORA (não bloqueia o turno atual), mas dispara
+    um refresh em background que, ao terminar, atualiza o cache p/ a PRÓXIMA chamada."""
+    client = FakeHonchoClient()
+    m = HonchoMemory(client=client)
+    m.inject("preferências")                             # popula cache
+    m._inject_ttl = -1.0                                 # força "vencido" sem esperar de verdade
+    block = m.inject("preferências")                     # serve do cache velho, dispara refresh assíncrono
+    assert block                                          # não voltou vazio (serviu do cache)
+    # espera o refresh em background terminar (thread daemon, curta — mock é síncrono/instantâneo)
+    import time as _t
+    for _ in range(50):
+        with m._inject_lock:
+            if "preferências" not in m._inject_inflight:
+                break
+        _t.sleep(0.01)
+    with m._inject_lock:
+        assert "preferências" not in m._inject_inflight   # refresh concluiu, não ficou "em voo" p/ sempre
 
 
 # ----------------------------------------------------------------- config do Honcho (P1)

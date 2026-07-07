@@ -219,7 +219,7 @@ def run_task(
     _acc = {"usage": CanonicalUsage(), "served": ""}   # tokens + quem respondeu (custo §A5 / served-by §E5)
 
     from okami.llm.streaming import streaming_enabled as _stream_on
-    _streaming = _stream_on(cfg)
+    _streaming = _stream_on(cfg, provider)   # MESMO provider selecionado p/ esta task (-p/--provider), não o default
 
     _deadline = _overall_timeout_for(cfg)              # #3: teto global da fase de geração
 

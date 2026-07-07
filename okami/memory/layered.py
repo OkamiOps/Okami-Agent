@@ -41,15 +41,34 @@ class LayeredMemory(Memory):
         return out[:limit]
 
     def inject(self, query: str = "", limit: int = 5) -> str:
-        blocks = []
+        """Mesmo tratamento que `recall` já tem: concatenar o bloco INTEIRO de cada backend duplicava
+        preâmbulo (cada camada traz o seu) e dobrava o volume injetado (2x tokens, mesma info, cada
+        backend já respeita `limit` sozinho). Aqui trata a 1ª linha de cada bloco multi-linha como
+        HEADER (usa só a do primeiro backend que tiver um) e o resto como ITENS — dedup por chave
+        (120 primeiros chars, igual ao recall) e cap total em `limit` itens combinados → UM preâmbulo."""
+        preamble = ""
+        seen: set[str] = set()
+        items: list[str] = []
         for b in self.backends:
             try:
                 blk = b.inject(query, limit)
             except Exception:  # noqa: BLE001
                 blk = ""
-            if blk:
-                blocks.append(blk)
-        return "\n\n".join(blocks)
+            if not blk:
+                continue
+            blk_lines = blk.splitlines()
+            head, rest = (blk_lines[0], blk_lines[1:]) if len(blk_lines) > 1 else ("", blk_lines)
+            if head and not preamble:
+                preamble = head
+            for line in rest:
+                key = line.strip()[:120].lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    items.append(line)
+        if not preamble and not items:
+            return ""
+        capped = items[:limit]
+        return "\n".join(([preamble] if preamble else []) + capped)
 
     def recent(self, limit: int = 10) -> list[MemoryItem]:
         out: list[MemoryItem] = []

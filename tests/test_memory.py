@@ -110,6 +110,25 @@ def test_dedup_reinforces_instead_of_duplicating(tmp_path):
     m.close()
 
 
+def test_dedup_near_duplicate_without_embedder(tmp_path):
+    """Sem embedder, dedup era só texto IDÊNTICO — um parafraseio virava item NOVO. Agora
+    _find_duplicate cai no fallback jaccard (_content_tokens/_jaccard) e reforça o existente."""
+    m = SqliteFTS5Memory(tmp_path / "m.db")  # sem embedder
+    id1 = m.write(MemoryItem(text="o usuário prefere respostas curtas e diretas"))
+    id2 = m.write(MemoryItem(text="o usuário prefere respostas diretas e curtas"))  # quase-idêntico
+    assert id1 == id2 and m.count() == 1
+    m.close()
+
+
+def test_dedup_near_duplicate_respects_threshold(tmp_path):
+    """Textos genuinamente diferentes (jaccard baixo) NÃO devem colidir — não é dedup agressivo demais."""
+    m = SqliteFTS5Memory(tmp_path / "m.db")
+    m.write(MemoryItem(text="o usuário prefere respostas curtas e diretas"))
+    m.write(MemoryItem(text="o deploy roda em Vercel com Postgres"))
+    assert m.count() == 2
+    m.close()
+
+
 def test_importance_heuristic_ranks_preferences(tmp_path):
     m = open_memory(tmp_path)  # sem embedder
     m.write(MemoryItem(text="o usuário sempre prefere modo escuro", kind="fact"))

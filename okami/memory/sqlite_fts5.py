@@ -205,6 +205,16 @@ class SqliteFTS5Memory(Memory):
             self._mat_dirty = True
         return int(cur.lastrowid)
 
+    # sem embedder, "duplicata" só pegava texto IDÊNTICO — qualquer parafraseio ('prefere respostas
+    # curtas e diretas' vs 'prefere respostas diretas e curtas') virava item NOVO, duplicando memória.
+    # Reusa _content_tokens/_jaccard (já usados em consolidate/_merge_near_dups) como fallback
+    # determinístico — mas MAIS conservador que o `consolidate()` (threshold 0.8 ali): 0.9 aqui + exige
+    # ≥3 tokens de conteúdo em comum. Sem esse piso, textos curtos genéricos ('fato 0'/'fato 1', 'item
+    # turno N') com só 1-2 tokens em comum colidiam por acidente (falso positivo). `consolidate()`
+    # continua sendo o merge DELIBERADO e assíncrono (mais permissivo, roda por cima do que sobrou).
+    _NEAR_DUP_JACCARD = 0.9
+    _NEAR_DUP_MIN_TOKENS = 3
+
     def _find_duplicate(self, text: str, emb) -> int | None:
         if emb is not None:
             for row in self._load():
@@ -215,7 +225,18 @@ class SqliteFTS5Memory(Memory):
         row = self.conn.execute(
             "SELECT id FROM items WHERE text = ? AND superseded = 0", (text,)
         ).fetchone()
-        return row[0] if row else None
+        if row:
+            return row[0]
+        toks = _content_tokens(text)
+        if len(toks) < self._NEAR_DUP_MIN_TOKENS:
+            return None
+        for rid, other_text in self.conn.execute(
+                "SELECT id, text FROM items WHERE superseded = 0"):
+            other_toks = _content_tokens(other_text)
+            if (len(other_toks) >= self._NEAR_DUP_MIN_TOKENS
+                    and _jaccard(toks, other_toks) >= self._NEAR_DUP_JACCARD):
+                return rid
+        return None
 
     # ------------------------------------------------------------------ read
     def _load(self) -> list[tuple]:

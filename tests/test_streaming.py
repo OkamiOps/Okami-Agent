@@ -81,3 +81,30 @@ def test_streaming_failopen_when_provider_raises():
     def boom(name=None):
         raise KeyError("sem default provider")
     assert streaming_enabled(SimpleNamespace(harness={}, provider=boom)) is False
+
+
+# ── regressão native_tools+minimax: nativo ativo NUNCA streama (payload real não tem tools=) ──
+def _cfg_native(tier="weak", native_tools=None, tool_mode="json_constrained", name="minimax", model="minimax/m3"):
+    from types import SimpleNamespace
+    pc = SimpleNamespace(tier=tier, tool_mode=lambda: tool_mode, native_tools=native_tools,
+                         name=name, model=model, api_base="")
+    return SimpleNamespace(harness={}, provider=lambda name=None: pc)
+
+
+def test_streaming_off_when_native_tools_active_even_on_weak_tier():
+    from okami.llm.streaming import streaming_enabled
+    # weak tier normalmente liga streaming sozinho — MAS native_tools=True (hint explícito, ex.: minimax)
+    # exige tools= no payload, e o caminho de streaming nunca anexa tools → tem que ficar OFF.
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=True)) is False
+
+
+def test_streaming_on_when_native_tools_explicitly_off():
+    from okami.llm.streaming import streaming_enabled
+    # native_tools=False (hint explícito) → sem rail nativo → volta pro default tier-aware (weak → True)
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=False)) is True
+
+
+def test_streaming_on_for_local_tier_without_native():
+    from okami.llm.streaming import streaming_enabled
+    # local sem native_tools (None) → _is_local(pc) via tier="local" resolve sem probe/rede → False nativo
+    assert streaming_enabled(_cfg_native(tier="local", native_tools=None)) is True

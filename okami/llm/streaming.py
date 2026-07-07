@@ -14,12 +14,21 @@ from __future__ import annotations
 from okami.llm.usage import Completion, normalize_usage
 
 
-def streaming_enabled(cfg) -> bool:
+def streaming_enabled(cfg, provider: str | None = None) -> bool:
     """Streaming token-a-token ligado? `harness.streaming` explícito SEMPRE vence. Sem ele, o default é
     TIER-AWARE: liga sozinho p/ modelo de PROTOCOLO-TEXTO (json_constrained — tier local/weak), onde o
     streaming é seguro (a ação JSON vem no próprio texto) E mais NECESSÁRIO (modelo local lento: o usuário
     via "💭 thinking…" congelado por todo o prefill+geração). Strong com tool_calls NATIVOS fica OFF (os
-    deltas estruturados não passam pelo streaming de texto)."""
+    deltas estruturados não passam pelo streaming de texto).
+
+    INVARIANTE (regressão native_tools+minimax, ago/2026): o rail nativo exige `tools=`/`tool_choice=` no
+    payload (quem manda é `_complete_one`, via `native_supported(pc)`). O caminho de streaming
+    (`stream_messages_deltas`) NUNCA anexa `tools=` — então, se o veredito nativo está ativo p/ este
+    provider/modelo, streamar quer dizer chamar o endpoint SEM tools, o modelo não tem function-calling
+    p/ usar, devaneia em <think> e não sobra ação parseável (tarefa cai como "rejeitado, sem ação").
+    Por isso, nativo ativo → NUNCA streama (tier vira irrelevante), até existir streaming+tools de verdade.
+    Usa o MESMO veredito (cache L1/L2) que `_complete_one` consulta — sem probe duplicado, sem descasamento
+    de decisão entre o texto do prompt e o payload real da chamada."""
     try:
         h = getattr(cfg, "harness", None) or {}
         explicit = h.get("streaming") if isinstance(h, dict) else getattr(h, "streaming", None)
@@ -28,7 +37,13 @@ def streaming_enabled(cfg) -> bool:
     if explicit is not None:
         return bool(explicit)
     try:                                                  # default tier-aware (sem provider → off, fail-open)
-        pc = cfg.provider()
+        pc = cfg.provider(provider)     # MESMO provider que o call site vai de fato usar (não o default cego)
+        try:                                              # nativo ativo → payload precisa de tools= → sem streaming
+            from okami.llm.native_capability import native_supported
+            if native_supported(pc):
+                return False
+        except Exception:  # noqa: BLE001 — veredito indisponível (fixture de teste, provider incompleto)
+            pass           # cai no default tier-aware abaixo (comportamento anterior preservado)
         if (getattr(pc, "tier", "") or "").lower() in ("local", "weak"):
             return True
         return (pc.tool_mode() if hasattr(pc, "tool_mode") else "") == "json_constrained"

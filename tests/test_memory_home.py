@@ -60,7 +60,9 @@ def test_finish_setup_seals_genesis_in_home(tmp_path):
     assert not (ws / ".okami").exists() and not (ws / "USER.md").exists()
 
 
-# ── extract (fim de tarefa) grava MEMORY.md na CASA ─────────────────────────
+# ── extract (fim de tarefa) grava na memória RANKED, NUNCA em MEMORY.md ──────
+# Doctrine (alinhada a learning.reflect): MEMORY.md só recebe fato via remember_user/remember/reflect —
+# o extract mecânico de TODA tarefa era a mesma fábrica de lixo já corrigida na reflexão/skill.
 
 class _Mem:
     def __init__(self):
@@ -76,23 +78,28 @@ class _Mem:
         return ""
 
 
-def test_extract_writes_memory_md_to_home(tmp_path):
+def test_extract_durable_task_writes_to_ranked_memory_not_file(tmp_path):
     ws, home = _dirs(tmp_path)
+    mem = _Mem()
+    r = Harness(Script([J("write_file", path="a.txt", content="x"),
+                        J("write_file", path="b.txt", content="y"),
+                        J("task_complete", summary="criei os arquivos a.txt e b.txt como pedido")]),
+                Task(goal="cria os arquivos a.txt e b.txt"), ws, budget=Budget(max_steps=6),
+                memory=mem, agent_home=home).run()
+    assert r.state == TaskState.COMPLETE
+    assert mem.items                                     # ≥2 passos com efeito → fato durável foi p/ ranked
+    assert not (home / "MEMORY.md").exists()              # NUNCA MEMORY.md (nem na casa nem no workspace)
+    assert not (ws / "MEMORY.md").exists()
+
+
+def test_extract_trivial_task_writes_nothing(tmp_path):
+    """1 único passo com efeito não é 'trabalho durável' — não vira fato em memória alguma."""
+    ws, home = _dirs(tmp_path)
+    mem = _Mem()
     r = Harness(Script([J("write_file", path="a.txt", content="x"),
                         J("task_complete", summary="criei o arquivo a.txt como pedido")]),
                 Task(goal="cria o arquivo a.txt"), ws, budget=Budget(max_steps=6),
-                memory=_Mem(), agent_home=home).run()
+                memory=mem, agent_home=home).run()
     assert r.state == TaskState.COMPLETE
-    assert (home / "MEMORY.md").exists()                # fato na casa do agente
-    assert not (ws / "MEMORY.md").exists()              # NÃO no workspace (era o bug: ~/MEMORY.md)
-
-
-def test_extract_without_home_keeps_workspace_backcompat(tmp_path):
-    ws = tmp_path / "só-ws"
-    ws.mkdir()
-    r = Harness(Script([J("write_file", path="a.txt", content="x"),
-                        J("task_complete", summary="criei o arquivo a.txt")]),
-                Task(goal="cria o arquivo a.txt"), ws, budget=Budget(max_steps=6),
-                memory=_Mem()).run()
-    assert r.state == TaskState.COMPLETE
-    assert (ws / "MEMORY.md").exists()                  # sem agent_home → comportamento antigo
+    assert mem.items == []                                # nada persistido (nem ranked, nem MEMORY.md)
+    assert not (home / "MEMORY.md").exists()
