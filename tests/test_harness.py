@@ -221,7 +221,8 @@ def test_approval_blocks_sensitive_write_when_denied(tmp_path):
 def test_approval_allows_sensitive_write_when_granted(tmp_path):
     outputs = [
         J("write_file", path="SOUL.md", content="novo soul aprovado"),
-        J("task_complete", summary="ok"),
+        J("task_complete", summary="ok"),          # exit_criteria vazio + efeito real sem verify → nudge (WIN2)
+        J("task_complete", summary="ok"),          # 2ª tentativa: aceita de qualquer jeito (sem risco de loop)
     ]
     r = Harness(Script(outputs), Task(goal="x"), tmp_path, approve=lambda req: True).run()
     assert r.state == TaskState.COMPLETE

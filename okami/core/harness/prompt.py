@@ -20,6 +20,8 @@ _CORE_TOOLS = frozenset({
     "use_skill", "install_skill", "tool_search",
     "respond", "task_complete", "task_blocked", "need_input", "clarify",
     "send_message", "notify", "generate_pdf",
+    "spawn",   # WIN3: modelo fraco precisa da descrição CHEIA p/ saber DECOMPOR tarefa grande em subtarefas
+    #          (cauda-longa 1-linha esconde o schema/uso e o fraco nem tenta — some do repertório na prática)
 })
 
 
@@ -63,9 +65,10 @@ def _workspace_orientation(workspace) -> str:
             f"{tree}\nPra localizar algo cujo nome varia, use `find_files` (ignora caso/hífen/underscore).")
 
 
-def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
-                        surface: str = "cli", model: str = "", allow_paths=None,
-                        open_fs: bool = False, native: bool = False) -> str:
+def render_tools_block(registry: dict[str, Tool], model: str = "") -> str:
+    """Bloco de tools do system prompt (§ disclosure progressivo) — extraído de `build_system_prompt`
+    p/ reuso pelo diagnóstico `okami prompt-size` (WIN4): precisa medir o MESMO texto que vai pro modelo
+    sem duplicar a lógica de compactação (MCP numeroso / tier fraco)."""
     # Disclosure PROGRESSIVO (pesquisa #5 item 27): MCP numeroso (>8) vira 1 linha por tool — o
     # schema completo vem sob demanda via tool_search. Poucas tools MCP → descrição inteira (sem custo).
     _mcp = [t for t in registry.values() if getattr(t, "mcp", False)]
@@ -88,7 +91,13 @@ def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", 
             continue
         args = ", ".join(f'"{k}": <{v}>' for k, v in t.args_schema.items()) or ""
         lines.append(f'- {t.name}: {t.description}\n    args: {{{args}}}')
-    tools_block = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def build_system_prompt(task: Task, registry: dict[str, Tool], extra: str = "", workspace=None,
+                        surface: str = "cli", model: str = "", allow_paths=None,
+                        open_fs: bool = False, native: bool = False) -> str:
+    tools_block = render_tools_block(registry, model)
     extra_block = f"\n\n{extra}\n" if extra else ""
 
     # Ramo do PROTOCOLO de ação: nativo (function-calling do provider — confirmado pelo probe) vs JSON-em-
@@ -239,6 +248,42 @@ descreva nem performe o seu próprio jeito — só seja. Se ela pedir algo execu
 
 {"Agora responda — use `respond` p/ falar, ou a ferramenta certa p/ agir." if native
  else "Agora responda (um único bloco json: `respond` p/ falar, ou a ferramenta certa p/ agir)."}"""
+
+
+_CHARS_PER_TOKEN_DIAG = 4    # tokens ≈ chars/4 — mesma convenção usada em budget_for_context_window abaixo
+
+
+def prompt_size_sections(task: Task, registry: dict[str, Tool], core_block: str = "", *, workspace=None,
+                         surface: str = "cli", model: str = "", allow_paths=None, open_fs: bool = False,
+                         native: bool = False) -> dict:
+    """Diagnóstico `okami prompt-size` (WIN4, espírito hermes_cli/prompt_size.py): breakdown por SEÇÃO do
+    prompt final que o harness manda pro provider — chars/tokens, sem chamar rede nenhuma (só monta o
+    MESMO texto que `build_system_prompt` produziria). tokens = chars/4 (convenção do resto do Okami)."""
+    tools_block = render_tools_block(registry, model)
+    from okami.core.harness.style import model_family_guidance, style_block
+    _fam = model_family_guidance(model, native=native)
+    style = style_block(surface) + (f"\n\n{_fam}" if _fam else "")
+    orient = _workspace_orientation(workspace) if workspace is not None else ""
+    full = build_system_prompt(task, registry, core_block, workspace=workspace, surface=surface,
+                               model=model, allow_paths=allow_paths, open_fs=open_fs, native=native)
+
+    def _sec(label: str, chars: int) -> dict:
+        return {"label": label, "chars": chars, "tokens": chars // _CHARS_PER_TOKEN_DIAG}
+
+    sections = [
+        _sec("tools (repertório de ações)", len(tools_block)),
+        _sec("estilo (voz/idioma/canal)", len(style)),
+        _sec("orientação de workspace", len(orient)),
+        _sec("memória/core (SOUL/VOICE/PERSONA + AGENTS/USER/MEMORY)", len(core_block)),
+    ]
+    return {
+        "platform": surface,
+        "model": model or "(não definido)",
+        "native": native,
+        "tool_count": len(registry),
+        "sections": sections,
+        "total": _sec("TOTAL (system prompt completo)", len(full)),
+    }
 
 
 # Teto do resultado de tool QUE VAI PRO CONTEXTO do modelo (chars). Output maior é truncado no

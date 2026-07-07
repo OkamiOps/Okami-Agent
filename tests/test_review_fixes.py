@@ -140,8 +140,13 @@ def test_thrash_does_not_fire_when_progress_between_compactions(tmp_path, monkey
     monkeypatch.setattr(loop_mod._compaction, "estimate_chars", lambda m: 30000)
     monkeypatch.setattr(loop_mod._compaction, "prune_observations", lambda m, **k: (m, 0))
     monkeypatch.setattr(loop_mod._compaction, "compact", lambda m, mem, **k: (m, 0))  # 0% ganho
-    h = Harness(generate=lambda m, s: next(script), task=Task(goal="faça"), workspace=tmp_path,
-                budget=Budget(max_context_chars=24000))
+    # exit_criteria explícito (satisfeito pela escrita real de out.txt) — não é o alvo deste teste (é o
+    # anti-thrash de compactação); sem isso o nudge de verify-on-stop (WIN2, exit_criteria VAZIO + efeito
+    # sem verificação) somaria mais UMA rodada de compactação de baixo ganho e disparava o anti-thrash
+    # por um motivo alheio ao que este teste prova.
+    h = Harness(generate=lambda m, s: next(script),
+                task=Task(goal="faça", exit_criteria=[{"type": "file_exists", "path": "out.txt"}]),
+                workspace=tmp_path, budget=Budget(max_context_chars=24000))
     res = h.run()
     assert res.state.name == "COMPLETE", f"trabalho legítimo morto pelo anti-thrash: {res.reason}"
 

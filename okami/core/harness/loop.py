@@ -209,6 +209,20 @@ def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
     return real_steps >= 12 and len(m) < 1000         # trabalho grande, entrega curta
 
 
+def _verified_since_last_effect(steps: list) -> bool:
+    """Heurística do verify-on-stop mínimo (WIN2): achou um `run_shell` BEM-SUCEDIDO (ok=True) DEPOIS
+    do último passo com EFEITO? Sem passo com efeito, não há o que verificar → True (não bloqueia papo
+    puro nem tarefa read-only). `run_shell` é o sinal — é o jeito universal de rodar teste/lint/build;
+    outra tool de leitura (read_file) NÃO conta como "comprovação" no espírito do nudge."""
+    last_effect = -1
+    for i, s in enumerate(steps):
+        if s.effect:
+            last_effect = i
+    if last_effect < 0:
+        return True                                   # nada com efeito ainda → nada a verificar
+    return any(s.tool == "run_shell" and s.ok for s in steps[last_effect + 1:])
+
+
 _THIN_NUDGE = (
     "Você fez bastante trabalho ({n} passos) mas a entrega ficou CURTA/rasa e/ou em parágrafo corrido. "
     "REESCREVA AGORA em MARKDOWN ESTRUTURADO (a TUI renderiza tabela/seção/cor), preenchendo este esqueleto "
@@ -358,6 +372,15 @@ class Harness:
         self._MAX_SAME_OUTPUT = 2                       # 3ª saída idêntica seguida da mesma tool → nudge
         self._low_gain_compactions = 0                 # anti-thrashing: compactações seguidas com <10% de ganho
         self._obs_chars = 0                            # teto AGREGADO de tool-output do turno (Hermes: 200K)
+        self._loop_warned: set[str] = set()             # fingerprints já AVISADOS (warn-before-block, WIN1)
+        self._pending_loop_warn: str | None = None      # aviso a anexar DEPOIS do próximo tool-result (WIN1)
+        # AGREGAÇÃO de falha PRÉ-dispatch (WIN1, paridade Hermes tool_guardrails.py:298-319): nome
+        # ALUCINADO e args FALTANDO são hoje contadores DISJUNTOS (_consecutive_violations vs
+        # _consecutive_arg_fails), cada um resetado pelo OUTRO modo de erro — um modelo que ALTERNA entre
+        # os dois nunca deixa nenhum dos dois isolados bater o próprio teto. Este é o contador UNIFICADO:
+        # soma as duas falhas, na ORDEM que vierem, e só zera quando uma tool de fato DISPACHA de verdade.
+        self._consecutive_action_failures = 0
+        self._verify_nudged = False                    # verify-on-stop (WIN2): já empurrei p/ verificar? (1x)
 
     def _note_compact_gain(self, before: int, after: int) -> bool:
         """Anti-thrashing de compactação (pesquisa #5 item 2): compactação PESADA que rende <10% não
@@ -495,6 +518,12 @@ class Harness:
         # default=str: tipo não-JSON (set/etc) NUNCA derruba o turno no fingerprint (defesa; o parser já
         # normaliza, mas tool/MCP pode injetar args exóticos).
         return f"{action.tool}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False, default=str)}"
+
+    def _bump_action_failure(self) -> int:
+        """Incrementa o contador UNIFICADO de falha pré-dispatch (nome inválido + arg faltando, WIN1).
+        Zera só quando alguma tool DISPACHA de verdade (_handle_tool_result)."""
+        self._consecutive_action_failures += 1
+        return self._consecutive_action_failures
 
     def run(self) -> Task:
         t = self.task
@@ -770,7 +799,12 @@ class Harness:
                     hint = (f" '{action.tool}' não existe." +  # prompt já lista as tools; aqui só um empurrão
                             (f" Quis dizer: {', '.join(_near)}?" if _near else ""))
                 self._emit("violation", n=self._consecutive_violations, text=text[:200])
-                if self._consecutive_violations >= self.budget.max_consecutive_violations:
+                # AGREGAÇÃO unificada (WIN1, paridade Hermes tool_guardrails.py:298-319): nome ALUCINADO
+                # conta pro MESMO contador que arg-faltando lá embaixo — fecha o buraco de um modelo que
+                # ALTERNA entre os dois erros (nenhum contador ISOLADO bate sozinho na alternância).
+                _agg = self._bump_action_failure()
+                if (self._consecutive_violations >= self.budget.max_consecutive_violations
+                        or _agg >= self.budget.max_tool_failures):
                     if self._try_escalate("violações de Action-or-Terminate"):
                         continue
                     # JSON-RECOVERY (Hermes): antes de DESISTIR, injeta uma recuperação CLARÍSSIMA e dá +N
@@ -830,6 +864,18 @@ class Harness:
                              "diferente ou declare task_blocked com a razão.")
                 self._fingerprints.append(fp)
                 continue
+            elif repeats + 1 == self.budget.warn_repeat and fp not in self._loop_warned:
+                # WARN-BEFORE-BLOCK (WIN1, paridade Hermes agent/tool_guardrails.py warn_after): a 2ª
+                # repetição idêntica ainda EXECUTA — só avisa (1x por fingerprint, não spamma a cada
+                # repetição intermediária). O bloqueio de vez só chega em max_repeat (ramo acima). O aviso
+                # vai DEPOIS do resultado da tool (_handle_tool_result), pra não quebrar a sequência
+                # assistant→tool do protocolo nativo (call_id tem de ser seguido IMEDIATAMENTE pelo result).
+                self._loop_warned.add(fp)
+                self._emit("loop_warn", fingerprint=fp, repeats=repeats + 1)
+                self._pending_loop_warn = (
+                    "AVISO: você repetiu essa MESMA ação antes. Ainda não é bloqueio, mas mude a "
+                    "abordagem — ou, se a repetição é de propósito (ex.: esperar um processo), explique "
+                    "o porquê na próxima mensagem. Repetir sem mudar nada vai bloquear em breve.")
 
             tool = self.registry[action.tool]
 
@@ -847,6 +893,11 @@ class Harness:
                 result = self._handle_terminal(t, action)
                 if result is not None:
                     return result
+                # NUDGE (task_complete/respond rejeitado: rasa/sem-ferramenta/sem-verificação/...) = o
+                # modelo RESPONDEU, não travou — mesma lógica do go/no-go negado/hook vetado acima: reseta
+                # o anti-travamento (senão dois nudges seguidos em cima de trabalho longo podem SOMAR
+                # tempo de relógio e disparar o watchdog de stall por engano, mesmo com o modelo ativo).
+                _last_progress = _wt.monotonic()
                 continue  # task_complete rejeitado → segue
 
             # --- Validação de args: ação malformada NÃO quebra o harness, vira re-prompt ---
@@ -861,7 +912,12 @@ class Harness:
                 self._consecutive_arg_fails += 1
                 self._emit("malformed_args", tool=action.tool, missing=missing,
                            n=self._consecutive_arg_fails)
-                if self._consecutive_arg_fails >= self.budget.max_consecutive_violations:
+                # AGREGAÇÃO unificada (WIN1): mesmo contador do nome-alucinado acima — args faltando
+                # também soma no total, fechando o buraco da alternância nome-errado ↔ args-faltando que
+                # nenhum contador isolado pegava sozinho.
+                _agg = self._bump_action_failure()
+                if (self._consecutive_arg_fails >= self.budget.max_consecutive_violations
+                        or _agg >= self.budget.max_tool_failures):
                     if self._try_escalate("ação repetidamente sem argumento obrigatório"):
                         self._consecutive_arg_fails = 0
                         continue
@@ -903,7 +959,7 @@ class Harness:
                     self._fingerprints.append(fp)
                     step_n += 1
                     _last_progress = _wt.monotonic()      # passo concluído (mesmo negado) = atividade → reseta o anti-travamento
-                    t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False))
+                    t.steps.append(Step(step_n, action.tool, action.args, "negado (go/no-go)", False, False))
                     self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                     self._reject(action,                                   # NATIVO → erro role=tool; JSON → user
                                  f"erro: ação NEGADA (go/no-go) — {sens.reason}. Proponha uma alternativa.",
@@ -916,7 +972,7 @@ class Harness:
                     "before_tool", {"tool": action.tool, "args": action.args}):
                 step_n += 1
                 _last_progress = _wt.monotonic()          # passo concluído (vetado) = atividade → reseta o anti-travamento
-                t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False))
+                t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False, False))
                 self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=False, effect=False)
                 self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
                              f"erro: ação BLOQUEADA por hook de política ('{action.tool}'). Tente outra abordagem.",
@@ -973,7 +1029,8 @@ class Harness:
         PARALELO (item 20) — assim o lote read-only emite step/_audit/observação idêntico ao serial."""
         step_n += 1
         self._consecutive_arg_fails = 0               # dispatch de verdade → zera o contador de args malformados
-        t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect))
+        self._consecutive_action_failures = 0          # dispatch de verdade → zera o agregado também (WIN1)
+        t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect, res.ok))
         self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
                    out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
         # REFUND de passo (item 5, espelha o budget de poll): execute_code read-only é META-trabalho (rodou
@@ -989,6 +1046,9 @@ class Harness:
         # seguir IMEDIATAMENTE a mensagem assistant que echoou a tool_call — nudge de user no meio invalida a
         # sequência de function-calling. Pro rail JSON é indiferente (result antes do nudge é até mais natural).
         self._append_observation(step_n, action, res)
+        if self._pending_loop_warn is not None:        # warn-before-block (WIN1): DEPOIS do result, nunca antes
+            self.messages.append({"role": "user", "content": self._pending_loop_warn})
+            self._pending_loop_warn = None
         # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
         # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
         if res.ok and not res.effect:
@@ -1211,6 +1271,20 @@ class Harness:
                     self._emit("complete_rejected", missing=["entrega rasa vs trabalho feito"])
                     self.messages.append({"role": "user", "content": _THIN_NUDGE.format(n=_real)})
                     return None
+                # VERIFY-ON-STOP mínimo (WIN2, espírito Hermes verification_stop.py): exit_criteria VAZIO
+                # (nada VERIFICÁVEL declarado) + já houve EFEITO real nesta corrida (escreveu/editou/rodou
+                # algo que muda estado) + nenhum run_shell BEM-SUCEDIDO depois do último efeito → o modelo
+                # está encerrando sem checar o próprio trabalho. Empurra UMA vez; na 2ª tentativa aceita
+                # DE QUALQUER JEITO (sem risco de loop — é um nudge, não um gate como check_exit).
+                if (not t.exit_criteria and not self._verify_nudged
+                        and any(s.effect for s in t.steps) and not _verified_since_last_effect(t.steps)):
+                    self._verify_nudged = True
+                    self._emit("complete_rejected", missing=["sem verificação após o último efeito"])
+                    self.messages.append({"role": "user", "content":
+                        "Antes de concluir: você fez mudança(s) mas não vi um comando de VERIFICAÇÃO rodar "
+                        "depois delas. Verifique o resultado antes de concluir — rode um comando que comprove "
+                        "(teste, lint, o próprio comando/arquivo alterado) e SÓ AÍ chame task_complete de novo."})
+                    return None
                 t.state = TaskState.COMPLETE
                 t.result = _summary or "(sem resumo)"
                 self._extract_on_complete(t)
@@ -1235,6 +1309,9 @@ class Harness:
         self.generate = self.escalate
         self._loop_breaks = 0
         self._consecutive_violations = 0
+        self._consecutive_arg_fails = 0
+        self._consecutive_action_failures = 0            # WIN1: modelo NOVO começa sem bagagem de falha agregada
+        self._loop_warned.clear()
         self._fingerprints.clear()
         self._batch = []                                # descarta ações do lote antigo: o modelo NOVO reavalia
         #                                                 do zero (ação órfã do modelo anterior = incoerência)

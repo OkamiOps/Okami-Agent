@@ -15,6 +15,58 @@ from okami.cli._shared import (
 )
 from okami.i18n import t
 
+# `okami run` é Fase 0: ida-e-volta CRUA ao provider, SEM registry de tools nem loop de execução —
+# não há QUEM rode um tool_call que o modelo emita aqui. Sem este aviso, o modelo (treinado/afinado
+# em dados agentic) tende a "fingir" que tem ferramentas e devolve JSON de tool_call ou listagens de
+# arquivo INVENTADAS como se fossem reais (achado via E2E). A linha é SEMPRE anexada — mesmo com
+# --system custom — porque o bug é do MODELO assumir tools por hábito, não de o dono esquecer de avisar.
+_NO_TOOLS_NOTICE = (
+    "Você NÃO tem acesso a ferramentas, arquivos, shell ou internet nesta conversa — é uma "
+    "ida-e-volta direta ao seu conhecimento. Responda só com o que você sabe; NUNCA finja ter "
+    "chamado uma ferramenta, NUNCA invente saída de comando/arquivo/busca como se fosse real."
+)
+
+
+def _pyproject_version(text: str) -> str | None:
+    """Extrai `version = "..."` do [project] de um pyproject.toml (regex simples — evita depender de
+    tomllib só pra isto). None se não achar. Puro/testável com um texto qualquer."""
+    import re
+    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text or "")
+    return m.group(1) if m else None
+
+
+def _version_drift_warning(installed: str, pyproject: "str | None") -> "str | None":
+    """None se bateu (ou não achou pyproject.toml — instalação empacotada normal); senão o aviso de
+    'instalação desatualizada' (dev editou o repo mas o pacote instalado ainda é o antigo). Puro/testável."""
+    if not pyproject or installed == pyproject:
+        return None
+    return t("doctor.version_drift",
+             _default="okami.__version__ ({installed}) ≠ pyproject.toml ({proj}) — instalação desatualizada? "
+                       "rode `pip install -e .` / `uv sync`.", installed=installed, proj=pyproject)
+
+
+def _find_pyproject() -> "Path | None":
+    """Acha o pyproject.toml relevante: do CWD (rodando dentro do repo) ou da raiz do pacote instalado em
+    modo editável (okami/../pyproject.toml). None se nenhum existir (instalação empacotada normal — sem
+    drift pra checar)."""
+    import okami as _okami_pkg
+    candidates = [Path.cwd() / "pyproject.toml"]
+    try:
+        candidates.append(Path(_okami_pkg.__file__).resolve().parent.parent / "pyproject.toml")
+    except Exception:  # noqa: BLE001 — __file__ pode faltar em empacotamentos exóticos
+        pass
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def _run_system_prompt(system: str | None) -> str:
+    """Monta o system prompt da Fase 0: aviso 'sem tools' sempre presente, `--system` do usuário
+    (se houver) some ANTES — o dono pode dar contexto/persona, mas o aviso nunca é sobrescrito."""
+    extra = system.strip() if isinstance(system, str) and system.strip() else ""
+    return f"{extra}\n\n{_NO_TOOLS_NOTICE}" if extra else _NO_TOOLS_NOTICE
+
 
 @app.command(help=_tr("cli.run", _default="Single round-trip to the provider (Phase 0)."))
 def run(
@@ -42,17 +94,23 @@ def run(
             f"(defina {pc.api_key_env}). Tentando mesmo assim..."
         )
 
+    effective_system = _run_system_prompt(system)
     try:
+        from okami.core.harness.parsing import strip_think_blocks
         if no_stream:
-            out = prov.complete(cfg, prompt, provider=provider, system=system, model=model)
-            console.print(out)
+            out = prov.complete(cfg, prompt, provider=provider, system=effective_system, model=model)
+            console.print(strip_think_blocks(out))          # tira <think>/reasoning antes de mostrar (paridade harness)
         else:
+            # buffer inteiro antes de imprimir: <think>/reasoning pode vazar em pedaços que só formam
+            # a tag completa depois de vários chunks — strip por-chunk deixaria lixo escapar na tela.
+            buf = []
             for piece in prov.stream_complete(
-                cfg, prompt, provider=provider, system=system, model=model
+                cfg, prompt, provider=provider, system=effective_system, model=model
             ):
-                sys.stdout.write(piece)
-                sys.stdout.flush()
+                buf.append(piece)
+            sys.stdout.write(strip_think_blocks("".join(buf)))
             sys.stdout.write("\n")
+            sys.stdout.flush()
     except Exception as e:  # noqa: BLE001
         console.print(f"\n[red]Erro na chamada:[/red] {e}")
         raise typer.Exit(1)
@@ -279,6 +337,13 @@ def doctor(
                            title=t("doctor.card.disk", _default="Disk"), accent=_ui.MAGENTA))
 
     console.print(_ui.grid(cards, width=console.width))
+
+    drift_p = _find_pyproject()                   # instalação desatualizada (stale install): __version__ ≠ pyproject
+    drift_msg = _version_drift_warning(__version__, _pyproject_version(drift_p.read_text(encoding="utf-8"))
+                                       if drift_p else None)
+    if drift_msg:
+        console.print()
+        console.print(f"[bold yellow]⚠ VERSION DRIFT[/bold yellow] {drift_msg}")
 
     from okami.core import advisories            # supply-chain: pacote comprometido instalado? (item 15)
     hits = advisories.detect_compromised(include_acked=False)

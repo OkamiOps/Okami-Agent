@@ -185,6 +185,45 @@ def _make_desktop_notifier(global_raw: dict) -> Callable[[str, str], None]:
     return _notify
 
 
+def _execute_scheduled_job(job: dict, *, by_agent: dict, eps: list, sched, toast) -> str:
+    """Roda UM job vencido do scheduler e entrega o resultado (função pura em relação a threads —
+    extraída de `_start_scheduler` p/ ser testável direto, sem subir thread/loop real).
+
+    Espelha a entrega (WIN #1, paridade Hermes) no transcript de CADA sessão-alvo: sem isso o agente
+    não "lembra" de ter mandado aquilo por cron e pode repetir/se contradizer no próximo turno. O texto
+    mirrorado passa por `redact_pii` (WIN #2b) ANTES de virar histórico — o espelho volta pro contexto
+    do PRÓXIMO turno (prompt->LLM), que é exatamente o caminho que `pii.redact_pii` foi feito p/ cobrir.
+    O texto ENVIADO ao usuário fica cru (ele já conhece o próprio telefone/id)."""
+    ep = by_agent.get(job.get("agent")) or (eps[0] if eps else None)
+    if ep is None:
+        return "(sem endpoint p/ entregar)"
+    from okami.automation.scheduler import delivery_decision, delivery_targets, gate_allows, run_script
+    if not gate_allows(job, cwd=str(ep.ws)):           # wake-gate: condição barata falhou → não acorda o LLM
+        return "(gate: condição não bateu — agente não foi acordado)"
+    if job.get("script"):                              # job SCRIPT (item 30): roda comando, sem gastar LLM
+        result = run_script(job["script"], cwd=str(ep.ws))
+    else:
+        from okami.automation.scheduler import headless_prompt
+        task = ep.run_task(ep.cfg, ep.ws, headless_prompt(job["prompt"]),   # roda headless: não trava pedindo
+                           agent_home=ep.home, open_fs=ep.open_fs)
+        result = task.result or task.reason or task.state.value
+    deliver, text = delivery_decision(result)          # [SILENT] → registra mas não manda pro chat
+    sched.record_output(job["id"], text)                # item 30: histórico do output (não some após entregar)
+    if deliver:                                         # multi-alvo ("123,456") ou a CASA (/sethome)
+        from okami.gateway.mirror import mirror_record, should_mirror
+        from okami.gateway.pii import redact_pii
+        for tg in delivery_targets(job.get("target"), home=ep.home_chat()):
+            sent = f"⏰ {job['id']}: {text}"
+            ep.channel.send(tg, sent)
+            if should_mirror("cron"):                   # espelha no transcript da sessão-alvo
+                s = ep.session(tg)
+                platform = getattr(ep.channel, "name", "") or ""
+                role, mirrored = mirror_record(redact_pii(sent, platform), source="cron")
+                ep._append_turn(tg, s, role, mirrored)
+        toast(f"⏰ {ep.agent_id}", f"{job['id']}: {text}")   # #4: toast desktop (best-effort)
+    return text
+
+
 def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 30.0,
                      desktop_notify=None) -> None:
     """Sobe o scheduler (§11): a cada `interval`s roda jobs vencidos e ENTREGA o resultado no chat.
@@ -198,26 +237,7 @@ def _start_scheduler(eps: list, emit: Callable[[str], None], interval: float = 3
     toast = desktop_notify or (lambda title, body: None)
 
     def execute(job):
-        ep = by_agent.get(job.get("agent")) or (eps[0] if eps else None)
-        if ep is None:
-            return "(sem endpoint p/ entregar)"
-        from okami.automation.scheduler import delivery_decision, delivery_targets, gate_allows, run_script
-        if not gate_allows(job, cwd=str(ep.ws)):       # wake-gate: condição barata falhou → não acorda o LLM
-            return "(gate: condição não bateu — agente não foi acordado)"
-        if job.get("script"):                          # job SCRIPT (item 30): roda comando, sem gastar LLM
-            result = run_script(job["script"], cwd=str(ep.ws))
-        else:
-            from okami.automation.scheduler import headless_prompt
-            task = ep.run_task(ep.cfg, ep.ws, headless_prompt(job["prompt"]),   # roda headless: não trava pedindo
-                               agent_home=ep.home, open_fs=ep.open_fs)
-            result = task.result or task.reason or task.state.value
-        deliver, text = delivery_decision(result)      # [SILENT] → registra mas não manda pro chat
-        sched.record_output(job["id"], text)           # item 30: histórico do output (não some após entregar)
-        if deliver:                                    # multi-alvo ("123,456") ou a CASA (/sethome)
-            for tg in delivery_targets(job.get("target"), home=ep.home_chat()):
-                ep.channel.send(tg, f"⏰ {job['id']}: {text}")
-            toast(f"⏰ {ep.agent_id}", f"{job['id']}: {text}")   # #4: toast desktop (best-effort)
-        return text
+        return _execute_scheduled_job(job, by_agent=by_agent, eps=eps, sched=sched, toast=toast)
 
     def loop():
         while True:

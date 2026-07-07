@@ -83,7 +83,8 @@ def test_extract_durable_task_writes_to_ranked_memory_not_file(tmp_path):
     mem = _Mem()
     r = Harness(Script([J("write_file", path="a.txt", content="x"),
                         J("write_file", path="b.txt", content="y"),
-                        J("task_complete", summary="criei os arquivos a.txt e b.txt como pedido")]),
+                        J("task_complete", summary="criei os arquivos a.txt e b.txt como pedido"),  # nudge (WIN2)
+                        J("task_complete", summary="criei os arquivos a.txt e b.txt como pedido")]),  # 2ª: aceita
                 Task(goal="cria os arquivos a.txt e b.txt"), ws, budget=Budget(max_steps=6),
                 memory=mem, agent_home=home).run()
     assert r.state == TaskState.COMPLETE
@@ -97,7 +98,8 @@ def test_extract_trivial_task_writes_nothing(tmp_path):
     ws, home = _dirs(tmp_path)
     mem = _Mem()
     r = Harness(Script([J("write_file", path="a.txt", content="x"),
-                        J("task_complete", summary="criei o arquivo a.txt como pedido")]),
+                        J("task_complete", summary="criei o arquivo a.txt como pedido"),  # nudge (WIN2)
+                        J("task_complete", summary="criei o arquivo a.txt como pedido")]),  # 2ª: aceita
                 Task(goal="cria o arquivo a.txt"), ws, budget=Budget(max_steps=6),
                 memory=mem, agent_home=home).run()
     assert r.state == TaskState.COMPLETE

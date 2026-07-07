@@ -79,6 +79,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                scope="chat", tier="power"),
     CommandDef("mouse", "toggle the TUI mouse (off = native terminal selection)", "info",
                args="[on|off]", scope="chat", tier="power"),
+    CommandDef("redraw", "force a clean repaint (fixes a garbled terminal after resize/glitch)", "info",
+               scope="chat", tier="power"),
     CommandDef("whoami", "show your chat id (for the allowlist)", "info", ("id",), tier="power"),
     # ---- system ----
     CommandDef("yolo", "auto-approve sensitive actions this session", "system"),

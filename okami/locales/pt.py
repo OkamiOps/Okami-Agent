@@ -516,6 +516,7 @@ MESSAGES: dict[str, str] = {
     "cmd.replay": "mostra os últimos N tool-calls com args completos + saída",
     "cmd.skin": "troca o tema da TUI (okami | nord | dracula | …)",
     "cmd.mouse": "liga/desliga o mouse da TUI (off = seleção nativa do terminal)",
+    "cmd.redraw": "força um repaint limpo (conserta o terminal bagunçado após resize/glitch)",
     "cmd.whoami": "mostra seu chat id (p/ allowlist)",
     # sistema
     "cmd.yolo": "auto-aprova ações sensíveis nesta sessão",
@@ -529,6 +530,8 @@ MESSAGES: dict[str, str] = {
     "cmd.memory": "escritas de memória pendentes: /memory pending|approve|reject (write_approval)",
     # ── doctor (okami doctor) ──
     "doctor.lint_summary": "{p} ok · {w} avisos · {f} falhas",
+    "doctor.version_drift": "okami.__version__ ({installed}) ≠ pyproject.toml ({proj}) — instalação "
+                            "desatualizada? rode `pip install -e .` / `uv sync`.",
     "doctor.prov.experimental": "experimental",
     "doctor.prov.experimental_hint": "opt-in · não verificado",
     "doctor.prov.optional": "opcional",

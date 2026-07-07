@@ -30,7 +30,8 @@ def test_thinking_phrase_rotates_and_cycles():
 def test_running_tool_text_has_emoji_name_and_clock():
     t = tui.running_tool_text("read_file", {"path": "a.py"}, spin="⠙", elapsed=3)
     s = t.plain
-    assert "read_file" in s and "3s" in s and "⠙" in s
+    # WIN6: a linha mostra o VERBO pt-BR ("lendo arquivo"), não o nome cru da tool ("read_file")
+    assert "lendo arquivo" in s and "3s" in s and "⠙" in s
     assert "📖" in s                                       # emoji do tipo de tool (read → 📖)
     assert "a.py" in s                                     # preview do arg
 

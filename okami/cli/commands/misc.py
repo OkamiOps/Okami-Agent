@@ -169,6 +169,42 @@ def sessions_export(
     console.print(f"[green]✓ exportado[/green] {out}")
 
 
+@sessions_app.command("delete", help=_tr("cli.sessions.delete", _default="Delete a chat session — transcript + archives + metadata. Cannot be undone (okami sessions delete <chat_id>)."))
+def sessions_delete(
+    chat_id: str = typer.Argument(..., help=_tr("cli.sessions.delete.id", _default="Chat id to delete (see `okami sessions list`).")),
+    agent: str = typer.Option("", "-a", "--agent"),
+    yes: bool = typer.Option(False, "-y", "--yes", help=_tr("cli.sessions.delete.yes", _default="Skip the confirmation prompt.")),
+) -> None:
+    """Apaga uma sessão: transcript ativo (.jsonl) + arquivos arquivados por /new (.reset.jsonl) + a
+    entrada em sessions.json. Reusa a API do TranscriptStore (mesmo layout do /new e do `sessions export`)
+    — sem volta, por isso confirma antes (a menos que -y)."""
+    store, who = _sessions_store(agent)
+    if chat_id not in store.ids():
+        console.print(f"[yellow]sessão '{chat_id}' não existe[/yellow] [dim](veja `okami sessions list`)[/dim]")
+        raise typer.Exit(1)
+    if not yes:
+        ok = typer.confirm(_tr("cli.sessions.delete.confirm",
+                               _default="apagar a sessão '{cid}' ({who})? não tem volta.", cid=chat_id, who=who))
+        if not ok:
+            console.print("[dim]cancelado.[/dim]")
+            raise typer.Exit(0)
+    removed = []
+    tx = store._tx_path(chat_id)          # mesma validação anti-traversal do append/read
+    if tx.exists():
+        tx.unlink()
+        removed.append(tx.name)
+    for p in sorted(store.dir.glob(f"{chat_id}.*.reset.jsonl")):   # arquivos de /new (archives)
+        p.unlink()
+        removed.append(p.name)
+    s = store.load_store()
+    if chat_id in s:
+        del s[chat_id]
+        store._save_store(s)
+        removed.append("sessions.json")
+    console.print(f"[green]✓ removido[/green] {chat_id} · {len(removed)} arquivo(s): "
+                  f"{', '.join(removed) if removed else '—'}")
+
+
 @app.command("serve-mcp", help=_tr("cli.serve_mcp", _default="Serve Okami as an MCP server (sessions/history/memory) over stdio."))
 def serve_mcp(
     agent: str = typer.Option("okami", "-a", "--agent", help=_tr("cli.serve_mcp.agent", _default="Agent whose home/sessions to expose.")),

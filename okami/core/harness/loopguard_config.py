@@ -6,7 +6,8 @@ afinar a sensibilidade sem editar código. Default = nada (Budget mantém os def
 """
 from __future__ import annotations
 
-_ALLOWED = ("max_repeat", "stall_limit", "max_loop_breaks", "max_poll_waits", "max_consecutive_violations")
+_ALLOWED = ("max_repeat", "warn_repeat", "stall_limit", "max_loop_breaks", "max_poll_waits",
+           "max_consecutive_violations", "max_tool_failures")
 
 
 def guardrail_budget_overrides(cfg) -> dict:

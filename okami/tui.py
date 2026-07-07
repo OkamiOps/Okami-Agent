@@ -188,8 +188,9 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool = False,
                      pending_clarify: bool = False) -> str:
     """Decisão PURA de roteamento do chat concorrente (REPL e TUI compartilham; testável sem terminal).
 
-    Retorna: exit · help · details · agents · skin · mouse · copy · approval · clarify · stop · queue · handle.
-    - comandos de DISPLAY (help/details/agents) são CLIENTE — não vão pro endpoint;
+    Retorna: exit · help · details · agents · skin · mouse · copy · redraw · approval · clarify · stop
+    · queue · handle.
+    - comandos de DISPLAY (help/details/agents/redraw) são CLIENTE — não vão pro endpoint;
     - aprovação pendente tem prioridade (a próxima linha responde o go/no-go);
     - clarify pendente (turno bloqueado esperando resposta) → a linha responde DIRETO (não vai pra fila);
     - /stop sempre passa direto (cancela mesmo ocupado);
@@ -206,6 +207,8 @@ def _route_repl_line(line: str, *, busy: bool, pending_approval: bool = False,
         return "agents"
     if head in ("/replay", "/last"):                    # M8: últimos tool-calls c/ args+saída (cliente)
         return "replay"
+    if head == "/redraw":                               # repaint limpo (SIGWINCH perdido/glitch de terminal)
+        return "redraw"
     if head == "/skin":                                 # tema da TUI (cliente)
         return "skin"
     if head == "/mouse":                                # mouse on/off (cliente)
@@ -312,6 +315,96 @@ def welcome(*, version: str, model: str, provider: str, cwd: Path, session: str,
     return Group(header, Text(""), panel, tips)
 
 
+def install_focus_report_ignore() -> int:
+    """Silencia sequências de focus-report do terminal (ESC[I / ESC[O) que iTerm2/Ghostty/xterm mandam ao
+    trocar de aba/janela — port do pt_input_extras.py do Hermes (`install_ignored_terminal_sequences`).
+
+    Sem isto, o prompt_toolkit não reconhece ESC[I/ESC[O e cai no fallback: interpreta ESC + '[' + 'I'/'O'
+    como teclas soltas, e o 'I'/'O' vaza pro buffer do input como lixo visível ("Ilorem ipsum..."). Registra
+    como `Keys.Ignore` — os bytes nunca chegam no buffer (mais limpo que filtrar a string depois).
+    setdefault: uma tabela já registrada por outro código (usuário/downstream) NÃO é sobrescrita.
+    Devolve quantas sequências foram mudadas (0 = sem prompt_toolkit, ou já registradas)."""
+    try:
+        from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
+        from prompt_toolkit.keys import Keys
+    except Exception:  # noqa: BLE001 — sem prompt_toolkit: REPL simples não usa isto mesmo
+        return 0
+    changed = 0
+    for seq in ("\x1b[I", "\x1b[O"):
+        if seq not in ANSI_SEQUENCES:
+            ANSI_SEQUENCES[seq] = Keys.Ignore
+            changed += 1
+    return changed
+
+
+def install_bracketed_paste_timeout_patch(timeout_s: float = 2.0) -> bool:
+    """Patch defensivo no `Vt100Parser.feed` do prompt_toolkit p/ nunca travar esperando o fim de um paste
+    colado (bracketed paste) — port do patch em hermes_cli/cli.py (`_apply_bracketed_paste_timeout_patch`,
+    upstream #16263).
+
+    O parser normal BUFFERIZA tudo enquanto espera o marcador de fim `ESC[201~`. Se o terminal PERDER esse
+    marcador (glitch de SSH, sleep/wake do macOS, corrida no multiplexador), o input trava pra sempre — a
+    única saída era matar a aba. Este patch estoura um timeout: se `timeout_s` passar sem o fim do paste,
+    o que já foi bufferizado é entregue como um BracketedPaste normal e o parser volta ao modo normal.
+
+    Idempotente (sentinela no módulo). Devolve True se aplicou (ou já estava aplicado), False se
+    prompt_toolkit não está disponível."""
+    try:
+        import time as _time
+
+        import prompt_toolkit.input.vt100_parser as _vt100_mod
+        from prompt_toolkit.key_binding.key_processor import KeyPress as _PtKeyPress
+        from prompt_toolkit.keys import Keys as _PtKeys
+    except Exception:  # noqa: BLE001 — sem prompt_toolkit: REPL simples não usa isto mesmo
+        return False
+
+    if getattr(_vt100_mod, "_okami_bp_timeout_patched", False):
+        return True
+
+    def _patched_feed(self_parser, data: str) -> None:
+        if self_parser._in_bracketed_paste:
+            self_parser._paste_buffer += data
+            end_mark = "\x1b[201~"
+            if end_mark in self_parser._paste_buffer:
+                end_index = self_parser._paste_buffer.index(end_mark)
+                paste_content = self_parser._paste_buffer[:end_index]
+                self_parser.feed_key_callback(_PtKeyPress(_PtKeys.BracketedPaste, paste_content))
+                self_parser._in_bracketed_paste = False
+                remaining = self_parser._paste_buffer[end_index + len(end_mark):]
+                self_parser._paste_buffer = ""
+                self_parser._okami_bp_start = None
+                if remaining:
+                    _patched_feed(self_parser, remaining)
+            else:
+                bp_start = getattr(self_parser, "_okami_bp_start", None)
+                now = _time.monotonic()
+                if bp_start is None:
+                    self_parser._okami_bp_start = now
+                elif now - bp_start > timeout_s:
+                    paste_content = self_parser._paste_buffer
+                    self_parser._in_bracketed_paste = False
+                    self_parser._paste_buffer = ""
+                    self_parser._okami_bp_start = None
+                    if paste_content:
+                        self_parser.feed_key_callback(_PtKeyPress(_PtKeys.BracketedPaste, paste_content))
+        else:                                              # modo normal: reinlinea o feed original
+            for i, c in enumerate(data):
+                if self_parser._in_bracketed_paste:
+                    _patched_feed(self_parser, data[i:])
+                    break
+                self_parser._input_parser.send(c)
+
+    _vt100_mod.Vt100Parser.feed = _patched_feed
+    _vt100_mod._okami_bp_timeout_patched = True
+    return True
+
+
+def redraw_sequence() -> str:
+    """ANSI de repaint limpo (home + apaga da tela pra baixo) — usado por /redraw e pelo handler de
+    SIGWINCH quando o terminal fica com lixo depois de um resize/glitch. Puro, testável sem TTY."""
+    return "\x1b[H\x1b[J"
+
+
 def _args_preview(args: dict) -> str:
     """1 linha curta dos args de uma tool (path/cmd/query) p/ o display ao vivo."""
     if not isinstance(args, dict):
@@ -415,6 +508,48 @@ def tool_emoji(tool: str) -> str:
     return "🛠️"
 
 
+# Verbo pt-BR por FERRAMENTA (paridade _TOOL_VERBS do Hermes/agent/display.py) — usado na linha ao vivo
+# ("🐚 executando comando…" em vez de "🐚 run_shell…"). Tool sem entrada → cai pro nome cru (raw preview).
+_TOOL_VERBS = {
+    "run_shell": "executando comando",
+    "read_file": "lendo arquivo",
+    "list_dir": "listando pasta",
+    "find_files": "buscando arquivos",
+    "write_file": "escrevendo arquivo",
+    "edit_file": "editando arquivo",
+    "remember": "gravando na memória",
+    "recall_memory": "consultando a memória",
+    "remember_user": "gravando preferência",
+    "use_skill": "usando skill",
+    "spawn": "delegando pra um agente",
+    "browse": "navegando na web",
+    "generate_image": "gerando imagem",
+    "need_input": "perguntando",
+    "process_start": "iniciando processo",
+    "process_write": "escrevendo no processo",
+    "process_poll": "checando processo",
+    "process_wait": "esperando processo",
+    "process_log": "lendo log do processo",
+    "process_list": "listando processos",
+    "process_kill": "encerrando processo",
+    "process_signal": "sinalizando processo",
+}
+
+
+def tool_verb(tool: str) -> str:
+    """Verbo pt-BR da tool p/ a linha 'rodando agora' — cai pro nome cru se a tool for desconhecida
+    (custom/plugin/MCP), igual ao fallback do Hermes."""
+    return _TOOL_VERBS.get(tool, str(tool))
+
+
+def _exit_code_of(out: str) -> "int | None":
+    """Extrai 'exit=N' do texto de saída de uma tool (run_shell/execute_code/process_*) p/ o sufixo
+    '[exit N]' no card de falha. None quando a tool não reporta código de saída no texto."""
+    import re
+    m = re.search(r"exit=(-?\d+)", out or "")
+    return int(m.group(1)) if m else None
+
+
 # Verbo que ROTACIONA enquanto a agente pensa (paridade FaceTicker do Hermes: em vez de "pensando…"
 # fixo por 30s, o verbo muda devagar e dá sensação de vida). _THINK_EVERY ticks por verbo (~2s a 0.12s/tick).
 _THINK_VERBS = ("raciocinando", "vasculhando o código", "ligando os pontos", "pensando alto",
@@ -437,7 +572,7 @@ def running_tool_text(tool: str, args: dict, *, spin: str = "", elapsed: int = 0
     t.append(f"  {tool_emoji(tool)} ", style="")
     if spin:
         t.append(f"{spin} ", style=f"bold {ORANGE}")
-    t.append(str(tool), style=f"bold {SOFT}")
+    t.append(tool_verb(tool), style=f"bold {SOFT}")
     prev = _args_preview(args or {})
     if prev:
         t.append(f" {prev}", style=MUTE)
@@ -497,7 +632,12 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
         prev = _args_full(args) if detail == "expanded" else _args_preview(args)
         emoji = tool_emoji(e["tool"])                   # 🛠️/🐚/📖/✍️… = QUE tipo de coisa o agente faz
         markc, mark = (CYAN, "✓") if e.get("ok") else ("red", "✗")
-        t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{escape(str(e['tool']))}[/]"
+        fail_suffix = ""
+        if not e.get("ok"):                              # falhou e a saída tem 'exit=N' → mostra o código
+            ec = _exit_code_of(e.get("out") or "")
+            if ec is not None:                            # escapa: '[exit N]' literal, não é tag de markup
+                fail_suffix = f" [{MUTE}]{escape(f'[exit {ec}]')}[/]"
+        t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{escape(str(e['tool']))}[/]{fail_suffix}"
                              + (f" [{MUTE}]{escape(str(prev))}[/]" if prev else ""))
         return t
     if k == "approval_request":

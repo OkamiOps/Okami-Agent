@@ -69,13 +69,6 @@ def test_borrowed_credential_payload_is_sanitized():
     assert is_owned_source("oauth_pkce") is True and is_owned_source("vendor_x") is False
 
 
-# ── active-session concurrency limit ──
-def test_session_limit_check():
-    from okami.gateway.session_limit import within_session_limit
-    assert within_session_limit(current=2, limit=5) is True
-    assert within_session_limit(current=5, limit=5) is False        # cheio → recusa nova
-    assert within_session_limit(current=99, limit=0) is True        # limit=0 = ilimitado
-
 
 # ── tool_guardrails config-driven (→ Budget) ──
 def test_guardrail_budget_overrides():

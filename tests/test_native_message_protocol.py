@@ -114,7 +114,10 @@ def test_native_multiple_writes_run_serially_in_one_turn(tmp_path):
 
     h = Harness(gen, Task(goal="crie x e y"), tmp_path)
     h.run()
-    assert calls["n"] == 2                                       # 2 escritas no MESMO turno (1 geração)
+    # 2 escritas no MESMO turno (1 geração) + 1 chamada extra: exit_criteria vazio + efeito sem verify
+    # dispara o nudge de verify-on-stop (WIN2) uma vez antes de aceitar — não quebra o paralelismo do
+    # turno 1 (que é o que este teste prova).
+    assert calls["n"] == 3
     assert (tmp_path / "x.txt").read_text(encoding="utf-8") == "X"
     assert (tmp_path / "y.txt").read_text(encoding="utf-8") == "Y"
     asst = _assistant_with_tool_calls(h.messages)

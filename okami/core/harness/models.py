@@ -24,6 +24,8 @@ class Step:
     args: dict
     output: str
     effect: bool
+    ok: bool = True     # sucesso da tool (res.ok) — usado pelo nudge de verify-on-stop (§WIN2: achar um
+    #                     run_shell bem-sucedido DEPOIS do último efeito, não só "rodou algo")
 
 
 @dataclass
@@ -41,9 +43,23 @@ class Task:
 class Budget:
     max_steps: int = 200         # passos (ações) por tarefa — alto p/ trabalho longo de verdade (review/refactor)
     max_consecutive_violations: int = 3
-    max_repeat: int = 3          # mesma ação N vezes → loop
+    # WARN-BEFORE-BLOCK (paridade Hermes agent/tool_guardrails.py warn_after/hard_stop_after): repetir a
+    # MESMA ação não é mais bloqueio seco na 3ª tentativa — a 2ª repetição (warn_repeat) injeta uma
+    # OBSERVAÇÃO de aviso ("você repetiu — mude a abordagem ou explique por quê") mas a tool RODA normal;
+    # só bloqueia de verdade quando a repetição chega em max_repeat (default 5, como o
+    # same_tool_failure_halt_after do Hermes). ABAB (cycle) continua bloqueando na hora — é um padrão
+    # mais claramente patológico que uma simples repetição.
+    warn_repeat: int = 2         # repetição Nº → injeta aviso (não bloqueia)
+    max_repeat: int = 5          # repetição Nº → bloqueia de vez (era hard-block na 3ª; agora dá mais corda)
     stall_limit: int = 4         # passos sem efeito observável → quebra
     max_loop_breaks: int = 3     # quebras de loop antes de FAILED
+    # AGREGAÇÃO unificada (paridade Hermes tool_guardrails.py:298-319 same_tool_failure_*): nome de tool
+    # ALUCINADO e args FALTANDO são hoje contadores DISJUNTOS (_consecutive_violations vs
+    # _consecutive_arg_fails) — cada um só zera quando o OUTRO tipo de erro acontece, então um modelo
+    # que ALTERNA entre "nome errado" e "nome certo sem arg obrigatório" nunca deixa nenhum dos dois
+    # isolado bater o próprio teto. Este teto SOMA as duas falhas (nesta ordem ou naquela); zera só
+    # quando alguma tool de fato DISPACHA de verdade (_handle_tool_result).
+    max_tool_failures: int = 6
     max_poll_waits: int = 8      # ESPERAS repetidas num processo em background (process_wait/poll/log) antes de
     #                              cobrar como loop — esperar um build/teste lento NÃO é loop inútil, é I/O
     max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos

@@ -180,20 +180,43 @@ def denied(surface: str, name: str, *, config=None, sandbox=None) -> bool:
     return False
 
 
+# Tools já avisadas nesta EXECUÇÃO do processo (chat de terminal roda prune_unavailable a CADA turno
+# — sem cache, as ~7 tools não-configuradas (voice/vídeo/HA/feishu/x_search sem integração) imprimiam
+# o mesmo "indisponível" em TODO turno, um mar de ruído repetido). Módulo-level de propósito: o registro
+# (default_registry()) é reconstruído por turno, então um cache local à função não sobreviveria.
+_WARNED_UNAVAILABLE: set[str] = set()
+
+
+def reset_unavailable_warnings() -> None:
+    """Limpa o cache de avisos 'já mostrado' — usado pelos testes (processo de teste é 1 só, sessões
+    são várias) p/ isolar cada caso sem vazar estado entre eles."""
+    _WARNED_UNAVAILABLE.clear()
+
+
 def prune_unavailable(registry: dict, *, emit=lambda m: None) -> dict:
     """check_fn de disponibilidade (pesquisa #5 item 27): tool cujo `check()` devolve uma razão
     (dep/credencial faltando) SAI do registro — o modelo nem a vê, em vez de chamá-la e falhar.
-    check() que estoura = indisponível (fail-closed do check, fail-open da sessão: o resto segue)."""
+    check() que estoura = indisponível (fail-closed do check, fail-open da sessão: o resto segue).
+
+    Cada tool indisponível só gera aviso na PRIMEIRA vez que aparece neste processo — turnos
+    seguintes podam em silêncio (já foi dito). Quando há algo NOVO, sai como UMA linha-resumo (não
+    uma linha por tool) p/ não afogar o log de boot quando várias somem juntas."""
     out: dict = {}
+    new_unavailable: list[str] = []
     for name, tool in registry.items():
         try:
             reason = tool.check() if hasattr(tool, "check") else None
         except Exception as e:  # noqa: BLE001 — um check quebrado não derruba a sessão
             reason = f"check falhou: {e}"
         if reason:
-            emit(f"🔌 tool '{name}' indisponível: {reason}")
+            if name not in _WARNED_UNAVAILABLE:
+                _WARNED_UNAVAILABLE.add(name)
+                new_unavailable.append(f"{name} ({reason})")
             continue
         out[name] = tool
+    if new_unavailable:
+        emit(f"🔌 {len(new_unavailable)} tool(s) indisponível(is) — pod{'a' if len(new_unavailable) == 1 else 'adas'} do "
+             f"registro: {', '.join(new_unavailable)}")
     return out
 
 

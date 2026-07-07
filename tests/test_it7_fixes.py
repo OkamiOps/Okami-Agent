@@ -98,7 +98,8 @@ def test_task_complete_zero_work_action_expected_is_nudged(tmp_path):
     outputs = [
         _J("task_complete", summary="feito (de memória, sem rodar nada)"),  # exit_criteria VAZIO + 0 steps
         _J("write_file", path="hello.txt", content="oi"),                   # faz trabalho REAL
-        _J("task_complete", summary="agora sim, criei o arquivo"),
+        _J("task_complete", summary="agora sim, criei o arquivo"),          # efeito sem verify → nudge (WIN2)
+        _J("task_complete", summary="agora sim, criei o arquivo"),          # 2ª tentativa: aceita de qq jeito
     ]
     events: list = []
     t = Task(goal="crie um arquivo hello.txt")                              # action-expected, SEM exit_criteria

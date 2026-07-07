@@ -62,7 +62,11 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         _run_repl_simple(ep, cid, console, tui, model_label=model_label, ctx_pct=ctx_pct)
         return
 
+    tui.install_focus_report_ignore()          # WIN1: ESC[I/ESC[O (iTerm2/Ghostty) não vazam pro buffer
+    tui.install_bracketed_paste_timeout_patch()  # WIN2: paste colado sem ESC[201~ (SSH glitch) não trava input
+
     import collections
+    import signal as _signal
     import threading
     import time as _t
 
@@ -142,6 +146,30 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} {_tr('status.turns', _default='turns')}  ·  {state}{q}"
                     f"    {_tr('chat.toolbar.keys', _default='Ctrl-C cancel · Ctrl-D exit')} ")
 
+    # WIN3: SIGWINCH (resize) + /redraw — repinta limpo quando o terminal fica com lixo (reflow, glitch de
+    # multiplexador). Minimal: não reproduz o scrollback inteiro, só limpa e deixa o próximo prompt desenhar.
+    _needs_redraw = [False]
+
+    def _do_redraw() -> None:
+        try:
+            sys.stdout.write(tui.redraw_sequence())
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001 — repaint é cosmético, nunca derruba o REPL
+            pass
+        try:
+            get_app().invalidate()
+        except Exception:  # noqa: BLE001 — sem app rodando (fora do prompt()) → só o clear acima já ajuda
+            pass
+
+    def _on_winch(signum, frame) -> None:               # noqa: ANN001 — assinatura de signal handler
+        _needs_redraw[0] = True
+
+    if hasattr(_signal, "SIGWINCH"):
+        try:
+            _signal.signal(_signal.SIGWINCH, _on_winch)
+        except (ValueError, OSError):                    # thread não-principal → sem handler; /redraw manual segue OK
+            pass
+
     def _user_panel(msg: str):                        # fala do usuário em MOLDURA CIANO (simetria c/ o agente laranja)
         from datetime import datetime
         from rich.box import ROUNDED
@@ -153,6 +181,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
                      border_style="#00dfe8", box=ROUNDED, padding=(0, 1), expand=True)
 
     while True:
+        if _needs_redraw[0]:                            # SIGWINCH pegou entre turnos → repinta ANTES do prompt
+            _needs_redraw[0] = False
+            _do_redraw()
         try:
             with patch_stdout(raw=True):                # erase_when_done (no PromptSession) apaga o eco cru
                 line = session.prompt(_prompt_msg, bottom_toolbar=_toolbar, placeholder=_placeholder,
@@ -206,6 +237,9 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
             except ValueError:
                 n = 10
             console.print(tui.replay_view(list(getattr(ep, "_step_log", []) or []), n))
+            continue
+        if decision == "redraw":                        # /redraw: repaint manual (paridade Ctrl+L do Hermes)
+            _do_redraw()
             continue
         if decision in ("skin", "mouse"):               # só fazem sentido na TUI de tela cheia (--tui)
             console.print(f"[dim]🎨 {_tr('chat.tui_only', _default='{cmd} only works in the full-screen TUI (run `okami chat` without --no-tui).', cmd=decision)}[/dim]")
