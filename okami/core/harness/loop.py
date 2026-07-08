@@ -1027,6 +1027,9 @@ class Harness:
         """Pós-dispatch de UMA tool: conta o passo, emite eventos, audita, roda o circuit-breaker e o
         watchdog, e anexa a observação. Devolve o novo step_n. Compartilhado pelo caminho SERIAL e pelo
         PARALELO (item 20) — assim o lote read-only emite step/_audit/observação idêntico ao serial."""
+        _transform = getattr(self.hooks, "transform_tool_result", None)   # duck-typed: hooks doubles em
+        if callable(_transform):                          # teste que só implementam .fire() seguem OK
+            res.output = self.hooks.transform_tool_result(action.tool, action.args, res.output)  # §11
         step_n += 1
         self._consecutive_arg_fails = 0               # dispatch de verdade → zera o contador de args malformados
         self._consecutive_action_failures = 0          # dispatch de verdade → zera o agregado também (WIN1)

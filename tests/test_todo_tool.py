@@ -24,7 +24,7 @@ def ctx(tmp_path: Path) -> ToolContext:
 def test_tool_atributos():
     t = TodoWrite()
     assert t.name == "todo_write"
-    assert t.required == ("todos",)
+    assert t.required == ()   # `todos` agora é OPCIONAL — omitir = ler a lista atual
     assert "todos" in t.args_schema
     assert t.terminal is False
 
@@ -137,3 +137,65 @@ def test_render_mostra_status_no_bloco():
     out = render_pending([{"content": "tarefa", "status": "in_progress"}])
     assert "[in_progress] tarefa" in out
     assert "NAO recomece" in out
+
+
+# ---------- FIX3: `todos` opcional (leitura), `merge`, status `cancelled` ----------
+
+def test_sem_todos_le_lista_atual_sem_mutar(ctx):
+    ctx.todos[:] = [{"id": "1", "content": "existente", "status": "pending"}]
+    res = TodoWrite().run({}, ctx)
+    assert res.ok is True
+    assert res.effect is False
+    assert "existente" in res.output
+    # leitura não muta a lista
+    assert ctx.todos == [{"id": "1", "content": "existente", "status": "pending"}]
+
+
+def test_sem_todos_lista_vazia_nao_quebra(ctx):
+    res = TodoWrite().run({}, ctx)
+    assert res.ok is True
+    assert "vazia" in res.output.lower()
+
+
+def test_status_cancelled_e_valido(ctx):
+    TodoWrite().run({"todos": [{"content": "abandonado", "status": "cancelled"}]}, ctx)
+    assert ctx.todos[0]["status"] == "cancelled"
+    assert "cancelled" in TodoWrite().args_schema["todos"]
+
+
+def test_cancelled_nao_conta_como_aberto(ctx):
+    res = TodoWrite().run({"todos": [
+        {"content": "a", "status": "pending"},
+        {"content": "b", "status": "cancelled"},
+    ]}, ctx)
+    assert "1 aberto" in res.output
+
+
+def test_cancelled_nao_entra_no_render_pending():
+    out = render_pending([{"content": "abandonado", "status": "cancelled"}])
+    assert out == ""
+
+
+def test_merge_atualiza_status_por_id_preservando_o_resto(ctx):
+    ctx.todos[:] = [
+        {"id": "1", "content": "passo um", "status": "pending"},
+        {"id": "2", "content": "passo dois", "status": "pending"},
+    ]
+    res = TodoWrite().run({"merge": True, "todos": [
+        {"id": "1", "content": "passo um", "status": "completed"},
+    ]}, ctx)
+    assert res.ok is True
+    assert [t["status"] for t in ctx.todos] == ["completed", "pending"]
+    assert ctx.todos[1]["content"] == "passo dois"   # item não citado sobrevive intacto
+
+
+def test_merge_com_id_novo_faz_append(ctx):
+    ctx.todos[:] = [{"id": "1", "content": "passo um", "status": "pending"}]
+    TodoWrite().run({"merge": True, "todos": [{"id": "2", "content": "passo dois", "status": "pending"}]}, ctx)
+    assert [t["id"] for t in ctx.todos] == ["1", "2"]
+
+
+def test_merge_false_continua_substituindo_tudo(ctx):
+    ctx.todos[:] = [{"id": "1", "content": "velho", "status": "pending"}]
+    TodoWrite().run({"todos": [{"id": "2", "content": "novo", "status": "pending"}]}, ctx)
+    assert [t["id"] for t in ctx.todos] == ["2"]   # merge omitido (default False) → substitui inteiro

@@ -6,7 +6,7 @@ from okami.cli._app import app, console  # noqa: F401
 # Importa os módulos de comando p/ registrar @app.command / add_typer (ordem = ordem no --help).
 from okami.cli.commands import (  # noqa: F401,E402
     basics, task, skills, memory, setup, persona, cron,
-    chat, media, gateway, provider, config, misc,
+    chat, media, gateway, provider, model, config, misc,
     auth, policy, observability, readiness, curator, channel, fsaccess, sendmsg,
     remote, lsp_cmd, gemini, promptsize,
 )

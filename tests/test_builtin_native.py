@@ -35,10 +35,10 @@ def test_hookmanager_fires_builtin_only_when_enabled(tmp_path):
     """include_builtin=False (default) NÃO descobre nativos (isolamento de teste); True descobre."""
     from okami.automation.hooks import HookManager
     off = HookManager(root=str(tmp_path), include_builtin=False)
-    assert off._plugin_scripts("before_tool") == []            # root vazio + nativos OFF → nada
+    assert off._plugin_scripts("transform_tool_result") == []  # root vazio + nativos OFF → nada
     on = HookManager(root=str(tmp_path), include_builtin=True)
-    scripts = on._plugin_scripts("before_tool")
-    assert any("security-guidance" in str(s) for s in scripts)  # nativo descoberto p/ execução
+    scripts = on._plugin_scripts("transform_tool_result")
+    assert any("security-guidance" in str(s) for s in scripts)  # nativo descoberto p/ execução (não-bloqueante)
 
 
 # ── skills NATIVAS (mesmo mecanismo: embarcadas no pacote, mergeadas no runner) ──

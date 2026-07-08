@@ -116,6 +116,7 @@ class ManageSkill(Tool):
                    "description": "1 linha (≤120 chars)", "body": "markdown do procedimento, ou conteúdo do arquivo (write_file)",
                    "path": "write_file: caminho relativo dentro da skill (ex.: scripts/run.sh)"}
     required = ("action", "name")
+    arg_constraints = {"action": {"enum": ["create", "edit", "write_file", "archive"]}}
 
     def run(self, args, ctx):
         import re as _re
@@ -253,6 +254,10 @@ class Spawn(Tool):
                    "tasks": "(opcional) lista de {goal, agent?, model?} p/ rodar em PARALELO",
                    "background": "(opcional) true = roda em segundo plano e avisa quando terminar (tarefa longa)"}
     required = ()
+    # sem arg_types o rail nativo manda "false" (string) e bool("false") é True (bug) — mesmo caso do
+    # replace_all em files.py.
+    arg_types = {"background": "boolean"}
+    arg_constraints = {"background": {"default": False}}
     _MAX_PARALLEL = 6
 
     def run(self, args, ctx):
@@ -337,6 +342,12 @@ class SpawnJobs(Tool):
     args_schema = {"action": "list | status | result | await", "job": "(status/result/await) id do job (8 hex)",
                    "timeout": "(await) segundos a esperar (default 60, máx 300)"}
     required = ("action",)
+    arg_types = {"timeout": "integer"}
+    # enum trava o domínio (auditoria 2026-07) — sem isto o modelo chuta "check"/"get" em vez de status/result.
+    arg_constraints = {
+        "action": {"enum": ["list", "status", "result", "await"]},
+        "timeout": {"default": 60, "minimum": 1, "maximum": 300},
+    }
 
     def run(self, args, ctx):
         from okami.core.spawn_jobs import await_job, list_jobs, read_job
@@ -390,6 +401,7 @@ class Browse(Tool):
                    "selector": "(opc) ref [N] de uma snapshot OU seletor CSS de fallback",
                    "text": "(opc) texto p/ fill"}
     required = ("url",)
+    arg_constraints = {"action": {"enum": ["read", "snapshot", "click", "fill", "screenshot"], "default": "read"}}
 
     def run(self, args, ctx):
         action = args.get("action", "read")

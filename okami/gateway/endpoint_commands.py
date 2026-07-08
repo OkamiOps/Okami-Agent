@@ -79,8 +79,11 @@ class EndpointCommandsMixin:
         from okami.i18n import t
         if not self.cfg:
             return "—"
-        lines = ["🧠 " + t("gw.models_header", _default="providers (switch with /model <name>):")]
-        for name, pc in self.cfg.providers.items():
+        # NUMERADO (mobile-friendly — Telegram não tem cursor de seta): /model <n> troca direto.
+        lines = ["🧠 " + t("gw.models_header", _default="providers (switch with /model <n or alias>):")]
+        self._models_index = list(self.cfg.providers)     # cache p/ o /model <n> resolver o índice
+        for i, name in enumerate(self._models_index, 1):
+            pc = self.cfg.providers[name]
             star = "★ " if name == self.cfg.default_provider else "  "
             if pc.experimental:
                 state = t("gw.models_experimental", _default="experimental")
@@ -88,14 +91,15 @@ class EndpointCommandsMixin:
                 state = "✓ " + t("gw.models_ready", _default="ready")
             else:
                 state = "⚠ " + t("gw.models_missing", _default="missing: okami login {name}", name=name)
-            lines.append(f"  {star}{name} · {pc.model} [{state}]")
+            lines.append(f"{i}. {star}{name} · {pc.model} [{state}]")
         lines.append(t(
             "gw.models_tip",
-            _default="tip: /model codex = OpenAI (GPT-5) via your ChatGPT subscription — no API key."))
+            _default="tip: /model sonnet|opus|codex|fast|smart = aliases · /model <alias> --save persists it."))
         return "\n".join(lines)
 
     def _model_cmd(self, s: "Session", arg: str) -> str:
         from okami.i18n import t
+        from okami.llm.model_aliases import ALIASES, ModelAliasError, TIER_ALIASES, full_model_string, resolve
         provs = self.cfg.providers if self.cfg else {}
         if not arg:
             prov = s.provider_override or (self.cfg.default_provider if self.cfg else "?")
@@ -106,20 +110,58 @@ class EndpointCommandsMixin:
             return "🧠 " + t(
                 "gw.model_current", _default="model: {cur}", cur=cur) + tag + ov + " · " + t(
                 "gw.model_lists", _default="/models lists providers and models")
-        # `/model codex` (ou `/model codex gpt-5.4`): arg começa com um PROVIDER configurado → TROCA de
-        # provider (ex.: codex = OpenAI via assinatura, SEM API key). Senão, arg é só o modelo no provider atual.
-        first, _, rest = arg.partition(" ")
-        if first in provs:
-            s.provider_override = first
-            s.model_override = rest.strip()          # vazio → usa o modelo default daquele provider
-            pc = provs[first]
+        save = False
+        if arg.strip().endswith("--save"):
+            save = True
+            arg = arg.rsplit("--save", 1)[0].strip()
+        # `/model 2` (índice de /models, numerado — mobile) OU um alias/tier/provider CONHECIDO: passa
+        # pelo MESMO resolver que `okami model` (single source of truth). Retrocompat: um arg que não bate
+        # com nada disso (ex.: `/model gpt-5.4` — só o MODELO, provider já setado antes) segue o
+        # comportamento HISTÓRICO — vira override de modelo cru no provider atual, sem validar catálogo
+        # (senão `/model <qualquer coisa nova>` que hoje é aceito passaria a dar erro).
+        index = getattr(self, "_models_index", None) or list(provs)
+        first, _, _rest = arg.partition(" ")
+        extra_aliases = {k.lower() for k in (self.cfg.model_aliases or {})} if self.cfg else set()
+        known = bool(self.cfg) and (
+            arg.isdigit() or first.lower() in ALIASES or first.lower() in TIER_ALIASES
+            or first.lower() in extra_aliases or first in provs)
+        if known:
+            token = index[int(arg) - 1] if arg.isdigit() and 1 <= int(arg) <= len(index) else arg
+            try:
+                provider, model = resolve(self.cfg, token)
+            except ModelAliasError as e:
+                return "❌ " + str(e)
+            s.provider_override = provider
+            s.model_override = model or ""
+            pc = provs[provider]
             ready = "" if pc.ready else " ⚠ " + t(
-                "gw.model_need_auth", _default="need to authenticate: okami login {first}", first=first)
+                "gw.model_need_auth", _default="need to authenticate: okami login {first}", first=provider)
+            if save:
+                from okami.cli._shared import _write_model_override
+                full_model = full_model_string(self.cfg, provider, model) if model else None
+                _write_model_override(provider, full_model)
+                saved = " 💾 " + t("gw.model_saved", _default="saved as the new default.")
+            else:
+                saved = ""
             return "🧠 " + t(
                 "gw.model_provider_set",
-                _default="provider for this session → {first} ({model}).", first=first,
-                model=s.model_override or pc.model) + ready + " " + t(
+                _default="provider for this session → {first} ({model}).", first=provider,
+                model=s.model_override or pc.model) + ready + saved + " " + t(
                 "gw.model_next_turns_use", _default="Next turns use it.")
+        # Não é alias/tier/provider/índice conhecido. Retrocompat: um MODELO cru (`/model gpt-5.4`,
+        # `claude-opus-4-8`, qualquer `foo/bar`) ainda vira override no provider atual — tem `/` ou
+        # versão (`-5.4`, `.2`). Mas uma PALAVRA SOLTA que não bate com nada é quase sempre typo de
+        # alias (`clawd` → `claude`): erra com sugestão em vez de aceitar silencioso (config-drop trap).
+        import re as _re
+        looks_like_model = ("/" in arg) or bool(_re.search(r"[-.]\d", arg))
+        if not looks_like_model:
+            import difflib as _dl
+            pool = list(ALIASES) + list(TIER_ALIASES) + list(provs) + list(self.cfg.model_aliases or {} if self.cfg else [])
+            near = _dl.get_close_matches(first.lower(), pool, n=3, cutoff=0.5)
+            hint = (" " + t("gw.model_did_you_mean", _default="did you mean: {near}?", near=", ".join(near))) if near else ""
+            return "❌ " + t(
+                "gw.model_unknown",
+                _default="'{arg}' isn't a known alias/provider/model. /models lists them.", arg=first) + hint
         s.model_override = arg
         return "🧠 " + t(
             "gw.model_set",

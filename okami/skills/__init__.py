@@ -63,6 +63,8 @@ class Skill:
     aliases: list[str] = field(default_factory=list)      # nomes antigos (migração) → use_skill ainda resolve
     platforms: list[str] = field(default_factory=list)    # #11: OS permitidos (darwin/linux/win); vazio = todos
     environments: list[str] = field(default_factory=list)  # #11: runtimes (docker/s6…); vazio = sempre visível
+    requires_tools: list[str] = field(default_factory=list)      # tool AUSENTE → skill some do catálogo
+    fallback_for_tools: list[str] = field(default_factory=list)  # tool PRESENTE → skill some (é o plano B dela)
 
 
 def _as_str_list(v) -> list:
@@ -99,6 +101,8 @@ def parse_skill(path: Path) -> Skill:
         aliases=[str(a) for a in (meta.get("aliases") or [])],
         platforms=[str(p).lower() for p in _as_str_list(meta.get("platforms"))],
         environments=[str(e).lower() for e in _as_str_list(meta.get("environments"))],
+        requires_tools=[str(t) for t in _as_str_list(meta.get("requires_tools"))],
+        fallback_for_tools=[str(t) for t in _as_str_list(meta.get("fallback_for_tools"))],
         meta=meta,
         body=body,
         path=path,
@@ -167,11 +171,33 @@ def skill_matches_environment(skill: Skill, active_environments) -> bool:
     return any(e in active for e in skill.environments)
 
 
-def visible_skills(skills: list[Skill], *, os_name: str, active_environments=None) -> list[Skill]:
-    """Filtra o CATÁLOGO (índice/autocomplete) por plataforma+ambiente. Load explícito por nome ainda
-    resolve a skill escondida — isto só evita inflar o índice com skill irrelevante pro runtime."""
+def skill_matches_tools(skill: Skill, available_tools) -> bool:
+    """True se a skill deve aparecer dado o conjunto de tools DISPONÍVEIS nesta run (mirror do
+    `_skill_should_show` do Hermes, prompt_builder.py:1387-1414). `available_tools=None` → sem
+    filtragem (mostra tudo, mesma postura de skill_matches_platform sem `platforms` declarado).
+
+    - `fallback_for_tools`: a skill é plano B de uma tool — some quando essa tool JÁ está disponível
+      (senão o catálogo mostra dois jeitos de fazer a mesma coisa, um deles morto).
+    - `requires_tools`: a skill PRECISA da tool — some quando ela NÃO está disponível (senão o agente
+      carrega a skill e trava no meio por falta de ferramenta)."""
+    if available_tools is None:
+        return True
+    at = {str(t) for t in available_tools}
+    if any(t in at for t in skill.fallback_for_tools):
+        return False
+    if any(t not in at for t in skill.requires_tools):
+        return False
+    return True
+
+
+def visible_skills(skills: list[Skill], *, os_name: str, active_environments=None,
+                    available_tools=None) -> list[Skill]:
+    """Filtra o CATÁLOGO (índice/autocomplete) por plataforma+ambiente+tools. Load explícito por nome
+    ainda resolve a skill escondida — isto só evita inflar o índice com skill irrelevante pro runtime.
+    `available_tools=None` (default) desliga o gate por tool — retrocompat com quem não passa registry."""
     return [s for s in skills if skill_matches_platform(s, os_name)
-            and skill_matches_environment(s, active_environments)]
+            and skill_matches_environment(s, active_environments)
+            and skill_matches_tools(s, available_tools)]
 
 
 def _name_is_bad(name: str) -> bool:

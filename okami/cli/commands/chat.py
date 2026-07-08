@@ -332,6 +332,26 @@ def chat(
     cfg, ws, name, home = _resolve_agent(agent, workspace)
     ws.mkdir(parents=True, exist_ok=True)
 
+    # -p aceita ALIAS (sonnet/opus/codex/fast/smart/…), não só id cru — mesmo resolver do `okami
+    # model`/`/model` (single source of truth, item (e) da precedência: flag > override de sessão).
+    # -m sozinho só passa pelo resolver se for um alias CONHECIDO — senão segue cru (retrocompat: `-m
+    # <bare-model-id>` sempre significou "modelo X no provider default", não deve virar erro de alias).
+    from okami.llm.model_aliases import ALIASES, ModelAliasError, TIER_ALIASES, resolve as _resolve_model
+    if provider:
+        try:
+            resolved_provider, resolved_model = _resolve_model(cfg, provider)
+        except ModelAliasError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(1) from None
+        provider = resolved_provider
+        model = model or resolved_model           # -m explícito sempre vence o hint do alias
+    elif model and model.strip().lower() in {*ALIASES, *TIER_ALIASES, *(k.lower() for k in cfg.model_aliases)}:
+        try:
+            provider, model = _resolve_model(cfg, model)
+        except ModelAliasError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(1) from None
+
     def run_task(c, w, goal, **kw):                # honra -p/-m; mas /model da sessão (kw) vence
         kw.setdefault("agent_home", home)         # casa ISOLADA (memória/identidade) ≠ projeto onde mexe
         kw.setdefault("open_fs", True)            # CLI = DONO: alcança TODO o FS (relativo no CWD, absoluto livre)

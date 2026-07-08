@@ -151,6 +151,7 @@ class PluginRegistrar:
         self.tools: dict = {}
         self.commands: dict = {}
         self.context_providers: list = []
+        self.transform_tool_result_hooks: list = []
 
     @property
     def llm(self) -> PluginLlm:
@@ -178,6 +179,15 @@ class PluginRegistrar:
         if not callable(provider):
             raise ValueError("register_context: precisa de um callable provider()->str")
         self.context_providers.append({"fn": provider, "name": name})
+
+    def register_transform_tool_result(self, fn) -> None:
+        """Plugin contribui um hook `transform_tool_result` (mirror do Hermes `transform_tool_result`,
+        não-bloqueante). `fn(payload)` com `payload = {tool, args, result}` → texto extra (ou None/"" p/
+        nada a anexar) ANEXADO ao resultado da tool que o modelo lê no próximo turno — nunca veta, nunca
+        substitui. O runner liga cada hook registrado num `HookManager.on("transform_tool_result", fn)`."""
+        if not callable(fn):
+            raise ValueError("register_transform_tool_result: precisa de um callable fn(payload)->str|None")
+        self.transform_tool_result_hooks.append(fn)
 
 
 def _resolve_register(plugin: "Plugin"):
@@ -275,6 +285,18 @@ def load_plugin_context(plugins, *, cfg=None, emit=lambda m: None, _resolve=None
     return out
 
 
+def load_plugin_transform_tool_result(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> list:
+    """COLETA os hooks `transform_tool_result` que os plugins registram (ctx.register_transform_tool_result)
+    — port do transform_tool_result do Hermes. Devolve [fn, ...] pronto p/ `hooks.on("transform_tool_result",
+    fn)` (o caller — runner — pluga no HookManager). Isolado por plugin (igual às demais coletas)."""
+    out: list = []
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
+        for fn in registrar.transform_tool_result_hooks:
+            out.append(fn)
+            emit(f"[plugin {plugin.name}] +transform_tool_result")
+    return out
+
+
 def plugin_roots() -> list[Path]:
     """Raízes: projeto (.) + home do Okami + NATIVOS do pacote (viajam no pip install). O projeto vem 1º →
     vence o nativo de mesmo nome (discover_plugins dedup por nome, 1ª raiz ganha)."""
@@ -294,4 +316,4 @@ def plugin_roots() -> list[Path]:
 
 __all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
            "load_plugin_commands", "load_plugin_context", "load_plugin_gateway", "load_plugin_tools",
-           "plugin_context", "plugin_roots"]
+           "load_plugin_transform_tool_result", "plugin_context", "plugin_roots"]

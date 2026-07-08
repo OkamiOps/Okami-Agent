@@ -1,7 +1,7 @@
-"""Plugin built-in security-guidance (#20, port do Hermes) — hook before_tool que faz advisory de
-segurança no código que o agente vai escrever. Testado pelo CONTRATO real: script roda como subprocesso,
-lê OKAMI_HOOK_PAYLOAD, imprime advisory no stdout (que o HookManager mostra via emit) e sai 0 (warn) /
-1 (block). Não veta por padrão (warn-mode); OKAMI_SECURITY_GUIDANCE_BLOCK=1 vira veto."""
+"""Plugin built-in security-guidance (#20, port do Hermes) — hook transform_tool_result (NÃO-bloqueante)
+que ANEXA um advisory de segurança ao resultado da tool DEPOIS da escrita. Testado pelo CONTRATO real:
+script roda como subprocesso, lê OKAMI_HOOK_PAYLOAD ({tool,args,result}), imprime advisory no stdout
+(que o HookManager ANEXA ao resultado da tool) e SEMPRE sai 0 — nunca veta."""
 from __future__ import annotations
 
 import json
@@ -11,23 +11,22 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-GUARD = REPO / "okami" / "builtin" / "plugins" / "security-guidance" / "hooks" / "before_tool" / "guard.py"
+GUARD = REPO / "okami" / "builtin" / "plugins" / "security-guidance" / "hooks" / "transform_tool_result" / "guard.py"
 
 
-def _run(payload: dict, *, block: bool = False) -> tuple[int, str]:
-    env = {**os.environ, "OKAMI_HOOK_PAYLOAD": json.dumps(payload)}
-    if block:
-        env["OKAMI_SECURITY_GUIDANCE_BLOCK"] = "1"
-    else:
-        env.pop("OKAMI_SECURITY_GUIDANCE_BLOCK", None)
-    r = subprocess.run([sys.executable, str(GUARD)], env=env, capture_output=True, text=True, timeout=20)
+def _run(payload: dict) -> tuple[int, str]:
+    env = {**os.environ}
+    env.pop("OKAMI_SECURITY_GUIDANCE_BLOCK", None)   # veto por env foi retirado (não-bloqueante agora)
+    r = subprocess.run([sys.executable, str(GUARD)], env={**env, "OKAMI_HOOK_PAYLOAD": json.dumps(payload)},
+                        capture_output=True, text=True, timeout=20)
     return r.returncode, (r.stdout + r.stderr)
 
 
-# ── advisory sai no código perigoso, silêncio no limpo ──
+# ── advisory sai no código perigoso, silêncio no limpo — SEMPRE exit 0 (nunca veta) ──
 def test_warns_on_eval():
     code, out = _run({"tool": "write_file", "args": {"path": "x.py", "content": "y = eval(user_input)"}})
-    assert code == 0 and "eval" in out.lower()                 # warn não veta (exit 0)
+    assert code == 0 and "eval" in out.lower()
+    assert "⚠️" in out                                          # advisory não-bloqueante marcado
 
 
 def test_warns_on_insecure_deserialization():
@@ -37,18 +36,14 @@ def test_warns_on_insecure_deserialization():
 
 def test_silent_on_clean_code():
     code, out = _run({"tool": "write_file", "args": {"path": "ok.py", "content": "def add(a, b):\n    return a + b\n"}})
-    assert code == 0 and out.strip() == ""                     # nada a avisar → silêncio total
+    assert code == 0 and out.strip() == ""                     # nada a avisar → silêncio total, nada anexado
 
 
-# ── block-mode VETA (exit 1) ──
-def test_block_mode_vetoes():
-    code, out = _run({"tool": "write_file", "args": {"path": "x.py", "content": "os.system(cmd)"}}, block=True)
-    assert code == 1 and "os.system" in out.lower()            # block → exit≠0 (HookManager veta a tool)
-
-
-def test_block_mode_still_silent_when_clean():
-    code, out = _run({"tool": "write_file", "args": {"path": "ok.py", "content": "print('oi')\n"}}, block=True)
-    assert code == 0 and out.strip() == ""                     # limpo nunca veta, mesmo em block
+# ── nunca veta, mesmo com muitos achados (era block-mode; agora é sempre append) ──
+def test_never_vetoes_even_with_many_findings():
+    code, out = _run({"tool": "write_file", "args": {"path": "x.py", "content": "os.system(cmd)\neval(y)\npickle.loads(z)"}})
+    assert code == 0                                           # SEMPRE exit 0 — transform_tool_result não veta
+    assert "os.system" in out.lower() and "eval" in out.lower()
 
 
 # ── apply_patch: varre as linhas ADICIONADAS ('+'), não as removidas ──
@@ -68,7 +63,7 @@ def test_ignores_removed_patch_lines():
 
 # ── tools que não escrevem código → no-op ──
 def test_noop_on_non_write_tool():
-    code, out = _run({"tool": "run_shell", "args": {"command": "eval $(curl x)"}})
+    code, out = _run({"tool": "run_shell", "args": {"command": "eval $(curl x)"}, "result": "ok"})
     assert code == 0 and out.strip() == ""                     # não é write/patch → não varre
 
 
@@ -91,11 +86,19 @@ def test_placeholder_context_uses_preceding_chars():
     assert rc2 == 0 and "hardcoded-secret" in out2
 
 
-# ── fim-a-fim pelo HookManager real (descobre o script + roda via shell + mostra via emit) ──
-def test_end_to_end_via_hookmanager():
+# ── fim-a-fim pelo HookManager real: transform_tool_result ANEXA (nunca veta) ──
+def test_end_to_end_via_hookmanager_appends_advisory():
     from okami.automation.hooks import HookManager
     emitted: list[str] = []
     hm = HookManager(root=str(REPO), emit=emitted.append, include_builtin=True)   # nativo do pacote
-    ok = hm.fire("before_tool", {"tool": "write_file", "args": {"path": "x.py", "content": "eval(z)"}})
-    assert ok is True                                          # warn-mode: roda mas não veta
-    assert any("eval" in m.lower() for m in emitted)           # advisory chegou ao usuário via emit
+    transformed = hm.transform_tool_result("write_file", {"path": "x.py", "content": "eval(z)"}, "arquivo escrito")
+    assert "arquivo escrito" in transformed                    # resultado ORIGINAL preservado
+    assert "eval" in transformed.lower() and "⚠️" in transformed  # advisory ANEXADO ao resultado
+
+
+def test_end_to_end_via_hookmanager_clean_code_unchanged():
+    from okami.automation.hooks import HookManager
+    hm = HookManager(root=str(REPO), include_builtin=True)
+    transformed = hm.transform_tool_result("write_file", {"path": "ok.py", "content": "print('oi')\n"},
+                                            "arquivo escrito")
+    assert transformed == "arquivo escrito"                    # nada a anexar → resultado intocado

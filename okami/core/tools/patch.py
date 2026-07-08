@@ -106,22 +106,35 @@ def _uni_norm(s: str) -> str:
     return s.translate(_UNI_TABLE)
 
 
+def _esc_norm(s: str) -> str:
+    """Desfaz escape LITERAL (paridade Hermes escape_normalized): o modelo às vezes manda '\\n'/'\\t'/'\\r'
+    (backslash + letra, 2 chars) onde queria o BYTE de controle real — artefato de serialização
+    (JSON/tool-call) que faz o `old` nunca casar num arquivo com quebra/tab de verdade."""
+    return s.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+
+
 def _find_block(haystack: list[str], needle: list[str], start: int) -> int:
-    """Posição do bloco `needle` em `haystack`. EXATO primeiro (a partir de `start`, depois do começo —
-    tolera hunk fora de ordem). Sem exato, FUZZY (rstrip → strip) mas SÓ se o match for ÚNICO no arquivo
-    inteiro: fuzzy ambíguo casaria no bloco ERRADO e corromperia em silêncio (bug do review). Retorna o
-    índice, -1 (não achou) ou _AMBIGUOUS (fuzzy casa em >1 lugar → caller pede mais contexto)."""
+    """Posição do bloco `needle` em `haystack`. Cadeia de estratégias em ordem crescente de tolerância
+    (paridade Hermes fuzzy_match.py, 9-strategy chain — adaptada p/ matching por LINHA):
+    1. exato (a partir de `start`, depois do começo — tolera hunk fora de ordem)
+    2/3/4. fuzzy whitespace: rstrip → strip → unicode(strip) — cada nível exige match ÚNICO
+    5. escape_normalized: desfaz '\\n'/'\\t'/'\\r' literal no `needle` (drift de serialização)
+    6. trimmed_boundary: só a 1ª/última linha do bloco tolera espaço sobrando nas bordas
+    7. block_anchor: ancora na 1ª+última linha (unicode-normalizadas) e aceita o MEIO por similaridade
+       (paridade Hermes: threshold 0.50 p/ candidato único, 0.70 se houver mais de um candidato de âncora)
+    FUZZY ambíguo (>1 match no mesmo nível) NUNCA escolhe sozinho — devolve _AMBIGUOUS (caller pede mais
+    contexto), nunca corrompe em silêncio."""
     if not needle:
         return start
     span = len(haystack) - len(needle) + 1
     if span <= 0:
         return -1
-    for base in (start, 0):                            # exato: à frente do ponto atual, senão do começo
+    for base in (start, 0):                            # 1. exato: à frente do ponto atual, senão do começo
         for i in range(base, span):
             if haystack[i:i + len(needle)] == needle:
                 return i
-    # fuzzy crescente: whitespace (rstrip/strip), depois unicode→ASCII (aspas curvas/travessão/nbsp que o
-    # modelo copia). Cada nível exige match ÚNICO no arquivo (ambíguo → recusa, não corrompe em silêncio).
+    # 2-4. fuzzy crescente: whitespace (rstrip/strip), depois unicode→ASCII (aspas curvas/travessão/nbsp que
+    # o modelo copia). Cada nível exige match ÚNICO no arquivo (ambíguo → recusa, não corrompe em silêncio).
     for norm in (str.rstrip, str.strip, lambda x: _uni_norm(x.strip())):
         n = [norm(x) for x in needle]
         matches = [i for i in range(span) if [norm(x) for x in haystack[i:i + len(needle)]] == n]
@@ -129,6 +142,62 @@ def _find_block(haystack: list[str], needle: list[str], start: int) -> int:
             return matches[0]
         if len(matches) > 1:
             return _AMBIGUOUS
+    # 5. escape_normalized: '\n'/'\t'/'\r' LITERAL (2 chars) no needle → byte de controle real. Reparte o
+    # needle desescapado em linhas (o nº de linhas pode mudar) e tenta exato de novo.
+    esc_text = _esc_norm("\n".join(needle))
+    if esc_text != "\n".join(needle):
+        esc_lines = esc_text.split("\n")
+        esc_span = len(haystack) - len(esc_lines) + 1
+        if esc_span > 0:
+            matches = [i for i in range(esc_span) if haystack[i:i + len(esc_lines)] == esc_lines]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                return _AMBIGUOUS
+    # 6. trimmed_boundary: só a borda (1ª/última linha) tolera espaço sobrando — o MEIO precisa casar exato.
+    # Útil quando só a indentação da 1ª/última linha do bloco colado pelo modelo divergiu.
+    tb = list(needle)
+    tb[0] = tb[0].strip()
+    if len(tb) > 1:
+        tb[-1] = tb[-1].strip()
+    matches = []
+    for i in range(span):
+        block = list(haystack[i:i + len(needle)])
+        block[0] = block[0].strip()
+        if len(block) > 1:
+            block[-1] = block[-1].strip()
+        if block == tb:
+            matches.append(i)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return _AMBIGUOUS
+    # 7. block_anchor: bloco de 2+ linhas cujo MEIO divergiu (edição prévia, comentário a mais/a menos) —
+    # ancora na 1ª+última linha (strip+unicode) e aceita por SIMILARIDADE do meio. Threshold mais apertado
+    # quando há vários candidatos de âncora (evita casar o bloco ERRADO).
+    if len(needle) >= 2:
+        import difflib
+        first = _uni_norm(needle[0].strip())
+        last = _uni_norm(needle[-1].strip())
+        anchors = [i for i in range(span)
+                   if _uni_norm(haystack[i].strip()) == first
+                   and _uni_norm(haystack[i + len(needle) - 1].strip()) == last]
+        if anchors:
+            threshold = 0.50 if len(anchors) == 1 else 0.70
+            needle_mid = "\n".join(needle[1:-1])
+            matches = []
+            for i in anchors:
+                if len(needle) <= 2:
+                    matches.append(i)
+                    continue
+                mid = "\n".join(haystack[i + 1:i + len(needle) - 1])
+                ratio = difflib.SequenceMatcher(None, mid, needle_mid).ratio()
+                if ratio >= threshold:
+                    matches.append(i)
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                return _AMBIGUOUS
     return -1
 
 

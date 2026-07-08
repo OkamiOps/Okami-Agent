@@ -60,6 +60,26 @@ def test_read_truncation_note_reports_more(tmp_path):
     assert "offset" in r.output.lower() and ("90" in r.output or "mais" in r.output.lower())
 
 
+# ----------------------------------------------------------------- FIX 3: line_numbers (opt-in)
+def test_read_line_numbers_off_by_default(tmp_path):
+    _write(tmp_path, "f.txt", ["a", "b", "c"])
+    r = ReadFile().run({"path": "f.txt"}, _ctx(tmp_path))
+    assert r.output.splitlines() == ["a", "b", "c"]        # sem prefixo — back-compat intacto
+
+
+def test_read_line_numbers_whole_file(tmp_path):
+    _write(tmp_path, "f.txt", ["a", "b", "c"])
+    r = ReadFile().run({"path": "f.txt", "line_numbers": True}, _ctx(tmp_path))
+    assert r.output.splitlines() == ["1|a", "2|b", "3|c"]
+
+
+def test_read_line_numbers_with_offset_window(tmp_path):
+    _write(tmp_path, "f.txt", [f"L{i}" for i in range(20)])
+    r = ReadFile().run({"path": "f.txt", "offset": 8, "limit": 2, "line_numbers": True}, _ctx(tmp_path))
+    body = r.output.split("\n\n[")[0]
+    assert body.splitlines() == ["9|L8", "10|L9"]           # numeração 1-based da linha REAL do arquivo
+
+
 # ----------------------------------------------------------------- wrapper <persisted-output>
 def test_wrapper_has_tag_path_and_preview():
     w = persisted_output_wrapper(".okami/tool_outputs/step_3.txt", total_chars=120000,

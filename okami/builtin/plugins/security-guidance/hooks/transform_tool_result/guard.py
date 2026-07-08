@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""security-guidance (port do Hermes) — hook before_tool: varre o CÓDIGO que o agente vai escrever
-(write_file / edit_file / apply_patch) por padrões inseguros e imprime um advisory. Auto-contido (só
-stdlib) p/ rodar sob qualquer python do PATH. Lê OKAMI_HOOK_PAYLOAD (JSON: {tool,args}); fail-open
-(payload quebrado / sem código → exit 0, silêncio). Por padrão é WARN (exit 0, só avisa via stdout, que
-o HookManager mostra ao dono). OKAMI_SECURITY_GUIDANCE_BLOCK=1 → BLOCK (exit 1, o hook VETA a escrita).
+"""security-guidance (port do Hermes) — hook transform_tool_result: varre o CÓDIGO que o agente ACABOU
+de escrever (write_file / edit_file / apply_patch) por padrões inseguros e devolve um advisory. NÃO-
+BLOQUEANTE (port do transform_tool_result do Hermes/security-guidance): o stdout vira texto ANEXADO ao
+resultado da tool — o modelo vê no PRÓXIMO turno e se auto-corrige, sem vetar a escrita nem incomodar o
+dono ANTES dela (era o antigo hook before_tool, que vetava/avisava cedo demais — invisível pro modelo).
+Auto-contido (só stdlib) p/ rodar sob qualquer python do PATH. Lê OKAMI_HOOK_PAYLOAD
+(JSON: {tool,args,result}); fail-open (payload quebrado / sem código → exit 0, silêncio). SEMPRE exit 0
+— este hook NUNCA veta (não há evento a bloquear; transform_tool_result é observador+anexador).
 
 NÃO substitui as defesas embutidas (Tirith, jail de path, net_guard, approval) — é uma 2ª opinião sobre
 o conteúdo, no estilo dos 25 detectores do Hermes (desserialização, injeção, XSS, cripto fraca, segredos).
@@ -103,7 +106,7 @@ def main() -> int:
         if not isinstance(payload, dict):
             return 0
     except (ValueError, TypeError):
-        return 0                               # payload quebrado → fail-open (nunca veta à toa)
+        return 0                               # payload quebrado → fail-open (nunca imprime nada)
     tool = str(payload.get("tool") or "")
     args = payload.get("args") or {}
     if tool not in _WRITE_TOOLS and tool != "apply_patch":
@@ -113,14 +116,15 @@ def main() -> int:
         return 0
     hits = _scan(code)
     if not hits:
-        return 0
-    block = (os.environ.get("OKAMI_SECURITY_GUIDANCE_BLOCK") or "").strip().lower() in ("1", "true", "yes")
+        return 0                               # limpo → silêncio total, nada anexado ao resultado
     path = args.get("path") or args.get("file") or "(arquivo)"
-    verb = "VETANDO" if block else "alerta"
-    print(f"security-guidance [{verb}] {path}: {len(hits)} achado(s) — " + " | ".join(hits))
-    if not block:
-        print("(warn-mode; defina OKAMI_SECURITY_GUIDANCE_BLOCK=1 p/ transformar em veto)")
-    return 1 if block else 0
+    # ADVISORY não-bloqueante: cada achado vira uma linha "⚠️ segurança: <explicação>". O stdout inteiro é
+    # ANEXADO ao resultado da tool pelo HookManager (transform_tool_result) — o modelo lê e se auto-corrige
+    # no próximo turno. Nenhuma regra aqui é CRITICAL o bastante p/ justificar vetar a escrita já feita.
+    print(f"⚠️ security-guidance — {path}: {len(hits)} achado(s):")
+    for h in hits:
+        print(f"  ⚠️ segurança: {h}")
+    return 0                                   # NUNCA veta — transform_tool_result é não-bloqueante
 
 
 if __name__ == "__main__":

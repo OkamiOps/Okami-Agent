@@ -73,3 +73,61 @@ def test_events_counts_all_sources(tmp_path):
     hm.on("after_tool", lambda p: None)
     ev = hm.events()
     assert ev["before_task"] == 2 and ev["after_tool"] == 1
+
+
+# ── transform_tool_result (#20, port do Hermes): NÃO-bloqueante, ANEXA texto ao resultado ──
+def test_transform_tool_result_appends_text_without_blocking():
+    hm = HookManager()
+    hm.on("transform_tool_result", lambda p: "⚠️ advisory extra")
+    out = hm.transform_tool_result("write_file", {"path": "x.py"}, "resultado original")
+    assert "resultado original" in out and "⚠️ advisory extra" in out
+
+
+def test_transform_tool_result_no_hooks_returns_unchanged():
+    hm = HookManager()
+    assert hm.transform_tool_result("write_file", {}, "resultado") == "resultado"
+
+
+def test_transform_tool_result_handler_returning_none_is_noop():
+    hm = HookManager()
+    hm.on("transform_tool_result", lambda p: None)
+    assert hm.transform_tool_result("write_file", {}, "resultado") == "resultado"
+
+
+def test_transform_tool_result_multiple_handlers_compose():
+    hm = HookManager()
+    hm.on("transform_tool_result", lambda p: "primeiro")
+    hm.on("transform_tool_result", lambda p: "segundo")
+    out = hm.transform_tool_result("write_file", {}, "base")
+    assert "base" in out and "primeiro" in out and "segundo" in out
+
+
+def test_transform_tool_result_raising_handler_is_isolated():
+    """Um hook que explode NÃO derruba os outros nem perde o texto original (paridade Hermes invoke_hook)."""
+    hm = HookManager()
+    hm.on("transform_tool_result", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
+    hm.on("transform_tool_result", lambda p: "sobrevivente")
+    out = hm.transform_tool_result("write_file", {}, "base")
+    assert "base" in out and "sobrevivente" in out
+
+
+def test_transform_tool_result_payload_shape():
+    seen = {}
+    hm = HookManager()
+    hm.on("transform_tool_result", lambda p: seen.update(p) or None)
+    hm.transform_tool_result("run_shell", {"command": "ls"}, "output aqui")
+    assert seen == {"tool": "run_shell", "args": {"command": "ls"}, "result": "output aqui"}
+
+
+def test_transform_tool_result_config_command_appends(tmp_path):
+    ran = []
+
+    def fake_capture(cmd, event, payload):
+        ran.append((cmd, event))
+        return "do script"
+
+    hm = HookManager({"transform_tool_result": ["notify"]}, root=str(tmp_path))
+    hm._run_capture = fake_capture
+    out = hm.transform_tool_result("write_file", {}, "base")
+    assert "base" in out and "do script" in out
+    assert ran == [("notify", "transform_tool_result")]

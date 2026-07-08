@@ -1,10 +1,11 @@
 name: security-guidance
-hooks: [before_tool]
+hooks: [transform_tool_result]
 description: >
-  Port do plugin built-in security-guidance do Hermes. Hook before_tool: ANTES de cada escrita de
-  código (write_file/edit_file/apply_patch) varre o conteúdo por ~28 padrões inseguros — eval/exec,
-  desserialização (pickle/marshal), yaml.load, injeção de shell (os.system/shell=True), SQL por
-  f-string/concatenação, XSS (innerHTML/document.write/dangerouslySetInnerHTML), cripto fraca
-  (md5/sha1/Math.random), TLS desligado, segredos hardcoded, JWT alg=none — e imprime um advisory
-  (mostrado ao dono via emit). 2ª opinião sobre o CONTEÚDO; não substitui Tirith, jail de path,
-  net_guard nem approval. WARN por padrão (exit 0); OKAMI_SECURITY_GUIDANCE_BLOCK=1 → VETA a escrita.
+  Port do plugin built-in security-guidance do Hermes. Hook transform_tool_result (NÃO-bloqueante):
+  DEPOIS de cada escrita de código (write_file/edit_file/apply_patch) varre o conteúdo por ~28 padrões
+  inseguros — eval/exec, desserialização (pickle/marshal), yaml.load, injeção de shell
+  (os.system/shell=True), SQL por f-string/concatenação, XSS (innerHTML/document.write/
+  dangerouslySetInnerHTML), cripto fraca (md5/sha1/Math.random), TLS desligado, segredos hardcoded,
+  JWT alg=none — e ANEXA um advisory ("⚠️ segurança: ...") ao resultado da tool, que o modelo lê no
+  próximo turno e pode se auto-corrigir. 2ª opinião sobre o CONTEÚDO; não substitui Tirith, jail de
+  path, net_guard nem approval. Nunca veta a escrita (já foi feita) — apenas ANEXA, sempre.

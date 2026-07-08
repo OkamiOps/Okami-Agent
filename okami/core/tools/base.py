@@ -179,6 +179,12 @@ class Tool:
     # schema NATIVO (function-calling) e guia a COERÇÃO do harness — sem isto, o modelo nativo emite "false"
     # (string) e bool("false") é True (bug). Só declare onde o tipo NÃO é string.
     arg_types: dict[str, str] = {}
+    # Restrições JSON-schema por arg (auditoria 2026-07 — #1 driver de tool-call ruim: schema OpenAI só
+    # tinha {type, description}, sem enum/default/min/max — o modelo "chuta" um valor fora do domínio
+    # (ex.: search_files target="conteudo" em vez de "content"). Formato: {arg: {"enum": [...],
+    # "default": ..., "minimum": ..., "maximum": ...}} — só declare as chaves que se aplicam a cada arg;
+    # nenhuma delas é obrigatória. Vai pro schema nativo (to_openai_schema) igual arg_types.
+    arg_constraints: dict[str, dict] = {}
     required: tuple[str, ...] = ()   # args obrigatórios (validados pelo harness antes de rodar)
     terminal: bool = False
 
@@ -196,12 +202,18 @@ class Tool:
         JSON-em-texto continua de pé; isto é a forma nativa equivalente, mesma `name`/args. Carrega o
         TIPO real de cada arg (arg_types) — sem isso o modelo nativo manda tudo como string."""
         _types = self.arg_types or {}
+        _constraints = self.arg_constraints or {}
         props: dict = {}
         for k, v in (self.args_schema or {}).items():
             t = _types.get(k, "string")
             prop = {"type": t, "description": v}
             if t == "array":
                 prop["items"] = {"type": "string"}          # itens genéricos (suficiente p/ o grammar)
+            c = _constraints.get(k)
+            if c:                                             # enum/default/minimum/maximum (só as chaves declaradas)
+                for key in ("enum", "default", "minimum", "maximum"):
+                    if key in c:
+                        prop[key] = c[key]
             props[k] = prop
         return {"type": "function", "function": {
             "name": self.name, "description": self.description,

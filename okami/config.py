@@ -273,6 +273,7 @@ class OkamiConfig(BaseModel):
     security: dict[str, Any] = Field(default_factory=dict)      # {"advisories": ..., ...} — lazy_deps/tirith liam vazio → morto
     notifications: dict[str, Any] = Field(default_factory=dict)  # {"desktop": bool} — endpoint._desktop_enabled lia vazio → morto
     plugins: dict[str, Any] = Field(default_factory=dict)        # {"allowed_providers": [...], "allow_provider_override": bool} — trust-gating do plugin (plugin_context lia vazio → trust-gating morto)
+    model_aliases: dict[str, str] = Field(default_factory=dict)  # {alias: "provider" | "provider/modelo"} — extensão do okami/llm/model_aliases.py (`okami model`/`/model`)
     #  NOTA: `channels` fica DE FORA de propósito (contém token=SEGREDO — nunca entra no OkamiConfig).
 
     def provider(self, name: str | None = None) -> ProviderConfig:
@@ -482,6 +483,7 @@ def build_config(raw: dict) -> OkamiConfig:
         security=raw.get("security") or {},           # idem lazy_deps/tirith (supply-chain)
         notifications=raw.get("notifications") or {},  # idem endpoint._desktop_enabled
         plugins=raw.get("plugins") or {},             # idem plugin_context (trust-gating); SEM isto nascia morto
+        model_aliases=raw.get("model_aliases") or {},  # idem model_aliases.py — SEM isto o bloco nascia morto
     )
 
 

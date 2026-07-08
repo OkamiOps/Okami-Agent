@@ -43,6 +43,15 @@ class SearchFiles(Tool):
                    "context": "(opc) nº de linhas ao redor de cada match", "ignore_case": "(opc) true/false",
                    "offset": "(opc) pular N matches (paginação)"}
     required = ("query",)
+    arg_types = {"context": "integer", "ignore_case": "boolean", "offset": "integer"}
+    # enum trava o domínio de valor no schema NATIVO — sem isto o modelo já chutou "conteudo"/"name"
+    # em vez de "content"/"files" (auditoria 2026-07). default espelha o comportamento real do run().
+    arg_constraints = {
+        "target": {"enum": ["content", "files"]},
+        "mode": {"enum": ["content", "files", "count"], "default": "content"},
+        "context": {"minimum": 0},
+        "offset": {"minimum": 0},
+    }
 
     def run(self, args, ctx):
         from okami.core.redact import redact

@@ -523,11 +523,26 @@ def _resolve_agent(agent: str | None, workspace: str):
 
 
 def _write_local(update: dict) -> None:
-    """Mescla chaves no okami.local.yaml (override não-destrutivo do okami.yaml) — escrita durável."""
+    """Mescla chaves no okami.local.yaml (override não-destrutivo do okami.yaml) — escrita durável.
+
+    Merge é PROFUNDO (não `.update()` raso): um `update={"providers": {"claude": {"model": "x"}}}`
+    preserva outras chaves já gravadas em `providers.claude` (e outros providers) em vez de sobrescrever
+    o bloco inteiro. Usado por `okami model <alias> --save` p/ persistir provider+modelo num único write."""
+    from okami.config import _deep_merge
     from okami.core.safe_io import read_yaml_resilient, secure_write_yaml
     p = config_dir() / "okami.local.yaml"
     data = read_yaml_resilient(p, default={})       # recupera de backup se o atual estiver corrompido
-    data.update(update)
+    data = _deep_merge(data, update)
     secure_write_yaml(p, data)                       # atômico + backup rotacionado + .last-good (P1.2)
+
+
+def _write_model_override(provider_id: str, model: str | None) -> None:
+    """Persiste `default_provider` + (se houver modelo resolvido) `providers.<id>.model` em
+    okami.local.yaml — override NÃO-destrutivo (okami.yaml continua declarativo/intocado).
+    Fonte única usada por `okami model <token> --save` e `/model <token> --save` (gateway)."""
+    update: dict = {"default_provider": provider_id}
+    if model:
+        update["providers"] = {provider_id: {"model": model}}
+    _write_local(update)
 
 

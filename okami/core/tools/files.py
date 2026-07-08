@@ -7,6 +7,14 @@ from okami.core.tools.base import (
 )
 
 
+def _add_line_numbers(text: str, start: int) -> str:
+    """Prefixa cada linha com 'N|' (formato Hermes) a partir de `start` (1-based) — FIX 3, usado só quando
+    read_file(line_numbers=true). Preserva a quebra final se o texto original terminava com '\\n'."""
+    lines = text.splitlines()
+    out = "\n".join(f"{start + i}|{ln}" for i, ln in enumerate(lines))
+    return out + "\n" if text.endswith("\n") else out
+
+
 def _as_int(v) -> int | None:
     """Aceita int ou string numérica (o modelo às vezes manda "5"); senão None."""
     if v is None or v == "":
@@ -38,23 +46,6 @@ def _first_changed_line(text: str, old: str, new: str) -> int:
         if a != b:
             return start + i
     return start
-
-
-def _fuzzy_replace(text: str, old: str, new: str):
-    """Substituição tolerante a WHITESPACE/indentação (paridade Hermes): casa o bloco `old` por LINHA
-    (rstrip→strip, via patch._find_block), exige match ÚNICO (não escolhe entre vários). Devolve o texto
-    editado, ou None se não casar de forma única. Aplica `new` como veio (o modelo controla o conteúdo)."""
-    old_lines = old.splitlines()
-    if not old_lines:
-        return None
-    from okami.core.tools.patch import _find_block
-    lines = text.splitlines()
-    i = _find_block(lines, old_lines, 0)
-    if i < 0:                                  # -1 não casou · -2 ambíguo → não inventa
-        return None
-    lines[i:i + len(old_lines)] = new.splitlines()
-    out = "\n".join(lines)
-    return out + "\n" if text.endswith("\n") else out
 
 
 def _short_diff(before: str, after: str) -> str:
@@ -109,8 +100,10 @@ class ReadFile(Tool):
                    "(ler só N linhas) p/ paginar arquivo/saída grande sem trazer tudo de uma vez.")
     args_schema = {"path": "caminho relativo ao workspace",
                    "offset": "(opcional) nº de linhas a pular do início",
-                   "limit": "(opcional) máx. de linhas a retornar"}
-    arg_types = {"offset": "integer", "limit": "integer"}
+                   "limit": "(opcional) máx. de linhas a retornar",
+                   "line_numbers": "(opcional) prefixa cada linha com 'N|' — ajuda a compor um `old` exato "
+                                   "p/ edit_file (default: desligado)"}
+    arg_types = {"offset": "integer", "limit": "integer", "line_numbers": "boolean"}
     required = ("path",)
 
     def run(self, args, ctx):
@@ -171,20 +164,26 @@ class ReadFile(Tool):
         # trazer o arquivo inteiro. Sem offset/limit → arquivo inteiro (back-compat).
         off = _as_int(args.get("offset"))
         lim = _as_int(args.get("limit"))
+        # line_numbers (FIX 3, opt-in — default OFF p/ não mudar o formato existente): prefixa "N|" (formato
+        # Hermes) — ajuda o modelo a mirar a linha certa ao compor um `old` exato p/ edit_file.
+        numbered = bool(args.get("line_numbers", False))
         if off is None and lim is None:
             if len(text) > 100_000:                   # arquivo gigante sem range → não despeja inteiro no
                 nlines = text.count("\n") + 1          # contexto; manda paginar com offset/limit (por LINHA)
                 return ToolResult(False, f"'{rel}' é grande ({len(text):,} chars, {nlines:,} linhas) — não "
                                   "leio inteiro de uma vez. Pagine: read_file com offset/limit (por linha), "
                                   "ou use search_files p/ achar o trecho.", effect=False)
-            return ToolResult(True, text + hint, effect=False)
+            out = _add_line_numbers(text, 1) if numbered else text
+            return ToolResult(True, out + hint, effect=False)
         lines = text.splitlines()
         start = max(0, off or 0)
         if start >= len(lines) and lines:
             return ToolResult(True, f"(offset {start} além do fim — o arquivo tem {len(lines)} linha(s))",
                               effect=False)
         end = start + lim if lim is not None else len(lines)
-        chunk = "\n".join(lines[start:end])
+        window = lines[start:end]
+        chunk = "\n".join(f"{start + i + 1}|{ln}" for i, ln in enumerate(window)) if numbered \
+            else "\n".join(window)
         remaining = len(lines) - end
         if remaining > 0:
             chunk += f"\n\n[… +{remaining} linha(s); continue com offset={end} …]"
@@ -258,28 +257,51 @@ class WriteFile(Tool):
         return ToolResult(True, f"escrito {rel} ({n} chars)" + extra, effect=True)
 
 
-def _edit_did_you_mean(text: str, old: str, rel: str, *, max_lines: int = 10) -> str:
-    """Quando 'old' não casa EXATO, acha a seção mais PARECIDA no arquivo e devolve um snippet p/ o modelo
-    copiar o texto literal (paridade Hermes 'did you mean'). Tira o agente do loop de re-chutar `old`. ''
-    se não houver nada minimamente parecido."""
+def _edit_did_you_mean(text: str, old: str, rel: str, *, max_lines: int = 10, max_results: int = 3) -> str:
+    """Quando 'old' não casa EXATO, acha até TOP-3 seções mais PARECIDAS no arquivo e devolve snippets p/ o
+    modelo copiar o texto literal (paridade Hermes find_closest_lines max_results=3). Tira o agente do loop
+    de re-chutar `old` — antes só mostrava 1 candidato; se ele era o errado, o modelo ficava sem opção B/C.
+    '' se não houver nada minimamente parecido."""
     import difflib
-    anchor = next((ln.strip() for ln in old.splitlines() if ln.strip()), "")
+    old_lines = old.splitlines()
+    anchor = next((ln.strip() for ln in old_lines if ln.strip()), "")
     if not anchor:
         return ""
     file_lines = text.splitlines()
-    best_i, best_r = -1, 0.0
+    scored = []
     for i, ln in enumerate(file_lines):
-        r = difflib.SequenceMatcher(None, anchor, ln.strip()).ratio()
-        if r > best_r:
-            best_r, best_i = r, i
-    if best_i < 0 or best_r < 0.55:                       # nada parecido o suficiente → sem palpite
+        stripped = ln.strip()
+        if not stripped:
+            continue
+        r = difflib.SequenceMatcher(None, anchor, stripped).ratio()
+        if r >= 0.55:                                      # mesmo piso de antes — abaixo disso não é "parecido"
+            scored.append((r, i))
+    if not scored:
         return ""
-    lo = max(0, best_i - 2)
-    hi = min(len(file_lines), best_i + max(1, len(old.splitlines())) + 2)
-    snippet = "\n".join(file_lines[lo:hi][:max_lines])
-    return (f" Trecho PARECIDO em {rel}:{best_i + 1} (~{int(best_r * 100)}%) — copie o texto EXATO daqui "
-            f"(espaços/indentação contam):\n```\n{snippet}\n```\n"
-            "Se ainda não casar, re-leia com read_file, ou reescreva o arquivo com write_file.")
+    scored.sort(key=lambda x: -x[0])
+    block_len = max(1, len(old_lines))
+    parts, seen_ranges = [], set()
+    for r, i in scored:
+        if len(parts) >= max_results:
+            break
+        lo = max(0, i - 2)
+        # contexto ATÉ +1 linha depois do bloco (não +2): com +2 o snippet de um candidato podia
+        # engolir a PRÓXIMA definição/função do arquivo (achado no teste top-3: janela do 3º
+        # candidato vazava pro início de um 4º bloco não-parecido, poluindo o "did you mean").
+        hi = min(len(file_lines), i + block_len + 1)
+        key = (lo, hi)
+        if key in seen_ranges:                              # candidatos vizinhos colapsam na mesma janela
+            continue
+        seen_ranges.add(key)
+        snippet_lines = file_lines[lo:hi][:max_lines]
+        numbered = "\n".join(f"{lo + j + 1}: {ln}" for j, ln in enumerate(snippet_lines))
+        parts.append(f"~{rel}:{lo + 1} (~{int(r * 100)}%)\n```\n{numbered}\n```")
+    if not parts:
+        return ""
+    header = " Trecho(s) PARECIDO(s)" if len(parts) == 1 else f" {len(parts)} trechos PARECIDOS"
+    return (f"{header} — copie o texto EXATO de um deles (espaços/indentação contam):\n"
+            + "\n---\n".join(parts) +
+            "\nSe nenhum casar, re-leia com read_file, ou reescreva o arquivo com write_file.")
 
 
 class EditFile(Tool):
@@ -349,27 +371,27 @@ class EditFile(Tool):
             text = read_text_capped(p, limit=MAX_WRITE_BYTES)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao ler {rel}: {e}")
-        count = text.count(old)
-        new_text = None
-        if count == 0:                                 # FUZZY (Hermes): tolera whitespace/indent errado no `old`
-            new_text = _fuzzy_replace(text, old, new)  # (o erro nº1 do modelo) — casa por linha, exige unicidade
-            if new_text is None:
-                return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços)."
-                                  + _edit_did_you_mean(text, old, rel), effect=False)
-            count = 1
-        elif count > 1 and not replace_all:
-            return ToolResult(False, f"'old' aparece {count}× em {rel} — torne-o único (mais contexto) "
-                                     "ou passe replace_all=true.")
+        # Cadeia de matching fuzzy (paridade Hermes, 9 estratégias — fuzzy_match.py): tenta exato primeiro,
+        # depois vai afrouxando (whitespace/indentação/escape/unicode/âncora/similaridade), parando na
+        # PRIMEIRA que casar de forma ÚNICA. Substitui o antigo fallback único (_fuzzy_replace).
+        from okami.core.tools.fuzzy_match import fuzzy_find_and_replace
+        new_text, n, strategy, err = fuzzy_find_and_replace(text, old, new, replace_all=replace_all)
+        if err is not None:
+            if err.startswith("Found "):                # >1 match no MESMO nível de estratégia → não escolhe sozinho
+                import re as _re
+                m = _re.search(r"Found (\d+) matches", err)
+                cnt = m.group(1) if m else "vários"
+                return ToolResult(False, f"'old' aparece {cnt}× em {rel} — torne-o único (mais contexto) "
+                                         "ou passe replace_all=true.")
+            return ToolResult(False, f"trecho não encontrado em {rel} — precisa ser EXATO (incl. espaços)."
+                              + _edit_did_you_mean(text, old, rel), effect=False)
         if ctx.checkpoints is not None:                # snapshot antes (rede de segurança / rollback)
             try:
                 ctx.checkpoints.snapshot(rel)
             except Exception:  # noqa: BLE001
                 pass
-        if new_text is None:                           # caminho EXATO (count==1 ou replace_all)
-            new_text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
         record_read(ctx, rel, p)              # conhece o conteúdo + atualiza baseline anti-stale
-        n = count if replace_all else 1
         from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: erro NOVO pela edição
         from okami.core.code_security import security_warn            # #9: padrão perigoso introduzido
         warn = lint_delta(rel, text, new_text)
@@ -378,7 +400,10 @@ class EditFile(Tool):
         sec = security_warn(rel, new_text)
         line_no = _first_changed_line(text, old, new)                # item 8: nº da 1ª linha mudada
         diff = _short_diff(text, new_text)                           # item 8: diff unified curto (capado)
-        head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'})"
+        # calibração (§TASK item 4): mostra qual estratégia casou quando não foi exata — ajuda o modelo a
+        # perceber que o `old` que ele mandou não era byte-a-byte igual ao arquivo.
+        strat_note = f" (match: {strategy})" if strategy and strategy != "exact" else ""
+        head = f"editado {rel}:{line_no} ({n} substituiç{'ões' if n > 1 else 'ão'}){strat_note}"
         extra = "".join(f"\n{w}" for w in (ground_warn, warn, sem, sem2, sec) if w)
         return ToolResult(True, head + (f"\n{diff}" if diff else "") + extra, effect=True)
 

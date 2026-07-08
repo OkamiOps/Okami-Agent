@@ -275,13 +275,21 @@ def run_task(
                 _acc["served"] = f"{res.provider}/{res.model}".rstrip("/")
             return res                      # Completion inteiro (P0.4)
 
+    # Registry NATIVO (core, sem MCP/plugin ainda) adiantado só p/ o gate de skill por tool abaixo —
+    # MCP/plugin entram depois (linha ~325) no MESMO objeto `registry`, sem duplicar o filtro.
+    from okami.core.tool_policy import filter_registry, prune_unavailable
+    registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
+                               sandbox=getattr(cfg, "sandbox", None))   # #P1: gate de isolamento no worker
+    registry = prune_unavailable(registry, emit=emit)   # check_fn (item 27): dep/credencial faltando → sai
+
     # Skills: forçadas por contrato (inteiras) + catálogo (use_skill). Descarta bloqueadas pelo scan.
     # with_builtin junta as NATIVAS do pacote (viajam no install); a skill do usuário vence por nome.
     all_skills = skillmod.with_builtin(skillmod.load_skills(Path(skills_dir)))
     safe = [s for s in all_skills if not scan_path(s.path.parent).blocked]
     import sys as _sys                                  # #11: gating do CATÁLOGO por plataforma/ambiente —
-    safe = skillmod.visible_skills(safe, os_name=_sys.platform, active_environments=None)  # esconde skill de
-    #   OS/runtime irrelevante do índice (load explícito por nome ainda resolve)
+    safe = skillmod.visible_skills(safe, os_name=_sys.platform, active_environments=None,
+                                    available_tools=set(registry.keys()))  # + gate por tool (requires/fallback_for)
+    #   OS/runtime/tool irrelevante do índice (load explícito por nome ainda resolve)
     if len(safe) != len(all_skills):
         emit("skills bloqueadas pelo scan: " + ", ".join({s.name for s in all_skills} - {s.name for s in safe}))
     routed = skillmod.route(goal, cfg.contracts, safe)
@@ -322,10 +330,8 @@ def run_task(
     # prefix-cache + pula a re-leitura do disco). None = renderiza do disco (caminho normal).
     core_block = core_block if core_block is not None else memfiles.core_block(home, cfg.memory.get("files", {}))
 
-    from okami.core.tool_policy import filter_registry, prune_unavailable
-    registry = filter_registry(default_registry(), surface, config=getattr(cfg, "tools", None),
-                               sandbox=getattr(cfg, "sandbox", None))   # #P1: gate de isolamento no worker
-    registry = prune_unavailable(registry, emit=emit)   # check_fn (item 27): dep/credencial faltando → sai
+    # `registry` (core, filtrado por surface/sandbox) já foi montado ANTES do bloco de skills acima —
+    # aqui só entra o que MCP/plugin CONTRIBUEM em cima dele.
     mcp_clients = []
     servers = (cfg.mcp or {}).get("servers")
     if servers:
@@ -379,6 +385,14 @@ def run_task(
     from okami.gateway.checkpoints import Checkpoints
     from okami.automation.hooks import HookManager
     hooks = HookManager(cfg.hooks, root=str(ws), emit=emit, include_builtin=True)   # event hooks (§11) + nativos
+    try:            # plugins podem CONTRIBUIR transform_tool_result via ctx.register_transform_tool_result
+        from okami.plugins import discover_plugins as _discover_p, load_plugin_transform_tool_result
+        from okami.plugins import plugin_roots as _plugin_roots
+        for _fn in load_plugin_transform_tool_result(_discover_p(_plugin_roots()), cfg=cfg, emit=emit):
+            hooks.on("transform_tool_result", _fn)
+    except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do agente
+        from okami.log import warn
+        warn("falha ao carregar transform_tool_result de plugins", exc_info=True)
     t = Task(goal=goal, exit_criteria=exit_criteria or [])
     if not hooks.fire("before_task", {"goal": goal}):         # política externa pode VETAR a tarefa
         from okami.core import TaskState

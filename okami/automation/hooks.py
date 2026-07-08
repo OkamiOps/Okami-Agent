@@ -1,9 +1,13 @@
 """Event hooks / plugins (estilo OpenClaw/Hermes) — roda código nos pontos do ciclo de vida.
 
 Eventos: `before_task`/`after_task`, `before_tool`/`after_tool`, `before_write`, `compaction`,
-`cron_run`, `before_skill_install`. Um hook `before_*` pode VETAR (bloquear) retornando exit≠0 /
-False — útil p/ políticas (ex.: barrar `run_shell` perigoso, barrar install de skill). Os `after_*`
-são observadores (retorno ignorado).
+`cron_run`, `before_skill_install`, `transform_tool_result`. Um hook `before_*` pode VETAR (bloquear)
+retornando exit≠0 / False — útil p/ políticas (ex.: barrar `run_shell` perigoso, barrar install de
+skill). Os `after_*` são observadores (retorno ignorado). `transform_tool_result` é NÃO-BLOQUEANTE
+(porta do Hermes `transform_tool_result`/security-guidance): recebe (tool, args, result) e pode devolver
+texto EXTRA a anexar ao resultado da tool — o modelo vê no PRÓXIMO turno e se auto-corrige, sem vetar
+nem incomodar o dono ANTES da escrita. Múltiplos hooks compõem (texto concatenado); um hook que quebra
+é isolado (nunca derruba o loop nem os outros hooks).
 
 Fontes de hook (todas opcionais, combináveis):
 - **config** `hooks: { evento: ["comando shell", ...] }` (no okami.yaml/agent.yaml);
@@ -92,6 +96,54 @@ class HookManager:
             # erra (timeout/interpretador ruim/OOM) NÃO pode liberar a ação que existe pra barrar → veta.
             # Evento observador (after_*) não gateia nada → erro não tem efeito (segue True).
             return event not in _BLOCKABLE
+
+    def _run_capture(self, cmd: str, event: str, payload: dict) -> str:
+        """Como `_run_cmd`, mas devolve o STDOUT (texto a possivelmente anexar) em vez de bool — usado por
+        eventos de TRANSFORMAÇÃO (`transform_tool_result`), que nunca vetam, só sugerem texto extra. Mesmo
+        env sanitizado do `_run_cmd`; erro/timeout vira string vazia (fail-open, nunca derruba o hook)."""
+        from okami.core.tools import sanitized_env
+        env = {**sanitized_env(), "OKAMI_HOOK_EVENT": event, "OKAMI_HOOK_PAYLOAD": json.dumps(payload)}
+        for nm in (self.config or {}).get("env_passthrough") or []:
+            if nm in os.environ:
+                env[nm] = os.environ[nm]
+        try:
+            r = subprocess.run(  # nosec B602
+                cmd, shell=True, cwd=str(self.root), env=env,  # noqa: S602  # nosemgrep — operador, não modelo
+                input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+            return r.stdout.strip()
+        except Exception as e:  # noqa: BLE001 — hook que explode não derruba o resultado da tool
+            self.emit(f"[hook {event}] erro: {e}")
+            return ""
+
+    def transform_tool_result(self, tool: str, args: dict, result_text: str) -> str:
+        """Roda os hooks `transform_tool_result` (NÃO-bloqueante, port do Hermes): cada handler in-process
+        ou script (pasta/plugin/config) recebe {tool, args, result} e pode devolver texto EXTRA, que é
+        ANEXADO ao resultado (nunca substitui, nunca veta). Isolado por hook — try/except individual
+        (handler in-process) / subprocess isolado (script) — um hook ruim não derruba os outros nem o
+        loop (paridade com o `invoke_hook` do Hermes). Múltiplos hooks compõem em sequência."""
+        event = "transform_tool_result"
+        payload = {"tool": tool, "args": args, "result": result_text}
+        text = result_text
+        for fn in self._handlers.get(event, []):
+            try:
+                extra = fn(payload)
+            except Exception as e:  # noqa: BLE001 — handler que explode não derruba a tool nem os outros hooks
+                self.emit(f"[hook {event}] erro do handler: {e}")
+                continue
+            if extra:
+                text = f"{text}\n\n{extra}" if text else str(extra)
+        _cmds = self.config.get(event, []) or []
+        if isinstance(_cmds, str):
+            _cmds = [_cmds]
+        for cmd in _cmds:
+            extra = self._run_capture(cmd, event, payload)
+            if extra:
+                text = f"{text}\n\n{extra}" if text else extra
+        for script in self._scripts(event):
+            extra = self._run_capture(str(script), event, payload)
+            if extra:
+                text = f"{text}\n\n{extra}" if text else extra
+        return text
 
     def fire(self, event: str, payload: dict | None = None) -> bool:
         """Dispara todos os hooks do evento. Devolve False se algum `before_*` VETOU."""
