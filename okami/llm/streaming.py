@@ -84,6 +84,53 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
         raise                                        # caller decide o fallback (tem o on_token/usage)
 
 
+def _tail_prefix_len(s: str, tag: str) -> int:
+    """Comprimento do maior SUFIXO de `s` que é PREFIXO de `tag` — o que precisamos segurar porque pode ser
+    o começo de uma tag partida no próximo delta (ex.: s termina em '<thi', tag '<think>' → 4)."""
+    m = min(len(s), len(tag) - 1)
+    for k in range(m, 0, -1):
+        if s[-k:] == tag[:k]:
+            return k
+    return 0
+
+
+class _ThinkScrubber:
+    """Suprime o conteúdo de <think>...</think> no stream de DISPLAY (on_token), lidando com a tag PARTIDA
+    entre deltas (paridade Hermes agent/think_scrubber.py). O texto ACUMULADO (Completion) fica INTACTO —
+    o harness já tira <think> onde precisa; isto é só p/ o modelo local/reasoning não VAZAR o raciocínio
+    ao vivo no Telegram/TUI. `feed(delta)` devolve só a parte visível (fora de think)."""
+    _OPEN, _CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self._in = False
+        self._buf = ""
+
+    def feed(self, delta: str) -> str:
+        self._buf += delta
+        out: list[str] = []
+        while self._buf:
+            if not self._in:
+                idx = self._buf.find(self._OPEN)
+                if idx == -1:                              # sem <think> completo: emite tudo menos um tail que
+                    keep = _tail_prefix_len(self._buf, self._OPEN)   # possa ser começo de '<think>' no próximo
+                    out.append(self._buf[:len(self._buf) - keep])
+                    self._buf = self._buf[len(self._buf) - keep:]
+                    break
+                out.append(self._buf[:idx])
+                self._buf = self._buf[idx + len(self._OPEN):]
+                self._in = True
+            else:
+                idx = self._buf.find(self._CLOSE)
+                if idx == -1:                              # ainda dentro do think: descarta, segura só o tail
+                    self._buf = self._buf[-(len(self._CLOSE) - 1):] if len(self._buf) >= len(self._CLOSE) else self._buf
+                    if _tail_prefix_len(self._buf, self._CLOSE) == 0:
+                        self._buf = ""                     # nada que possa ser </think> parcial → limpa
+                    break
+                self._buf = self._buf[idx + len(self._CLOSE):]
+                self._in = False
+        return "".join(out)
+
+
 def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=None, response_schema=None,
                        _stream=None, _fallback=None, **overrides) -> Completion:
     """Streama os tokens (on_token cada delta), acumula e devolve o Completion. Stream que morre antes do
@@ -99,15 +146,19 @@ def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=Non
 
     src = _stream if _stream is not None else stream_messages_deltas(
         cfg, messages, provider=provider, model=model, **overrides)
+    scrubber = _ThinkScrubber()                          # não VAZA <think> ao vivo no display (o Completion
+    #                                                      acumula o texto CRU; scrub é só p/ o on_token)
     try:
         for delta in src:
             if delta:
-                chunks.append(delta)
+                chunks.append(delta)                     # acumula CRU (harness parseia/limpa depois)
                 if on_token:
-                    try:
-                        on_token(delta)
-                    except Exception:  # noqa: BLE001 — DISPLAY é best-effort: um erro na TUI/edição NÃO
-                        pass            # pode truncar a saída do modelo nem mascarar como falha de provider
+                    visible = scrubber.feed(delta)       # só a parte FORA de <think> vai pro display
+                    if visible:
+                        try:
+                            on_token(visible)
+                        except Exception:  # noqa: BLE001 — DISPLAY é best-effort: um erro na TUI/edição NÃO
+                            pass            # pode truncar a saída do modelo nem mascarar como falha de provider
     except Exception:  # noqa: BLE001 — stream caiu (antes ou no meio)
         if chunks:                                   # já streamou parte → entrega o que veio (não duplica)
             return Completion(text="".join(chunks), provider=getattr(cfg.provider(provider), "name", "") if cfg else "",

@@ -216,17 +216,42 @@ def _deliverable_too_thin(goal: str, msg: str, real_steps: int) -> bool:
     return real_steps >= 12 and len(m) < 1000         # trabalho grande, entrega curta
 
 
+# Editar um arquivo DOC (.md/.txt/…) NÃO exige rodar teste/lint p/ "comprovar" — o nudge de verify-on-stop
+# só faz sentido p/ mutação de CÓDIGO (paridade Hermes verification_stop._NON_CODE_VERIFY_EXTENSIONS): antes
+# editar README.md/SKILL.md disparava "você editou mas não verificou" espúrio, gastando um turno à toa.
+# Extensões/nomes de arquivo PROSA (paridade Hermes verification_stop._NON_CODE_VERIFY_*): editar isso não
+# exige rodar teste/lint p/ "comprovar".
+_NON_CODE_VERIFY_EXT = (".md", ".markdown", ".mdx", ".rst", ".txt", ".text", ".adoc", ".asciidoc",
+                        ".org", ".log", ".csv", ".tsv")
+_NON_CODE_VERIFY_NAMES = frozenset({"license", "licence", "notice", "authors", "contributors",
+                                    "changelog", "codeowners"})
+_EDIT_TOOLS = ("write_file", "edit_file", "apply_patch")
+
+
+def _needs_verify_effect(s) -> bool:
+    """Esse passo com efeito EXIGE comprovação (teste/lint/build)? Edit/write/patch em arquivo doc não."""
+    if not getattr(s, "effect", False):
+        return False
+    if s.tool in _EDIT_TOOLS:
+        a = s.args or {}
+        import os as _os
+        path = str(a.get("path") or a.get("file") or a.get("filename") or "").lower()
+        base = _os.path.basename(path)
+        if path.endswith(_NON_CODE_VERIFY_EXT) or base in _NON_CODE_VERIFY_NAMES:
+            return False                              # doc-only → nada de código a verificar
+    return True
+
+
 def _verified_since_last_effect(steps: list) -> bool:
-    """Heurística do verify-on-stop mínimo (WIN2): achou um `run_shell` BEM-SUCEDIDO (ok=True) DEPOIS
-    do último passo com EFEITO? Sem passo com efeito, não há o que verificar → True (não bloqueia papo
-    puro nem tarefa read-only). `run_shell` é o sinal — é o jeito universal de rodar teste/lint/build;
-    outra tool de leitura (read_file) NÃO conta como "comprovação" no espírito do nudge."""
+    """Verify-on-stop mínimo (WIN2): achou `run_shell` BEM-SUCEDIDO (ok=True) DEPOIS do último passo que
+    EXIGE comprovação (mutação de código; edit de doc não conta — _needs_verify_effect)? Sem passo assim,
+    não há o que verificar → True (não bloqueia papo puro, read-only, nem edit só de documentação)."""
     last_effect = -1
     for i, s in enumerate(steps):
-        if s.effect:
+        if _needs_verify_effect(s):
             last_effect = i
     if last_effect < 0:
-        return True                                   # nada com efeito ainda → nada a verificar
+        return True                                   # nada de código com efeito → nada a verificar
     return any(s.tool == "run_shell" and s.ok for s in steps[last_effect + 1:])
 
 

@@ -60,7 +60,7 @@ def test_verified_since_last_effect_false_when_run_shell_before_the_effect():
 # ------------------------------------------------------------------ integração: Harness fim-a-fim
 def test_task_complete_nudged_once_then_accepted_regardless(tmp_path):
     outputs = [
-        J("write_file", path="a.txt", content="oi"),   # efeito real
+        J("write_file", path="a.py", content="x=1"),   # efeito real (CODIGO exige verify)
         J("task_complete", summary="feito"),            # sem verify → nudge (1ª tentativa REJEITADA)
         J("task_complete", summary="feito"),             # 2ª tentativa: aceita de qualquer jeito
     ]
@@ -76,7 +76,7 @@ def test_task_complete_nudged_once_then_accepted_regardless(tmp_path):
 
 def test_task_complete_accepted_immediately_when_run_shell_confirms(tmp_path):
     outputs = [
-        J("write_file", path="a.txt", content="oi"),
+        J("write_file", path="a.py", content="x=1"),
         J("run_shell", cmd="true"),                        # verificação BEM-SUCEDIDA depois do efeito
         J("task_complete", summary="feito e verificado"),
     ]
@@ -111,7 +111,7 @@ def test_task_complete_not_nudged_when_exit_criteria_present(tmp_path):
     """Exit_criteria NÃO-vazio já é verificação de verdade (check_exit) — o nudge de WIN2 é só p/ o caso
     exit_criteria VAZIO; não deve duplicar/incomodar quando já existe um critério declarado."""
     outputs = [
-        J("write_file", path="a.txt", content="oi"),
+        J("write_file", path="a.txt", content="oi"),     # casa com o exit_criteria (teste não é sobre doc-exclusion)
         J("task_complete", summary="feito"),
     ]
     events = []
@@ -131,3 +131,16 @@ def test_step_records_tool_result_ok_flag(tmp_path):
     r = Harness(Script(outputs), t, tmp_path).run()
     assert r.steps and r.steps[0].tool == "run_shell"
     assert r.steps[0].ok is False                          # `false` sai com exit != 0
+
+
+def test_edit_de_doc_nao_dispara_nudge_de_verify(tmp_path):
+    """Paridade Hermes: editar README.md (prosa) NÃO exige rodar teste — antes disparava nudge espúrio."""
+    outputs = [
+        J("write_file", path="README.md", content="# docs"),   # doc-only → sem verify
+        J("task_complete", summary="atualizei o readme"),
+    ]
+    events = []
+    r = Harness(Script(outputs), Task(goal="atualiza README"), tmp_path, on_event=events.append).run()
+    assert r.state == TaskState.COMPLETE
+    rejects = [e for e in events if e["kind"] == "complete_rejected" and "sem verificação" in str(e.get("missing"))]
+    assert not rejects                                     # doc não pede verificação
