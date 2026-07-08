@@ -6,6 +6,19 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.14.3-beta] — 2026-07-08
+
+### 🐛 Correção
+- **`okami chat -p <provider>` era ignorado**: o chat interativo mostrava e usava o provider _default_
+  do `okami.yaml` mesmo quando a flag `-p`/`--provider` pedia outro — só a execução do turno threava a
+  escolha, enquanto banner, rótulo de modelo e as sessões do endpoint seguiam no default. Agora o provider
+  resolvido pela flag vira o provider da sessão de chat (fonte única). Verificado executando o comando com
+  um default diferente da flag. `okami run`/`okami task` já honravam `-p` corretamente.
+
+### ✅ Cobertura
+- Novo teste subprocess que executa `okami chat -p` e exige que o banner reflita o provider da flag —
+  fecha a classe de bug "pedi um modelo e ele usou outro" que testes de unidade não pegavam.
+
 ## [0.14.2-beta] — 2026-07-08
 
 ### 🐛 Correção

@@ -369,6 +369,10 @@ def chat(
             raise typer.Exit(1) from None
         provider = resolved_provider
         model = model or resolved_model           # -m explícito sempre vence o hint do alias
+        cfg.default_provider = provider           # -p vira o provider DESTA sessão de chat: banner,
+                                                  # model_label, pc=cfg.provider() e as sessões do endpoint
+                                                  # passam a usá-lo (antes só a closure run_task threava →
+                                                  # o -p era ignorado no REPL interativo e no banner).
     elif model and model.strip().lower() in {*ALIASES, *TIER_ALIASES, *(k.lower() for k in cfg.model_aliases)}:
         try:
             provider, model = _resolve_model(cfg, model)

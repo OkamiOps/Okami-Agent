@@ -4,4 +4,4 @@ Fase 0: fundação (config + providers via LiteLLM + CLI `okami run`).
 Ver docs/ARCHITECTURE.md e docs/ROADMAP.md.
 """
 
-__version__ = "0.14.2-beta"
+__version__ = "0.14.3-beta"
