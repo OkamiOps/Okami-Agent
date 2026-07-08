@@ -634,12 +634,16 @@ if _HAS_TEXTUAL:
             """'12K↑ 3K↓ · incluído' (ou custo estimado) p/ a barra de status — mesma fonte do /usage.
             '' se ainda não contou nada, ou se der qualquer erro (custo é cosmético, nunca derruba a UI)."""
             try:
-                pc = self.ep.cfg.provider() if self.ep.cfg else None
+                entry = self.ep.store.entry(self._cid)
+                # provider de quem REALMENTE serviu (served_by) — não o default; senão /model trocado
+                # de provider mostrava transporte/preço do provider ERRADO (custo "estimado" onde era
+                # assinatura, ou vice-versa).
+                pc = self.ep._served_provider(self.ep.session(self._cid), entry)
                 if pc is None:
                     return ""
-                entry = self.ep.store.entry(self._cid)
+                vendor = (entry.get("served_by") or "").split("/", 1)[0] or self.ep.cfg.default_provider
                 return _tui.usage_fragment(entry, transport=pc.transport,
-                                           provider=self.ep.cfg.default_provider, model=pc.model)
+                                           provider=vendor, model=pc.model)
             except Exception:  # noqa: BLE001
                 return ""
 

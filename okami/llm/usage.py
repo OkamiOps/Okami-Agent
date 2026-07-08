@@ -98,13 +98,24 @@ def normalize_usage(raw, *, transport: str) -> CanonicalUsage:
             cache_write_tokens=_int(raw, "cache_creation_input_tokens"),
             requests=1,
         )
-    if transport == "bedrock_native":                # Converse: inputTokens/outputTokens
+    if transport == "bedrock_native":                # Converse: inputTokens/outputTokens (cache SEPARADO —
         return CanonicalUsage(input_tokens=_int(raw, "inputTokens"), output_tokens=_int(raw, "outputTokens"),
-                              requests=1)
+                              # NÃO soma no inputTokens, ao contrário do codex; cacheRead/WriteInputTokens
+                              # só existem quando o prompt caching do Bedrock está ativo (Claude on Bedrock)
+                              cache_read_tokens=_int(raw, "cacheReadInputTokens"),
+                              cache_write_tokens=_int(raw, "cacheWriteInputTokens"), requests=1)
     if transport == "gemini_native":                 # generateContent: usageMetadata.{prompt,candidates}TokenCount
         meta = _get(raw, "usageMetadata", {}) or raw
-        return CanonicalUsage(input_tokens=_int(meta, "promptTokenCount"),
-                              output_tokens=_int(meta, "candidatesTokenCount"), requests=1)
+        # promptTokenCount JÁ INCLUI cachedContentTokenCount (como o codex) → subtrair p/ não contar 2x;
+        # thoughtsTokenCount (thinking do gemini-2.5+) NÃO vinha p/ lugar nenhum → total_tokens SUBCONTAVA
+        # silenciosamente sempre que o modelo pensava (reasoning tokens são cobrados, mas invisíveis).
+        cache_read = _int(meta, "cachedContentTokenCount")
+        reasoning = _int(meta, "thoughtsTokenCount")
+        # thoughtsTokenCount é ADITIVO (não subconjunto de candidatesTokenCount, ao contrário do
+        # reasoning_tokens da OpenAI) → soma no output p/ total_tokens não subcontar o turno.
+        return CanonicalUsage(input_tokens=max(0, _int(meta, "promptTokenCount") - cache_read),
+                              output_tokens=_int(meta, "candidatesTokenCount") + reasoning,
+                              cache_read_tokens=cache_read, reasoning_tokens=reasoning, requests=1)
     if transport == "codex_oauth":
         total_in = _int(raw, "input_tokens")
         details = _get(raw, "input_tokens_details", {})

@@ -1053,13 +1053,32 @@ class AgentEndpoint(EndpointCommandsMixin):
             except Exception:  # noqa: BLE001
                 pass
 
+    def _served_provider(self, s: "Session", stats: dict):
+        """Provider config de quem REALMENTE serviu o turno (§E5 served_by), com fallback pro override
+        da sessão (/model) e só por último o default — SEM isso a janela de contexto era calculada com
+        o provider ERRADO sempre que a sessão trocava de provider (ctx% mentia p/ quem usava /model)."""
+        if not self.cfg:
+            return None
+        served_by = str((stats or {}).get("served_by") or "")
+        vendor = served_by.split("/", 1)[0] if served_by else ""
+        for key in (vendor, getattr(s, "provider_override", "") or ""):
+            if key and key in self.cfg.providers:                # só aceita nome NÃO-vazio e conhecido —
+                try:                                              # "" cairia no default de cfg.provider()
+                    return self.cfg.provider(key)                 # antes mesmo de tentar o override (bug)
+                except Exception:  # noqa: BLE001
+                    continue
+        try:
+            return self.cfg.provider()                            # último recurso: default global
+        except Exception:  # noqa: BLE001
+            return None
+
     def _turn_footer(self, s: "Session", stats: dict, elapsed: float) -> str:
         """Rodapé de custo por resposta: `· ctx N% · X tok (in↑ out↓) · Ys`. Sóbrio, 1 linha, dim."""
         from okami.llm.usage import CanonicalUsage, format_tokens
         parts: list[str] = []
         u = CanonicalUsage.from_dict((stats or {}).get("usage") or {})
         try:                                              # ctx %: quão cheia está a janela do modelo —
-            pc = self.cfg.provider() if self.cfg else None  # PROMPT INTEIRO (entrada fresca + cache_read +
+            pc = self._served_provider(s, stats)             # PROMPT INTEIRO (entrada fresca + cache_read +
             if pc and u.prompt_tokens:                      # cache_write: tokens cacheados AINDA ocupam a
                 from okami.llm.providers import context_window_tokens   # janela — só contar input_tokens
                 win = max(1, context_window_tokens(pc))     # (não-cacheado) subestimava drasticamente com
@@ -1572,7 +1591,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                     self.store.add_usage(chat_id, stats["usage"], served_by=stats.get("served_by", ""))
                     from okami.llm.usage import CanonicalUsage
                     _u = CanonicalUsage.from_dict(stats["usage"])
-                    _pc = self.cfg.provider() if self.cfg else None
+                    _pc = self._served_provider(s, stats)
                     if _pc and _u.prompt_tokens:                # ctx% REAL = PROMPT INTEIRO do último turno
                         from okami.llm.providers import context_window_tokens   # (input fresco + cache_read +
                         _win = max(1, context_window_tokens(_pc))               # cache_write; cache AINDA ocupa

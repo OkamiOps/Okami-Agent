@@ -16,6 +16,7 @@ NÃO se aplica a:
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -72,8 +73,8 @@ def detect_install_kind(src: Path | None = None) -> str:
     return "managed"
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
+def _run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env)
 
 
 def git_pull(src: Path, *, allow_dirty: bool = False) -> tuple[bool, str]:
@@ -90,15 +91,69 @@ def git_pull(src: Path, *, allow_dirty: bool = False) -> tuple[bool, str]:
     return False, (result.stderr or result.stdout).strip() or "git pull falhou"
 
 
+def _tool_env() -> dict:
+    """Env do `uv tool install` apontando p/ o MESMO local do okami em execução — senão o upgrade
+    reinstala num lugar (default do uv, ~/.local) diferente do binário que a pessoa roda (ex.: ~/.okami/bin
+    do install.sh) e a versão "não muda". Se o venv atual está sob $OKAMI_HOME (install gerenciado),
+    força UV_TOOL_DIR/UV_TOOL_BIN_DIR = ~/.okami/{tools,bin} (idêntico ao install.sh); senão, default do uv."""
+    env = dict(os.environ)
+    home = Path(os.environ.get("OKAMI_HOME") or (Path.home() / ".okami")).resolve()
+    venv = Path(sys.prefix).resolve()
+    try:
+        under_home = venv == home or home in venv.parents
+    except OSError:
+        under_home = False
+    if under_home:
+        env["UV_TOOL_DIR"] = str(home / "tools")
+        env["UV_TOOL_BIN_DIR"] = str(home / "bin")
+    return env
+
+
 def uv_tool_install(src: Path) -> tuple[bool, str]:
-    """`uv tool install --force <src>` — reinstala o `okami` isolado (mesmo passo 3 do install.sh)."""
+    """`uv tool install --force <src>` — reinstala o `okami` isolado (mesmo passo 3 do install.sh),
+    NO MESMO local do binário em execução (ver _tool_env)."""
     uv = shutil.which("uv")
     if not uv:
         return False, "uv não encontrado — instale: https://docs.astral.sh/uv/getting-started/installation/"
-    result = _run([uv, "tool", "install", "--force", str(src)])
+    result = _run([uv, "tool", "install", "--force", str(src)], env=_tool_env())
     if result.returncode == 0:
         return True, result.stdout.strip()
     return False, (result.stderr or result.stdout).strip() or "uv tool install falhou"
+
+
+def installed_bin_path(env: dict | None = None) -> Path:
+    """Onde o `okami` recém-(re)instalado REALMENTE mora — mesmo UV_TOOL_BIN_DIR que `_tool_env()`
+    força pro `uv tool install` (ver ali). Sem isso o shadow-check compararia contra o default do
+    uv mesmo quando o install é gerenciado (~/.okami/bin), gerando falso positivo/negativo."""
+    env = env if env is not None else _tool_env()
+    bin_dir = env.get("UV_TOOL_BIN_DIR")
+    if bin_dir:
+        return Path(bin_dir) / "okami"
+    return Path.home() / ".local" / "bin" / "okami"
+
+
+def shadow_warning(installed: Path) -> str | None:
+    """Se o `okami` que o PATH do usuário resolve HOJE não é o binário que acabamos de instalar,
+    ele vai continuar sendo o que o shell chama — a pessoa roda `okami upgrade`, some sucesso, mas
+    `okami --version` teima na versão velha. Mesma checagem que o install.sh faz no passo 5b.
+    Retorna None quando está tudo certo (PATH resolve pro binário novo, ou nada no PATH ainda)."""
+    on_path = shutil.which("okami")
+    if not on_path:
+        return None
+    on_path_p = Path(on_path)
+    try:
+        same = on_path_p.resolve() == installed.resolve()
+    except OSError:
+        same = on_path_p == installed
+    if same:
+        return None
+    return (
+        f"[yellow]⚠[/] o `okami` no seu PATH ainda aponta pra outro binário: {on_path}\n"
+        f"  O upgrade foi instalado em {installed} — é por isso que `okami --version` pode "
+        "continuar mostrando a versão velha.\n"
+        f"  Resolva removendo o antigo (ex.: [bold]rm -f {on_path}[/bold] ou `pipx uninstall "
+        "okami-agent`) ou ajustando a ordem do PATH, e reabra o terminal."
+    )
 
 
 def new_version_from_src(src: Path) -> str | None:
@@ -183,3 +238,7 @@ def upgrade(
     else:
         console.print(f"[green]✓[/] atualizado: {old} → {new}")
     console.print("  [dim]Abra um terminal novo (ou rode `hash -r`) se `okami --version` ainda mostrar a versão antiga.[/dim]")
+
+    warning = shadow_warning(installed_bin_path())
+    if warning:
+        console.print(warning)

@@ -36,9 +36,15 @@ class EndpointCommandsMixin:
         line = f"📊 {format_tokens(u.input_tokens)} in · {format_tokens(u.output_tokens)} out"
         if u.cache_read_tokens:
             line += f" · {format_tokens(u.cache_read_tokens)} cache"
-        pc = self.cfg.provider() if self.cfg else None
+        # provider de quem REALMENTE serviu (served_by) — não o default: uma sessão trocada de provider
+        # via /model mostrava aqui o transport/preço do provider ERRADO (ex.: "estimated $" p/ uma
+        # sessão inteira em assinatura, ou vice-versa).
+        s_obj = self.session(chat_id) if hasattr(self, "session") else None
+        pc = self._served_provider(s_obj, e) if hasattr(self, "_served_provider") else (
+            self.cfg.provider() if self.cfg else None)
         if pc:
-            cr = estimate_cost(u, transport=pc.transport, provider=self.cfg.default_provider, model=pc.model)
+            vendor = (e.get("served_by") or "").split("/", 1)[0] or (self.cfg.default_provider if self.cfg else "")
+            cr = estimate_cost(u, transport=pc.transport, provider=vendor, model=pc.model)
             line += "   " + t("gw.usage_cost", _default="cost {label}", label=cr.label)
         if e.get("served_by"):
             line += "\n" + t("gw.usage_served_by", _default="served by: {by}", by=e["served_by"])

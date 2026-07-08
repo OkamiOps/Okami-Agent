@@ -38,6 +38,28 @@ def test_normalize_none_is_one_request_zero_tokens():
     assert u.total_tokens == 0 and u.requests == 1
 
 
+def test_normalize_gemini_subtracts_cache_and_counts_thinking_tokens():
+    """usageMetadata REAL do Gemini: promptTokenCount JÁ INCLUI cachedContentTokenCount (subtrair, como
+    o codex) e thoughtsTokenCount (thinking do 2.5+) é ADITIVO — sem somar, o total_tokens subcontava
+    silenciosamente todo turno com raciocínio."""
+    raw = {"usageMetadata": {"promptTokenCount": 120, "cachedContentTokenCount": 20,
+                             "candidatesTokenCount": 15, "thoughtsTokenCount": 40,
+                             "totalTokenCount": 175}}
+    u = normalize_usage(raw, transport="gemini_native")
+    assert u.input_tokens == 100 and u.cache_read_tokens == 20
+    assert u.output_tokens == 55 and u.reasoning_tokens == 40   # 15 resposta + 40 thinking
+    assert u.prompt_tokens == 120 and u.total_tokens == 175
+
+
+def test_normalize_bedrock_captures_prompt_cache_buckets():
+    """Bedrock Converse com prompt caching ativo (Claude on Bedrock): cacheRead/WriteInputTokens vinham
+    p/ lugar nenhum → cache invisível no dashboard (mostrava só inputTokens fresco)."""
+    raw = {"inputTokens": 30, "outputTokens": 10, "cacheReadInputTokens": 200, "cacheWriteInputTokens": 5}
+    u = normalize_usage(raw, transport="bedrock_native")
+    assert u.input_tokens == 30 and u.cache_read_tokens == 200 and u.cache_write_tokens == 5
+    assert u.prompt_tokens == 235
+
+
 def test_cost_subscription_is_included_never_a_dollar():
     u = CanonicalUsage(input_tokens=1_000_000, output_tokens=500_000)
     for tr in ("codex_oauth", "claude_cli"):
