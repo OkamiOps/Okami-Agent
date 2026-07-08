@@ -92,6 +92,12 @@ COMPACT_RATIO = 0.72
 # à janela) só dispararia a ~2.88M chars → o histórico inteiro era REENVIADO a cada passo (lentidão
 # mortal, 1.5M tok de entrada). Capamos p/ a compaction disparar cedo. Dono sobe via `context_window:`.
 _LOCAL_WINDOW_CAP = 32_768
+# TETO DE TRABALHO (2026-07-08, uso real): mesmo num modelo de janela GIGANTE (minimax M3 = 1M tokens,
+# setado explícito no config → bypassa o _LOCAL_WINDOW_CAP), NÃO carregamos ~720K tokens de contexto a
+# cada passo. Um log real de gerar 1 PDF acumulou 1.8M tok porque a compaction só dispararia a 0.72×1M.
+# A janela do modelo segue sendo o limite DURO; este é só o working-set em que COMEÇAMOS a compactar —
+# manter enxuto deixa cada passo rápido/barato. 180K tok ≈ pilha de trabalho grande e ainda sã.
+_WORKING_CTX_CAP_TOKENS = 180_000
 
 
 def context_window_tokens(pc: ProviderConfig) -> int:
@@ -106,8 +112,12 @@ def context_window_tokens(pc: ProviderConfig) -> int:
 
 
 def compaction_threshold_chars(pc: ProviderConfig, ratio: float = COMPACT_RATIO) -> int:
-    """Quando comprimir (em chars), proporcional à janela REAL do modelo (anti-overflow)."""
-    return int(context_window_tokens(pc) * pc.chars_per_token * ratio)
+    """Quando comprimir (em chars): proporcional à janela REAL do modelo (anti-overflow), MAS capado num
+    working-set são (_WORKING_CTX_CAP_TOKENS) — num modelo de janela gigante não arrastamos 720K tokens
+    de contexto por passo (lento/caro). O menor entre os dois vence."""
+    window_based = int(context_window_tokens(pc) * pc.chars_per_token * ratio)
+    working_cap = int(_WORKING_CTX_CAP_TOKENS * pc.chars_per_token)
+    return min(window_based, working_cap)
 
 
 def _build_messages(prompt: str, system: str | None) -> list[dict[str, str]]:
