@@ -261,7 +261,16 @@ def config_main(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
     from okami.cli import _ui
-    _render_config_view()
+    try:
+        _render_config_view()
+    except FileNotFoundError:                          # sem okami.yaml (fresh/antes do setup): degrada limpo
+        console.print()
+        console.print(_ui.panel(
+            _ui.hint("nenhum okami.yaml encontrado nesta pasta nem em ~/.okami.\n"
+                     "Rode [bold]okami setup[/] para criar a config, ou entre num projeto que já tenha um."),
+            title="config", accent=_ui.ORANGE))
+        console.print()
+        raise typer.Exit(1)
     from okami import menu
     if not menu._interactive():                       # script/pipe: só mostra (não trava pedindo input)
         console.print(_ui.hint("show · get <k> · set <k> <v> · edit · path · check · okami model <alias>"))
