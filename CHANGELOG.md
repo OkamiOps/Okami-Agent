@@ -6,6 +6,15 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.14.2-beta] — 2026-07-08
+
+### 🐛 Correção
+- **`okami chat` não inicia** (`UnboundLocalError: ep`): a inicialização do indicador de ferramenta-em-
+  execução do toolbar era feita antes de o endpoint (`ep`) existir, derrubando o chat interativo no boot.
+  Movida para depois da criação do `ep`. Adicionado um **smoke test que executa o `okami chat` de verdade**
+  (subprocess) e falha diante de qualquer traceback de inicialização — a classe de bug que testes de
+  unidade não pegam porque as *closures* do REPL não são importáveis isoladamente.
+
 ## [0.14.1-beta] — 2026-07-08
 
 Correções de acompanhamento à confiabilidade de instalação e à precisão da telemetria de uso.

@@ -448,8 +448,8 @@ def chat(
                           + f"{tail}[/dim]")
             _expl["n"] = _expl["ok"] = 0
 
-    ep._live_tool = {"tool": None, "args": None, "t0": None}   # tool RODANDO agora → o toolbar lê isto
-    #   (mesma ideia do self._running da TUI, só que exposto no ep pq o toolbar mora em _run_repl)
+    # (a inicialização de ep._live_tool vive DEPOIS de `ep = AgentEndpoint(...)` — o `ep` ainda não existe
+    #  aqui. O _on_event abaixo só referencia `ep` em tempo de chamada, então pode ser definido antes.)
 
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
         import time as _time
@@ -478,6 +478,7 @@ def chat(
     ep = AgentEndpoint(name, cfg, ws, ch, run_task=run_task, approval_mode=mode, on_event=_on_event,
                        agent_home=home, open_fs=True,    # casa isolada + acesso a todo o FS (dono)
                        approval_timeout=600.0)        # REPL interativo: humano pode demorar p/ aprovar
+    ep._live_tool = {"tool": None, "args": None, "t0": None}   # tool RODANDO agora → o toolbar lê isto
     ep._step_log = _step_log                           # M8: o _run_repl lê isto p/ o /replay
     from okami import prefs as _prefs                  # M4: retoma a verbosidade lembrada (default collapsed)
     _saved_det = _prefs.get_pref("repl_details", "collapsed")
