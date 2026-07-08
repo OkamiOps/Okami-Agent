@@ -107,8 +107,8 @@ def test_native_multiple_writes_run_serially_in_one_turn(tmp_path):
         calls["n"] += 1
         if calls["n"] == 1:
             return Completion(text="", tool_calls=[
-                {"id": "w1", "name": "write_file", "arguments": '{"path":"x.txt","content":"X"}'},
-                {"id": "w2", "name": "write_file", "arguments": '{"path":"y.txt","content":"Y"}'}])
+                {"id": "w1", "name": "write_file", "arguments": '{"path":"x.py","content":"X=1"}'},
+                {"id": "w2", "name": "write_file", "arguments": '{"path":"y.py","content":"Y=1"}'}])
         return Completion(text="", tool_calls=[
             {"id": "d", "name": "task_complete", "arguments": '{"summary":"escrevi os dois"}'}])
 
@@ -117,9 +117,9 @@ def test_native_multiple_writes_run_serially_in_one_turn(tmp_path):
     # 2 escritas no MESMO turno (1 geração) + 1 chamada extra: exit_criteria vazio + efeito sem verify
     # dispara o nudge de verify-on-stop (WIN2) uma vez antes de aceitar — não quebra o paralelismo do
     # turno 1 (que é o que este teste prova).
-    assert calls["n"] == 3
-    assert (tmp_path / "x.txt").read_text(encoding="utf-8") == "X"
-    assert (tmp_path / "y.txt").read_text(encoding="utf-8") == "Y"
+    assert calls["n"] == 3                                       # (.py, não .txt: doc não pede verify)
+    assert (tmp_path / "x.py").read_text(encoding="utf-8") == "X=1"
+    assert (tmp_path / "y.py").read_text(encoding="utf-8") == "Y=1"
     asst = _assistant_with_tool_calls(h.messages)
     assert asst and asst[0][1]["tool_calls"][0]["id"] == "w1"   # 1ª declarada, sequência válida
     assert h.messages[asst[0][0] + 1]["role"] == "tool"
