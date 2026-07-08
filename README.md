@@ -10,13 +10,13 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 (skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
 or wherever you want.
 
-![version](https://img.shields.io/badge/version-0.9.0--alpha-ff7527)
+![version](https://img.shields.io/badge/version-0.10.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-2578%20passing-3fb950)
-![status](https://img.shields.io/badge/status-public%20alpha-orange)
+![tests](https://img.shields.io/badge/tests-3364%20passing-3fb950)
+![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
 
@@ -24,34 +24,35 @@ or wherever you want.
 
 ---
 
-> 🐺 **Public alpha (`v0.9.0-alpha`).** Okami is open for you to try. The command/config surface may
-> still change between alphas — before exposing it publicly, run `okami policy check --strict` first.
+> 🐺 **Public beta (`v0.10.0-beta`).** Okami is open for you to try. The command/config surface may
+> still change before GA — before exposing it publicly, run `okami policy check --strict` first.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
-> ### ✨ New in `0.9.0-alpha`
-> A big capability jump — **~98% parity** with the state of the art (by capability presence), including
-> **multi-vendor readiness**. From ~1.7k → **2.6k tests passing**.
-> - **Mixture-of-Agents** — `okami moa` fans one hard problem across your configured providers and
->   synthesizes the best answer with the strongest (reasoning amplification, subscription-only).
-> - **Free Gemini tier** — `okami gemini login` (Google Code Assist via OAuth PKCE), no billing.
-> - **Copilot backend** — GitHub Copilot as a provider via the `copilot` CLI (`transport: copilot_cli`).
-> - **Semantic diagnostics on write** — a persistent **LSP client** (`okami lsp`, auto-install) feeds
->   pyright/gopls/ts/rust/… diagnostics into the post-write delta filter.
-> - **14 channels, now two-way** — WhatsApp/Signal/Matrix/SMS/iMessage/DingTalk/WeCom/QQ/WeChat gained
->   **inbound** (poll for Signal/Matrix/iMessage; webhook-push for the rest) — not just outbound — plus
->   niche tools `x_search` (Grok), `homeassistant` (IoT) and `feishu_doc_read`.
-> - **Embedded computer-use** — opt-in `computer_use` tool (screenshot/click/type/key) with a layered
->   guard: off by default, hardline-blocks destructive combos, every action is go/no-go.
-> - **Hermes built-in plugins** — `security-guidance` (scans code-to-be-written for ~28 insecure patterns)
->   and `disk-cleanup` (tracks & removes ephemeral files) ported as real folder plugins.
-> - **Multi-vendor ready** — native Gemini (`generateContent`) and Bedrock (Converse/IAM) transports;
->   subscription-Claude today, ready to switch vendors when you need it. SDKs install on demand (`okami deps`).
-> - **Hardened security** — scope-aware threat-pattern library, context-file injection scan, MCP exfil
->   scanner + OSV malware check, SSL CA-bundle preflight, and **Tirith** pre-exec content scanning.
-> - **Automation & extensibility** — Blueprints (`okami blueprint`), Kanban swarm (`okami swarm`),
->   plugin discovery (`okami plugins`), CDP browser supervisor, web dashboard (`okami dashboard`/`okami gui`).
+> ### ✨ New in `0.10.0-beta`
+> First **beta** — promoted on maturity, not a new headline feature. A full E2E audit vs Hermes (8 agents,
+> real-world use with minimax) found the root cause behind the agent feeling "slow/dumb" in the field: a
+> broken native tool-calling probe silently degraded **every non-hardcoded provider** to the JSON-in-text
+> rail. Fixed across 3 waves (P0/P1/P2) plus an adversarial review that caught 4 regressions the campaign
+> itself introduced. 193 commits · 403 files · **2.4k → 3.36k tests passing** since `v0.9.0-alpha`.
+> - **Native tool-calling probe fixed** — the silent `TypeError` that degraded every non-hardcoded
+>   provider to JSON-in-text is gone; the verdict now persists to disk.
+> - **Tool-result budget scales with the model's context window** (15%/30%, floor 8K/16K, cap 100K/200K)
+>   instead of a flat 8K/1.5K cutoff.
+> - **Retry decoupled from key-pool size** — a single credential no longer means zero retries; tier-aware
+>   timeouts (local 1800s / cloud 600s).
+> - **Telegram renders before splitting** — long replies no longer lose HTML formatting mid-cut.
+> - **STT/link-summary no longer block the shared poll loop** — a slow transcription in one chat used to
+>   stall every other chat.
+> - **Memory stops absorbing mechanical write-noise** — only explicit `remember`/`reflect` calls write to
+>   `MEMORY.md` now.
+> - Real E2E result (minimax): before → `BLOCKED`/hallucinating tool-calls/`<think>` leaking into text;
+>   after → **`COMPLETE`** with sha256 verification, intact Telegram formatting, `tokens_in` 6.4-7K → 2.7K.
+> - Also ~190 parity commits since the alpha: multi-agent supervisor (`okami agent up/down/status/supervise`),
+>   VPS-first remote provisioning, Windows/Mac/Linux portability (14 fixes), rich Telegram rendering
+>   (tables, task lists, inline-button clarify), gateway session LRU/dedup/auto-resume, multi-vendor
+>   reasoning-echo and context recalibration, full plugin lifecycle, `okami prompt-size`.
 >
-> Full notes in the [CHANGELOG](CHANGELOG.md).
+> Full notes in the [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md).
 
 `okami chat` opens a **full-screen TUI** in the brand identity (Onyx + Heat Orange / Volt Cyan):
 

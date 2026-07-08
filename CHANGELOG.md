@@ -6,6 +6,82 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.10.0-beta] — 2026-07-08
+
+Primeiro **beta**: promoção do alpha por MATURIDADE, não por feature nova. Motivo — auditoria E2E completa
+vs Hermes (8 agentes, uso real com minimax) achou a causa-raiz de o agente parecer "burro/lento" em
+campo, e 3 ondas de correção (P0 `7939d6e` · P1 `c030281` · P2 `29d648e`) fecharam do sintoma à causa.
+Desde o `v0.9.0-alpha`: **193 commits · 403 arquivos · +23.841/−1.021 linhas · suíte 2.408 → 3.364
+testes**. 🐺
+
+### 🔎 Auditoria E2E vs Hermes (uso real, 8 agentes) — por que o agente "parecia burro"
+Sintoma reportado pelo dono: respostas lentas, tarefa simples travando, formatação quebrada no Telegram.
+Não era 1 bug — era uma cadeia de degradação silenciosa. Achados e correções, do sintoma à causa:
+- **probe de tool-calling nativo quebrado (TypeError silencioso)**: todo provider NÃO-hardcoded (ex.:
+  minimax) caía pro rail JSON-em-texto sem avisar — perdia tool-calling nativo, thinking vazava no texto,
+  contexto inchava. Verdict agora persiste em disco (`native_verdict.json`); hint explícito do catálogo
+  pula o probe.
+- **retry zero com 1 credencial só**: `max_retries` estava acoplado ao tamanho do key-pool — com 1 chave
+  só, zero retry. Agora desacoplado (default 3) + timeout por tier (local 1800s / cloud 600s, antes 150s
+  flat matava geração longa de modelo local).
+- **tool-results cortados 8K/1.5K flat**: agora o orçamento ESCALA com a janela do modelo (15%/30% do
+  contexto, floor 8K/16K, cap 100K/200K) — modelo com janela grande não perde ferramenta por corte cego.
+- **Telegram dividia ANTES de formatar**: resposta >4096 chars perdia toda a formatação HTML (tags cortadas
+  no meio) — agora renderiza o HTML completo primeiro, divide por unidades UTF-16 com tags balanceadas
+  entre cortes, sanitiza marcador desbalanceado.
+- **STT/link-summary bloqueavam o poll loop de TODOS os chats**: uma transcrição de áudio ou resumo de
+  link travava o gateway inteiro por chat nenhum receber mensagem; agora rodam fora do poll loop
+  compartilhado (spawn por chat) + cap de fila 32 + demotion guard de interrupt.
+- **MEMORY.md poluído por auto-write mecânico**: `_extract_on_complete` despejava "goal → result" cru na
+  memória — só `remember`/`remember_user`/`reflect` escrevem lá agora; gate de durabilidade (≥2 passos com
+  efeito) pra memória ranqueada; dedup near-duplicate por Jaccard.
+- **hooks builtin sem bit +x**: `security-guidance`/`disk-cleanup` vetavam TODA tool com exit 126
+  silencioso (script sem permissão de execução) — corrigido o bit no pacote.
+- **`okami run` alucinava tool-calls**: sem aviso explícito de "sem tools disponíveis" no system prompt, o
+  modelo fraco inventava `tool_call` que não existia — agora avisa explícito + strip de `<think>` no
+  output exibido.
+- **streaming × rail nativo em conflito**: `streaming_enabled` checava o TIER antes de saber se o provider
+  suportava tools nativas — ligar streaming pra minimax (rail nativo) quebrava porque o caminho de
+  streaming nunca anexava `tools=` no payload (regressão exposta pela própria correção do probe P0). Agora
+  `streaming_enabled` consulta `native_supported` primeiro.
+- **E2E real (minimax), antes → depois**: BLOCKED/alucinando/vazamento de `<think>` → **COMPLETE** com
+  verificação mecânica (sha256), formatação íntegra no Telegram, `tokens_in` 6.4-7K → 2.7K por turno.
+
+### ⚙️ Onda P2 — quick-wins de qualidade (harness, gateway, run, TUI)
+- **loop-guard avisa antes de bloquear**: warn no repeat #2, bloqueia só no #5 (paridade Hermes
+  warn-then-block); contador unificado fecha loophole nome-ruim↔arg-faltando.
+- **verify-on-stop**: `task_complete` com efeitos NÃO verificados ganha 1 nudge antes de aceitar (aceita na
+  2ª tentativa — sem risco de loop infinito).
+- **`spawn` promovido a tool core** — modelos fracos agora decompõem tarefa em subagentes por padrão.
+- **`okami prompt-size`**: breakdown de chars/tokens por seção do prompt (diagnóstico de inchaço).
+- **mensagens proativas do cron espelhadas no transcript** (PII mascarado só na cópia da sessão);
+  `session_limit.py` morto removido.
+- **TUI hardening**: bracketed-paste defensivo (paste-end perdido não trava input), focus-report ESC[I/O
+  ignorado (lixo em iTerm2/Ghostty), `/redraw` + repaint em SIGWINCH, `okami sessions delete`,
+  version-drift no `doctor`, verbos pt-BR nos tool-calls + sufixo `[exit N]` em falhas.
+- Suíte: **3.364 testes passando**.
+
+### 🐛 Revisão adversarial (4 bugs que a própria campanha introduziu)
+Review adversarial pós-campanha achou 4 regressões reais introduzidas pelas ondas P0-P2 — corrigidas antes
+do beta (detalhe: `7b4395b`).
+
+### 🤖 paridade multi-vendor/Telegram/gateway/plugins (~190 commits desde o alpha)
+O grosso do trabalho entre `v0.9.0-alpha` e o beta: fechar o diff funcional vs Hermes (74 gaps
+missing/59 parciais mapeados) em ondas por área — loop → tools → telegram → gateway → plugins. Destaques
+(lista completa nas seções abaixo, já documentadas no [Não lançado] anterior):
+- **multi-agente supervisor** (`okami agent up/down/status/supervise`), **portabilidade** Windows/Mac/Linux
+  (14 breaks corrigidos), **provisão remota VPS-first** (ssh/git bootstrap sem depender da máquina do
+  usuário), `system_monitor`/`restart_gateway`/`env_check`, WebFetch resiliente com auto-fallback Playwright.
+- **Telegram rico**: tabelas, listas, task lists GFM (☐/☑), clarify com botões inline, batch-delay
+  adaptativo, entity flattening inbound.
+- **gateway**: LRU de sessões, dedup de reenvio, auto-resume <1h, `typed_command_prefix` por canal.
+- **multi-vendor**: reasoning-echo (DeepSeek/Kimi/MiMo), cap de output, recalibração de contexto via erro
+  do provider, OpenRouter routing hints, `num_ctx` do Ollama.
+- **codex**: replay de reasoning (`encrypted_content`) no mesmo turno, captura de deltas de raciocínio do
+  stream Responses.
+- **plugins**: lifecycle completo (register tools/commands/context, LLM gated).
+- **edit fuzzy** unicode→ASCII (aspas curvas/travessão/nbsp não derrubam mais a edição).
+
 ### 🤖 Onda 3 — MULTI-AGENTE: cada agente seu próprio gateway, supervisionado (watchdog + auto-restart)
 O dono queria N agentes, cada um com gateway/cron/heartbeat/tasks próprios. A fundação já existia (homes
 isolados em agents/<id>/, tokens próprios, load_agents) — faltava o ciclo de vida em runtime.
@@ -98,8 +174,6 @@ registry/getattr). 7 confirmados, 4 rejeitados, 0 gap real do Hermes (já ~98% p
 - **no-op morto** `ok = ok or False` no `ProcessManager.kill` (`core/processes.py`) → `pass` + comentário.
 - Considerados e descartados (não quebrados): falta de log no `distill_skill_llm`, variantes de "nada a salvar".
   +4 testes (1 por bug funcional; o no-op é refactor sem mudança de comportamento).
-
-## [Unreleased]
 
 ### 🧱 subagente #8: sobrevive ao restart (reconcile) — paridade com o BackgroundRegistry
 Os 2 subsistemas de background (BackgroundRegistry do `/background` p/ humano · spawn_jobs p/ o agente)
@@ -516,4 +590,5 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.10.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.10.0-beta
 [0.1.0-alpha]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.1.0-alpha
