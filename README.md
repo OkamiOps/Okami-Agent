@@ -10,12 +10,12 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 (skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
 or wherever you want.
 
-![version](https://img.shields.io/badge/version-0.12.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.13.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3500%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-3576%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,28 +24,26 @@ or wherever you want.
 
 ---
 
-> 🐺 **Public beta (`v0.12.0-beta`).** Okami is open for you to try. The command/config surface may
+> 🐺 **Public beta (`v0.13.0-beta`).** Okami is open for you to try. The command/config surface may
 > still change before GA — before exposing it publicly, run `okami policy check --strict` first.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
-> ### ✨ New in `0.12.0-beta`
-> The owner pushed back: "you claim parity but I keep hitting spots where we're light-years behind
-> Hermes" — 3 real-usage gaps a code audit doesn't catch, plus a critical self-inflicted regression found
-> along the way. Suite: **3,468 → 3,500 tests**.
-> - **Critical fix**: `run_task`/`Harness` now accept `set_no_interrupt` — closes a `TypeError` that was
->   crashing **every single Telegram gateway turn** since `v0.10.0-beta` (masked as a generic error; the
->   CLI-only E2E never caught it).
-> - **`/steer <text>`** (new) — inject a message into the turn that's already running, **without
->   cancelling** it; `/busy steer` makes every new message during a turn act as steer instead of
->   interrupting.
-> - **Provider onboarding unblocked** — minimax/mimo/grok were already `api_key`-based and Codex already
->   native OAuth device-flow; the real gap was menu discoverability. New presets: `minimax-oauth`,
->   `minimax-cn`, `xai-oauth`.
-> - **Secret via chat** — send an API key straight into Telegram when you have no `.env` access; detected
->   at gateway inbound before the model ever sees it, stored in an encrypted vault (`Fernet`,
->   ciphertext-only, 0600), message auto-deleted, model sees only a confirmation note.
-> - Honest framing: the "parity" claim held for code audits but was overstated for real-usage flows —
->   this release closes that gap and owns the regression.
+> ### ✨ New in `0.13.0-beta`
+> The owner's next push: "parity isn't enough — find where Hermes is ahead and beat it." We mapped 6
+> dimensions against Hermes and shipped the first wave: 4 fronts in parallel. Suite: **3,572 → 3,576
+> tests**.
+> - **Native GPT Image via Codex subscription** (owner's #1 ask) — was broken (posted to the paid REST
+>   endpoint, `401`); now posts to the subscription endpoint (`chatgpt.com/backend-api/codex/responses`
+>   + `image_generation` tool, `gpt-image-2`), text-to-image **and** image-to-image in the same call.
+>   **Verified live**: generated a real 861KB PNG through the subscription.
+> - Fixed a latent `403` on the existing codex chat transport as a side effect of the same header fix.
+> - **New `editar-pdf` skill** — info/extract/metadata/patch/rotate/merge/split via `pypdf` (lazy dep).
+> - **Unified plugin hook bus** — 15 hook points (was ~4 across two disjoint systems).
+> - **Persistent browser session** — click login → dashboard → report without re-navigating; new
+>   scroll/back/press/eval(guarded)/close_session actions; idle reaper so a VPS never leaks Chromium.
+> - **`ANTISLOP.md`** (new, versioned default) — 15 anti-chatbot-slop patterns injected every turn.
+> - Honest framing: we also confirmed where we're **already ahead** of Hermes (Chromium-free HTML→PDF,
+>   3-file identity, checkpoints, encrypted secret vault) — documented, no code change needed there.
 >
 > Full notes in the [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md).
 
@@ -369,9 +367,14 @@ moderator that decides who speaks (or no one), with cooldown and anti-stampede c
 
 - **Voice** — `okami voice` (turn-based: speak into the mic → the agent responds **out loud**),
   `okami transcribe` (local Whisper), `okami say` (Edge TTS).
-- **Image** — `okami image "..."` (gpt-image-2 via Codex subscription; `--ref photo.png` for editing).
+- **Image** — `okami image "..."` (gpt-image-2 via Codex subscription, native — no pay-as-you-go API key
+  needed; `--ref photo.png` for image-to-image editing in the same call).
 - **Browser** — the `browse` tool (Playwright; without it, read-only *fetch*) — **every URL goes
-  through the anti-SSRF guard**.
+  through the anti-SSRF guard**. A **persistent session** (login → dashboard → report without
+  re-navigating) with `scroll`/`back`/`press`/`eval` (guarded)/`close_session`, screenshots as native
+  image blocks, JS dialog auto-dismiss, and an idle reaper so a 24/7 VPS never leaks a Chromium process.
+- **PDF editing** — the `editar-pdf` skill (`pypdf`, lazy dep): info/extract/metadata/patch/rotate/
+  merge/split.
 - **Background processes** — `process_start/poll/wait/log/list/kill/write/signal`: run a long command
   without blocking the turn, with on-disk state that **survives a restart**, an **interactive PTY**
   (`process_write` sends stdin), `notify_on_complete`, `watch_patterns` with *strikes*, and orphan

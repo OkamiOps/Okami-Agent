@@ -1,6 +1,6 @@
-# Okami Agent — `v0.12.0-beta` "O Fluxo Real" 🐺
+# Okami Agent — `v0.13.0-beta` "A Imagem Real" 🐺
 
-**3 commits · suíte 3.468 → 3.500 testes** · lançada **2026-07-08**.
+**1 commit · suíte 3.572 → 3.576 testes** · lançada **2026-07-08**.
 
 > ⚠️ **Beta.** A superfície de comandos e config ainda pode mudar até a GA. Recomendado para uso real
 > (inclusive em VPS 24/7) — mas rode `okami policy check --strict` antes de expor publicamente. Feedback
@@ -12,131 +12,128 @@
 
 ## A história desta release
 
-Depois da `v0.11.0-beta`, o dono não deixou passar: **"você fala que estamos em paridade e eu trago
-vários pontos onde estamos anos-luz atrás do Hermes."** Não veio de auditoria de código — veio de operar
-o agente de verdade, no dia a dia, e sentir a distância que o diff não mostra.
+Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o dono não deixou a barra descer pra "manter
+paridade". A resposta veio direta: **"paridade não basta — acha onde o Hermes está na frente e
+ULTRAPASSA."**
 
-Três gaps concretos, de uso real:
+Fizemos o mapeamento pedido: 6 dimensões (mídia, gateway, TUI/humanização, harness/tools,
+memória/skills/plugins, computer/browser), comparando ponto a ponto com o Hermes. O resultado não foi
+unilateral — achamos os gaps reais que o dono já suspeitava (GPT Image via assinatura quebrado, qualidade
+de tool-call, skills, humanização, profundidade de browser, edição de mídia/PDF), mas também achamos
+onde **já estávamos na frente** e ninguém tinha documentado: HTML→PDF sem depender de Chromium (o Hermes
+depende), identidade partida em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) contra um blob genérico único do
+Hermes, checkpoints de sessão, cofre de segredo cifrado.
 
-1. **"Não dá pra corrigir o agente NO MEIO do turno sem cancelar tudo."** O único jeito de intervir era
-   `/busy` interrupt: cancela e recomeça do zero — perde o progresso do turno inteiro por um ajuste
-   pequeno.
-2. **"Assinatura/token-plan não pode depender de eu logar via CLI."** O dono achava que o onboarding de
-   provider exigia CLI local pra assinatura — o que inviabiliza operar 100% remoto.
-3. **"Não consigo mandar uma chave pelo chat quando não tenho acesso ao `.env`."** Numa VPS remota, editar
-   `.env` na mão não é sempre possível — e mandar a chave crua pro modelo ver não é aceitável.
+Esta release é a **primeira onda de implementação** desse backlog — 4 frentes em paralelo (mídia,
+segurança/quick-wins, hooks, browser) mais a costura entre elas.
 
-No meio de mapear o gap #1, apareceu uma coisa pior: **uma regressão crítica autoinfligida** pela própria
-onda de auditoria da `v0.10.0-beta`. `run_task`/`Harness` não aceitavam o parâmetro `set_no_interrupt`
-que o endpoint do gateway já injetava desde `7939d6e` — resultado, **todo turno vindo do Telegram
-estourava `TypeError`**, mascarado como um simples `❌ error`. O E2E anterior só cobria o caminho CLI
-(`okami task`), que não passa por esse hook — nunca pegou. Corrigida primeiro, antes de qualquer feature
-nova.
-
-**Honestidade em vez de spin**: a alegação de "paridade com Hermes" das últimas releases era real pra
-auditoria de código — mas **superestimada pra uso real**. Os 3 gaps acima só apareceram operando o agente
-de verdade, não lendo diff. Esta release fecha essa lacuna e assume o erro.
+**O headline é o pedido #1 do dono**: geração de imagem nativa (GPT Image) estava **quebrada** — o código
+antigo postava pro endpoint REST pago (`api.openai.com/v1/images`), voltava `401` porque exige uma API
+key paga que o dono não tem e não quer usar (ele opera 100% via assinatura). Reescrevemos pra postar pro
+**endpoint da própria assinatura codex** (`chatgpt.com/backend-api/codex/responses`, tool
+`image_generation`, modelo `gpt-image-2`), com headers anti-Cloudflare corretos e resolução de
+`account_id` via fallback (o claim do JWT normalmente não vem preenchido). **Verificamos ao vivo**:
+gerou um PNG real de 861KB através da assinatura, texto→imagem e imagem→imagem na mesma chamada.
 
 ## ✨ Highlights
 
-- **Regressão crítica corrigida**: `run_task`/`Harness.__init__` agora aceitam `set_no_interrupt` —
-  encerra o `TypeError` que quebrava TODO turno pelo gateway do Telegram desde a `v0.10.0-beta`.
-- **Efeito colateral bom**: o demote guard do `/busy` interrupt — código morto até agora, nada setava
-  `no_interrupt=True` — **passa a funcionar de verdade**; `_compact()` marca a compactação como fase
-  não-interrompível.
-- **`/steer <texto>`** (novo) — injeta uma mensagem direta do usuário no turno em andamento **sem
-  cancelar** (marcador anti prompt-injection + nota de trust no system prompt); `/busy steer` faz toda
-  mensagem nova durante um turno virar steer em vez de interromper.
-- **`Session.pending_steer`** nunca perde a mensagem: drena após cada resultado de tool, defere se não há
-  onde anexar; `cancel`/`stop`/`retry` limpam o pendente.
-- **Onboarding de provider desbloqueado** — diagnóstico revelou que minimax/mimo/grok já eram `api_key`
-  direto e Codex já era OAuth device-flow nativo; o gap real era descoberta, não arquitetura. Presets
-  novos: `minimax-oauth` (assinatura), `minimax-cn` (região China), `xai-oauth` (SuperGrok/Premium+),
-  `custom` reetiquetado como "traga seu próprio provider".
-- **Segredo via chat** — dono remoto sem acesso ao `.env` manda a API key no Telegram; detecção no
-  INBOUND do gateway ANTES do modelo ver, cofre cifrado (`Fernet`, só-ciphertext, 0600), `deleteMessage`
-  automático e confirmação — o modelo só vê "🔐 guardei a credencial X", **nunca o valor cru**.
-- **Bug de ordering fechado**: redação da resposta agora roda ANTES de persistir (antes vazava no
-  transcript/histórico).
-- **+40 testes de segurança** cobrindo o cofre e a detecção de segredo inline.
+- **GPT Image nativo via assinatura codex** (pedido #1 do dono) — estava quebrado (`401` no REST pago),
+  agora posta pro endpoint da assinatura; texto→imagem **e** imagem→imagem na mesma chamada;
+  **verificado ao vivo** (PNG real, 861KB).
+- **`codex_headers.py`** (novo) — headers anti-Cloudflare (`originator`/UA `codex_cli_rs` +
+  `ChatGPT-Account-Id`), com fallback de `account_id` via `~/.codex/auth.json` quando o claim do JWT não
+  vem preenchido (o caso comum).
+- **Bug latente corrigido de graça**: o mesmo retrofit de headers em `transports.py` conserta um `403`
+  que já existia na VPS no chat codex normal — nunca tinha sido diagnosticado até agora.
+- Host de imagem precisa ser `gpt-5.5` — `gpt-5.1` retorna `HTTP 400` (documentado pra não reintroduzir).
+- **Skill `editar-pdf`** (nova) — `info`/`extract`/`metadata`/`patch`/`rotate`/`merge`/`split` via
+  `pypdf`, dependência lazy.
+- **Barramento de hooks unificado** — 15 pontos de hook (eram ~4, em dois sistemas que não se falavam):
+  pre/post tool call, pre/post LLM call, pre-verify, ciclo de vida de sessão, subagent start/stop.
+- **Browser em segundo plano com sessão persistente** — clicar login → dashboard → relatório sem
+  re-navegar; `scroll`/`back`/`press`/`eval` (guardado contra exfiltração)/`close_session`; screenshot
+  como image block nativo; dialogs JS com auto-dismiss; idle reaper pra VPS nunca vazar Chromium.
+- **`ANTISLOP.md`** (novo, versionado) — 15 padrões PT-BR anti-"cara de chatbot" injetados todo turno;
+  instalação nova já nasce com o default, override local continua valendo.
+- **Busca com ripgrep + fallback pure-Python** — respeita `.gitignore` nos dois caminhos.
+- **SSRF confirmado sem regressão** — `net_guard` já bloqueava metadata/privado/redirect, auditoria
+  formalizou o que já estava certo.
 
-## 🔥 Regressão — gateway crashava TODO turno
+## 🎨 Mídia — GPT Image nativo via assinatura
 
-Regressão da própria onda P0 (`7939d6e`, `v0.10.0-beta`): o endpoint do gateway injeta
-`kw['set_no_interrupt']`, mas `run_task` não tinha o parâmetro nem `**kwargs` — toda run pelo gateway
-(Telegram) estourava `TypeError`, mascarado como `❌ error`. O E2E só cobria o caminho CLI (`okami task`),
-que não passa esse hook — o gateway real ficou quebrado sem ninguém perceber.
+O gap #1 do dono, agora fechado fim a fim (dependendo do fix de token-store em andamento — ver abaixo):
 
-- `run_task` ganha `set_no_interrupt`, encadeado no `_hkw` (mesmo padrão do `set_remote`).
-- `Harness.__init__` aceita e guarda (`self._set_no_interrupt`, no-op no CLI).
-- `_compact()` passa a marcar a compactação como fase não-interrompível — o demote guard do `/busy`
-  interrupt, morto desde sempre, agora funciona de verdade.
-- Regressão travada em `tests/test_it11_fixes.py` (contrato runner↔Harness).
+- `imagegen.py` reescrito: endpoint `chatgpt.com/backend-api/codex/responses` + tool `image_generation`
+  (`gpt-image-2`) em vez do REST pago que dava `401`.
+- Texto→imagem **e** imagem→imagem na **mesma chamada** (`input_image` parts) — não precisa de duas
+  requisições separadas.
+- Host obrigatoriamente `gpt-5.5` (`gpt-5.1` dá `HTTP 400`).
+- `codex_headers.py` novo: headers anti-Cloudflare; `account_id` resolvido via
+  `oauth.codex_account_id()` → claim do JWT (raramente presente) → fallback
+  `~/.codex/auth.json` → `tokens.account_id`.
+- `transports.py`: mesmo retrofit de headers no chat codex normal — conserta um `403` latente na VPS que
+  vinha da mesma causa-raiz.
+- Fallback automático pra `flux`/`openrouter` (`IMAGE_BACKENDS`, mesmo padrão do `videogen`);
+  `GenerateImage.check()` já consulta esse fallback.
+- **Verificado ao vivo pelo orquestrador**: PNG real de 861KB gerado através da assinatura, fim a fim.
+- Skill nova **`editar-pdf`**: `pypdf` como dependência lazy, comandos `info`/`extract`/`metadata`/
+  `patch`/`rotate`/`merge`/`split`.
 
-## 🎯 `/steer` — corrige o turno sem cancelar
+## 🛡️ Segurança + quick wins
 
-Antes só existia `/busy` interrupt: cancela o turno em andamento e recomeça do zero. Bom pra "para tudo",
-péssimo pra "ajusta uma coisa pequena sem perder o progresso".
+- SSRF: `net_guard` auditado e confirmado já sólido (bloqueia metadata endpoint, IP privado, redirect,
+  respeita `allow_private` explícito) — plugado em `web_extract`/`browse`/`references`; documentado sem
+  necessidade de mudança de código.
+- Busca de arquivos com backend `ripgrep`, fallback pure-Python automático quando `rg` não está
+  disponível — os dois caminhos respeitam `.gitignore`.
+- `ANTISLOP.md`: 15 padrões PT-BR anti-chatbot-slop (banido "Como posso ajudar?", hedging excessivo,
+  entusiasmo vazio, bullet-slop e afins) injetados no `core_block` todo turno; shipado como default
+  **versionado** em `okami/builtin/identity` — instalação nova já nasce com ele, override local segue
+  tendo prioridade.
 
-- `/steer <texto>`: injeta uma **MENSAGEM DIRETA DO USUÁRIO** no contexto do turno já rodando, com
-  marcador anti prompt-injection e uma nota explícita de trust no system prompt.
-- `/busy steer`: modo em que toda mensagem nova chegando durante um turno vira steer automaticamente, em
-  vez de disparar o interrupt.
-- `Session.pending_steer` + `steer_source` encadeados `run_task → Harness` (mesmo padrão do
-  `set_no_interrupt`); drenado após cada resultado de tool; se não houver onde anexar no momento, fica
-  **deferido** (nunca perdido); `cancel`/`stop`/`retry` limpam o steer pendente.
+## 🔌 Barramento de hooks unificado
 
-## 🔑 Onboarding de provider — assinatura/token-plan sem CLI
+- 15 pontos de hook (eram ~4, espalhados em dois sistemas separados): `pre_tool_call`/`post_tool_call`,
+  `pre_llm_call`/`post_llm_call`, `pre_verify`, ciclo de vida de sessão, `subagent_start`/`subagent_stop`.
+- Bridge dos hooks shell existentes pro barramento novo — compatibilidade retroativa mantida.
+- Wiring cirúrgico em `loop.py`/`runner.py`; `register_*` novo pra plugins registrarem hooks sem tocar no
+  core.
 
-Diagnóstico honesto: Okami já não dependia de CLI local pra minimax/mimo/grok (já `api_key` direto) nem
-pro Codex (já OAuth device-flow nativo) — o gap era **descoberta**, não arquitetura.
+## 🌐 Browser em segundo plano + edição de PDF
 
-- Presets novos em `provider_catalog.py`: `minimax-oauth` (assinatura), `minimax-cn` (região China,
-  `api.minimaxi.com`), `xai-oauth` (SuperGrok/Premium+, `client_id` real).
-- `custom` reetiquetado como "traga seu próprio provider" (token-plan / API-key / endpoint
-  OpenAI-compatível).
-- Nenhum transport novo — só torna visível o que já existia.
+- Sessão persistente (`browser_session.py`, thread-bound, com idle reaper): clicar login → dashboard →
+  relatório sem re-navegar a cada passo.
+- Ações novas: `scroll`, `back`, `press`, `eval` (guardado contra exfiltração de cookie/localStorage),
+  `close_session`.
+- Screenshot exposto como image block nativo (helper compartilhado `image_block.py`).
+- Diálogos JS (`alert`/`confirm`/`prompt`) com auto-dismiss.
+- Idle reaper garante que uma VPS 24/7 nunca deixa processo Chromium vazando.
 
-## 🔐 Segredo via chat
+## 🧭 Onde já estávamos na frente
 
-Cenário real: dono remoto sem acesso ao `.env` manda a chave direto no Telegram. Escolhas travadas do
-dono: **"salvar, apagar e confirmar"** + **"só no cofre, nunca no LLM"**.
+Parte do exercício de mapeamento foi honesto nos dois sentidos — nem tudo é gap. Confirmado, sem mudança
+de código nesta release:
 
-- Detecção no **INBOUND do gateway, ANTES do modelo ver** (`okami/core/redact.py`): prefixos de chave
-  conhecidos (`ghp_`/`sk-`/`xai-`/`AKIA`/…) + padrão `NOME=valor` com keyword sensível e valor ≥12 chars
-  sem espaço; guard contra falso-positivo (frase natural tipo "a senha é X" e valores curtos não
-  disparam).
-- Cofre cifrado novo (`okami/core/secretvault.py`): **Fernet**, chave 32B em `$OKAMI_HOME/.secret_key`
-  (0600, lazy), vault JSON **só-ciphertext** (0600, escrita atômica); `resolve_secret` resolve
-  `vault > env > .env`; `apply_vault_to_environ` popula `os.environ` no boot (`config._load_env`) —
-  providers/oauth leem do cofre sem precisar editar nada.
-- Fluxo: `vault_set` → `deleteMessage` no Telegram → confirmação `🔐 guardei a credencial X` → texto
-  sanitizado in-place segue pro histórico/`run_task` — **o modelo vê só a nota, nunca o valor**.
-- Bug de ordering corrigido: `redact(reply)` rodava DEPOIS de persistir — vazava no transcript/histórico;
-  agora roda antes.
-- Nova dependência: `cryptography>=42`.
+- HTML→PDF sem depender de Chromium (o Hermes depende).
+- Identidade em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) vs blob genérico único do Hermes.
+- Checkpoints de sessão.
+- Cofre de segredo cifrado (`v0.12.0-beta`).
 
-## 🔒 Nota de segurança
+## ⚠️ Beta — caveats e trabalho em andamento
 
-O valor cru da credencial **nunca entra no contexto do modelo** em nenhum ponto do fluxo — nem no goal do
-`run_task`, nem no histórico, nem na resposta antes da redação. Verificação independente confirmou: valor
-cru ausente do disco (só ciphertext no vault, permissão 0600), sem falso-positivo na detecção de
-linguagem natural. +40 testes de segurança cobrindo cofre + detecção inline.
-
-## ⚠️ Beta — sobre a alegação de paridade
-
-- A "paridade com Hermes" reportada nas releases anteriores era real pra **auditoria de código**, mas
-  **superestimada pra uso real** — os 3 gaps desta release (e a regressão do gateway) só apareceram
-  operando o agente de verdade, não lendo diff. Esta release fecha essa lacuna especificamente.
 - Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
 - Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
   publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
-- **Em andamento, fora desta release**: 3 fixes de provider (crash de streaming do Claude, token store do
-  401 no Codex, parser do `claude_cli`) rodando em sessões separadas — devem sair numa próxima patch.
+- **Em andamento, fora desta release** — 3 sessões de fix de provider rodando em paralelo:
+  - Crash de streaming do Claude.
+  - **Bug do token-store do Codex**: um token corrompido de 9 caracteres fica na frente do token válido
+    da CLI e é usado primeiro — **esse fix é necessário pra geração de imagem funcionar fim a fim** num
+    usuário novo/fresh install, mesmo com o endpoint de assinatura já corrigido nesta release.
+  - Parser do `claude_cli`.
 
 ## ✅ Release verification
 
-- **3.500 testes** passando (`uv run pytest -q`), subindo de 3.468.
+- **3.576 testes** passando (`uv run pytest -q`), subindo de 3.572.
 - Reprodução local:
   ```bash
   uv sync --frozen
@@ -162,9 +159,9 @@ okami doctor    # confirma que a versão instalada bate com o pyproject (sem ver
 okami chat      # conversa no terminal
 ```
 
-Nova dependência nesta release: **`cryptography>=42`** (cofre de segredos) — `uv sync`/`pip install -U`
-já resolve, nenhuma migração manual de config é necessária. `okami.yaml`/`okami.local.yaml` existentes
-continuam válidos.
+Nenhuma dependência nova obrigatória nesta release (`cryptography>=42` já foi adicionada na
+`v0.12.0-beta`) — `pypdf` é lazy (só carrega se a skill `editar-pdf` for usada). `uv sync`/
+`pip install -U` já resolve; `okami.yaml`/`okami.local.yaml` existentes continuam válidos.
 
 ## 📄 License
 

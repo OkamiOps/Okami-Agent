@@ -6,6 +6,77 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.13.0-beta] — 2026-07-08
+
+Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o dono rejeitou o próximo passo óbvio ("mantém
+paridade"): **"paridade não basta — acha onde o Hermes está na frente e ULTRAPASSA."** Mapeamos 6
+dimensões (mídia, gateway, TUI/humanização, harness/tools, memória/skills/plugins, computer/browser),
+achamos pontos concretos onde o Hermes ganha (GPT Image via assinatura, qualidade de tool-call, skills,
+humanização, browser, mídia/PDF) — e também pontos onde **já estávamos na frente** (HTML→PDF sem
+Chromium, identidade em 3 arquivos SOUL/VOICE/PERSONA vs blob genérico do Hermes, checkpoints, cofre de
+segredo cifrado). Esta release é a **primeira onda de implementação**, 4 frentes em paralelo. Suíte:
+**3.572 → 3.576 testes**.
+
+### 🎨 GPT Image nativo via assinatura codex (pedido #1 do dono)
+- Diagnóstico: geração de imagem estava **quebrada** — postava pro `api.openai.com/v1/images` (REST
+  pago), voltava `401` porque exige API key paga, algo que o dono não tem/não quer.
+- `imagegen.py` reescrito: passa a postar pro **endpoint da assinatura**
+  (`chatgpt.com/backend-api/codex/responses` + tool `image_generation`, modelo `gpt-image-2`) —
+  **texto→imagem E imagem→imagem na MESMA chamada** (`input_image` parts).
+- Host precisa ser `gpt-5.5` (`gpt-5.1` retorna `HTTP 400`).
+- `codex_headers.py` (novo): headers anti-Cloudflare (`originator`/User-Agent `codex_cli_rs` +
+  `ChatGPT-Account-Id`) — o `account_id` normalmente NÃO vem no claim do JWT, então resolve por fallback
+  em `~/.codex/auth.json` → `tokens.account_id`; `oauth.codex_account_id()` novo.
+- `transports.py`: retrofit dos MESMOS headers no chat codex — conserta um `403` **latente** que já
+  existia na VPS (mesma causa-raiz, nunca tinha sido diagnosticada).
+- Fallback pra `flux`/`openrouter` (padrão `IMAGE_BACKENDS`, como no `videogen`); `GenerateImage.check()`
+  já consulta o fallback.
+- **VERIFICADO AO VIVO**: PNG real gerado via assinatura (861KB), fim a fim.
+- Nova skill **`editar-pdf`**: `info`/`extract`/`metadata`/`patch`/`rotate`/`merge`/`split` via `pypdf`
+  (dependência lazy, só carrega se a skill for usada).
+
+### 🛡️ Segurança + quick wins
+- **SSRF**: auditoria confirmou que `net_guard` já bloqueava metadata endpoint, IP privado e redirect
+  (com `allow_private` explícito), já plugado em `web_extract`/`browse`/`references` — sem regressão,
+  documentado.
+- Busca de arquivos ganha backend **ripgrep** com fallback pure-Python automático quando `rg` não está
+  instalado — respeita `.gitignore` nos dois caminhos.
+- **`ANTISLOP.md`** (novo): 15 padrões PT-BR anti-"cara de chatbot" injetados no `core_block` todo turno
+  (banido: "Como posso ajudar?", hedging excessivo, entusiasmo vazio, bullet-slop, etc.) — shipado como
+  default **versionado** em `okami/builtin/identity` (instalação nova já nasce com ele; override local
+  continua tendo prioridade).
+
+### 🔌 Barramento de hooks unificado
+- **15 pontos de hook** (eram ~4, espalhados em dois sistemas que não se falavam): `pre_tool_call` /
+  `post_tool_call`, `pre_llm_call` / `post_llm_call`, `pre_verify`, ciclo de vida de sessão,
+  `subagent_start` / `subagent_stop`, entre outros.
+- Bridge dos hooks shell existentes pro barramento novo — nenhum hook antigo quebra.
+- Wiring cirúrgico em `loop.py`/`runner.py`; `register_*` novo pra plugins registrarem hooks sem tocar no
+  core.
+
+### 🌐 Browser em segundo plano + edição de PDF
+- **Sessão persistente** (`browser_session.py`, thread-bound, com idle reaper): clicar login → dashboard
+  → relatório **sem re-navegar** a cada passo — antes cada ação de browser era stateless.
+- Ações novas: `scroll`, `back`, `press`, `eval` (guardado contra exfiltração de cookie/localStorage),
+  `close_session`.
+- Screenshot exposto como **image block** nativo (helper compartilhado `image_block.py`).
+- Diálogos JS (`alert`/`confirm`/`prompt`) com auto-dismiss — sem travar a sessão esperando um clique que
+  nunca vem.
+- Idle reaper garante que uma VPS 24/7 **nunca vaza processo Chromium** aberto.
+
+### 🧭 Onde já estávamos na frente (confirmado, sem mudança)
+- HTML→PDF sem depender de Chromium (o Hermes depende).
+- Identidade em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) vs blob genérico único do Hermes.
+- Checkpoints de sessão; cofre de segredo cifrado (`v0.12.0-beta`).
+
+### 🚧 Em andamento, fora desta release
+- 3 sessões de fix de provider rodando em paralelo: crash de streaming do Claude, bug do token-store do
+  Codex (token corrompido de 9 caracteres ofuscava o token válido da CLI — **precisa ser corrigido pra
+  geração de imagem funcionar fim a fim** num usuário novo), parser do `claude_cli`.
+
+### 🧪 Suíte
+- **3.576 testes passando** (3.572 → 3.576).
+
 ## [0.12.0-beta] — 2026-07-08
 
 O dono não deixou passar: "você fala que estamos em paridade e eu trago vários pontos onde estamos
@@ -702,6 +773,7 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.13.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.13.0-beta
 [0.12.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.12.0-beta
 [0.11.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.11.0-beta
 [0.10.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.10.0-beta
