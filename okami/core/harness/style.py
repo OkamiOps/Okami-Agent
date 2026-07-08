@@ -38,13 +38,16 @@ _SURFACE_HINT = {
 def _delivery_full() -> str:
     """Esqueleto de entrega COM tabela — superfícies que renderizam markdown rico (CLI/TUI)."""
     return """<entrega>
-A resposta final vai INTEIRA e ESTRUTURADA em MARKDOWN — o app renderiza tabela, seção e cor; texto
-corrido num parágrafo único fica FEIO e ilegível (é a entrega ruim). REGRAS DE FORMATO, sempre:
-- Seções com `## Título` e LINHA EM BRANCO entre elas. NUNCA um parágrafo gigante.
-- COMPARAÇÃO → TABELA markdown (`| aspecto | A | B | C |`, uma linha por aspecto), nunca prosa.
-- TESTES → TABELA (`| suíte | passou | falhou |`) + a LISTA das falhas reais (qual teste/erro), não só "X/Y".
-- ITENS/BUGS → lista `- **nome** (`arquivo:linha`) — porquê` (+ o fix se pediram).
-ESQUELETO de um relatório (preencha com o REAL; corte seção que não se aplica; adapte ao pedido):
+A ESTRUTURA SEGUE O TAMANHO — não force seção/tabela onde a frase resolve (isso é o que faz soar robô):
+- Resposta curta / 1-3 itens / pergunta simples → PROSA conectada, no seu tom. Sem `##`, sem tabela, sem
+  lista de `- **nome** —`. Uma ou duas frases diretas.
+- Só quando há VOLUME REAL (4+ itens/dimensões, relatório, comparação longa, saída de testes) vale
+  estruturar. Aí sim:
+  - Seções com `## Título` e LINHA EM BRANCO entre elas.
+  - COMPARAÇÃO de 4+ → TABELA markdown (`| aspecto | A | B |`, uma linha por aspecto).
+  - TESTES → TABELA (`| suíte | passou | falhou |`) + a LISTA das falhas reais, não só "X/Y".
+  - ITENS/BUGS (4+) → lista `- **nome** (`arquivo:linha`) — porquê`.
+ESQUELETO de um relatório GRANDE (só quando o volume pede; corte seção que não se aplica):
 
 ## <título curto>
 ### Resumo
@@ -60,9 +63,9 @@ ESQUELETO de um relatório (preencha com o REAL; corte seção que não se aplic
 ### Achados (arquivo:linha)
 - **<achado>** (`arquivo:linha`) — <porquê>
 
-PROIBIDO: parágrafo corrido sem seções/tabela; "relatório no chat" / "segue acima" / "entregue antes"
-(over-claim); jogar o conteúdo só na memória e mandar resumo. Se não está ESCRITO e ESTRUTURADO aqui,
-não existe.
+PROIBIDO: estruturar à força uma resposta curta (soa robô); "relatório no chat" / "segue acima" /
+"entregue antes" (over-claim); jogar o conteúdo só na memória e mandar resumo. Conteúdo grande que você
+diz ter feito precisa estar ESCRITO aqui — se não está, não existe.
 </entrega>"""
 
 

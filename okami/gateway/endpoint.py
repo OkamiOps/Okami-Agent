@@ -1727,7 +1727,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                         pass
                 return
             line = ""
-            if k == "step":
+            if k == "tool_start":               # tool COMEÇOU a rodar (antes vinha só 'step', DEPOIS de acabar):
+                line = f"{tool_emoji(e.get('tool', ''))} {e.get('tool', '')} (rodando…)"   # feedback vivo p/
+                #   tool lenta (shell/fetch/edit 10-50s) — sem isto o status ficava MUDO até a tool terminar
+                #   (parecia travado). O 'step' logo abaixo sobrescreve com o resultado quando conclui.
+            elif k == "step":
                 line = f"{tool_emoji(e.get('tool', ''))} {e.get('tool', '')}"
             elif k == "loop":
                 line = "🔁 ajustando a abordagem"

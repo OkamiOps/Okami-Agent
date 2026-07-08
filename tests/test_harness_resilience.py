@@ -228,7 +228,7 @@ def test_prompt_has_hermes_action_and_verification_gates():
     # gate de ENTREGA: markdown ESTRUTURADO (esqueleto: ## seções + tabelas), anti over-claim, anti-paredão
     assert "<entrega>" in low and "over-claim" in low
     assert "esqueleto" in low and "| suíte | passou | falhou |" in low         # template markdown com tabela
-    assert "tabela" in low and "parágrafo corrido" in low                      # proíbe paredão de texto
+    assert "tabela" in low and "estrutura segue o tamanho" in low              # estrutura condicional ao tamanho
     # gates de AÇÃO (Hermes): persistência + uso obrigatório de ferramenta + anti-bail
     assert "<persistencia>" in low and "<use_ferramenta>" in low
     assert "menu" in low and "permiss" in low and "memória" in low
@@ -549,9 +549,9 @@ def test_flat_wall_of_text_is_detected_as_thin():
 def test_entrega_skeleton_in_prompt():
     from okami.core.harness.prompt import build_system_prompt
     low = build_system_prompt(Task(goal="faz X"), {}).lower()
-    assert "## <título" in low or "## <titulo" in low            # esqueleto markdown presente
+    assert "## <título" in low or "## <titulo" in low            # esqueleto markdown presente (p/ relatório GRANDE)
     assert "| suíte | passou | falhou |" in low                  # tabela de testes no esqueleto
-    assert "parágrafo corrido" in low                            # proíbe paredão
+    assert "estrutura segue o tamanho" in low                    # contrato novo: só estrutura quando o volume pede
 
 
 def test_stall_after_work_salvages_partial(tmp_path, monkeypatch):

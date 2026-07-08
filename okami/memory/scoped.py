@@ -48,15 +48,29 @@ class ScopedMemory(Memory):
         return out[:limit]
 
     def inject(self, query: str = "", limit: int = 5) -> str:
-        blocks = []
+        # ANTES: juntava os blocos de global+project SEM cap nem dedup → até 2×limit (10) itens/turno, com
+        # fato quase-igual gravado no global E no projeto aparecendo 2x (incha o contexto, dilui o relevante).
+        # Agora: 1 preâmbulo, dedup por chave de 120 chars, cap combinado em `limit` — igual recall()/Layered.
+        preamble, seen, items = "", set(), []
         for b in (self.global_, self.project):
             try:
                 blk = b.inject(query, limit)
             except Exception:  # noqa: BLE001
                 blk = ""
-            if blk:
-                blocks.append(blk)
-        return "\n\n".join(blocks)
+            if not blk:
+                continue
+            lines = blk.splitlines()
+            head, rest = (lines[0], lines[1:]) if len(lines) > 1 else ("", lines)
+            if head and not preamble:
+                preamble = head
+            for line in rest:
+                key = line.strip()[:120].lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    items.append(line)
+        if not preamble and not items:
+            return ""
+        return "\n".join(([preamble] if preamble else []) + items[:limit])
 
     def count(self) -> int:
         n = 0

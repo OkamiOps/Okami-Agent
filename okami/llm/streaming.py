@@ -64,16 +64,29 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
         yield getattr(via, "text", "") or ""
         return
     produced = False
-    try:
+    reasoning_open = False                                # raciocínio (reasoning_content) vem SEM tag em
+    try:                                                  # minimax/DeepSeek/Kimi → envolve em <think> na ORIGEM
         for chunk in litellm.completion(**_p._kwargs(pc, messages, stream=True, model=model, **overrides)):
             try:
                 d = chunk.choices[0].delta
-                delta = d.content or getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None)
+                content = d.content
+                reasoning = getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None)
             except (AttributeError, IndexError):
-                delta = None
-            if delta:
+                content = reasoning = None
+            if reasoning:                                 # abre <think> na 1ª vez → scrubber (display) E o
+                if not reasoning_open:                    # strip_think do harness (resposta) tratam igual
+                    reasoning_open = True
+                    yield "<think>"
                 produced = True
-                yield delta
+                yield reasoning
+            if content:
+                if reasoning_open:                        # transição raciocínio→resposta: fecha o think
+                    reasoning_open = False
+                    yield "</think>"
+                produced = True
+                yield content
+        if reasoning_open:                                # stream acabou ainda em raciocínio → fecha a tag
+            yield "</think>"
         if not produced:
             raise _p.EmptyResponse("stream vazio")
     except Exception as e:  # noqa: BLE001
@@ -86,49 +99,74 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
 
 def _tail_prefix_len(s: str, tag: str) -> int:
     """Comprimento do maior SUFIXO de `s` que é PREFIXO de `tag` — o que precisamos segurar porque pode ser
-    o começo de uma tag partida no próximo delta (ex.: s termina em '<thi', tag '<think>' → 4)."""
+    o começo de uma tag partida no próximo delta (ex.: s termina em '<thi', tag '<think>' → 4). Case-insensitive."""
     m = min(len(s), len(tag) - 1)
+    sl = s.lower()
     for k in range(m, 0, -1):
-        if s[-k:] == tag[:k]:
+        if sl[-k:] == tag[:k]:
             return k
     return 0
 
 
+def _find_any(hay_lower: str, tags: tuple[str, ...]) -> tuple[int, int]:
+    """Menor índice onde QUALQUER `tag` aparece em `hay_lower` (já minúsculo). Retorna (idx, len(tag)) ou (-1, 0)."""
+    best_i, best_l = -1, 0
+    for t in tags:
+        i = hay_lower.find(t)
+        if i != -1 and (best_i == -1 or i < best_i):
+            best_i, best_l = i, len(t)
+    return best_i, best_l
+
+
 class _ThinkScrubber:
-    """Suprime o conteúdo de <think>...</think> no stream de DISPLAY (on_token), lidando com a tag PARTIDA
-    entre deltas (paridade Hermes agent/think_scrubber.py). O texto ACUMULADO (Completion) fica INTACTO —
-    o harness já tira <think> onde precisa; isto é só p/ o modelo local/reasoning não VAZAR o raciocínio
-    ao vivo no Telegram/TUI. `feed(delta)` devolve só a parte visível (fora de think)."""
-    _OPEN, _CLOSE = "<think>", "</think>"
+    """Suprime o conteúdo de <think>/<thinking>/<reasoning>/<thought>…</…> no stream de DISPLAY (on_token),
+    lidando com a tag PARTIDA entre deltas (paridade Hermes agent/think_scrubber.py, 5 variantes, case-insensitive).
+    O texto ACUMULADO (Completion) fica INTACTO — o harness já tira <think> onde precisa; isto é só p/ o modelo
+    local/reasoning não VAZAR o raciocínio ao vivo no Telegram/TUI. `feed(delta)` devolve só a parte visível;
+    `flush()` no fim do stream devolve o tail retido (senão os últimos chars da resposta somem se parecerem
+    começo de tag) — mas DESCARTA se ainda estava dentro de um think aberto (fail-safe anti-vazamento)."""
+    _OPENS = ("<think>", "<thinking>", "<reasoning>", "<thought>")
+    _CLOSES = ("</think>", "</thinking>", "</reasoning>", "</thought>")
+    _MAXTAG = max(len(t) for t in _OPENS + _CLOSES)
 
     def __init__(self) -> None:
         self._in = False
         self._buf = ""
 
+    def _tail_keep(self, tags: tuple[str, ...]) -> int:
+        return max((_tail_prefix_len(self._buf, t) for t in tags), default=0)
+
     def feed(self, delta: str) -> str:
         self._buf += delta
         out: list[str] = []
         while self._buf:
+            low = self._buf.lower()
             if not self._in:
-                idx = self._buf.find(self._OPEN)
-                if idx == -1:                              # sem <think> completo: emite tudo menos um tail que
-                    keep = _tail_prefix_len(self._buf, self._OPEN)   # possa ser começo de '<think>' no próximo
+                idx, tlen = _find_any(low, self._OPENS)
+                if idx == -1:                              # sem tag de abertura completa: emite tudo menos um tail
+                    keep = self._tail_keep(self._OPENS)    # que possa ser começo de uma tag partida no próximo
                     out.append(self._buf[:len(self._buf) - keep])
                     self._buf = self._buf[len(self._buf) - keep:]
                     break
                 out.append(self._buf[:idx])
-                self._buf = self._buf[idx + len(self._OPEN):]
+                self._buf = self._buf[idx + tlen:]
                 self._in = True
             else:
-                idx = self._buf.find(self._CLOSE)
+                idx, tlen = _find_any(low, self._CLOSES)
                 if idx == -1:                              # ainda dentro do think: descarta, segura só o tail
-                    self._buf = self._buf[-(len(self._CLOSE) - 1):] if len(self._buf) >= len(self._CLOSE) else self._buf
-                    if _tail_prefix_len(self._buf, self._CLOSE) == 0:
-                        self._buf = ""                     # nada que possa ser </think> parcial → limpa
+                    keep = self._tail_keep(self._CLOSES)
+                    self._buf = self._buf[len(self._buf) - keep:] if keep else ""
                     break
-                self._buf = self._buf[idx + len(self._CLOSE):]
+                self._buf = self._buf[idx + tlen:]
                 self._in = False
         return "".join(out)
+
+    def flush(self) -> str:
+        """Fim do stream: emite o tail retido (fora de think). Se ainda dentro de um think aberto (nunca
+        fechou), DESCARTA — melhor perder um think truncado do que vazá-lo."""
+        tail = "" if self._in else self._buf
+        self._buf = ""
+        return tail
 
 
 def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=None, response_schema=None,
@@ -159,6 +197,13 @@ def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=Non
                             on_token(visible)
                         except Exception:  # noqa: BLE001 — DISPLAY é best-effort: um erro na TUI/edição NÃO
                             pass            # pode truncar a saída do modelo nem mascarar como falha de provider
+        if on_token:                                     # fim do stream: emite o tail retido (senão o fim da
+            tail = scrubber.flush()                      # resposta some se parecer começo de tag)
+            if tail:
+                try:
+                    on_token(tail)
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception:  # noqa: BLE001 — stream caiu (antes ou no meio)
         if chunks:                                   # já streamou parte → entrega o que veio (não duplica)
             return Completion(text="".join(chunks), provider=getattr(cfg.provider(provider), "name", "") if cfg else "",

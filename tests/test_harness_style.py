@@ -17,8 +17,9 @@ _MANUAL_MARK = "=== COMO VOCÊ AGE"
 def test_style_block_cli_keeps_table_skeleton():
     s = style_block("cli")
     assert "<entrega>" in s and "over-claim" in s
-    assert "| suíte | passou | falhou |" in s          # CLI/TUI renderiza tabela → mantém esqueleto
-    assert "parágrafo corrido" in s
+    assert "| suíte | passou | falhou |" in s          # CLI/TUI ainda tem o esqueleto de tabela p/ relatório
+    # contrato novo: estrutura CONDICIONAL ao tamanho (resposta curta = prosa; não força tabela → não soa robô)
+    assert "ESTRUTURA SEGUE O TAMANHO" in s and "PROSA" in s
 
 
 def test_style_block_telegram_directs_like_hermes():
