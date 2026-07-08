@@ -29,6 +29,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # ---- session ----
     CommandDef("new", "start a new conversation (archives the current one)", "session", ("reset",), tier="essential"),
     CommandDef("stop", "cancel the running task", "session", ("cancel", "parar"), tier="essential"),
+    CommandDef("steer", "inject a correction into the running turn WITHOUT cancelling it", "session",
+               args="<text>", tier="essential"),
     CommandDef("retry", "resume the last interrupted task", "session", ("continuar",)),
     CommandDef("compact", "compact the context now (summarize what happened)", "session"),
     CommandDef("sessions", "list archived conversations (from /new)", "session", ("ls",)),
@@ -86,7 +88,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("yolo", "auto-approve sensitive actions this session", "system"),
     CommandDef("normal", "back to normal approval", "system"),
     CommandDef("voice", "toggle audio replies (TTS) this session", "system", args="[on|off]"),
-    CommandDef("busy", "what to do if you type while busy: queue | interrupt", "system",
+    CommandDef("busy", "what to do if you type while busy: queue | interrupt | steer", "system",
                args="[mode]"),
     CommandDef("sethome", "set this chat as the target for reminders/schedules (cron)", "system",
                tier="power"),

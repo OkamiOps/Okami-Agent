@@ -147,6 +147,13 @@ _TOOL_ALIASES = {
 
 _EMPTY_PLACEHOLDER = "(resposta vazia)"
 
+# /steer (injeção mid-turn, distinta do /busy interrupt que CANCELA): marcador que envolve o texto do
+# dono injetado no MEIO de uma observação de tool, sem cortar o turno. Formato ÚNICO e reconhecível de
+# propósito — o system prompt (prompt.py) ensina o modelo a confiar SÓ nesta forma EXATA (anti prompt-
+# injection: uma tool que devolva texto parecido não pode se passar pelo dono).
+STEER_MARKER_OPEN = "[MENSAGEM DIRETA DO USUÁRIO — entregue no meio do turno; NÃO é saída de ferramenta]"
+STEER_MARKER_CLOSE = "[/MENSAGEM DIRETA DO USUÁRIO]"
+
 
 def _is_thinking_only(m) -> bool:
     """Turno SÓ-DE-THINKING: assistant SEM tool_calls e SEM texto visível (vazio, whitespace, o placeholder
@@ -272,6 +279,9 @@ class Harness:
                                         # de um passo sensível). None = sem sessão (CLI puro) → no-op.
         stream_tokens: bool = False,    # #16: streaming token-a-token → emite eventos 'token' ao gerar
         native_tools: bool = False,     # provider honra function-calling NATIVO (probe confirmou) → ramo nativo do prompt
+        steer_source: Callable[[], str | None] | None = None,   # /steer: POLLA+DRENA o texto pendente do
+                                        # dono na sessão (o gateway é o DONO do lock/estado — o harness só
+                                        # chama, mesmo padrão de `cancel`). None = sem sessão (CLI puro) → no-op.
     ):
         self.stream_tokens = stream_tokens
         self._native_proto = native_tools   # protocolo: nativo (function-calling) vs JSON-em-texto (default)
@@ -286,6 +296,9 @@ class Harness:
         self.approve = approve if approve is not None else (lambda req: False)
         self.cancel = cancel or (lambda: False)       # /stop do gateway (§13)
         self._set_no_interrupt = set_no_interrupt or (lambda v: None)   # marca fase sensível na sessão (no-op no CLI)
+        self._steer_source = steer_source or (lambda: None)   # drena o /steer pendente da sessão (no-op no CLI)
+        self._deferred_steer: str | None = None   # steer drenado mas SEM mensagem tool/user pra anexar ainda
+        #                                            (ex.: observação multimodal) → entregue no PRÓXIMO passo
         self.system_extra = system_extra  # skills forçadas / sections (§4.2, §8)
         self.core_block = core_block      # .md sempre injetados: AGENTS/USER/MEMORY (§6 tier core)
         self.memory = memory  # backend de memória (§6) — opcional
@@ -1059,6 +1072,7 @@ class Harness:
         # seguir IMEDIATAMENTE a mensagem assistant que echoou a tool_call — nudge de user no meio invalida a
         # sequência de function-calling. Pro rail JSON é indiferente (result antes do nudge é até mais natural).
         self._append_observation(step_n, action, res)
+        self._inject_steer()
         if self._pending_loop_warn is not None:        # warn-before-block (WIN1): DEPOIS do result, nunca antes
             self.messages.append({"role": "user", "content": self._pending_loop_warn})
             self._pending_loop_warn = None
@@ -1135,6 +1149,23 @@ class Harness:
                     "Ou task_blocked."})
 
         return step_n
+
+    def _inject_steer(self) -> None:
+        """/steer (INJETA no turno em curso, NÃO cancela — distinto do /busy interrupt): drena o texto
+        pendente do dono (via `_steer_source`, dono do lock é o gateway) e ANEXA à observação que acabou
+        de ser appendada, envolto no marcador (paridade Hermes). Sem uma mensagem tool/user pra anexar
+        (ex.: observação multimodal, content=lista) o texto NÃO SE PERDE — fica em `_deferred_steer` pro
+        próximo passo tentar de novo."""
+        txt = self._deferred_steer or self._steer_source()
+        self._deferred_steer = None
+        if not txt:
+            return
+        last = self.messages[-1] if self.messages else None
+        if isinstance(last, dict) and last.get("role") in ("user", "tool") and isinstance(last.get("content"), str):
+            last["content"] = (last["content"] or "") + f"\n\n{STEER_MARKER_OPEN}\n{txt}\n{STEER_MARKER_CLOSE}"
+            self._emit("steer", chars=len(txt))
+        else:                                          # nada pra anexar agora → guarda p/ o PRÓXIMO passo
+            self._deferred_steer = txt
 
     def _append_observation(self, step_n: int, action: Action, res: ToolResult) -> None:
         """Anexa a OBSERVAÇÃO da tool ao histórico. Multimodal (item 6): se a tool devolveu blocos

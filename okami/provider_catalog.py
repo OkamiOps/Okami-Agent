@@ -74,6 +74,35 @@ PRESETS: list[Preset] = [
            model_prefix="openai/", models=["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1"],
            fields=[Field("__secret__", "Subscription Key (Account ▸ Token Plan)", env="MINIMAX_API_KEY",
                          kind="secret")]),
+    # DISCOVERABILITY (item 1): o transport `minimax_oauth` já existe (okami/llm/transports.py) e o
+    # login genérico por device flow (okami/llm/oauth.py device_login) já sabe usá-lo — só faltava um
+    # PRESET pra chegar lá por `okami provider add`. EXPERIMENTAL porque os endpoints OAuth da MiniMax
+    # (client_id/device_authorization_url/token_url) não são publicados oficialmente — inferidos por
+    # convenção RFC 8628 sobre o domínio api.minimax.io; confirme em platform.minimax.io/docs antes de
+    # depender disso em produção (mesmo aviso que já existe em config.py `experimental`).
+    Preset("minimax-oauth", "MiniMax (assinatura via OAuth)",
+           "device flow nativo, SEM Subscription Key — EXPERIMENTAL (endpoints a confirmar)",
+           base={"model": "openai/MiniMax-M2.7", "api_base": "https://api.minimax.io/v1",
+                 "native_tools": True, "auth": "oauth_subscription", "transport": "minimax_oauth",
+                 "tier": "weak", "context_window": 1000000, "experimental": True,
+                 "oauth": {"client_id": "CONFIRMAR",
+                           "device_authorization_url": "https://api.minimax.io/oauth/device/code",
+                           "token_url": "https://api.minimax.io/oauth/token", "scope": ""}},
+           model_prefix="openai/", models=["MiniMax-M2.7", "MiniMax-M3", "MiniMax-M2.5", "MiniMax-M2.1"],
+           login="minimax_oauth",
+           note="EXPERIMENTAL: client_id/URLs OAuth ainda não confirmados oficialmente pela MiniMax — "
+                "revise `oauth:` no okami.yaml antes de logar. Login: okami login minimax-oauth."),
+    # DISCOVERABILITY (item 2): mesmo Token Plan da MiniMax, endpoint REGIONAL China (Hermes:
+    # plugins/model-providers/minimax/__init__.py `minimax_cn`, base_url=https://api.minimaxi.com — nota
+    # "minimaxi.com", não "minimax.io"). Chave própria (MINIMAX_CN_API_KEY) — contas/planos são distintos
+    # entre as duas regiões, então não reaproveita MINIMAX_API_KEY.
+    Preset("minimax-cn", "MiniMax China (Token Plan)",
+           "mesmo Token Plan, endpoint regional China (api.minimaxi.com)",
+           base={"model": "openai/MiniMax-M3", "api_base": "https://api.minimaxi.com/v1", "native_tools": True,
+                 "auth": "api_key", "tier": "weak", "context_window": 1000000},
+           model_prefix="openai/", models=["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1"],
+           fields=[Field("__secret__", "Subscription Key China (Account ▸ Token Plan)", env="MINIMAX_CN_API_KEY",
+                         kind="secret")]),
     Preset("mimo", "Xiaomi MiMo (Token Plan)", "assinatura tp-xxxxx — OpenAI-compat regional",
            base={"api_base": "https://token-plan-ams.xiaomimimo.com/v1", "auth": "api_key",
                  "native_tools": True,              # idem minimax: cloud OpenAI-compat com function-calling → pina
@@ -111,6 +140,27 @@ PRESETS: list[Preset] = [
                  "context_window": 256000},
            model_prefix="xai/", models=["grok-4", "grok-4-fast", "grok-3", "grok-3-mini"],
            fields=[Field("__secret__", "API key", env="XAI_API_KEY", kind="secret")]),
+    # DISCOVERABILITY (item 4): grok TEM assinatura OAuth (SuperGrok/Premium+) — Hermes confirma em
+    # hermes_cli/auth.py: XAI_OAUTH_CLIENT_ID/XAI_OAUTH_DEVICE_CODE_URL são valores REAIS publicados no
+    # próprio código do Hermes (não placeholder). O único ponto EXPERIMENTAL aqui é o token_url: a xAI usa
+    # OIDC discovery (auth.x.ai/.well-known/openid-configuration) pra achar o token endpoint em runtime,
+    # e o device_login genérico do Okami (okami/llm/oauth.py) só aceita uma URL estática — usamos a
+    # convenção RFC 8628 sobre o mesmo issuer (auth.x.ai/oauth2/token); confirme via discovery antes de
+    # depender em produção.
+    Preset("xai-oauth", "xAI / Grok (assinatura SuperGrok)",
+           "device flow OAuth (SuperGrok/Premium+), SEM API key — EXPERIMENTAL (token_url a confirmar)",
+           base={"model": "xai/grok-4", "api_base": "https://api.x.ai/v1", "auth": "oauth_subscription",
+                 "transport": "minimax_oauth",  # reaproveita o transport OAuth genérico (bearer via litellm)
+                 "tier": "strong", "context_window": 256000, "experimental": True,
+                 "oauth": {"client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+                           "device_authorization_url": "https://auth.x.ai/oauth2/device/code",
+                           "token_url": "https://auth.x.ai/oauth2/token",
+                           "scope": "openid profile email offline_access grok-cli:access api:access"}},
+           model_prefix="xai/", models=["grok-4", "grok-4-fast", "grok-3", "grok-3-mini"],
+           login="minimax_oauth",
+           note="EXPERIMENTAL: token_url inferido por convenção (xAI usa OIDC discovery, não uma URL "
+                "fixa) — confirme antes de logar. client_id/device_code_url são os mesmos publicados "
+                "pelo Hermes (hermes_cli/auth.py). Login: okami login xai-oauth."),
     Preset("mistral", "Mistral AI", "Mistral Large/Codestral — API key",
            base={"api_base": "https://api.mistral.ai/v1", "auth": "api_key", "tier": "strong",
                  "context_window": 128000},
@@ -154,10 +204,18 @@ PRESETS: list[Preset] = [
            model_prefix="together_ai/",
            models=["meta-llama/Llama-3.3-70B-Instruct-Turbo", "deepseek-ai/DeepSeek-V3"],
            fields=[Field("__secret__", "API key", env="TOGETHER_API_KEY", kind="secret")]),
-    Preset("custom", "Endpoint custom (OpenAI-compat)", "qualquer /v1 — você informa base/chave",
+    # item 3: rota "traga seu próprio provider" — qualquer vendor com token-plan/API key/endpoint
+    # OpenAI-compat que não tem preset dedicado. Já persiste reusável: `_provider_add_flow` pergunta
+    # "ID deste provider no okami.yaml" (default "custom") e grava normal em okami.yaml + a chave no
+    # .env — dá pra adicionar VÁRIOS (ex.: "meu-token-plan", "empresa-x") só trocando o ID no prompt.
+    # env aqui é só o default sugerido; troque o nome se for cadastrar mais de um custom.
+    Preset("custom", "Traga seu provider (token-plan / API key / endpoint OpenAI-compat)",
+           "qualquer /v1 que você já tenha — sem esperar preset dedicado; fica salvo no okami.yaml",
            base={"auth": "api_key", "tier": "unknown"}, model_prefix="openai/",
            fields=[Field("api_base", "API base (.../v1)", "http://localhost:8080/v1"),
-                   Field("__secret__", "API key (vazio = sem chave)", env="CUSTOM_API_KEY", kind="secret")]),
+                   Field("__secret__", "API key / token do plano (vazio = sem chave)", env="CUSTOM_API_KEY",
+                         kind="secret")],
+           note="Reusável: rode 'okami provider add' de novo pra cadastrar outro (dê um ID diferente)."),
 ]
 
 

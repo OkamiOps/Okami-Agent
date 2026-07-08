@@ -479,6 +479,7 @@ MESSAGES: dict[str, str] = {
     # descrições dos slash commands (sessão)
     "cmd.new": "começa uma conversa nova (arquiva a atual)",
     "cmd.stop": "cancela a tarefa em andamento",
+    "cmd.steer": "injeta uma correção no turno em curso SEM cancelá-lo",
     "cmd.retry": "retoma a última tarefa interrompida",
     "cmd.compact": "compacta o contexto agora (resume o que já passou)",
     "cmd.sessions": "lista as conversas arquivadas (por /new)",
@@ -522,7 +523,7 @@ MESSAGES: dict[str, str] = {
     "cmd.yolo": "auto-aprova ações sensíveis nesta sessão",
     "cmd.normal": "volta a aprovação normal",
     "cmd.voice": "liga/desliga a resposta em áudio (TTS) nesta sessão",
-    "cmd.busy": "o que fazer se você escrever ocupado: queue (fila) | interrupt (corta)",
+    "cmd.busy": "o que fazer se você escrever ocupado: queue (fila) | interrupt (corta) | steer (injeta)",
     "cmd.sethome": "define este chat como destino dos lembretes/agendamentos (cron)",
     "cmd.config": "mostra a config efetiva (segredos mascarados)",
     "cmd.reload": "recarrega a config em quente (sem reiniciar)",

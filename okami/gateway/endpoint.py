@@ -83,8 +83,11 @@ class Session:
         self.voice_off = False           # /voice off → NUNCA responde em áudio nesta sessão
         self.voice_always = False        # /voice on → SEMPRE áudio. Default (ambos False): ESPELHA a entrada
         #                                  (mandou voz → responde em voz; mandou texto → só texto)
-        self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual)
+        self.busy_mode = "queue"         # ocupado + nova msg: queue (fila) | interrupt (corta a atual) | steer
+        #                                   (injeta no turno em curso, SEM cortar)
         self.queued: list = []           # mensagens em fila (runtime; não persiste)
+        self.pending_steer: str | None = None   # /steer: texto do dono a ser INJETADO no turno em curso (sob
+        #                                          _sess_lock — drenado pelo hook steer_source do harness)
         self.no_interrupt = False        # fase não-interruptível da tarefa em curso (compactação/subagente,
         #                                   paridade Hermes #30170/#56391) — settable pelo runner via kw;
         #                                   interrupt vira queue enquanto True (demote, não cancela)
@@ -658,16 +661,19 @@ class AgentEndpoint(EndpointCommandsMixin):
                 s.busy_mode = "queue"
             elif arg in ("interrupt", "corta", "stop"):
                 s.busy_mode = "interrupt"
+            elif arg in ("steer", "guiar"):
+                s.busy_mode = "steer"
             elif arg in ("", "status"):
                 q = (" · " + _tr("gw.busy_queued_count", _default="{n} in queue", n=len(s.queued))) if s.queued else ""
                 self.channel.send(chat_id, "⏳ " + _tr(
                     "gw.busy_status", _default="busy mode: {mode}", mode=s.busy_mode) + q
-                    + ". " + _tr("gw.busy_options", _default="Options: queue · interrupt."))
+                    + ". " + _tr("gw.busy_options", _default="Options: queue · interrupt · steer."))
                 return
             else:
                 self.channel.send(chat_id, _tr(
                     "gw.busy_usage",
-                    _default="usage: /busy queue (queue) | interrupt (cuts the current one) | status"))
+                    _default="usage: /busy queue (queue) | interrupt (cuts the current one) | "
+                             "steer (injects without cutting) | status"))
                 return
             self._save_meta(chat_id, s)
             self.channel.send(chat_id, "⏳ " + _tr("gw.busy_set", _default="busy → {mode}.", mode=s.busy_mode))
@@ -735,7 +741,26 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         if low == "/stop":
             s.cancel = True
+            s.pending_steer = None          # cancela ANTES do próximo passo → um steer pra essa iteração é moot
             self.channel.send(chat_id, "⏹ " + _tr("gw.stopping", _default="stopping after the current step…"))
+            return
+        if low.startswith("/steer"):        # injeta no turno EM CURSO sem cancelar (independente do busy_mode)
+            arg = text[len("/steer"):].strip()
+            if not arg:
+                self.channel.send(chat_id, _tr(
+                    "gw.steer_usage", _default="usage: /steer <text to inject into the running turn>"))
+                return
+            with self._sess_lock:
+                if not s.busy:               # nada rodando → não há turno pra injetar; vira mensagem normal
+                    running = False
+                else:
+                    s.pending_steer = (s.pending_steer + "\n" + arg) if s.pending_steer else arg
+                    running = True
+            if running:
+                self.channel.send(chat_id, "⏩ " + _tr(
+                    "gw.steer_queued", _default="steer queued — arrives after the next tool."))
+            else:
+                self.handle(chat_id, arg)   # sem turno rodando: trata como mensagem normal
             return
         if low in ("/retry", "/continuar"):            # retoma a última tarefa que ficou sem resposta
             if s.busy:
@@ -745,7 +770,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self.channel.send(chat_id, _tr("gw.nothing_to_resume", _default="nothing interrupted to resume."))
                 return
             last = s.history[-1][1]                     # o USER pendente continua; _run não re-adiciona
-            s.busy, s.cancel = True, False
+            s.busy, s.cancel, s.pending_steer = True, False, None   # turno novo → nenhum steer velho sobrevive
             self._spawn(lambda: self._run(chat_id, last, s, resume=True))
             return
         if low.startswith("/feedback"):                # molda a identidade (§8), com go/no-go
@@ -973,30 +998,38 @@ class AgentEndpoint(EndpointCommandsMixin):
             return
         with self._sess_lock:                           # check-then-set ATÔMICO vs. o drain do finally (race)
             if s.busy:                                   # ocupado: enfileira (e corta a atual se modo interrupt)
-                # COLAPSA reenvio IDÊNTICO (paridade Hermes): double-tap / reenvio por ansiedade não roda N×.
-                _dup = bool(s.queued) and s.queued[-1][0] == text and s.queued[-1][2] == surface_override
-                _dropped = False
-                if not _dup:
-                    if len(s.queued) >= _QUEUE_CAP:      # teto duro (paridade Hermes _BUSY_QUEUE_MAX_PENDING)
-                        _dropped = True
-                    else:
-                        s.queued.append((text, self._img.pop(cid, None), surface_override))  # surface PRÓPRIA
-                decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
-                if decision == "interrupt":
-                    if s.no_interrupt:                   # fase não-interruptível → DEMOTE p/ queue (não cancela)
-                        decision = "queued"
-                    else:
-                        s.cancel = True
-                if _dropped:
-                    decision = "dropped"
+                if s.busy_mode == "steer":                # /busy steer: INJETA no turno em curso, sem cortar
+                    s.pending_steer = (s.pending_steer + "\n" + text) if s.pending_steer else text
+                    decision, qn = "steer", 0
+                else:
+                    # COLAPSA reenvio IDÊNTICO (paridade Hermes): double-tap / reenvio por ansiedade não roda N×.
+                    _dup = bool(s.queued) and s.queued[-1][0] == text and s.queued[-1][2] == surface_override
+                    _dropped = False
+                    if not _dup:
+                        if len(s.queued) >= _QUEUE_CAP:      # teto duro (paridade Hermes _BUSY_QUEUE_MAX_PENDING)
+                            _dropped = True
+                        else:
+                            s.queued.append((text, self._img.pop(cid, None), surface_override))  # surface PRÓPRIA
+                    decision, qn = ("interrupt" if s.busy_mode == "interrupt" else "queued"), len(s.queued)
+                    if decision == "interrupt":
+                        if s.no_interrupt:                   # fase não-interruptível → DEMOTE p/ queue (não cancela)
+                            decision = "queued"
+                        else:
+                            s.cancel = True
+                            s.pending_steer = None           # cancelando → um steer pra essa iteração é moot
+                    if _dropped:
+                        decision = "dropped"
             else:
-                s.busy, s.cancel, decision = True, False, "start"
+                s.busy, s.cancel, s.pending_steer, decision = True, False, None, "start"
         if decision == "start":                          # efeitos colaterais (send/spawn) FORA do lock
             self._spawn(lambda: self._run(chat_id, text, s, images=self._img.pop(cid, None),
                                           surface_override=surface_override, from_voice=from_voice))
         elif decision == "interrupt":
             self.channel.send(chat_id, "⏹ " + _tr(
                 "gw.interrupting", _default="interrupting the current one — starting your new message now."))
+        elif decision == "steer":
+            self.channel.send(chat_id, "⏩ " + _tr(
+                "gw.steer_queued", _default="steer queued — arrives after the next tool."))
         elif decision == "dropped":
             from okami import log
             log.warn(f"fila da sessão {cid} no teto ({_QUEUE_CAP}) — mensagem descartada")
@@ -1470,6 +1503,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             # Guarda de demote (fix 2): o runner marca fases não-interruptíveis (compactação/subagente) via
             # este setter — /busy interrupt vira queue enquanto True, em vez de cancelar no meio de um passo sensível.
             kw["set_no_interrupt"] = lambda v, _s=s: setattr(_s, "no_interrupt", bool(v))
+
+            def _pop_steer(_s=s):                          # /steer: DRENA o pendente sob o MESMO lock do dispatch
+                with self._sess_lock:
+                    txt, _s.pending_steer = _s.pending_steer, None
+                    return txt
+            kw["steer_source"] = _pop_steer
             _t0 = time.time()                              # cronômetro da resposta (footer ctx·tok·tempo)
             _hb_stop = self._start_heartbeat(chat_id, _t0, live)  # #11: "ainda trabalhando ~N min · passo M · ~Nk tok"
             try:
@@ -1571,6 +1610,7 @@ class AgentEndpoint(EndpointCommandsMixin):
                 s.busy = False
                 s.cancel = False
                 s.no_interrupt = False                   # turno acabou → nenhuma fase pendente segurando o cancel
+                s.pending_steer = None                   # steer não-drenado deste turno NUNCA vaza pro próximo
                 nxt = s.queued.pop(0) if s.queued else None
                 if nxt is not None:                      # vai rodar a próxima da fila → segura o busy ligado
                     s.busy = True

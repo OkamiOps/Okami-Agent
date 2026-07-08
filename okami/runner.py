@@ -174,6 +174,8 @@ def run_task(
     set_remote=None,                             # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
     set_no_interrupt=None,                        # hook p/ marcar fase não-interruptível na sessão (compactação/
                                                  # subagente) → gateway demota /busy interrupt p/ queue. None = CLI.
+    steer_source=None,                            # /steer: hook p/ DRENAR o texto pendente do dono na sessão
+                                                 # (injeta no turno em curso, sem cancelar). None = sem sessão (CLI).
     core_block: str | None = None,               # #10: identidade/memória JÁ renderizada (review reusa a do pai →
                                                  # prefixo byte-idêntico = prefix-cache + pula a re-leitura do disco)
     emit: Callable[[str], None] = lambda m: None,
@@ -431,6 +433,8 @@ def run_task(
         _hkw["set_remote"] = set_remote
     if set_no_interrupt is not None:  # marca fase sensível (compactação/subagente) → demote guard no gateway
         _hkw["set_no_interrupt"] = set_no_interrupt
+    if steer_source is not None:      # /steer: drena o texto pendente do dono na sessão (injeta, não cancela)
+        _hkw["steer_source"] = steer_source
     try:
         harness = Harness(generate, t, ws, **_hkw)
     except TypeError:                 # ctor ainda sem `notify`/`clarify` (landing paralelo) → fail-open
