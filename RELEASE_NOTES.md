@@ -1,6 +1,6 @@
-# Okami Agent — `v0.13.0-beta` "A Imagem Real" 🐺
+# Okami Agent — `v0.14.0-beta` "Instalação Limpa" 🐺
 
-**1 commit · suíte 3.572 → 3.576 testes** · lançada **2026-07-08**.
+**1 commit · suíte 3.590 → 3.613 testes** · lançada **2026-07-08**.
 
 > ⚠️ **Beta.** A superfície de comandos e config ainda pode mudar até a GA. Recomendado para uso real
 > (inclusive em VPS 24/7) — mas rode `okami policy check --strict` antes de expor publicamente. Feedback
@@ -12,128 +12,87 @@
 
 ## A história desta release
 
-Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o objetivo passou de "manter paridade" com o Hermes
-para **ultrapassar nos pontos onde ele ainda está na frente**.
+As últimas releases fecharam gaps de capacidade — imagem, hooks, browser. Esta fecha uma lacuna
+diferente, mais operacional: **instalações existentes não tinham um caminho de atualização claro**. O
+único jeito de subir de versão era rerodar o instalador do zero, um processo não documentado e que não
+confirmava o que de fato mudou. Isso deixava instalações indo ficando presas em versões velhas com o
+tempo.
 
-Fizemos um mapeamento em 6 dimensões (mídia, gateway, TUI/humanização, harness/tools,
-memória/skills/plugins, computer/browser), comparando ponto a ponto com o Hermes. O resultado não foi
-unilateral — achamos gaps reais (GPT Image via assinatura quebrado, qualidade de tool-call, skills,
-humanização, profundidade de browser, edição de mídia/PDF), mas também achamos onde **já estávamos na
-frente** e ninguém tinha documentado: HTML→PDF sem depender de Chromium (o Hermes depende), identidade
-partida em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) contra um blob genérico único do Hermes, checkpoints de
-sessão, cofre de segredo cifrado.
-
-Esta release é a **primeira onda de implementação** desse backlog — 4 frentes em paralelo (mídia,
-segurança/quick-wins, hooks, browser) mais a costura entre elas.
-
-**O headline é a geração de imagem nativa via assinatura**: geração de imagem (GPT Image) estava
-**quebrada** — o código antigo postava pro endpoint REST pago (`api.openai.com/v1/images`), voltava `401`
-porque exige uma API key paga separada, fora do modelo de assinatura em que o agente opera. Reescrevemos
-pra postar pro **endpoint da própria assinatura codex** (`chatgpt.com/backend-api/codex/responses`, tool
-`image_generation`, modelo `gpt-image-2`), com headers anti-Cloudflare corretos e resolução de
-`account_id` via fallback (o claim do JWT normalmente não vem preenchido). **Verificamos ao vivo**:
-gerou um PNG real de 861KB através da assinatura, texto→imagem e imagem→imagem na mesma chamada.
+Esta release ataca essa lacuna de ponta a ponta: um comando `okami upgrade` dedicado que sabe identificar
+o tipo de instalação e aplicar o caminho de atualização certo, instaladores que verificam o próprio
+resultado, e um Docker que finalmente persiste o estado do agente entre reinícios do container. Ao lado
+disso, o menu de configuração ganha um jeito interativo de trocar de provider/modelo, e o terminal mostra
+mais informação em tempo real (timing por tool-call, tokens/custo ao vivo).
 
 ## ✨ Highlights
 
-- **GPT Image nativo via assinatura codex** — estava quebrado (`401` no REST pago),
-  agora posta pro endpoint da assinatura; texto→imagem **e** imagem→imagem na mesma chamada;
-  **verificado ao vivo** (PNG real, 861KB).
-- **`codex_headers.py`** (novo) — headers anti-Cloudflare (`originator`/UA `codex_cli_rs` +
-  `ChatGPT-Account-Id`), com fallback de `account_id` via `~/.codex/auth.json` quando o claim do JWT não
-  vem preenchido (o caso comum).
-- **Bug latente corrigido de graça**: o mesmo retrofit de headers em `transports.py` conserta um `403`
-  que já existia na VPS no chat codex normal — nunca tinha sido diagnosticado até agora.
-- Host de imagem precisa ser `gpt-5.5` — `gpt-5.1` retorna `HTTP 400` (documentado pra não reintroduzir).
-- **Skill `editar-pdf`** (nova) — `info`/`extract`/`metadata`/`patch`/`rotate`/`merge`/`split` via
-  `pypdf`, dependência lazy.
-- **Barramento de hooks unificado** — 15 pontos de hook (eram ~4, em dois sistemas que não se falavam):
-  pre/post tool call, pre/post LLM call, pre-verify, ciclo de vida de sessão, subagent start/stop.
-- **Browser em segundo plano com sessão persistente** — clicar login → dashboard → relatório sem
-  re-navegar; `scroll`/`back`/`press`/`eval` (guardado contra exfiltração)/`close_session`; screenshot
-  como image block nativo; dialogs JS com auto-dismiss; idle reaper pra VPS nunca vazar Chromium.
-- **`ANTISLOP.md`** (novo, versionado) — 15 padrões PT-BR anti-"cara de chatbot" injetados todo turno;
-  instalação nova já nasce com o default, override local continua valendo.
-- **Busca com ripgrep + fallback pure-Python** — respeita `.gitignore` nos dois caminhos.
-- **SSRF confirmado sem regressão** — `net_guard` já bloqueava metadata/privado/redirect, auditoria
-  formalizou o que já estava certo.
+- **`okami upgrade`** (comando novo) — detecta o tipo de instalação (managed/dev/Docker/ausente) e aplica
+  o caminho certo: `git pull --ff-only` + `uv tool install --force`, reportando versão antiga → nova.
+  Flags `--check` (só verifica) e `--yes` (sem confirmação).
+- **Instaladores endurecidos** — `install.sh`/`install.ps1` verificam o binário recém-instalado e
+  reportam versão antiga → nova (antes, atualizavam em silêncio); `install.ps1` trata long-paths do
+  Windows.
+- **Docker com estado persistente** — `docker-compose.yml` guarda `OKAMI_HOME` (skills, agentes, sessões,
+  `.env`, credenciais, cofre) num volume nomeado — antes, tudo isso ia para o home efêmero do container e
+  se perdia a cada recriação. `Dockerfile` reconstruído multi-stage, `uv sync --frozen`, não-root,
+  `HEALTHCHECK`.
+- **`okami config` ganha picker de provider/modelo** — troca interativa direto no menu (aliases
+  `sonnet`/`opus`/`fast`/`smart`), mais uma visão de providers configurados; persiste em
+  `okami.local.yaml`.
+- **Terminal mais informativo** — tool cards mostram tempo de execução; status bar (REPL e TUI) mostra
+  tokens/custo ao vivo durante a sessão; toolbar do REPL mostra a tool em execução em vez de um
+  "pensando" genérico.
 
-## 🎨 Mídia — GPT Image nativo via assinatura
+## 📦 Instalação & Upgrade
 
-O gap principal identificado no mapeamento, agora fechado fim a fim (dependendo do fix de token-store em
-andamento — ver abaixo):
+- `okami upgrade`: detecta 4 cenários — instalação **managed** (checkout git gerenciado pelo instalador),
+  **clone de desenvolvimento**, **Docker**, ou **ausente** — e só age no caminho aplicável. Para managed:
+  `git pull --ff-only` (nunca reescreve histórico local) seguido de `uv tool install --force`, com
+  relatório final de versão antiga → nova. `--check` reporta se há atualização disponível sem aplicar
+  nada; `--yes` pula a confirmação interativa (uso em automação).
+- `install.sh`/`install.ps1`: depois de instalar, o script agora **verifica o binário final** e imprime a
+  transição de versão — antes o resultado era mudo, sem confirmação de que a atualização realmente
+  aconteceu.
+- `install.ps1`: trata **long-paths do Windows** — checa a chave de registro relevante e habilita
+  `core.longpaths` no git quando necessário, evitando falhas silenciosas em instalações com caminho
+  profundo.
 
-- `imagegen.py` reescrito: endpoint `chatgpt.com/backend-api/codex/responses` + tool `image_generation`
-  (`gpt-image-2`) em vez do REST pago que dava `401`.
-- Texto→imagem **e** imagem→imagem na **mesma chamada** (`input_image` parts) — não precisa de duas
-  requisições separadas.
-- Host obrigatoriamente `gpt-5.5` (`gpt-5.1` dá `HTTP 400`).
-- `codex_headers.py` novo: headers anti-Cloudflare; `account_id` resolvido via
-  `oauth.codex_account_id()` → claim do JWT (raramente presente) → fallback
-  `~/.codex/auth.json` → `tokens.account_id`.
-- `transports.py`: mesmo retrofit de headers no chat codex normal — conserta um `403` latente na VPS que
-  vinha da mesma causa-raiz.
-- Fallback automático pra `flux`/`openrouter` (`IMAGE_BACKENDS`, mesmo padrão do `videogen`);
-  `GenerateImage.check()` já consulta esse fallback.
-- **Verificado ao vivo pelo orquestrador**: PNG real de 861KB gerado através da assinatura, fim a fim.
-- Skill nova **`editar-pdf`**: `pypdf` como dependência lazy, comandos `info`/`extract`/`metadata`/
-  `patch`/`rotate`/`merge`/`split`.
+## 🐳 Docker
 
-## 🛡️ Segurança + quick wins
+- `deploy/docker-compose.yml`: `OKAMI_HOME` passa a viver num **volume nomeado** (`okami-data`) —
+  skills, agentes, sessões, `.env`, credenciais e o cofre de segredo cifrado agora sobrevivem a
+  recriações do container. Antes, esse estado ia para o home efêmero do container e desaparecia a cada
+  `docker compose up` novo.
+- `deploy/Dockerfile`: reescrito **multi-stage**, com `uv sync --frozen` (build reprodutível a partir do
+  lockfile), usuário não-root, `HEALTHCHECK` configurado e imagens base pinadas.
 
-- SSRF: `net_guard` auditado e confirmado já sólido (bloqueia metadata endpoint, IP privado, redirect,
-  respeita `allow_private` explícito) — plugado em `web_extract`/`browse`/`references`; documentado sem
-  necessidade de mudança de código.
-- Busca de arquivos com backend `ripgrep`, fallback pure-Python automático quando `rg` não está
-  disponível — os dois caminhos respeitam `.gitignore`.
-- `ANTISLOP.md`: 15 padrões PT-BR anti-chatbot-slop (banido "Como posso ajudar?", hedging excessivo,
-  entusiasmo vazio, bullet-slop e afins) injetados no `core_block` todo turno; shipado como default
-  **versionado** em `okami/builtin/identity` — instalação nova já nasce com ele, override local segue
-  tendo prioridade.
+## ⚙️ Config — troca de provider/modelo pelo menu
 
-## 🔌 Barramento de hooks unificado
+- `okami config` ganha uma opção de **picker interativo de provider/modelo**, reaproveitando o mesmo
+  fluxo do comando `okami model` (aliases `sonnet`/`opus`/`fast`/`smart`), e uma tela de **providers
+  configurados**. Antes o menu não oferecia caminho para trocar de provider ou modelo — só edição manual
+  de config. A escolha persiste em `okami.local.yaml`.
 
-- 15 pontos de hook (eram ~4, espalhados em dois sistemas separados): `pre_tool_call`/`post_tool_call`,
-  `pre_llm_call`/`post_llm_call`, `pre_verify`, ciclo de vida de sessão, `subagent_start`/`subagent_stop`.
-- Bridge dos hooks shell existentes pro barramento novo — compatibilidade retroativa mantida.
-- Wiring cirúrgico em `loop.py`/`runner.py`; `register_*` novo pra plugins registrarem hooks sem tocar no
-  core.
+## 🖥️ Terminal — mais visibilidade em tempo real
 
-## 🌐 Browser em segundo plano + edição de PDF
-
-- Sessão persistente (`browser_session.py`, thread-bound, com idle reaper): clicar login → dashboard →
-  relatório sem re-navegar a cada passo.
-- Ações novas: `scroll`, `back`, `press`, `eval` (guardado contra exfiltração de cookie/localStorage),
-  `close_session`.
-- Screenshot exposto como image block nativo (helper compartilhado `image_block.py`).
-- Diálogos JS (`alert`/`confirm`/`prompt`) com auto-dismiss.
-- Idle reaper garante que uma VPS 24/7 nunca deixa processo Chromium vazando.
-
-## 🧭 Onde já estávamos na frente
-
-Parte do exercício de mapeamento foi honesto nos dois sentidos — nem tudo é gap. Confirmado, sem mudança
-de código nesta release:
-
-- HTML→PDF sem depender de Chromium (o Hermes depende).
-- Identidade em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) vs blob genérico único do Hermes.
-- Checkpoints de sessão.
-- Cofre de segredo cifrado (`v0.12.0-beta`).
+- Cartões de tool-call finalizados mostram **quanto tempo a chamada levou**.
+- A barra de status — no REPL de linha e no TUI de tela cheia — mostra **tokens e custo ao vivo** durante
+  a sessão, não só no resumo final.
+- A toolbar do REPL mostra qual **tool está em execução** no momento, em vez de uma linha genérica de
+  "pensando".
 
 ## ⚠️ Beta — caveats e trabalho em andamento
 
 - Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
 - Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
   publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
-- **Em andamento, fora desta release** — 3 sessões de fix de provider rodando em paralelo:
-  - Crash de streaming do Claude.
-  - **Bug do token-store do Codex**: um token corrompido de 9 caracteres fica na frente do token válido
-    da CLI e é usado primeiro — **esse fix é necessário pra geração de imagem funcionar fim a fim** num
-    usuário novo/fresh install, mesmo com o endpoint de assinatura já corrigido nesta release.
-  - Parser do `claude_cli`.
+- **Em andamento, fora desta release** — correções de conexão com provider seguem em paralelo: crash de
+  streaming do Claude e resolução do cofre de credenciais do Codex. Previstas para uma release de
+  acompanhamento.
 
 ## ✅ Release verification
 
-- **3.576 testes** passando (`uv run pytest -q`), subindo de 3.572.
+- **3.613 testes** passando (`uv run pytest -q`), subindo de 3.590.
 - Reprodução local:
   ```bash
   uv sync --frozen
@@ -152,16 +111,16 @@ curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/i
 irm https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.ps1 | iex
 
 # upgrade de instalação existente
-uv tool upgrade okami-agent   # ou: pip install -U okami-agent
+okami upgrade            # detecta o tipo de instalação e atualiza no lugar
+okami upgrade --check    # só verifica se há atualização, sem aplicar
 
 okami setup     # configura em 2-3 cliques
 okami doctor    # confirma que a versão instalada bate com o pyproject (sem version-drift)
 okami chat      # conversa no terminal
 ```
 
-Nenhuma dependência nova obrigatória nesta release (`cryptography>=42` já foi adicionada na
-`v0.12.0-beta`) — `pypdf` é lazy (só carrega se a skill `editar-pdf` for usada). `uv sync`/
-`pip install -U` já resolve; `okami.yaml`/`okami.local.yaml` existentes continuam válidos.
+Nenhuma dependência Python nova nesta release — a mudança é toda em instalação/Docker/CLI. `okami.yaml`/
+`okami.local.yaml` existentes continuam válidos.
 
 ## 📄 License
 

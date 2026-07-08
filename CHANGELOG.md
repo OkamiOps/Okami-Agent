@@ -6,6 +6,55 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.14.0-beta] — 2026-07-08
+
+As releases anteriores fecharam gaps de capacidade (imagem, hooks, browser). Esta fecha uma lacuna
+operacional que ficava só implícita: **instalações existentes não tinham um caminho de atualização
+documentado** — o único jeito de subir de versão era rerodar o instalador do zero, sem confirmação do
+que mudou. Onda focada em confiabilidade de instalação/atualização multi-plataforma, mais polimento de
+config e terminal. Suíte: **3.590 → 3.613 testes**.
+
+### 📦 Instalação & Upgrade
+- **Correção crítica no `install.sh`**: em locales UTF-8 (pt_BR, en_US) o instalador abortava com
+  `unbound variable` logo após clonar, deixando o binário desatualizado — uma expansão `$VAR` colada a um
+  caractere não-ASCII fazia o `bash` sob `set -u` incluir os bytes do caractere no nome da variável.
+  Corrigido e **validado executando o instalador de ponta a ponta** sob `pt_BR.UTF-8`.
+- **`okami upgrade`** (comando novo): detecta o tipo de instalação (managed via `git`, clone de
+  desenvolvimento, Docker, ou ausente) e aplica o caminho certo — `git pull --ff-only` + `uv tool install
+  --force` para instalações managed, relatando a versão antiga → nova ao final. Flags `--check` (só
+  reporta se há atualização disponível, sem aplicar) e `--yes` (não pergunta confirmação).
+- `install.sh`/`install.ps1` passam a **verificar o binário recém-instalado** e reportar versão
+  antiga → nova — antes, a instalação/atualização acontecia em silêncio, sem confirmação do resultado.
+- `install.ps1` trata **long-paths do Windows** (checagem de registro + habilitação de
+  `core.longpaths` no git quando necessário) — instalação em caminhos profundos deixa de falhar
+  silenciosamente.
+
+### 🐳 Docker
+- `deploy/docker-compose.yml` passa a **persistir `OKAMI_HOME` em volume nomeado** (`okami-data`) —
+  antes, skills, agentes, sessões, `.env`, credenciais e o cofre de segredo iam para o home efêmero do
+  container e se perdiam a cada recriação.
+- `deploy/Dockerfile` reconstruído **multi-stage**: `uv sync --frozen` (build reprodutível), usuário
+  não-root, `HEALTHCHECK` configurado, imagens base pinadas por digest.
+
+### ⚙️ Config
+- O menu `okami config` ganha um **picker interativo de provider/modelo** (reaproveitando o mesmo fluxo
+  do comando `okami model`, com os aliases `sonnet`/`opus`/`fast`/`smart`) e uma visão de **providers
+  configurados** — antes o menu não tinha como trocar de provider ou modelo, só editar config manualmente.
+  Persiste em `okami.local.yaml`.
+
+### 🖥️ Terminal
+- Os cartões de tool-call finalizados agora mostram o **tempo de execução** de cada chamada.
+- A barra de status (tanto no REPL de linha quanto no TUI de tela cheia) mostra **tokens/custo ao vivo**
+  durante a sessão, em vez de só ao final.
+- A toolbar do REPL mostra a **tool em execução** no lugar de uma linha genérica de "pensando".
+
+### 🚧 Em andamento, fora desta release
+- Correções de conexão com provider seguem em andamento em paralelo: crash de streaming do Claude e
+  resolução do cofre de credenciais do Codex — previstas para uma release de acompanhamento.
+
+### 🧪 Suíte
+- **3.613 testes passando** (3.590 → 3.613).
+
 ## [0.13.0-beta] — 2026-07-08
 
 Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o objetivo desta release passou de "manter paridade"
@@ -774,6 +823,7 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.14.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.14.0-beta
 [0.13.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.13.0-beta
 [0.12.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.12.0-beta
 [0.11.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.11.0-beta

@@ -809,6 +809,32 @@ def test_ctx_pct_real_tokens_and_trocas_total():
     assert int(ep.store.entry("7").get("node_count", 0)) // 2 == 2  # trocas CRESCE (não trava em 8)
 
 
+def test_ctx_pct_counts_cached_tokens_still_occupying_window():
+    # BUG: ctx% usava só `input_tokens` (não-cacheado), que a própria CanonicalUsage já subtrai o
+    # cache — com prompt caching pesado (Anthropic/Codex) isso subestimava DRASTICAMENTE a janela
+    # ocupada (tokens cacheados continuam contando pra janela do modelo, só não são re-processados).
+    # ctx% correto = prompt INTEIRO (input fresco + cache_read + cache_write) ÷ janela.
+    import tempfile
+
+    from okami.config import build_config
+    from okami.gateway import AgentEndpoint
+    cfg = build_config({"default_provider": "a", "providers": {
+        "a": {"model": "ma", "tier": "local", "api_key": "x", "context_window": 100_000}}})
+
+    def runner(c, ws, goal, **kw):
+        t = _ok_task(goal)
+        # 5K de entrada fresca + 75K vindos do cache = 80K do prompt inteiro numa janela de 100K → 80%
+        # (usar só input_tokens=5K daria ctx 5%, escondendo que a janela está quase saturada)
+        t.stats = {"usage": {"input": 5_000, "output": 1_000, "cache_read": 75_000}}
+        return t
+    ch = FakeChannel()
+    ep = AgentEndpoint("dev", cfg=cfg, ws=tempfile.mkdtemp(), channel=ch, run_task=runner, spawn=lambda fn: fn())
+    ep.handle("7", "faz um resumo")
+    footers = [t for _, t in ch.sent if t.startswith("· ")]
+    assert any("ctx 80%" in f for f in footers), footers
+    assert ep.store.entry("7").get("ctx_pct") == 80
+
+
 @pytest.fixture(autouse=True)
 def _i18n_pt_locale():
     """i18n: estes testes foram escritos com as respostas do gateway em PT. Força o locale `pt` (o

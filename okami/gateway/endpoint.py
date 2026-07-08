@@ -1059,11 +1059,11 @@ class AgentEndpoint(EndpointCommandsMixin):
         parts: list[str] = []
         u = CanonicalUsage.from_dict((stats or {}).get("usage") or {})
         try:                                              # ctx %: quão cheia está a janela do modelo —
-            pc = self.cfg.provider() if self.cfg else None  # tokens de ENTRADA (prompt inteiro: sistema +
-            if pc and u.input_tokens:                       # memória + skills + histórico + saídas de tool)
-                from okami.llm.providers import context_window_tokens   # ÷ janela do modelo. NÃO o char-sum
-                win = max(1, context_window_tokens(pc))                 # do histórico (que dava ~0%).
-                parts.append(f"ctx {min(100, round(100 * u.input_tokens / win))}%")
+            pc = self.cfg.provider() if self.cfg else None  # PROMPT INTEIRO (entrada fresca + cache_read +
+            if pc and u.prompt_tokens:                      # cache_write: tokens cacheados AINDA ocupam a
+                from okami.llm.providers import context_window_tokens   # janela — só contar input_tokens
+                win = max(1, context_window_tokens(pc))     # (não-cacheado) subestimava drasticamente com
+                parts.append(f"ctx {min(100, round(100 * u.prompt_tokens / win))}%")  # prompt caching ativo.
         except Exception:  # noqa: BLE001 — footer é cosmético, nunca quebra o turno
             pass
         if u.total_tokens:
@@ -1573,11 +1573,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                     from okami.llm.usage import CanonicalUsage
                     _u = CanonicalUsage.from_dict(stats["usage"])
                     _pc = self.cfg.provider() if self.cfg else None
-                    if _pc and _u.input_tokens:                # ctx% REAL = tokens de ENTRADA do último turno
-                        from okami.llm.providers import context_window_tokens   # (prompt inteiro) ÷ janela do
-                        _win = max(1, context_window_tokens(_pc))               # modelo — não o char-sum do
-                        self.store.update_entry(chat_id, last_input_tokens=int(_u.input_tokens),  # histórico
-                                                ctx_pct=min(100, round(100 * _u.input_tokens / _win)))
+                    if _pc and _u.prompt_tokens:                # ctx% REAL = PROMPT INTEIRO do último turno
+                        from okami.llm.providers import context_window_tokens   # (input fresco + cache_read +
+                        _win = max(1, context_window_tokens(_pc))               # cache_write; cache AINDA ocupa
+                        self.store.update_entry(chat_id, last_input_tokens=int(_u.input_tokens),  # a janela
+                                                ctx_pct=min(100, round(100 * _u.prompt_tokens / _win)))
                 except Exception:  # noqa: BLE001 — contabilidade nunca quebra o turno
                     pass
             reply = task.result or task.reason or f"({task.state.value})"

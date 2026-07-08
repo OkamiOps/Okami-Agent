@@ -10,12 +10,12 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
-![version](https://img.shields.io/badge/version-0.13.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.14.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3576%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-3613%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,28 +24,31 @@ ou onde você quiser.
 
 ---
 
-> 🐺 **Beta público (`v0.13.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
+> 🐺 **Beta público (`v0.14.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
 > comandos/config ainda pode mudar até a GA — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md) e as
 > [RELEASE_NOTES](RELEASE_NOTES.md).
 
-> ### ✨ Novo no `0.13.0-beta`
-> A próxima cobrança do dono: "paridade não basta — acha onde o Hermes está na frente e ULTRAPASSA."
-> Mapeamos 6 dimensões contra o Hermes e mandamos a primeira onda: 4 frentes em paralelo. Suíte:
-> **3.572 → 3.576 testes**.
-> - **GPT Image nativo via assinatura Codex** (pedido #1 do dono) — estava quebrado (postava pro REST
->   pago, `401`); agora posta pro endpoint da assinatura (`chatgpt.com/backend-api/codex/responses` +
->   tool `image_generation`, `gpt-image-2`), texto→imagem **e** imagem→imagem na mesma chamada.
->   **Verificado ao vivo**: PNG real de 861KB gerado através da assinatura.
-> - Conserta de graça um `403` latente no chat codex normal (mesmo fix de headers).
-> - **Skill `editar-pdf`** (nova) — info/extract/metadata/patch/rotate/merge/split via `pypdf` (lazy).
-> - **Barramento de hooks unificado** — 15 pontos de hook (eram ~4, em dois sistemas separados).
-> - **Sessão persistente de browser** — login → dashboard → relatório sem re-navegar; ações novas
->   scroll/back/press/eval(guardado)/close_session; idle reaper pra VPS nunca vazar Chromium.
-> - **`ANTISLOP.md`** (novo, default versionado) — 15 padrões anti-chatbot-slop injetados todo turno.
-> - Honestidade: também confirmamos onde já estamos **na frente** do Hermes (HTML→PDF sem Chromium,
->   identidade em 3 arquivos, checkpoints, cofre de segredo cifrado) — documentado, sem mudança de
->   código necessária ali.
+> ### ✨ Novo no `0.14.0-beta` — "Instalação Limpa"
+> As últimas releases fecharam gaps de capacidade (imagem, hooks, browser). Esta fecha uma lacuna
+> operacional: instalações existentes não tinham um caminho de atualização documentado. Suíte:
+> **3.590 → 3.613 testes**.
+> - **`okami upgrade`** (comando novo) — detecta o tipo de instalação (managed/dev-clone/Docker/ausente)
+>   e aplica o caminho certo: `git pull --ff-only` + `uv tool install --force`, reportando versão
+>   antiga → nova. Flags `--check` e `--yes` para automação.
+> - **Instaladores endurecidos** — `install.sh`/`install.ps1` verificam o binário recém-instalado e
+>   reportam versão antiga → nova (antes, atualizavam em silêncio); `install.ps1` trata long-paths do
+>   Windows.
+> - **Docker com estado persistente** — `docker-compose.yml` guarda `OKAMI_HOME` (skills, agentes,
+>   sessões, `.env`, credenciais, cofre) num volume nomeado — antes o estado ia pro home efêmero do
+>   container e se perdia a cada recriação; `Dockerfile` reconstruído multi-stage, não-root,
+>   `HEALTHCHECK`.
+> - **`okami config` ganha picker de provider/modelo** — troca interativa direto no menu (aliases
+>   `sonnet`/`opus`/`fast`/`smart`), mais visão de providers configurados, persistindo em
+>   `okami.local.yaml`.
+> - **Terminal mais informativo** — tool cards mostram tempo de execução por chamada; a status bar
+>   (REPL e TUI de tela cheia) mostra tokens/custo ao vivo durante a sessão; a toolbar do REPL mostra a
+>   tool em execução.
 
 O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
 
