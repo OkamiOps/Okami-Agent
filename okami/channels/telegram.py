@@ -345,6 +345,17 @@ class TelegramClient:
         except Exception:  # noqa: BLE001 — "not modified"/rede → best-effort
             return False
 
+    def delete_message(self, chat_id, message_id) -> bool:
+        """deleteMessage — usada p/ apagar a mensagem ORIGINAL depois de capturar uma credencial
+        inline ("Salvar, apagar e confirmar", diretiva do dono): o valor cru não fica visível no
+        histórico do Telegram. Best-effort (mensagem já apagada/>48h/sem permissão → False, nunca
+        derruba o turno — a redação do transcript/log é a defesa que NÃO depende disto)."""
+        try:
+            self._call("deleteMessage", {"chat_id": chat_id, "message_id": int(message_id)})
+            return True
+        except Exception:  # noqa: BLE001 — best-effort
+            return False
+
     def send_chat_action(self, chat_id, action: str = "typing", thread: int | None = None) -> None:
         try:
             p = {"chat_id": chat_id, "action": action}
@@ -611,6 +622,12 @@ class TelegramChannel(Channel):
     def edit_message(self, chat_id, msg_id, text: str) -> bool:
         chat, thread = self._decode(chat_id)
         return self.client.edit_message(chat, msg_id, text, thread=thread)
+
+    def delete_message(self, chat_id, msg_id) -> bool:
+        """Apaga a mensagem original do chat — usada após capturar uma credencial inline (o valor cru
+        não deve permanecer visível no histórico do Telegram). Best-effort."""
+        chat, _ = self._decode(chat_id)
+        return self.client.delete_message(chat, msg_id)
 
     def set_reaction(self, chat_id, message_id, emoji: str) -> None:
         chat, _ = self._decode(chat_id)                  # reação é no chat real (thread não se aplica)

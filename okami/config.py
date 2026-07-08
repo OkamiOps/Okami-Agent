@@ -84,6 +84,17 @@ def _load_env() -> None:
             log.warn(f"secret source: {res['error']} — seguindo com o .env.")
     except Exception:  # noqa: BLE001 — fonte de segredo NUNCA bloqueia o boot
         pass
+    # Cofre CIFRADO (okami/core/secretvault.py) — segredo capturado inline no chat (ex.: GITHUB_TOKEN
+    # colado no Telegram) mora aqui, não no .env plano. Ponte NÃO-destrutiva: providers.py/oauth.py só
+    # leem os.environ, então isto populariza sem tocar naqueles arquivos. Fail-never-block.
+    try:
+        from okami.core.secretvault import apply_vault_to_environ
+        vres = apply_vault_to_environ()
+        if vres.get("error"):
+            from okami import log
+            log.warn(f"secret vault: {vres['error']} — seguindo com o .env.")
+    except Exception:  # noqa: BLE001 — cofre NUNCA bloqueia o boot
+        pass
 
 
 # Carrega o quanto antes, para que api_key_env funcione já no import.

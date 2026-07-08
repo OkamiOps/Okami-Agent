@@ -27,6 +27,7 @@ dependencies = [
     "prompt_toolkit>=3.0",   # REPL concorrente do `okami chat` (digita enquanto trabalha; patch_stdout)
     "textual>=0.80",         # TUI de tela cheia do `okami chat --tui` (regiões fixas, mouse, scroll, status pinado)
     "pillow>=10",            # render do logo REAL da Okami como arte de terminal (half-block); degrada p/ lobo geométrico
+    "cryptography>=42",      # Fernet — cofre de segredos criptografado em repouso (okami/core/secretvault.py)
 ]
 
 [project.optional-dependencies]

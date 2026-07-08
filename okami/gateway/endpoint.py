@@ -1386,11 +1386,60 @@ class AgentEndpoint(EndpointCommandsMixin):
         _th.Thread(target=_loop, daemon=True).start()
         return stop
 
+    def _capture_inline_secrets(self, chat_id, text: str) -> str:
+        """"Salvar, apagar e confirmar" + "Só no cofre, nunca no LLM" (diretivas do dono, binding):
+        detecta credencial de ALTA CONFIANÇA em `text` (okami.core.redact.detect_inline_secrets),
+        guarda cada uma no cofre CIFRADO (okami.core.secretvault.vault_set — NÃO no .env plano),
+        apaga a mensagem original no canal (deleteMessage, best-effort) e confirma SÓ pelo nome
+        ("🔐 guardei a credencial X com segurança"). Devolve o texto SANEADO (valor trocado por uma
+        nota inline) — é ISSO que segue para transcript/histórico/goal do run_task; o valor cru NUNCA
+        avança além deste método. Sem match → devolve `text` intacto (custo zero no caminho comum).
+        Best-effort: falha na captura (cofre ilegível, canal fora do ar) NUNCA derruba o turno — na
+        pior hipótese o texto segue como está (ainda protegido pela redação de log/DLP de saída)."""
+        try:
+            from okami.core.redact import sanitize_inline_secrets
+            sanitized, matches, _note = sanitize_inline_secrets(text or "")
+            if not matches:
+                return text
+            import os
+
+            from okami.core.secretvault import vault_set
+            stored: list[str] = []
+            for m in matches:
+                try:
+                    vault_set(m["name"], m["value"])          # cofre CIFRADO ($OKAMI_HOME/.secret_key)
+                    os.environ[m["name"]] = m["value"]        # disponível JÁ neste processo (sem reiniciar)
+                    stored.append(m["name"])
+                except Exception:  # noqa: BLE001 — um nome que falha não trava os demais
+                    from okami import log
+                    log.warn(f"secretvault: falha ao guardar {m['name']!r}", exc_info=True)
+            del_fn = getattr(self.channel, "delete_message", None)   # Telegram: apaga a msg ORIGINAL
+            mid = self._last_msg_id.get(str(chat_id))
+            if del_fn and mid:
+                try:
+                    del_fn(chat_id, mid)
+                except Exception:  # noqa: BLE001 — best-effort (>48h/sem permissão/já apagada)
+                    pass
+            if stored:
+                names = ", ".join(dict.fromkeys(stored))    # dedup preservando ordem, sem valores
+                self.channel.send(chat_id, "🔐 " + _tr(
+                    "gw.secret_stored",
+                    _default="guardei a credencial {names} com segurança.", names=names))
+            return sanitized
+        except Exception:  # noqa: BLE001 — captura NUNCA derruba o turno
+            from okami import log
+            log.dbg("captura de segredo inline falhou", exc_info=True)
+            return text
+
     def _run(self, chat_id, text: str, s: Session, resume: bool = False, images=None,
              surface_override: str | None = None, from_voice: bool = False) -> None:
         if resume:                                        # retomada: o USER já está no transcript
             ctx = _history_block(s.history[:-1], max_chars=self.max_history_chars)
         else:
+            # Captura de credencial INLINE ("Só no cofre, nunca no LLM", diretiva do dono) — ANTES de
+            # QUALQUER persistência (transcript/histórico) ou uso como goal do run_task. O valor cru
+            # NUNCA passa daqui em diante: vira nota saneada no `text` que segue.
+            text = self._capture_inline_secrets(chat_id, text)
             ctx = _history_block(s.history, max_chars=self.max_history_chars)   # histórico PRIOR
             self._append_turn(chat_id, s, "USER", text)   # grava a fala EM ANDAMENTO (detecta interrupção)
         if s.persona_overlay:                              # overlay de sessão prevalece sobre o tom padrão
@@ -1535,6 +1584,12 @@ class AgentEndpoint(EndpointCommandsMixin):
             if not task.result and task.state.name == "FAILED":   # #9: razão crua de erro de provider →
                 from okami.gateway.response_filters import sanitize_provider_error   # categoria curta segura
                 reply = sanitize_provider_error(reply)            # (não vaza HTTP body/request-id no chat)
+            # DLP de saída (#7 item 2) — ORDEM CORRIGIDA (diretiva do dono): redige ANTES de persistir.
+            # Antes o redact() só rodava em cima de `reply_text` logo antes do send (linha ~1575 antiga),
+            # DEPOIS do _append_turn abaixo — ou seja, um segredo que o modelo cuspisse na resposta ia
+            # CRU pro transcript/histórico mesmo que a mensagem enviada saísse mascarada. Redigindo aqui,
+            # a versão persistida e a enviada são a MESMA (sempre saneada).
+            reply = redact(reply)
             self._append_turn(chat_id, s, "AGENTE", reply)  # fecha o par → não é mais "interrompida"
             self._goal_after_turn(chat_id, reply)           # juiz do objetivo (fail-open, item 41)
             s.resume_attempts = 0                          # concluiu → zera a guarda de resume
@@ -1572,8 +1627,10 @@ class AgentEndpoint(EndpointCommandsMixin):
                         if _rp not in _have and _rp.is_file():
                             _have.add(_rp)
                             reply_media.append(_em)
-            reply_text = redact(reply_text)                 # DLP de saída (#7 item 2): mascara segredo que o
-            #                                                 modelo possa ter cuspido ANTES de qualquer send
+            reply_text = redact(reply_text)                 # 2ª passada IDEMPOTENTE (defesa em profundidade —
+            #                                                 `reply` já foi redigido ANTES do _append_turn acima;
+            #                                                 isto só cobre o caso raro de extract_media reintroduzir
+            #                                                 texto não coberto pela 1ª passada).
             if reply_text.strip() or not reply_media:       # resposta só-anexo não manda texto vazio
                 self.channel.send(chat_id, prefix + reply_text)
             for m in reply_media:
