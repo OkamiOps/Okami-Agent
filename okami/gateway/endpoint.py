@@ -1576,6 +1576,8 @@ class AgentEndpoint(EndpointCommandsMixin):
                     return _base(e)
             ctx = _inject_plugin_context(ctx, getattr(self, "_plugin_context_providers", None))   # pre_llm_call
             kw = {"approve": approve, "extra_context": ctx, "cancel": lambda: s.cancel}
+            if resume:                                    # crash-resume: semeia o loop com o checkpoint
+                kw["resume"] = True                       # estruturado (passos feitos) em vez de refazer do zero
             if kw_pre:
                 kw["prelearned_files"] = kw_pre
             if on_ev is not None:                         # progresso ao vivo (tool-calls, loop, compaction…)

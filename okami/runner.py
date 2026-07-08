@@ -186,6 +186,8 @@ def run_task(
                                                  # (injeta no turno em curso, sem cancelar). None = sem sessão (CLI).
     core_block: str | None = None,               # #10: identidade/memória JÁ renderizada (review reusa a do pai →
                                                  # prefixo byte-idêntico = prefix-cache + pula a re-leitura do disco)
+    resume: bool = False,                         # crash-resume: semeia o loop com o checkpoint estruturado
+                                                 # fresco (passos feitos preservados) em vez de reconstruir do zero
     emit: Callable[[str], None] = lambda m: None,
 ) -> Task:
     ws = Path(workspace)                          # operacional: jail de arquivos, shell, find, @refs
@@ -451,6 +453,7 @@ def run_task(
         cfg=cfg,                      # tools que roteiam ao modelo auxiliar (web_extract/vision)
         # write_approval: escrita AUTOMÁTICA (review em background) vai pra fila do dono
         stage_writes=(surface == "review" and bool((cfg.memory or {}).get("write_approval"))),
+        resume=resume,                # crash-resume: semeia com o checkpoint estruturado fresco, se houver
     )
     if notify is not None:            # entrega FORA-DO-TURNO ao dono (#7 item 3) — só passa quando há canal
         _hkw["notify"] = notify

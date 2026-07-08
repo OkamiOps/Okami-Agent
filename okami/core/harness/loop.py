@@ -323,7 +323,11 @@ class Harness:
         steer_source: Callable[[], str | None] | None = None,   # /steer: POLLA+DRENA o texto pendente do
                                         # dono na sessão (o gateway é o DONO do lock/estado — o harness só
                                         # chama, mesmo padrão de `cancel`). None = sem sessão (CLI puro) → no-op.
+        resume: bool = False,           # RESUME de crash: se um checkpoint estruturado fresco existir no
+                                        # workspace, semeia self.messages com ele (passos JÁ feitos preservados)
+                                        # em vez de reconstruir [system,user] do zero. False = comportamento antigo.
     ):
+        self._resume = resume
         self.stream_tokens = stream_tokens
         self._native_proto = native_tools   # protocolo: nativo (function-calling) vs JSON-em-texto (default)
         self.surface = surface          # canal de entrega → hint de formato (Telegram sem tabela, etc.)
@@ -629,6 +633,16 @@ class Harness:
                                                               open_fs=self.ctx.open_fs, native=self._native_proto)},
             {"role": "user", "content": first},
         ]
+        if self._resume:                                 # crash-resume: semeia com o checkpoint estruturado se
+            try:                                         # fresco (passos feitos preservados, tail órfão reparado)
+                import time as _rt
+                from okami.core.harness.resume import load_checkpoint
+                seeded = load_checkpoint(self.ctx.workspace, max_age_s=3600.0, now=_rt.time())
+                if seeded:
+                    self.messages = seeded               # o system fica o do checkpoint (do turno original)
+                    self._emit("resume_seeded", messages=len(seeded))
+            except Exception:  # noqa: BLE001 — qualquer pepino → segue com o [system,user] recém-montado
+                pass
         self._emit("start", goal=t.goal)
 
         step_n = 0
@@ -1248,6 +1262,17 @@ class Harness:
                     "explorando, MAPEIE antes: list_dir na raiz, ou run_shell `find . -type f -name '*.py' | "
                     "head -80` — depois leia os arquivos CERTOS. Se a tarefa pede mudança, escreva/rode algo. "
                     "Ou task_blocked."})
+
+        # CHECKPOINT estruturado (crash-resume): grava self.messages a cada passo. Se o processo morrer no
+        # meio (kill/OOM/restart da VPS), o resume semeia daqui em vez de reconstruir do zero. Best-effort:
+        # só p/ superfície de sessão real (chat_id) — CLI puro não precisa. NUNCA derruba o turno.
+        if getattr(self.ctx, "chat_id", ""):
+            try:
+                import time as _ct
+                from okami.core.harness.resume import write_checkpoint
+                write_checkpoint(self.ctx.workspace, self.messages, _ct.time())
+            except Exception:  # noqa: BLE001
+                pass
 
         return step_n
 
