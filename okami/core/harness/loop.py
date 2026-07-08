@@ -648,6 +648,11 @@ class Harness:
                 t.reason = "cancelado pelo usuário (/stop)"
                 self._emit("cancelled")
                 return t
+            # /steer NO TOPO DO LOOP, ANTES de gerar (paridade Hermes conversation_loop.py:712 _pre_api_steer):
+            # dreno aqui, não só após tool-result. Assim um steer que chegou ENQUANTO o modelo gerava (ex.: o
+            # dono digitando "você está me enganando") entra JÁ nesta iteração — antes era só injetado depois de
+            # uma tool executar (_handle_tool_result), então se o modelo ia responder sem tool o recado se perdia.
+            self._inject_steer()
             # Auto-compaction (§6.4) em DUAS fases (Hermes): primeiro a poda BARATA de tool-results
             # antigos (1-linha + dedup, sem perda — transcript segue na sessão); só se ainda estourar,
             # o compact pesado (drop de mensagens + destilação à memória).
@@ -1213,12 +1218,19 @@ class Harness:
         self._deferred_steer = None
         if not txt:
             return
+        marker = f"\n\n{STEER_MARKER_OPEN}\n{txt}\n{STEER_MARKER_CLOSE}"
         last = self.messages[-1] if self.messages else None
-        if isinstance(last, dict) and last.get("role") in ("user", "tool") and isinstance(last.get("content"), str):
-            last["content"] = (last["content"] or "") + f"\n\n{STEER_MARKER_OPEN}\n{txt}\n{STEER_MARKER_CLOSE}"
-            self._emit("steer", chars=len(txt))
-        else:                                          # nada pra anexar agora → guarda p/ o PRÓXIMO passo
-            self._deferred_steer = txt
+        if isinstance(last, dict) and last.get("role") in ("user", "tool"):
+            content = last.get("content")
+            if isinstance(content, str):
+                last["content"] = (content or "") + marker
+                self._emit("steer", chars=len(txt))
+                return
+            if isinstance(content, list):              # multimodal (blocos): anexa bloco de texto (paridade
+                content.append({"type": "text", "text": marker})   # Hermes conversation_loop.py:726-731) em
+                self._emit("steer", chars=len(txt))    # vez de deferir — antes o steer se perdia na msg inicial
+                return
+        self._deferred_steer = txt                     # sem user/tool pra anexar (ex.: 1ª msg assistant) → próximo passo
 
     def _append_observation(self, step_n: int, action: Action, res: ToolResult) -> None:
         """Anexa a OBSERVAÇÃO da tool ao histórico. Multimodal (item 6): se a tool devolveu blocos

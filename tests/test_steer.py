@@ -45,6 +45,29 @@ def test_steer_source_drains_and_wraps_marker_on_tool_result(tmp_path):
     assert joined.count(STEER_MARKER_OPEN) == 1
 
 
+def test_steer_lands_before_generation_even_without_tool_result(tmp_path):
+    """Incidente 2026-07-08: o dono mandou 'você está me enganando' enquanto o modelo gerava, e o agente
+    IGNOROU. Causa: o steer só era injetado DENTRO de _handle_tool_result (após uma tool executar) — se o
+    modelo ia RESPONDER sem chamar tool, o recado se perdia. Fix (paridade Hermes conversation_loop.py:712):
+    dreno o steer NO TOPO do loop, antes de gerar. Aqui o modelo conclui de cara, sem tool nenhuma."""
+    seen: dict[str, str] = {}
+    sc = {"n": 0}
+
+    def steer_source():
+        sc["n"] += 1
+        return "VOCÊ ESTÁ ME ENGANANDO" if sc["n"] == 1 else None
+
+    def gen(messages, schema=None):
+        seen.setdefault("first", "\n".join(str(m.get("content")) for m in messages))
+        return Completion(text="", tool_calls=[
+            {"id": "d", "name": "task_complete", "arguments": '{"summary":"ok"}'}])
+
+    h = Harness(gen, Task(goal="faça X"), tmp_path, steer_source=steer_source)
+    t = h.run()
+    assert t.state == TaskState.COMPLETE
+    assert STEER_MARKER_OPEN in seen.get("first", ""), "steer não chegou antes da 1ª geração (dono ignorado)"
+
+
 def test_no_steer_source_is_noop(tmp_path):
     (tmp_path / "f1.txt").write_text("a", encoding="utf-8")
     (tmp_path / "f2.txt").write_text("b", encoding="utf-8")
