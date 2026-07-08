@@ -10,12 +10,12 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
-![version](https://img.shields.io/badge/version-0.10.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.11.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3364%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-3443%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,29 +24,28 @@ ou onde você quiser.
 
 ---
 
-> 🐺 **Beta público (`v0.10.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
+> 🐺 **Beta público (`v0.11.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
 > comandos/config ainda pode mudar até a GA — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md) e as
 > [RELEASE_NOTES](RELEASE_NOTES.md).
 
-> ### ✨ Novo no `0.10.0-beta`
-> Primeiro **beta** — promovido por MATURIDADE, não por uma feature nova. Uma auditoria E2E completa vs
-> Hermes (8 agentes, uso real com minimax) achou a causa-raiz de o agente parecer "lento/burro" em campo:
-> um probe de tool-calling nativo quebrado degradava silenciosamente TODO provider não-hardcoded pro rail
-> JSON-em-texto. Corrigido em 3 ondas (P0/P1/P2) + revisão adversarial que achou 4 regressões da própria
-> campanha. 193 commits · 403 arquivos · suíte **2.4k → 3.364 testes** desde o `v0.9.0-alpha`.
-> - **Probe de tool-calling nativo corrigido** — veredito persiste em disco; fim da degradação silenciosa.
-> - **Orçamento de tool-result escala com a janela do modelo** (15%/30%, floor 8K/16K, cap 100K/200K).
-> - **Retry desacoplado do key-pool** (1 credencial não zera mais o retry) + timeout por tier.
-> - **Telegram renderiza antes de dividir** — sem mais formatação quebrada em resposta longa.
-> - **STT/link-summary fora do poll loop compartilhado** — um chat lento não trava mais os outros.
-> - **Memória para de virar depósito de lixo mecânico** — só `remember`/`reflect` escrevem no `MEMORY.md`.
-> - E2E real (minimax): antes `BLOCKED`/alucinando → depois **`COMPLETE`** com verificação sha256,
->   `tokens_in` 6.4-7K → 2.7K.
-> - +190 commits de paridade: supervisor multi-agente (`okami agent up/down/status/supervise`), provisão
->   remota VPS-first, portabilidade Windows/Mac/Linux (14 fixes), Telegram rico (tabelas, task lists,
->   clarify com botões), gateway (LRU de sessões, dedup, auto-resume), multi-vendor (reasoning-echo,
->   recalibração de contexto), plugins com lifecycle completo, `okami prompt-size`.
+> ### ✨ Novo no `0.11.0-beta`
+> Lançada no MESMO DIA da `v0.10.0-beta` — 1 commit denso, 5 ondas paralelas, motivada por 3 reclamações
+> diretas do dono: difícil trocar de provider/modelo, chamadas de tools péssimas, e skills builtin sem
+> uso prático. Suíte: **3.364 → 3.443 testes**.
+> - **`okami model`** — comando novo: picker interativo, switch direto, `list --json`. Resolver único
+>   (`okami/llm/model_aliases.py`) com aliases semânticos (`sonnet`, `opus`, `haiku`, `codex`, `gpt`,
+>   `minimax`, `mimo`, `grok`, …) e tiers dinâmicos `fast`/`smart`. `/model` no Telegram usa o mesmo
+>   resolver, ganhou `--save` e `/models` numerado.
+> - **Schema de tool com contratos reais** — `to_openai_schema` agora emite `enum`/`default`/`minimum`/
+>   `maximum`; achou um bug real: `spawn.background` sem tipo booleano fazia a string `"false"` virar
+>   `True` em runtime.
+> - **Edit ganha 3 estratégias fuzzy novas** (`escape_normalized`, `trimmed_boundary`, `block_anchor`),
+>   paridade com a cadeia de 9 estratégias do Hermes; ambiguidade continua nunca sendo resolvida sozinha.
+> - **4 skills builtin práticas**: `watchers` (RSS/GitHub/JSON com dedup), `pesquisa-web` com scripts de
+>   arxiv+wikipedia, `stocks` (Yahoo Finance sem API key), `github` (CI/merge/issues).
+> - **`security-guidance` vira aviso, não veto mudo** — o hook `transform_tool_result` anexa o aviso ao
+>   resultado da tool; o modelo vê e se autocorrige.
 
 O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
 
@@ -431,6 +430,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami status [--json]` | Visão resolvida (agente, modelo, providers, toggles). |
 | `okami login <provider>` | Autentica provider de assinatura (device flow / CLI). |
 | `okami provider add\|list\|remove\|default\|login\|models` | Gerencia providers (menu de seta). |
+| `okami model [alias] [--save] [--json]` | Troca/escolhe modelo por alias ou tier (`sonnet`, `fast`, `smart`, …). |
 | `okami auth list\|status` | Perfis de auth (metadata, sem segredo). |
 | `okami policy check\|init\|show` | Conformance autorada (`--strict` p/ GA). |
 | `okami config show\|get\|set\|unset\|path\|edit\|check` | Config efetiva (segredo → `.env`). |

@@ -1,7 +1,7 @@
-# Okami Agent — `v0.10.0-beta` "A Release da Auditoria" 🐺
+# Okami Agent — `v0.11.0-beta` "As Três Reclamações" 🐺
 
-**Primeiro beta.** 193 commits · 403 arquivos · +23.841/−1.021 linhas · suíte **2.408 → 3.364 testes**
-desde o `v0.9.0-alpha` (2026-06-16).
+**1 commit denso · 5 ondas paralelas** · suíte **3.364 → 3.443 testes** · lançada no **MESMO DIA** da
+`v0.10.0-beta` (2026-07-08).
 
 > ⚠️ **Beta.** A superfície de comandos e config ainda pode mudar até a GA. Recomendado para uso real
 > (inclusive em VPS 24/7) — mas rode `okami policy check --strict` antes de expor publicamente. Feedback
@@ -13,123 +13,90 @@ desde o `v0.9.0-alpha` (2026-06-16).
 
 ## A história desta release
 
-O dono reportou algo simples e desconfortável: em uso real, com minimax, **o agente parecia burro e
-lento**. Tarefa simples travava, resposta demorava, formatação chegava quebrada no Telegram. Não dava pra
-consertar isso com um patch qualquer — dava pra confundir sintoma com causa fácil demais.
+A `v0.10.0-beta` saiu de manhã, promovida por maturidade depois da auditoria E2E vs Hermes. No mesmo dia,
+o dono trouxe **3 reclamações diretas**, de uso real, sem rodeio:
 
-Então rodamos uma **auditoria E2E completa vs Hermes, com 8 agentes**, reproduzindo o uso real ponta a
-ponta em vez de confiar só na suíte de testes. O achado central: um **probe de tool-calling nativo
-quebrado** (`TypeError` silencioso) degradava **todo provider não-hardcoded** — incluindo minimax — para o
-rail JSON-em-texto, sem avisar ninguém. Daí em diante era efeito dominó: thinking vazando no texto,
-contexto inchando, retry zero porque só havia 1 credencial, tool-results cortados num teto fixo de 8K
-(1.5K pro modelo fraco) mesmo quando a janela do modelo era grande, Telegram dividindo a resposta ANTES de
-formatar (perdendo tag HTML no meio do corte), STT e resumo de link bloqueando o poll loop de **todos os
-chats** — não só do chat que pediu.
+1. **"Não consigo trocar fácil de provider ou de modelo."** Cada canal (CLI, `/model` no Telegram,
+   config) resolvia alias de um jeito diferente — sem validação, sem lista, sem persistência.
+2. **"Nossas chamadas de tools são péssimas."** Todo parâmetro de "modo" era texto livre pro modelo
+   chutar — sem `enum`, sem `default`, sem `min`/`max`. Um bug real disso: `spawn.background` sem tipo
+   declarado deixava a string `"false"` virar `True` no runtime.
+3. **"Não preciso de skill para pokemon, mas seria legal skill pra workflow, pra pesquisa e etc."** As
+   skills builtin eram mais demonstração do que ferramenta do dia a dia.
 
-Corrigimos em **3 ondas por impacto** — P0 (`7939d6e`, 6 bugs críticos de uso real), P1 (`c030281`,
-memória poluída + o conflito streaming×rail-nativo que a própria correção do P0 expôs) e P2 (`29d648e`,
-quick-wins de qualidade em harness/gateway/run/TUI) — mais uma **revisão adversarial pós-campanha** que
-achou e fechou 4 regressões que a própria campanha introduziu.
+Cada reclamação virou uma análise curta e uma onda de correção — e no meio do caminho apareceram mais duas
+frentes que dependiam da mesma limpeza: a cadeia de fuzzy-match do `edit` (pra parar de escolher sozinho
+entre matches ambíguos) e o hook `transform_tool_result` nos plugins (pra security-guidance virar aviso em
+vez de veto mudo). Cinco ondas, um commit, um dia.
 
-**Resultado, no mesmo cenário E2E real (minimax):** antes, `BLOCKED` / alucinando tool-call / vazamento de
-`<think>` no texto. Depois, **`COMPLETE`** com verificação mecânica (sha256), formatação íntegra no
-Telegram, e `tokens_in` caindo de 6.4-7K para **2.7K** por turno — o agente ficou mais rápido porque parou
-de carregar lixo em cada turno, não porque ficou "menos cauteloso".
-
-Esse é o argumento do beta: não é uma feature nova que justifica a promoção — é a **maturidade** de ter
-caçado a causa-raiz num cenário real, em vez de empilhar mais capacidade em cima de uma degradação
-silenciosa.
+**Validação de ponta a ponta:** rodamos o cenário real de novo com minimax — task terminou `COMPLETE` com
+auto-verificação mecânica (`od`/`wc`/`sha256`), e no meio da execução o próprio agente **interceptou e
+corrigiu sozinho** um bug de `echo -n` que teria corrompido o output. É o tipo de correção que só aparece
+quando o schema da tool é rico o suficiente pra o modelo perceber que algo saiu errado.
 
 ## ✨ Highlights
 
-- **Probe de tool-calling nativo corrigido** — o `TypeError` que derrubava silenciosamente TODO provider
-  não-hardcoded para o rail JSON-em-texto está morto; o veredito agora persiste em disco
-  (`native_verdict.json`) e hints do catálogo pulam o probe quando já sabem a resposta.
-- **Orçamento de tool-result escala com a janela do modelo** — 15%/30% do contexto (floor 8K/16K, cap
-  100K/200K) em vez do corte fixo de 8K/1.5K flat; modelo com janela grande não perde a saída de uma
-  ferramenta por um teto pensado pro modelo pequeno.
-- **Retry desacoplado do tamanho do key-pool** — com 1 credencial só, você tinha zero retry; agora o
-  default é 3, com timeout por tier (local 1800s / cloud 600s, antes 150s flat matava geração longa local).
-- **Telegram renderiza antes de dividir** — resposta acima de 4096 chars não perde mais a formatação no
-  meio do corte; divide por unidades UTF-16 com tags HTML balanceadas entre as partes.
-- **STT e resumo de link não travam mais o gateway inteiro** — rodam fora do poll loop compartilhado
-  (spawn por chat); antes, um áudio demorado num chat travava a resposta de todos os outros.
-- **Memória para de virar depósito de lixo mecânico** — só `remember`/`remember_user`/`reflect` escrevem
-  no `MEMORY.md` agora; dedup near-duplicate por Jaccard e gate de durabilidade (≥2 passos com efeito) pra
-  memória ranqueada.
-- **`streaming` respeita o rail nativo** — a checagem de streaming agora consulta se o provider suporta
-  tools nativas ANTES de decidir por tier; ligar streaming não quebra mais o payload de tools do rail nativo.
-- **`okami run` para de alucinar tool-call** — aviso explícito no system prompt quando não há tools
-  disponíveis, mais strip de `<think>` no output exibido.
-- **loop-guard avisa antes de bloquear** — warn no repeat #2, bloqueia só no #5 (paridade Hermes
-  warn-then-block), em vez de travar na primeira repetição suspeita.
-- **verify-on-stop** — `task_complete` com efeito não verificado ganha 1 nudge antes de ser aceito, sem
-  risco de loop infinito.
-- **`spawn` virou tool core** — modelo fraco agora decompõe tarefa em subagentes por padrão, em vez de
-  tentar (e falhar) fazer tudo num turno só.
-- **`okami prompt-size`** — breakdown de chars/tokens por seção do prompt, pra diagnosticar inchaço sem
-  adivinhar.
-- **~190 commits de paridade multi-vendor/Telegram/gateway/plugins** desde o alpha — ver seções abaixo.
+- **`okami model`** — comando novo: picker interativo, switch direto, `list --json`. Resolver único
+  (`okami/llm/model_aliases.py`) com aliases semânticos (`sonnet`, `opus`, `haiku`, `codex`, `gpt`,
+  `minimax`, `mimo`, `grok`, …) e tiers dinâmicos `fast`/`smart`, validados contra o catálogo de
+  providers — extensível via `model_aliases:` no yaml.
+- **`/model` no Telegram usa o MESMO resolver** — ganhou `--save` (persiste em `okami.local.yaml`) e
+  `/models` numerado, pra trocar de modelo do celular sem digitar nome completo.
+- **Typo de alias vira erro com sugestão** (did-you-mean) em vez de aplicar silenciosamente um override
+  errado.
+- **Schema de tool rico** — `to_openai_schema` agora emite `enum`/`default`/`minimum`/`maximum`; antes
+  todo parâmetro de modo era texto livre e o modelo chutava. Corrigido em `search_files`, `spawn_jobs`,
+  `todo_write`, `spawn`, `manage_skill`, `browse`.
+- **Bug real corrigido**: `spawn.background` sem tipo `boolean` fazia a string `"false"` virar `True`.
+- **Edit ganha 3 estratégias fuzzy novas** (`escape_normalized`, `trimmed_boundary`, `block_anchor`) —
+  paridade com a cadeia de 9 estratégias do Hermes; mais de 1 match continua sendo tratado como ambíguo,
+  o edit nunca escolhe sozinho. Did-you-mean top-3 com número de linha.
+- **4 skills builtin práticas**: `watchers` (RSS/GitHub/JSON com watermark dedup — base do "me avisa
+  quando X mudar"), `pesquisa-web` com scripts de arxiv+wikipedia, `stocks` (Yahoo Finance sem API key),
+  `github` (CI/merge/issues, `gh`-first).
+- **`security-guidance` vira aviso, não veto mudo** — o hook `transform_tool_result` anexa o aviso ao
+  resultado da tool; o próprio modelo vê e se autocorrige, em vez de a tool simplesmente falhar sem
+  explicação.
+- **`todo_write`** ganha leitura sem args, merge por `id`, status `cancelled` (paridade com o
+  `TODO_SCHEMA` do Hermes).
 
-## 🧠 Harness / Loop
+## 🔀 Troca de modelo
 
-- Loop-guard warn-then-block (repeat #2 avisa, #5 bloqueia); contador unificado fecha loophole
-  nome-ruim↔arg-faltando.
-- Verify-on-stop: nudge de verificação antes de aceitar `task_complete` com efeito não verificado.
-- Orçamento de tool-result escalando com a janela (15%/30%, floor 8K/16K, cap 100K/200K).
-- `run_shell` preserva output parcial no timeout; `run_parallel` com teto de batch 420s.
-- `spawn` promovido a tool core; `okami prompt-size` (novo comando de diagnóstico).
-- Reasoning replay do Codex (`encrypted_content`) no mesmo turno, `store=false` (paridade Hermes).
+- `okami/llm/model_aliases.py`: resolver único de alias/tier, validado contra o catálogo de providers.
+- `okami model`: picker / switch / `list --json`.
+- `/model` no gateway usa o mesmo resolver, com `--save` e `/models` numerado.
+- Did-you-mean em vez de override silencioso em typo de alias.
 
-## 🌐 Providers / Multi-vendor
+## 🛠️ Tools
 
-- Probe de tool-calling nativo corrigido (era o bug raiz da campanha) + veredito persistido em disco.
-- Retry desacoplado do key-pool (default 3) + timeout por tier (local 1800s / cloud 600s).
-- `streaming_enabled` consulta suporte nativo antes do tier — sem mais conflito streaming×rail-nativo.
-- Reasoning-echo (DeepSeek-reasoner/Kimi/MiMo) sem 400 em multi-turn tool-call.
-- Recalibração de contexto via erro reportado pelo provider (429 de tier long-context compacta e retenta).
-- OpenRouter routing hints (`extra_body.provider`); `num_ctx` do Ollama validado via `/api/show`.
+- `to_openai_schema` emite `enum`/`default`/`minimum`/`maximum` (`arg_constraints`), aplicado em 6 tools.
+- `spawn.background`: bug de tipo booleano corrigido (`"false"` virava `True`).
+- `todo_write`: leitura sem args, merge por `id`, status `cancelled`.
 
-## 💬 Telegram
+## ✏️ Edit
 
-- HTML renderizado por completo ANTES de dividir (≤4096 unidades UTF-16, tags balanceadas entre cortes).
-- Task lists GFM (`- [ ]`/`- [x]`) viram caixinhas ☐/☑.
-- Entity flattening inbound — mensagem recebida formatada vira markdown pro modelo.
-- Clarify com botões inline; batch-delay adaptativo no streaming-by-edit; `typed_command_prefix` por canal.
+- Cadeia de estratégias fuzzy: `escape_normalized`, `trimmed_boundary`, `block_anchor` — paridade com o
+  Hermes; ambiguidade nunca é resolvida por escolha automática.
+- Did-you-mean top-3 com números de linha; `read_file` ganha `line_numbers` opt-in.
 
-## 🛰️ Gateway / VPS
+## 🧩 Skills
 
-- STT/link-summary fora do poll loop compartilhado (spawn por chat); cap de fila 32 + demotion guard.
-- LRU de sessões vivas, dedup de reenvio, auto-resume só de interrupção recente (<1h).
-- Multi-agente supervisor: `okami agent up|down|status|supervise` (watchdog + auto-restart por processo).
-- Provisão remota VPS-first: o agente bootstrappa o PRÓPRIO acesso SSH/GitHub, sem depender da máquina do
-  usuário. `system_monitor`, `restart_gateway`, `env_check`.
-- Portabilidade Windows/Mac/Linux: 14 breaks reais corrigidos (auditoria adversarial de 7 finders).
+- `watchers`: RSS/GitHub/JSON com poll + watermark dedup, pra cron → Telegram.
+- `pesquisa-web`: scripts de arxiv + wikipedia com HTTP compartilhado.
+- `stocks`: Yahoo Finance sem API key.
+- `github`: CI/merge/issues, `gh`-first com fallback.
+- Frontmatter `requires_tools`/`fallback_for_tools` esconde skill sem tooling disponível.
 
-## 🧠 Memória
+## 🔌 Plugins
 
-- `_extract_on_complete` para de despejar "goal → result" cru no `MEMORY.md`.
-- Dedup near-duplicate por Jaccard; gate de durabilidade (≥2 passos com efeito) pra memória ranqueada.
-- `LayeredMemory.inject` com preâmbulo único + dedup 120-chars (antes: volume 2x e preâmbulos duplicados).
-
-## 🖥️ TUI / CLI
-
-- Bracketed-paste defensivo, focus-report ignorado (iTerm2/Ghostty), repaint em SIGWINCH.
-- `okami sessions delete`, version-drift no `doctor`, verbos pt-BR nos tool-calls + `[exit N]` em falhas.
-- Mensagens proativas do cron espelhadas no transcript (PII mascarado na cópia da sessão).
-
-## 🛡️ Segurança / Plugins
-
-- Bit `+x` restaurado nos hooks builtin (`security-guidance`/`disk-cleanup`) — estavam vetando TODA tool
-  com exit 126 silencioso.
-- Plugins com lifecycle completo: `register_context`, `register_command`, `ctx.llm.complete` trust-gated.
-- Edit fuzzy normaliza unicode→ASCII (aspas curvas/travessão/nbsp não derrubam mais a edição).
+- Hook `transform_tool_result`: não-bloqueante, componível, isolado por plugin.
+- `security-guidance`: veto vira aviso anexado ao resultado da tool.
 
 ## ✅ Release verification
 
-- **3.364 testes** passando (`uv run pytest -q`).
-- **Lint**: `ruff check okami tests` limpo. **Segurança**: `bandit -c pyproject.toml -r okami` limpo.
-- **Conformance estrita**: `okami policy check --strict` conforme na postura versionada.
+- **3.443 testes** passando (`uv run pytest -q`), subindo de 3.364.
+- E2E real (minimax): task `COMPLETE` com auto-verificação mecânica (`od`/`wc`/`sha256`), incluindo
+  auto-correção de um bug de `echo -n` no meio da execução.
 - Reprodução local:
   ```bash
   uv sync --frozen
@@ -144,8 +111,8 @@ silenciosa.
 - Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
 - Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
   publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
-- O restante do roadmap de auditoria vs Hermes (env auto-repair mais profundo, cauda-longa de canais de
-  nicho) segue em ondas — nenhum gap crítico de uso real conhecido nesta release.
+- **Em andamento, fora desta release**: 3 fixes de provider (crash de streaming do Claude, token store do
+  401 no Codex, parser do `claude_cli`) rodando em sessões separadas — devem sair numa próxima patch.
 
 ## 🚀 Instalação / upgrade
 

@@ -6,6 +6,56 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.11.0-beta] — 2026-07-08
+
+Lançada no MESMO DIA da `v0.10.0-beta`. 1 commit (`4bfbc14`), mas denso: **5 ondas paralelas** atacando 3
+reclamações diretas do dono — "não consigo trocar fácil de provider ou de modelo", "nossas chamadas de
+tools são péssimas" e falta de skills práticas ("não preciso de skill para pokemon, mas seria legal skill
+para workflow, para pesquisa e etc"). Suíte: **3.364 → 3.443 testes**. E2E real (minimax): task
+`COMPLETE` com auto-verificação (od/wc/sha256), inclusive interceptando e corrigindo sozinho um bug de
+`echo -n` no meio da execução. 🐺
+
+### 🔀 Troca de modelo (reclamação #1 do dono)
+- **`okami/llm/model_aliases.py`**: resolver ÚNICO de alias/tier — aliases semânticos (`sonnet`, `opus`,
+  `haiku`, `codex`, `gpt`, `minimax`, `mimo`, `grok`, …), tiers dinâmicos `fast`/`smart`, validação contra
+  o catálogo de providers, extensível via `model_aliases:` no yaml.
+- **`okami model`** (novo comando): picker interativo, switch direto, `list --json`.
+- **`/model`** no gateway/Telegram passa a usar o MESMO resolver — ganha `--save` (persiste em
+  `okami.local.yaml`) e `/models` numerado (uso mobile sem digitar nome completo).
+- Typo de alias agora vira erro com sugestão (did-you-mean) em vez de aplicar um override silencioso errado.
+
+### 🛠️ Tools — schema rico (causa #1 diagnosticada das chamadas ruins)
+- `to_openai_schema` passa a emitir `enum`/`default`/`minimum`/`maximum` (`arg_constraints`) — antes todo
+  parâmetro de "modo" era texto livre, sem contrato, e o modelo chutava valor. Aplicado em
+  `search_files`, `spawn_jobs`, `todo_write`, `spawn`, `manage_skill`, `browse`.
+- Bug real corrigido: `spawn.background` sem tipo `boolean` — a string `"false"` virava `True` no runtime.
+- `todo_write`: leitura sem args, merge por `id`, status `cancelled` (paridade com o `TODO_SCHEMA` do
+  Hermes).
+
+### ✏️ Edit — paridade de cadeia de estratégias fuzzy (Hermes)
+- Novas estratégias: `escape_normalized` (`\n` literal), `trimmed_boundary`, `block_anchor` (ancora
+  primeira+última linha, `difflib` no meio) — mais de 1 match seguem sendo tratados como ambíguo, o edit
+  nunca escolhe sozinho entre candidatos.
+- Did-you-mean top-3 com números de linha; `read_file` ganha `line_numbers` opt-in.
+
+### 🧩 Skills práticas (sem pokemon)
+- **`watchers`**: RSS/GitHub/JSON com poll + watermark dedup — a base de "me avisa quando X mudar" via
+  cron → Telegram.
+- **`pesquisa-web`** ganha scripts: `arxiv` + `wikipedia`, com HTTP compartilhado.
+- **`stocks`**: cotações via Yahoo Finance, sem API key.
+- **`github`**: CI/merge/issues, `gh`-first com fallback via `gh_api.py`.
+- Mecanismo novo: frontmatter `requires_tools`/`fallback_for_tools` esconde a skill quando o tooling
+  necessário não está disponível (paridade Hermes).
+
+### 🔌 Plugins
+- Hook `transform_tool_result`: não-bloqueante, componível, isolado por plugin.
+- `security-guidance`: veto vira aviso ANEXADO ao resultado da tool — o próprio modelo vê e se
+  autocorrige, em vez de a tool simplesmente falhar sem explicação.
+
+### 🧪 Suíte
+- **3.443 testes passando** (3.364 → 3.443). E2E real com minimax: `COMPLETE` com auto-verificação
+  mecânica (od/wc/sha256).
+
 ## [0.10.0-beta] — 2026-07-08
 
 Primeiro **beta**: promoção do alpha por MATURIDADE, não por feature nova. Motivo — auditoria E2E completa
@@ -590,5 +640,6 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.11.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.11.0-beta
 [0.10.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.10.0-beta
 [0.1.0-alpha]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.1.0-alpha
