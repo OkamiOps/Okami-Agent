@@ -34,19 +34,21 @@ def test_text_completion_emits_zero_usage_call(tmp_path):
 def test_failed_call_is_not_counted_only_the_successful_retry_is(tmp_path):
     """Uma chamada que ESTOURA (timeout/rede) não vira `llm_call` — só a tentativa que de fato voltou
     com resposta soma tokens. Sem isto, um turno com 1 falha + 1 sucesso contaria tokens 2x (a falha
-    nunca consumiu tokens de saída — o provider não devolveu nada)."""
-    calls_made = {"n": 0}
+    nunca consumiu tokens de saída — o provider não devolveu nada). O generate primário FALHA sempre
+    (retryable); o harness escala pro `escalate` (§3.5 cascata) — só essa chamada vira evento/tokens."""
+    primary_calls = {"n": 0}
 
     def gen(messages, schema=None):
-        calls_made["n"] += 1
-        if calls_made["n"] == 1:
-            raise TimeoutError("request timeout")     # 1ª chamada: falha (retryable), SEM usage
+        primary_calls["n"] += 1
+        raise TimeoutError("request timeout")          # sempre falha: SEM usage, nunca deve contar
+
+    def escalate(messages, schema=None):
         return Completion(text="", provider="codex", model="gpt-5",
                           usage=CanonicalUsage(input_tokens=1000, output_tokens=50),
                           tool_calls=[{"id": "c1", "name": "respond", "arguments": '{"message":"oi"}'}])
 
-    Harness(gen, Task(goal="oi"), tmp_path).run()
-    assert calls_made["n"] == 2                        # de fato tentou 2x (retry aconteceu)
+    Harness(gen, Task(goal="oi"), tmp_path, escalate=escalate).run()
+    assert primary_calls["n"] == 1                      # tentou o primário 1x, falhou, escalou (não martelou)
     calls = [e for e in read_events(tmp_path) if e["type"] == "llm_call"]
-    assert len(calls) == 1                              # só a chamada BEM-SUCEDIDA virou evento
+    assert len(calls) == 1                              # só a chamada BEM-SUCEDIDA (escalada) virou evento
     assert calls[0]["tokens_in"] == 1000 and calls[0]["tokens_out"] == 50   # não duplicado

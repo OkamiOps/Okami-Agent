@@ -30,6 +30,10 @@ if [ -x "$OKAMI_DIR/bin/okami" ]; then
   OLD_VERSION="$("$OKAMI_DIR/bin/okami" --version 2>/dev/null || true)"
 fi
 
+# Qual `okami` o PATH do USUÁRIO resolve HOJE (ANTES de ensure_path prependar ~/.okami/bin) — se for
+# um binário DIFERENTE do nosso (ex.: 0.11 antigo em ~/.local/bin), ele vai continuar sombreando o novo.
+PRE_SHADOW="$(command -v okami 2>/dev/null || true)"
+
 # shell rc do shell atual (onde persistimos PATH/OKAMI_HOME).
 shell_rc() {
   case "${SHELL:-}" in *zsh) echo "$HOME/.zshrc";; *bash) echo "$HOME/.bashrc";; *) echo "$HOME/.profile";; esac
@@ -98,6 +102,17 @@ elif [ -n "$OLD_VERSION" ]; then
   ok "já estava na última versão: $NEW_VERSION"
 else
   ok "instalado: $NEW_VERSION"
+fi
+
+# 5b) SHADOW CHECK: um `okami` MAIS VELHO instalado por outro método (ex.: `uv tool install` no
+# ~/.local/bin padrão, pipx) pode estar À FRENTE no PATH e continuar sendo o que o shell acha —
+# o usuário atualiza e o `okami --version` teima na versão velha. Detecta e diz EXATAMENTE como resolver.
+if [ -n "$PRE_SHADOW" ] && [ "$PRE_SHADOW" != "$OKAMI_DIR/bin/okami" ]; then
+  SHADOW_VER="$("$PRE_SHADOW" --version 2>/dev/null || true)"
+  printf '\033[1;33m⚠ ATENÇÃO: há um okami ANTIGO na frente do seu PATH que vai continuar sendo usado:\033[0m\n'
+  printf '    %s  (%s)\n' "$PRE_SHADOW" "${SHADOW_VER:-versão desconhecida}"
+  printf '  O novo (%s) está em %s/bin/okami. Pra usar o novo, remova o antigo:\n' "$NEW_VERSION" "$OKAMI_DIR"
+  printf '    \033[1mrm -f %s\033[0m   e reabra o terminal.\n' "$PRE_SHADOW"
 fi
 
 ok "tudo em $OKAMI_DIR  (src/ · tools/ · bin/ · dados em runtime)"

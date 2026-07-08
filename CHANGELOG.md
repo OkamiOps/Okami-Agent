@@ -6,6 +6,23 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.14.1-beta] — 2026-07-08
+
+Correções de acompanhamento à confiabilidade de instalação e à precisão da telemetria de uso.
+
+### 📦 Instalação
+- **Detecção de instalação-fantasma no PATH**: quando um `okami` mais antigo instalado por outro método
+  (ex.: `uv tool install` no `~/.local/bin` padrão) fica à frente no `PATH`, o binário recém-instalado
+  ficava mascarado e `okami --version` insistia na versão velha. O instalador agora detecta o conflito e
+  imprime o caminho exato do binário antigo e o comando para removê-lo. Validado executando o instalador
+  com e sem o conflito presente.
+
+### 📊 Uso / Telemetria
+- **`ctx %` passa a contar o prompt inteiro**: o percentual de contexto dividia apenas a entrada
+  não-cacheada pela janela do modelo, subestimando drasticamente a ocupação real quando o *prompt caching*
+  está ativo (o caso comum). Ex.: 5K de entrada nova + 75K servidos de cache numa janela de 100K agora
+  reportam `ctx 80%` em vez de `ctx 5%`. Vale para o rodapé por resposta e para a barra de status da TUI.
+
 ## [0.14.0-beta] — 2026-07-08
 
 As releases anteriores fecharam gaps de capacidade (imagem, hooks, browser). Esta fecha uma lacuna
