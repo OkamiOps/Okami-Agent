@@ -257,6 +257,8 @@ class Harness:
         cancel: Callable[[], bool] | None = None,
         checkpoints=None,
         hooks=None,
+        plugin_hooks=None,              # HookBus unificada (okami/plugins.py): pre/post_tool_call,
+                                        # pre/post_llm_call, pre_verify, ... None = sem plugin de hook novo (no-op)
         spawn=None,
         images=None,
         prelearned_files=None,
@@ -306,6 +308,7 @@ class Harness:
         self.registry = registry or default_registry()
         self.budget = budget or Budget()
         self.hooks = hooks                 # event hooks (§11): before_tool pode VETAR
+        self.plugin_hooks = plugin_hooks   # HookBus unificada (§unify): pre/post_tool_call, pre/post_llm_call, ...
         self.ctx = ToolContext(workspace=workspace, memory=memory, skills=skills or {},
                                checkpoints=checkpoints, spawn=spawn, sandbox=sandbox, skills_dir=skills_dir,
                                open_fs=open_fs, allow_paths=list(allow_paths or []),
@@ -444,15 +447,24 @@ class Harness:
         self._next_max_tokens = None                  # consome: o boost vale só pra ESTA geração
         messages = _filter_thinking_only(messages)    # dropa turno só-de-thinking/placeholder da CÓPIA enviada
         kw = {"max_tokens": mt} if mt else {}
+        _pre_llm = getattr(self.plugin_hooks, "invoke", None)   # pre/post_llm_call (bus unificada, §unify)
+        if callable(_pre_llm):
+            _pre_llm("pre_llm_call", messages=messages, schema=schema)
         if self.stream_tokens:
             try:
-                return self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t), **kw)
+                res = self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t), **kw)
+                if callable(_pre_llm):
+                    _pre_llm("post_llm_call", messages=messages, schema=schema, result=res)
+                return res
             except TypeError:
                 pass
         try:
-            return self.generate(messages, schema, **kw)
+            res = self.generate(messages, schema, **kw)
         except TypeError:                              # stub/generate sem max_tokens → chamada simples
-            return self.generate(messages, schema)
+            res = self.generate(messages, schema)
+        if callable(_pre_llm):
+            _pre_llm("post_llm_call", messages=messages, schema=schema, result=res)
+        return res
 
     def _pending_todos(self) -> str:
         """Bloco de reinjeção da CHECKLIST operacional (item 9) — só os itens em aberto. "" se não há
@@ -991,8 +1003,14 @@ class Harness:
                     continue
 
             # --- Hook before_tool (§11): política externa pode VETAR a tool ---
-            if self.hooks is not None and not self.hooks.fire(
-                    "before_tool", {"tool": action.tool, "args": action.args}):
+            # + pre_tool_call (bus unificada, §unify): ADITIVO — plugin novo via ctx.on("pre_tool_call", fn)
+            # também pode vetar, sem duplicar o before_tool acima (fontes independentes, mesmo call site).
+            _pre_tc = getattr(self.plugin_hooks, "fire_blockable", None)
+            _blocked = (self.hooks is not None and not self.hooks.fire(
+                    "before_tool", {"tool": action.tool, "args": action.args}))
+            if not _blocked and callable(_pre_tc):
+                _blocked = not _pre_tc("pre_tool_call", tool=action.tool, args=action.args)
+            if _blocked:
                 step_n += 1
                 _last_progress = _wt.monotonic()          # passo concluído (vetado) = atividade → reseta o anti-travamento
                 t.steps.append(Step(step_n, action.tool, action.args, "vetado por hook", False, False))
@@ -1093,6 +1111,10 @@ class Harness:
             self.hooks.fire("after_tool", {"tool": action.tool, "args": action.args, "ok": res.ok,
                                            "effect": res.effect, "output": res.output,
                                            "out_chars": len(res.output or "")})
+        _post_tc = getattr(self.plugin_hooks, "invoke", None)   # post_tool_call (bus unificada, §unify) —
+        if callable(_post_tc):                                  # ADITIVO ao after_tool acima (fonte independente)
+            _post_tc("post_tool_call", tool=action.tool, args=action.args, ok=res.ok,
+                     effect=res.effect, output=res.output, out_chars=len(res.output or ""))
 
         # circuit breaker de falha repetida
         if not res.ok:
@@ -1320,6 +1342,15 @@ class Harness:
                 # algo que muda estado) + nenhum run_shell BEM-SUCEDIDO depois do último efeito → o modelo
                 # está encerrando sem checar o próprio trabalho. Empurra UMA vez; na 2ª tentativa aceita
                 # DE QUALQUER JEITO (sem risco de loop — é um nudge, não um gate como check_exit).
+                _pre_verify = getattr(self.plugin_hooks, "invoke", None)   # pre_verify (bus unificada, §unify):
+                if callable(_pre_verify):                                  # plugin pode empurrar p/ continuar
+                    for _ret in _pre_verify("pre_verify", task=t, summary=_summary):
+                        _cont = (_ret.get("action") == "continue" or _ret.get("decision") == "block") \
+                            if isinstance(_ret, dict) else False
+                        if _cont:
+                            _msg = _ret.get("message") or _ret.get("reason") or "continue verificando antes de concluir."
+                            self.messages.append({"role": "user", "content": _msg})
+                            return None
                 if (not t.exit_criteria and not self._verify_nudged
                         and any(s.effect for s in t.steps) and not _verified_since_last_effect(t.steps)):
                     self._verify_nudged = True

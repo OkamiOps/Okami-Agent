@@ -92,34 +92,37 @@ def test_acp_initialize_and_prompt_roundtrip():
 
 
 # ---------------------------------------------------------------- image-gen 2 fluxos (§13)
+# NOTA: desde a correção do #1 (GPT Image via assinatura Codex — REST /images/* não autentica com
+# token OAuth de assinatura), os dois fluxos batem no MESMO endpoint (Responses API do codex,
+# `chatgpt.com/backend-api/codex/responses`) — ver tests/test_imagegen.py p/ a cobertura completa
+# (payload, SSE, fallback). Este teste fica só como smoke-test de import/uso básico via `_send`.
 def test_imagegen_two_flows(monkeypatch, tmp_path):
     import base64
     import okami.llm.imagegen as ig
 
     calls = {}
     png_b64 = base64.b64encode(b"\x89PNG").decode()
+    sse = [f'data: {{"type":"image_generation_call","result":"{png_b64}"}}\n'.encode(),
+          b'data: {"type":"response.completed","response":{}}\n']
 
-    class FakeResp:
-        def __init__(self, body): self._b = body
-        def read(self): return self._b
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+    def fake_send(url, payload, headers, timeout):
+        calls["url"] = url
+        calls["payload"] = payload
+        return sse
 
-    def fake_urlopen(req, timeout=0):
-        calls["url"] = req.full_url
-        calls["ctype"] = dict(req.header_items()).get("Content-type", "")
-        return FakeResp(b'{"data":[{"b64_json":"%s"}]}' % png_b64.encode())
+    monkeypatch.setattr(ig, "_codex_token_or_none", lambda: "tok")
+    monkeypatch.setattr("okami.llm.oauth.codex_account_id", lambda: "acct-1")
 
-    monkeypatch.setattr(ig, "_token", lambda: "tok")
-    monkeypatch.setattr(ig.urllib.request, "urlopen", fake_urlopen)
+    # fluxo SEM referência → texto→imagem
+    ig.generate_image("um gato", str(tmp_path / "a.png"), _send=fake_send)
+    assert calls["url"].endswith("/codex/responses")
+    assert calls["payload"]["input"][0]["content"] == [{"type": "input_text", "text": "um gato"}]
+    assert (tmp_path / "a.png").exists() and (tmp_path / "a.png").read_bytes() == b"\x89PNG"
 
-    # fluxo SEM referência → generations (JSON)
-    ig.generate_image("um gato", str(tmp_path / "a.png"))
-    assert calls["url"].endswith("/images/generations") and "json" in calls["ctype"]
-    assert (tmp_path / "a.png").exists()
-
-    # fluxo COM referência → edits (multipart)
+    # fluxo COM referência → MESMO endpoint, input_image extra no content
     ref = tmp_path / "foto.png"
     ref.write_bytes(b"\x89PNG")
-    ig.generate_image("vire um infográfico", str(tmp_path / "b.png"), references=[str(ref)])
-    assert calls["url"].endswith("/images/edits") and "multipart/form-data" in calls["ctype"]
+    ig.generate_image("vire um infográfico", str(tmp_path / "b.png"), references=[str(ref)], _send=fake_send)
+    content = calls["payload"]["input"][0]["content"]
+    assert content[0] == {"type": "input_text", "text": "vire um infográfico"}
+    assert content[1]["type"] == "input_image" and content[1]["image_url"].startswith("data:image/png;base64,")

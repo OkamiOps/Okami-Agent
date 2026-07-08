@@ -19,7 +19,8 @@ def test_wrap_marks_source():
 def test_browse_output_is_wrapped(monkeypatch, tmp_path):
     from okami.core.tools.agentic import Browse
     monkeypatch.setattr("okami.integrations.browser.browse",
-                        lambda url, action, sel, text, shot: "conteúdo da página")
+                        lambda url, action, sel, text, shot, *, session_id=None, dialog_policy=None:
+                        "conteúdo da página")
     r = Browse().run({"url": "https://x.com"}, ToolContext(workspace=tmp_path))
     assert r.ok
     assert '<untrusted_tool_result source="browse"' in r.output

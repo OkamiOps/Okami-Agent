@@ -57,6 +57,40 @@ def test_codex_sse_raises_on_failure_event():
         transports._codex_sse_text(lines)
 
 
+def test_codex_oauth_complete_sends_cloudflare_bypass_headers(monkeypatch):
+    """Retrofit anti-403 Cloudflare (VPS): o transport de chat do codex_oauth precisa dos MESMOS
+    headers (originator/User-Agent/ChatGPT-Account-Id) que a Responses API do image_gen — sem eles,
+    chatgpt.com/backend-api/codex derruba requests de VPS com 403 cf-mitigated mesmo com token válido."""
+    from okami.llm import oauth
+
+    monkeypatch.setattr(oauth, "codex_access_token", lambda: "tok-123")
+    monkeypatch.setattr(oauth, "codex_account_id", lambda: "acct-77")
+
+    class FakeResp:
+        def __enter__(self): return [b'data: {"type":"response.output_text.delta","delta":"oi"}',
+                                     b'data: {"type":"response.completed","response":{}}']
+        def __exit__(self, *a): return False
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["headers"] = dict(req.header_items())
+        captured["url"] = req.full_url
+        return FakeResp()
+
+    monkeypatch.setattr(transports.urllib.request, "urlopen", fake_urlopen)
+    pc = ProviderConfig(name="codex", model="x", transport="codex_oauth")
+    result = transports.codex_oauth_complete(pc, [{"role": "user", "content": "oi"}], None)
+
+    assert result.text == "oi"
+    assert captured["url"] == transports.CODEX_URL
+    headers = {k.lower(): v for k, v in captured["headers"].items()}
+    assert headers["originator"] == "codex_cli_rs"
+    assert headers["user-agent"].startswith("codex_cli_rs/")
+    assert headers["chatgpt-account-id"] == "acct-77"
+    assert headers["authorization"] == "Bearer tok-123"
+
+
 def test_kwargs_includes_reasoning_effort_and_call_override_wins():
     from okami.llm import providers
     pc = ProviderConfig(name="codex", model="x", reasoning_effort="high")

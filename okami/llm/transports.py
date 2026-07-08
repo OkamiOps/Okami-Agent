@@ -292,11 +292,16 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
     if effort:
         payload["reasoning"] = {"effort": effort}   # think effort (gpt-5/codex): minimal|low|medium|high
     def _send(pay: dict):
+        from okami.llm.codex_headers import cloudflare_headers
         body = json.dumps(pay).encode("utf-8")
         req = urllib.request.Request(CODEX_URL, data=body, method="POST")
         req.add_header("Authorization", f"Bearer {access}")
-        if account:
-            req.add_header("ChatGPT-Account-Id", account)
+        # anti-403 Cloudflare (VPS): originator/User-Agent de primeira parte + ChatGPT-Account-Id
+        # (`account` já veio do id_token via oauth.codex_account_id(); helper cai p/ o access_token
+        # se vier vazio) — sem isso o gate na frente do host derruba com cf-mitigated:challenge
+        # mesmo com Bearer válido (ver okami/llm/codex_headers.py).
+        for k, v in cloudflare_headers(access, account).items():
+            req.add_header(k, v)
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "text/event-stream")
         with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT) as resp:  # noqa: S310

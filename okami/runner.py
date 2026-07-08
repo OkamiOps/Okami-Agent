@@ -213,9 +213,12 @@ def run_task(
             if spec:
                 graw, _ = load_raw()
                 scfg, sws, shome = effective_config(graw, spec), spec.dir, spec.dir
+        plugin_hooks.invoke("subagent_start", subgoal=subgoal, agent=agent, depth=depth + 1)
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
                        agent_home=shome, open_fs=open_fs, allow_paths=allow_paths,   # herda acesso amplo
                        surface="subagent", emit=emit, on_event=on_event)   # #6: progresso do bg spawn
+        plugin_hooks.invoke("subagent_stop", subgoal=subgoal, agent=agent, depth=depth + 1,
+                            state=sub.state.value, result=sub.result or sub.reason or "")
         return (sub.result or sub.reason or sub.state.value)[:2000]
 
     eff = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
@@ -389,15 +392,26 @@ def run_task(
     from okami.gateway.checkpoints import Checkpoints
     from okami.automation.hooks import HookManager
     hooks = HookManager(cfg.hooks, root=str(ws), emit=emit, include_builtin=True)   # event hooks (§11) + nativos
+    from okami.plugins import HookBus
+    plugin_hooks = HookBus()   # sistema UNIFICADO (pre_tool_call, pre_llm_call, on_session_*, subagent_*, ...)
     try:            # plugins podem CONTRIBUIR transform_tool_result via ctx.register_transform_tool_result
         from okami.plugins import discover_plugins as _discover_p, load_plugin_transform_tool_result
-        from okami.plugins import plugin_roots as _plugin_roots
-        for _fn in load_plugin_transform_tool_result(_discover_p(_plugin_roots()), cfg=cfg, emit=emit):
+        from okami.plugins import plugin_roots as _plugin_roots, load_plugin_hooks
+        _plugins = _discover_p(_plugin_roots())
+        for _fn in load_plugin_transform_tool_result(_plugins, cfg=cfg, emit=emit):
             hooks.on("transform_tool_result", _fn)
+        for _hook_name, _fns in load_plugin_hooks(_plugins, cfg=cfg, emit=emit).items():
+            if _hook_name == "transform_tool_result":       # funil ÚNICO: hook novo pro mesmo nome legado
+                for _fn in _fns:                             # entra no MESMO handler (não duplica dispatch)
+                    hooks.on("transform_tool_result", _fn)
+                continue
+            for _fn in _fns:
+                plugin_hooks.on(_hook_name, _fn)
     except Exception:  # noqa: BLE001 — plugin quebrado não derruba o boot do agente
         from okami.log import warn
-        warn("falha ao carregar transform_tool_result de plugins", exc_info=True)
+        warn("falha ao carregar transform_tool_result/hooks de plugins", exc_info=True)
     t = Task(goal=goal, exit_criteria=exit_criteria or [])
+    plugin_hooks.invoke("on_session_start", goal=goal, surface=surface, chat_id=chat_id)
     if not hooks.fire("before_task", {"goal": goal}):         # política externa pode VETAR a tarefa
         from okami.core import TaskState
         t.state, t.reason = TaskState.BLOCKED, "bloqueada por hook before_task"
@@ -415,6 +429,7 @@ def run_task(
         memory=mem, core_block=core_block, approve=approve,
         skills=skills_map, registry=registry, cancel=cancel,
         checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
+        plugin_hooks=plugin_hooks,    # sistema de hooks UNIFICADO (pre/post_tool_call, pre_llm_call, ...)
         images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos
         sandbox=sandbox, skills_dir=skills_dir, open_fs=open_fs, surface=surface, chat_id=chat_id,
         model=model or pc.model, allow_paths=allow_paths,
@@ -446,6 +461,7 @@ def run_task(
         t.stats["usage"] = _acc["usage"].to_dict()        # tokens do turno (custo §A5)
         t.stats["served_by"] = _acc["served"]             # quem realmente respondeu (§E5)
         hooks.fire("after_task", {"goal": goal, "state": t.state.value, "result": t.result or ""})
+        plugin_hooks.invoke("on_session_end", goal=goal, state=t.state.value, result=t.result or "")
         if learn:                                        # review (learn=False) não despeja seu prompt sintético
             from okami.memory import save_turn            # P2: save_messages (default OFF) alimenta a memória
             save_turn(mem, goal, source="user", cfg_memory=cfg.memory)       # conversa bruta (Honcho user-model)

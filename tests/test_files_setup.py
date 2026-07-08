@@ -16,12 +16,16 @@ def test_core_block_includes_all_md_with_caps(tmp_path):
     block = files.core_block(tmp_path, {"user": 4000})
     assert "INSTRUÇÕES DO PROJETO" in block and "Use ShadCN" in block
     assert "MEMORY.md" in block and "Vercel" in block
-    # USER.md capado em 4000
-    assert block.count("X") == 4000
+    # USER.md capado em 4000 (checa o run de X, não a contagem total — ANTISLOP builtin pode ter X's)
+    assert "X" * 4000 in block and "X" * 4001 not in block
 
 
-def test_core_block_empty_when_no_files(tmp_path):
-    assert files.core_block(tmp_path) == ""
+def test_core_block_only_antislop_when_no_files(tmp_path):
+    # Sem arquivos no home, o ANTISLOP builtin (guardrail fixo versionado) ainda entra — é sempre-on.
+    block = files.core_block(tmp_path)
+    assert "ANTISLOP" in block
+    # e nada além dele (nenhuma outra camada de identidade/core)
+    assert "INSTRUÇÕES DO PROJETO" not in block and "MEMORY.md" not in block
 
 
 def test_core_block_injects_identity_in_order(tmp_path):

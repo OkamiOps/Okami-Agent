@@ -1,14 +1,20 @@
 """search_files — busca por CONTEÚDO no workspace (pesquisa #6 item 2).
 
-O find_files busca por NOME; este busca regex no CONTEÚDO (o que o grep/rg fazem). Motor portável
-em Python: jailed ao workspace, pula .git/.venv/binário, modos content/files/count, filtro glob,
-contexto -A/-B, paginação, case-insensitive. Redige segredo no match (igual run_shell). rg pode ser
-somado como fast-path depois — a interface e a saída ficam iguais.
+O find_files busca por NOME; este busca regex no CONTEÚDO (o que o grep/rg fazem). Fast-path: quando
+o binário `rg` (ripgrep) está no PATH, ele enumera os arquivos com match (respeitando .gitignore,
+pulando binário/.git sozinho, MUITO mais rápido que os.walk puro num repo grande) — só a ENUMERAÇÃO é
+delegada a ele; a extração de linha/contexto/redação continua em Python p/ a saída ficar
+byte-idêntica ao fallback. Sem `rg` (ou se a regex não é compatível com o motor dele — backreference/
+lookaround), cai no motor 100% Python: jailed ao workspace, pula .git/.venv/binário, modos
+content/files/count, filtro glob, contexto -A/-B, paginação, case-insensitive. Redige segredo no
+match (igual run_shell).
 """
 from __future__ import annotations
 
 import fnmatch
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 from okami.core.tools.base import Tool, ToolResult
@@ -17,6 +23,31 @@ _SKIP = {".git", "__pycache__", ".venv", "node_modules", ".okami", ".pytest_cach
          ".mypy_cache", ".ruff_cache", "build", ".idea", ".vscode", ".uv-cache"}
 _MAX_MATCHES = 200            # teto de matches devolvidos (paginável por offset)
 _MAX_FILE_BYTES = 2_000_000   # arquivo maior que isto não é varrido (provável dado/binário)
+_RG_TIMEOUT = 30.0
+
+
+def _rg_candidate_files(root: Path, pattern: str, ignore_case: bool, glob: str = "*") -> list[Path] | None:
+    """Lista de arquivos com pelo menos 1 match via `rg --files-with-matches` (respeita .gitignore
+    sozinho — não precisa do _SKIP p/ isso, mas ele é aplicado de novo no caller como cinto+suspensório).
+    None = `rg` ausente do PATH, timeout, ou regex incompatível com o motor dele (ex.: backreference/
+    lookaround só existem em Python re) — o CALLER cai no motor puro-Python (mesmo resultado, só mais
+    lento). Lazy-dep no estilo das outras tools (websearch.check etc): nunca quebra, só degrada."""
+    rg = shutil.which("rg")
+    if not rg:
+        return None
+    cmd = [rg, "--files-with-matches", "--no-messages", "-e", pattern]
+    if ignore_case:
+        cmd.append("--ignore-case")
+    if glob and glob != "*":                  # filtro de nome já na enumeração — menos I/O (Python refiltra igual)
+        cmd += ["--glob", glob]
+    cmd.append(str(root))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_RG_TIMEOUT)  # noqa: S603
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode not in (0, 1):     # 0 = achou, 1 = rg "sem match nenhum" (não é erro); outro = regex/erro
+        return None
+    return [Path(line) for line in proc.stdout.splitlines() if line.strip()]
 
 
 def _as_int(v, default=None):
@@ -77,12 +108,21 @@ class SearchFiles(Tool):
         offset = max(0, _as_int(args.get("offset"), 0) or 0)
 
         ws_root = Path(ctx.workspace).resolve()      # rglob devolve absoluto → relative_to precisa do resolvido
+        candidates = _rg_candidate_files(root, q, bool(args.get("ignore_case")), glob)
+        if candidates is not None:                    # fast-path rg: só os arquivos que JÁ têm match
+            paths = sorted({p for p in candidates if p.is_file()})
+        else:                                         # fallback puro-Python: todo arquivo sob root
+            paths = sorted(p for p in root.rglob("*") if not p.is_dir())
         per_file: dict[str, int] = {}
         blocks: list[str] = []
         seen = 0
         truncated = False
-        for p in sorted(root.rglob("*")):
-            if p.is_dir() or any(part in _SKIP for part in p.relative_to(root).parts):
+        for p in paths:
+            try:
+                rel_to_root = p.relative_to(root)
+            except ValueError:                        # rg devolveu path fora de root (não deveria) → ignora
+                continue
+            if any(part in _SKIP for part in rel_to_root.parts):
                 continue
             if not fnmatch.fnmatch(p.name, glob):
                 continue

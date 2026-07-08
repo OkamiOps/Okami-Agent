@@ -9,12 +9,112 @@ Fail-safe: plugin.yaml quebrado/ilegível é IGNORADO (não derruba o boot).
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import yaml
 
 from okami.log import warn
+
+
+# ---------------------------------------------------------------------------
+# Sistema de hooks UNIFICADO (#unify, port do Hermes hermes_cli/plugins.py:135-218 VALID_HOOKS +
+# invoke_hook). okami/automation/hooks.py cobre eventos de SHELL/PASTA (before_task/after_task,
+# before_tool/after_tool, before_write, compaction, cron_run, before_skill_install,
+# transform_tool_result) — fica INTOCADO (fonte de scripts/config). Este bloco acrescenta os pontos
+# de ciclo de vida que faltavam (LLM, sessão, subagente, gateway, aprovação) numa BUS central que
+# plugin Python registra via `ctx.on(hook, fn)` — sem substituir o HookManager legado.
+# ---------------------------------------------------------------------------
+
+VALID_HOOKS: set[str] = {
+    "pre_tool_call",
+    "post_tool_call",
+    "transform_tool_result",
+    "transform_llm_output",
+    "pre_llm_call",
+    "post_llm_call",
+    "pre_verify",
+    "on_session_start",
+    "on_session_end",
+    "on_session_reset",
+    "subagent_start",
+    "subagent_stop",
+    "pre_gateway_dispatch",
+    "pre_approval_request",
+    "post_approval_response",
+}
+
+# Hoje só pre_tool_call é um VETO booleano de verdade (paridade com before_tool). Os demais pre_*
+# (pre_verify, pre_gateway_dispatch, pre_approval_request) são ação-por-retorno ou observador puro
+# (ver docstrings do Hermes) — não passam por `fire_blockable`.
+_BLOCKABLE_HOOKS = ("pre_tool_call",)
+
+
+class HookBus:
+    """Registro central de hooks (port do Hermes `invoke_hook`/`register_hook`, VALID_HOOKS acima).
+    Isolamento por callback: um handler que EXPLODE é logado e IGNORADO — nunca derruba os outros nem
+    o loop (mesmo espírito do HookManager legado em automation/hooks.py)."""
+
+    def __init__(self):
+        self._handlers: dict[str, list[Callable]] = defaultdict(list)
+
+    def on(self, hook: str, fn: Callable) -> None:
+        """Registra um callback in-process p/ `hook`. Hook fora de VALID_HOOKS é aceito (forward-
+        compat, paridade Hermes register_hook) mas AVISA — provável typo do plugin."""
+        if hook not in VALID_HOOKS:
+            warn(f"hook desconhecido registrado na HookBus: {hook!r} (válidos: {sorted(VALID_HOOKS)})")
+        if not callable(fn):
+            raise ValueError("HookBus.on: fn precisa ser callable(**kwargs)")
+        self._handlers[hook].append(fn)
+
+    def has(self, hook: str) -> bool:
+        return bool(self._handlers.get(hook))
+
+    def invoke(self, hook: str, **kwargs) -> list:
+        """Chama TODOS os callbacks de `hook` (paridade Hermes `invoke_hook`). Isolado por callback —
+        um que quebra é logado e ignorado, os outros seguem rodando. Devolve os retornos NÃO-None (o
+        call site interpreta a semântica: contexto extra, rewrite, etc — cada hook documenta a sua)."""
+        results = []
+        for fn in self._handlers.get(hook, []):
+            try:
+                ret = fn(**kwargs)
+            except Exception as e:  # noqa: BLE001 — callback que explode não derruba os outros nem o loop
+                warn(f"hook {hook!r} callback falhou: {e}")
+                continue
+            if ret is not None:
+                results.append(ret)
+        return results
+
+    def fire_blockable(self, hook: str, **kwargs) -> bool:
+        """Variante BOOLEANA p/ hooks pre_* que VETAM (hoje: pre_tool_call) — paridade com o `fire()`
+        do HookManager legado. FAIL-CLOSED (mesmo padrão de automation/hooks.py:93-98): callback que
+        EXPLODE veta — política de segurança que erra não pode LIBERAR a ação que existe pra barrar."""
+        ok = True
+        for fn in self._handlers.get(hook, []):
+            try:
+                ret = fn(**kwargs)
+                if ret is False or (isinstance(ret, dict) and ret.get("action") == "block"):
+                    ok = False
+            except Exception as e:  # noqa: BLE001
+                warn(f"hook {hook!r} callback falhou (fail-closed → veta): {e}")
+                if hook in _BLOCKABLE_HOOKS:
+                    ok = False
+        return ok
+
+    def bridge_legacy(self, hook_manager) -> None:
+        """Liga o `hook_manager` LEGADO (automation/hooks.py: shell/pasta/config) na bus unificada —
+        um `before_tool` de shell/config passa a ser alcançável também via `pre_tool_call`/
+        `post_tool_call` da bus (ex.: um caller que só conhece a API nova). NÃO é usado no call site
+        de produção do loop.py (que já chama `hook_manager.fire` direto — bridging ali duplicaria a
+        execução do script); serve pra quem só tem a bus (ex.: integrações futuras) e para os testes
+        de unificação."""
+        self.on("pre_tool_call", lambda **kw: hook_manager.fire(
+            "before_tool", {"tool": kw.get("tool"), "args": kw.get("args")}))
+        self.on("post_tool_call", lambda **kw: hook_manager.fire(
+            "after_tool", {"tool": kw.get("tool"), "args": kw.get("args"), "ok": kw.get("ok"),
+                          "effect": kw.get("effect"), "output": kw.get("output")}))
 
 
 @dataclass
@@ -152,6 +252,7 @@ class PluginRegistrar:
         self.commands: dict = {}
         self.context_providers: list = []
         self.transform_tool_result_hooks: list = []
+        self.hooks: dict[str, list] = {}
 
     @property
     def llm(self) -> PluginLlm:
@@ -188,6 +289,18 @@ class PluginRegistrar:
         if not callable(fn):
             raise ValueError("register_transform_tool_result: precisa de um callable fn(payload)->str|None")
         self.transform_tool_result_hooks.append(fn)
+
+    def on(self, hook: str, fn) -> None:
+        """Plugin registra um hook do sistema UNIFICADO (port do `ctx.register_hook` do Hermes —
+        VALID_HOOKS: pre_tool_call, pre_llm_call, on_session_start, subagent_start, ...). Hook fora de
+        VALID_HOOKS é aceito (forward-compat) mas AVISA — provável typo. O runner coleta via
+        `load_plugin_hooks` e pluga cada um numa `HookBus` central."""
+        if hook not in VALID_HOOKS:
+            warn(f"plugin {self.ctx.plugin!r} registrou hook desconhecido {hook!r} "
+                 f"(válidos: {sorted(VALID_HOOKS)})")
+        if not callable(fn):
+            raise ValueError("on: fn precisa ser callable(**kwargs)")
+        self.hooks.setdefault(hook, []).append(fn)
 
 
 def _resolve_register(plugin: "Plugin"):
@@ -297,6 +410,18 @@ def load_plugin_transform_tool_result(plugins, *, cfg=None, emit=lambda m: None,
     return out
 
 
+def load_plugin_hooks(plugins, *, cfg=None, emit=lambda m: None, _resolve=None) -> dict[str, list]:
+    """COLETA os hooks do sistema UNIFICADO que os plugins registram via `ctx.on(hook, fn)` (port do
+    `register_hook` do Hermes). Devolve `{hook: [fn, ...]}` pronto p/ `HookBus.on(hook, fn)` — o
+    caller (runner) pluga cada um na bus central. Isolado por plugin (igual às demais coletas)."""
+    out: dict[str, list] = defaultdict(list)
+    for plugin, registrar in _run_registrars(plugins, cfg=cfg, emit=emit, _resolve=_resolve):
+        for hook, fns in registrar.hooks.items():
+            out[hook].extend(fns)
+            emit(f"[plugin {plugin.name}] +hook {hook} ({len(fns)})")
+    return dict(out)
+
+
 def plugin_roots() -> list[Path]:
     """Raízes: projeto (.) + home do Okami + NATIVOS do pacote (viajam no pip install). O projeto vem 1º →
     vence o nativo de mesmo nome (discover_plugins dedup por nome, 1ª raiz ganha)."""
@@ -314,6 +439,7 @@ def plugin_roots() -> list[Path]:
     return roots
 
 
-__all__ = ["Plugin", "PluginContext", "PluginLlm", "PluginRegistrar", "discover_plugins",
-           "load_plugin_commands", "load_plugin_context", "load_plugin_gateway", "load_plugin_tools",
-           "load_plugin_transform_tool_result", "plugin_context", "plugin_roots"]
+__all__ = ["HookBus", "VALID_HOOKS", "Plugin", "PluginContext", "PluginLlm", "PluginRegistrar",
+           "discover_plugins", "load_plugin_commands", "load_plugin_context", "load_plugin_gateway",
+           "load_plugin_hooks", "load_plugin_tools", "load_plugin_transform_tool_result",
+           "plugin_context", "plugin_roots"]

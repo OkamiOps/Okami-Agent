@@ -20,6 +20,9 @@ _FACTS_HEADER = "## Fatos"
 _LAYERS = [
     (["SOUL.md"], "soul", "IDENTIDADE / VALORES (SOUL.md)", 6000),
     (["VOICE.md"], "voice", "VOZ / TOM (VOICE.md)", 6000),
+    # padrões de "chatbot de atendimento" a NUNCA soar — carregado SEMPRE (não é archival), logo
+    # abaixo de VOICE.md (é a mesma família: como você fala vs. como você NUNCA fala).
+    (["ANTISLOP.md"], "antislop", "ANTISLOP / NUNCA SOE ASSIM (ANTISLOP.md)", 6000),
     (["PERSONA.md", "PROFILE.md"], "persona", "PERSONA / SELF (PERSONA.md)", 6000),
     # auto-descobre convenções do projeto (estilo Hermes/Claude Code): 1º que existir.
     (["AGENTS.md", "CLAUDE.md", ".cursorrules", ".hermes.md"], "agents", "INSTRUÇÕES DO PROJETO", 4000),
@@ -56,12 +59,26 @@ def read_capped(workspace: Path, name: str, cap: int = DEFAULT_CAP) -> str:
     return p.read_text(encoding="utf-8", errors="ignore")[:cap]
 
 
+# Defaults VERSIONADOS (shipam com o pacote): usados quando o home do agente ainda não tem o arquivo.
+# ANTISLOP é guardrail fixo (não identidade personalizada), então toda instalação nasce com ele —
+# o arquivo local em agents/<id>/ANTISLOP.md, se existir, SOBRESCREVE.
+_BUILTIN_DEFAULTS = {"ANTISLOP.md": Path(__file__).resolve().parent.parent / "builtin" / "identity" / "ANTISLOP.md"}
+
+
 def _read_first(workspace: Path, names: list[str], cap: int) -> tuple[str, str]:
-    """(nome_do_arquivo_lido, texto) — o 1º dos `names` que existir; ('', '') se nenhum."""
+    """(nome_do_arquivo_lido, texto) — o 1º dos `names` que existir no home; senão o default builtin
+    versionado (se houver p/ algum dos nomes); ('', '') se nenhum."""
     for n in names:
         txt = read_capped(workspace, n, cap)
         if txt:
             return n, txt
+    for n in names:
+        bp = _BUILTIN_DEFAULTS.get(n)
+        if bp and bp.exists():
+            try:
+                return n, bp.read_text(encoding="utf-8", errors="ignore")[:cap]
+            except OSError:
+                pass
     return "", ""
 
 

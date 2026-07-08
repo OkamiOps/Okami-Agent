@@ -391,35 +391,75 @@ def _has_playwright() -> bool:
     return importlib.util.find_spec("playwright") is not None
 
 
+_BROWSE_ACTIONS = ("read", "open", "snapshot", "click", "fill", "screenshot", "scroll", "back",
+                   "press", "eval", "close_session")
+_BROWSE_EFFECT_ACTIONS = frozenset({"click", "fill", "press", "eval", "back"})
+
+
 class Browse(Tool):
     name = "browse"
-    description = ("Abre uma URL e lê o texto. Com Playwright também: action=snapshot|click|fill|screenshot. "
-                   "snapshot numera os elementos interativos como [N] (mapa de acessibilidade); depois "
-                   "click/fill aceitam esse [N] como selector (resolvido por papel+nome) — bem mais "
-                   "confiável que adivinhar CSS. Mantém sessão LOGADA entre chamadas (perfil persistente).")
-    args_schema = {"url": "URL", "action": "read|snapshot|click|fill|screenshot",
+    description = ("Abre uma URL e interage com a página, mantendo a MESMA sessão (Chromium+cookies) "
+                   "entre chamadas — login → navega → clica sem perder estado. `url` é OBRIGATÓRIO só na "
+                   "1ª chamada da sessão; depois, omita p/ agir na página ATUAL. action=read|open|"
+                   "snapshot|click|fill|screenshot|scroll|back|press|eval|close_session. snapshot numera "
+                   "os elementos interativos como [N] (mapa de acessibilidade); click/fill aceitam esse "
+                   "[N] como `selector` (resolvido por papel+nome) — bem mais confiável que adivinhar CSS. "
+                   "screenshot devolve a IMAGEM (você VÊ a tela). eval roda JS na página (BLOQUEADO p/ "
+                   "document.cookie/localStorage/fetch a endereço privado — não tenta ler sessão/exfiltrar). "
+                   "scroll usa `text` como pixels (default 800); press usa `text` como tecla (ex.: 'Enter'). "
+                   "close_session encerra a sessão e libera o Chromium. Dialog (alert/confirm) da página é "
+                   "auto-DISMISSADO por padrão — não trava a chamada.")
+    args_schema = {"url": "(obrigatório só na 1ª chamada da sessão) URL",
+                   "action": "read|open|snapshot|click|fill|screenshot|scroll|back|press|eval|close_session",
                    "selector": "(opc) ref [N] de uma snapshot OU seletor CSS de fallback",
-                   "text": "(opc) texto p/ fill"}
-    required = ("url",)
-    arg_constraints = {"action": {"enum": ["read", "snapshot", "click", "fill", "screenshot"], "default": "read"}}
+                   "text": "(opc) texto p/ fill; tecla p/ press; pixels p/ scroll; código JS p/ eval",
+                   "screenshot": "(action=screenshot) caminho de saída .png no workspace",
+                   "session_id": "(opc) identificador da sessão de browser — default deriva da conversa atual"}
+    required = ()
+    arg_constraints = {"action": {"enum": list(_BROWSE_ACTIONS), "default": "read"}}
 
     def run(self, args, ctx):
-        action = args.get("action", "read")
-        # action≠read precisa do Playwright. Sem ele, browse() degrada SILENCIOSO p/ fetch (texto) — o
+        action = args.get("action") or "read"
+        if action not in _BROWSE_ACTIONS:
+            return ToolResult(False, f"browse: action inválida '{action}'. Use: {', '.join(_BROWSE_ACTIONS)}.")
+        session_id = str(args.get("session_id") or getattr(ctx, "chat_id", "") or "default")
+
+        if action == "close_session":
+            from okami.integrations.browser_session import SESSIONS
+            closed = SESSIONS.close(session_id)
+            msg = (f"sessão de browser '{session_id}' encerrada." if closed
+                  else f"sessão de browser '{session_id}' não estava ativa.")
+            return ToolResult(True, msg, effect=closed)
+
+        # action≠read/open precisa do Playwright. Sem ele, browse() degrada SILENCIOSO p/ fetch (texto) — o
         # agente pediria 'screenshot' e receberia texto achando que deu certo. Falha CLARO em vez disso.
-        if action != "read" and not _has_playwright():
+        if action not in ("read", "open") and not _has_playwright():
             return ToolResult(False, f"a ação '{action}' do browse precisa do Playwright (não instalado). "
                               "Rode: pip install playwright && playwright install chromium. "
-                              "Sem ele, só action=read funciona (lê o texto da página).")
+                              "Sem ele, só action=read/open funciona (lê o texto da página).")
+
+        url = args.get("url") or None
+        shot_path: str | None = None
+        if action == "screenshot":
+            try:
+                shot_path = str(_safe_path(ctx, args.get("screenshot") or "screenshot.png"))
+            except ValueError as e:
+                return ToolResult(False, str(e))
+
         try:
             from okami.integrations.browser import browse
-            out = browse(args["url"], action, args.get("selector"), args.get("text"),
-                         args.get("screenshot"))
+            out = browse(url, action, args.get("selector"), args.get("text"), shot_path,
+                        session_id=session_id)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"browse falhou: {e}")
+
         from okami.core.tools.base import untrusted_wrap   # página externa = dado, não instrução
+        content = None
+        if action == "screenshot" and shot_path and "salvo" in out:
+            from okami.core.tools.image_block import image_block
+            content = image_block(shot_path)
         return ToolResult(True, untrusted_wrap("browse", out),
-                          effect=args.get("action") in ("click", "fill"))
+                          effect=action in _BROWSE_EFFECT_ACTIONS, content=content)
 
 
 class GenerateImage(Tool):
@@ -431,11 +471,19 @@ class GenerateImage(Tool):
     required = ("prompt", "path")
 
     def check(self):
-        """Depende da assinatura Codex — sem login, a tool sai do registro (check_fn, item 27)."""
+        """Precisa da assinatura Codex OU de um backend de fallback configurado (media.image).
+        Sem nenhum dos dois, a tool sai do registro (check_fn, item 27)."""
         from okami.llm import oauth
-        if not oauth.codex_access_token():
-            return "sem login Codex (rode: okami login codex)"
-        return None
+        if oauth.codex_access_token():
+            return None
+        try:
+            from okami.llm.imagegen import image_config
+            from okami.config import load_config
+            if image_config(load_config()):
+                return None
+        except Exception:  # noqa: BLE001 — sem config de fallback resolvível → cai no aviso abaixo
+            pass
+        return "sem login Codex (rode: okami login codex) nem backend de imagem em media.image"
 
     def run(self, args, ctx):
         prompt = args.get("prompt")

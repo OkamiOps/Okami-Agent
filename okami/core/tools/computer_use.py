@@ -69,14 +69,7 @@ class ComputerUse(Tool):
 
 
 def _image_block(path: str):
-    """Embute o screenshot como bloco de imagem (o modelo VÊ a tela). Best-effort → None se falhar."""
-    try:
-        import base64
-        from pathlib import Path as _P
-        raw = _P(path).read_bytes()
-        if not raw or len(raw) > 6 * 1024 * 1024:          # tela vazia ou grande demais → só o caminho
-            return None
-        uri = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
-        return [{"type": "image_url", "image_url": {"url": uri}}]
-    except Exception:  # noqa: BLE001
-        return None
+    """Embute o screenshot como bloco de imagem (o modelo VÊ a tela). Best-effort → None se falhar.
+    Implementação compartilhada em okami/core/tools/image_block.py (também usada por browse(action=screenshot))."""
+    from okami.core.tools.image_block import image_block
+    return image_block(path)
