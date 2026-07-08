@@ -127,8 +127,11 @@ okami chat      # chat in the terminal
 **Everything in one folder — `~/.okami/`** (or `$OKAMI_HOME`), like `~/.openclaw`/`~/.hermes`: the
 installer doesn't scatter across the OS. The code lives in `~/.okami/src`, the isolated venv in
 `~/.okami/tools`, the launcher in `~/.okami/bin`, and the data (skills, agents, sessions, `.env`,
-credentials) in `~/.okami/` at runtime. Update/uninstall = run the installer again /
-`uv tool uninstall okami-agent`.
+credentials) in `~/.okami/` at runtime.
+
+**Update: `okami upgrade`** — pulls the latest code into `~/.okami/src` and reinstalls in place,
+printing old → new version. Re-running the installer (`curl … | bash` / `irm … | iex`) does the
+same thing and is safe to run again anytime. Uninstall: `uv tool uninstall okami-agent`.
 
 <details><summary><b>Dev (run from source, without a global install)</b></summary>
 
@@ -146,11 +149,15 @@ Without uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[d
 <details><summary><b>Docker (any OS)</b></summary>
 
 ```bash
-make docker-build                                            # docker build -f deploy/Dockerfile
+make docker-build                                            # docker build -f deploy/Dockerfile (multi-stage, uv, non-root)
+docker compose -f deploy/docker-compose.yml run --rm okami setup   # first run: configure providers
 docker compose -f deploy/docker-compose.yml run --rm okami doctor
 docker compose -f deploy/docker-compose.yml run --rm okami task "create hello.txt" -e file_exists:hello.txt
 docker run --rm --entrypoint python okami-agent -m pytest -q  # run the suite in the Linux image
 ```
+State (skills, agents, sessions, `.env`, credentials — i.e. `$OKAMI_HOME`) persists in the named
+volume `okami-data` (mounted at `/data`), independent of the repo bind-mount — it survives
+`docker compose down` (only `down -v` wipes it). To update, `git pull` and re-run `make docker-build`.
 > For an LMStudio on the host machine, point `api_base` at `http://host.docker.internal:PORT/v1`.
 </details>
 

@@ -23,6 +23,25 @@ $env:OKAMI_HOME     = $OkamiDir                 # a casa unica (runtime guarda d
 $env:UV_TOOL_DIR    = Join-Path $OkamiDir 'tools'   # venvs das ferramentas -> dentro de .okami
 $env:UV_TOOL_BIN_DIR = Join-Path $OkamiDir 'bin'    # launcher 'okami' -> dentro de .okami
 
+# Versao ANTES de mexer em nada - se ja havia um install, e o "de onde" do old->new no final.
+# Chama o binario direto (nao via PATH - pode nao estar exportado ainda nesta sessao).
+$OldVersion = ""
+$okamiExe = Join-Path $OkamiDir 'bin\okami.exe'
+if (Test-Path $okamiExe) {
+  try { $OldVersion = (& $okamiExe --version 2>$null) } catch { $OldVersion = "" }
+}
+
+# Long paths: deps do Python (litellm e afins) tem caminhos profundos no site-packages; sem isto,
+# `git clone`/`uv sync` podem falhar com "The specified path, file name, or both are too long"
+# quando $OkamiDir esta sob um %USERPROFILE% comprido. Melhor esforco - nunca aborta o install.
+try {
+  $lp = Get-ItemPropertyValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -ErrorAction Stop
+  if ($lp -ne 1) { Say "aviso: 'long paths' do Windows parece desabilitado - se o install falhar com caminho longo, habilite em: Configuracoes > Sistema > Sobre > Info avancada do sistema (ou politica de grupo) e rode de novo." }
+} catch { }
+if (Get-Command git -ErrorAction SilentlyContinue) {
+  try { git config --global core.longpaths true 2>$null } catch { }  # git tem seu proprio opt-in, independente do SO
+}
+
 # 1) uv - instala se faltar. uv e generico -> fica na pasta padrao dele.
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   Say "instalando o uv (gerencia Python + venv)..."
@@ -71,7 +90,21 @@ if ($OkamiDir -ne "$env:USERPROFILE\.okami") {
 $old = "$env:USERPROFILE\.okami-agent"
 if ((Test-Path $old) -and ($old -ne $Src)) { Say "install antigo em .okami-agent nao e mais usado - pode remover: Remove-Item -Recurse -Force $old" }
 
-Ok "pronto! tudo em $OkamiDir  (src\ tools\ bin\ + dados em runtime)"
+# 6) confere que o binario instalado FUNCIONA e reporta a versao (old->new se ja havia install -
+# e o jeito de saber, na hora, que "rodar o instalador de novo" realmente atualizou algo).
+$NewVersion = ""
+try { $NewVersion = (& $okamiExe --version 2>$null) } catch { $NewVersion = "" }
+if ([string]::IsNullOrWhiteSpace($NewVersion)) { Die "instalado, mas '$okamiExe --version' nao respondeu - algo quebrou na instalacao." }
+if ($OldVersion -and ($OldVersion -ne $NewVersion)) {
+  Ok "atualizado: $OldVersion -> $NewVersion"
+} elseif ($OldVersion) {
+  Ok "ja estava na ultima versao: $NewVersion"
+} else {
+  Ok "instalado: $NewVersion"
+}
+
+Ok "tudo em $OkamiDir  (src\ tools\ bin\ + dados em runtime)"
 Write-Host ''
 Write-Host "Agora rode: okami setup   (e depois  okami chat)" -ForegroundColor White
+Write-Host "Pra atualizar depois: okami upgrade   (ou rode este instalador de novo)" -ForegroundColor White
 Write-Host 'Se "okami" nao for encontrado, reabra o PowerShell.'

@@ -8,18 +8,17 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [0.13.0-beta] — 2026-07-08
 
-Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o dono rejeitou o próximo passo óbvio ("mantém
-paridade"): **"paridade não basta — acha onde o Hermes está na frente e ULTRAPASSA."** Mapeamos 6
-dimensões (mídia, gateway, TUI/humanização, harness/tools, memória/skills/plugins, computer/browser),
-achamos pontos concretos onde o Hermes ganha (GPT Image via assinatura, qualidade de tool-call, skills,
-humanização, browser, mídia/PDF) — e também pontos onde **já estávamos na frente** (HTML→PDF sem
-Chromium, identidade em 3 arquivos SOUL/VOICE/PERSONA vs blob genérico do Hermes, checkpoints, cofre de
-segredo cifrado). Esta release é a **primeira onda de implementação**, 4 frentes em paralelo. Suíte:
-**3.572 → 3.576 testes**.
+Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o objetivo desta release passou de "manter paridade"
+para **ultrapassar o Hermes nos pontos onde ele ainda está na frente**. Mapeamos 6 dimensões (mídia,
+gateway, TUI/humanização, harness/tools, memória/skills/plugins, computer/browser), achamos pontos
+concretos onde o Hermes ganha (GPT Image via assinatura, qualidade de tool-call, skills, humanização,
+browser, mídia/PDF) — e também pontos onde **já estávamos na frente** (HTML→PDF sem Chromium, identidade
+em 3 arquivos SOUL/VOICE/PERSONA vs blob genérico do Hermes, checkpoints, cofre de segredo cifrado). Esta
+release é a **primeira onda de implementação**, 4 frentes em paralelo. Suíte: **3.572 → 3.576 testes**.
 
-### 🎨 GPT Image nativo via assinatura codex (pedido #1 do dono)
+### 🎨 Geração de imagem nativa via assinatura Codex
 - Diagnóstico: geração de imagem estava **quebrada** — postava pro `api.openai.com/v1/images` (REST
-  pago), voltava `401` porque exige API key paga, algo que o dono não tem/não quer.
+  pago), voltava `401` porque exige uma API key paga separada, fora do modelo de assinatura.
 - `imagegen.py` reescrito: passa a postar pro **endpoint da assinatura**
   (`chatgpt.com/backend-api/codex/responses` + tool `image_generation`, modelo `gpt-image-2`) —
   **texto→imagem E imagem→imagem na MESMA chamada** (`input_image` parts).
@@ -79,11 +78,11 @@ segredo cifrado). Esta release é a **primeira onda de implementação**, 4 fren
 
 ## [0.12.0-beta] — 2026-07-08
 
-O dono não deixou passar: "você fala que estamos em paridade e eu trago vários pontos onde estamos
-anos-luz atrás do Hermes." Nada de auditoria de código — 3 reclamações de **uso real**, do jeito que só
-quem opera o agente no dia a dia acha. E no meio do caminho de mapear a primeira, apareceu uma regressão
-autoinfligida da própria onda de auditoria anterior (`v0.10.0-beta`): **todo turno pelo gateway do
-Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
+A afirmação de "paridade com o Hermes" das releases anteriores era real para auditoria de código, mas
+otimista demais para uso real. Esta release fecha 3 gaps de **uso real** — do tipo que só aparece operando
+o agente no dia a dia, não lendo diff de código. No meio do caminho de mapear o primeiro, apareceu também
+uma regressão autoinfligida da própria onda de auditoria anterior (`v0.10.0-beta`): **todo turno pelo
+gateway do Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
 
 ### 🔥 Regressão crítica — gateway crashava TODO turno (`da85c42`)
 - `run_task`/`Harness.__init__` não aceitavam `set_no_interrupt`, param que o endpoint do gateway injeta
@@ -96,7 +95,7 @@ Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
   não-interrompível.
 - Regressão travada em `test_it11_fixes.py` (contrato runner↔Harness).
 
-### 🎯 `/steer` — injeta no turno em andamento sem cancelar (gap #1 do dono)
+### 🎯 `/steer` — injeta no turno em andamento sem cancelar
 - `/steer <texto>`: injeta uma **MENSAGEM DIRETA DO USUÁRIO** no contexto do turno já rodando (marcador
   anti prompt-injection + nota de trust explícita no system prompt) — SEM cancelar. Ao lado do `/busy`
   interrupt (cancela e recomeça), agora existe também `/busy steer` (toda mensagem nova durante um turno
@@ -105,7 +104,7 @@ Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
   `set_no_interrupt`); drenado após cada resultado de tool; se não houver onde anexar, fica **deferido**
   (nunca é perdido); `/cancel`, `/stop` e `/retry` limpam o steer pendente.
 
-### 🔑 Onboarding de provider — assinatura/token-plan sem refém de CLI (gap #2 do dono)
+### 🔑 Onboarding de provider — assinatura/token-plan sem refém de CLI
 - Diagnóstico: Okami já NÃO dependia de CLI pra minimax/mimo/grok (já eram `api_key` direto) nem pro
   Codex (já OAuth device-flow nativo) — o gap real era **descoberta** no menu, não arquitetura.
 - Presets novos em `provider_catalog.py`: `minimax-oauth` (assinatura), `minimax-cn` (região China,
@@ -113,9 +112,10 @@ Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
   "traga seu próprio provider" (token-plan/API-key/endpoint OpenAI-compat).
 - Nenhum transport novo — só torna visível o que já existia.
 
-### 🔐 Segredo via chat — cofre cifrado, apaga e confirma (gap #3 do dono)
-- Cenário: dono remoto sem acesso ao `.env` manda a API key direto no Telegram, o agente guarda seguro e
-  continua. Escolhas travadas do dono: **"salvar, apagar e confirmar"** + **"só no cofre, nunca no LLM"**.
+### 🔐 Segredo via chat — cofre cifrado, apaga e confirma
+- Cenário: usuário remoto sem acesso ao `.env` manda a API key direto no Telegram, o agente guarda seguro
+  e continua. Contrato de segurança: **salvar, apagar a mensagem original e confirmar** + **valor só no
+  cofre, nunca exposto ao LLM**.
 - Detecção no **INBOUND do gateway, ANTES do modelo ver** (`okami/core/redact.py`): prefixos de chave
   conhecidos (`ghp_`/`sk-`/`xai-`/`AKIA`/…) + padrão `NOME=valor` com keyword sensível e valor ≥12 chars
   sem espaço; guard contra falso-positivo (linguagem natural tipo "a senha é X" e valores curtos não
@@ -142,13 +142,12 @@ agente de verdade, não lendo diff. Esta release fecha essa lacuna e assume o er
 ## [0.11.0-beta] — 2026-07-08
 
 Lançada no MESMO DIA da `v0.10.0-beta`. 1 commit (`4bfbc14`), mas denso: **5 ondas paralelas** atacando 3
-reclamações diretas do dono — "não consigo trocar fácil de provider ou de modelo", "nossas chamadas de
-tools são péssimas" e falta de skills práticas ("não preciso de skill para pokemon, mas seria legal skill
-para workflow, para pesquisa e etc"). Suíte: **3.364 → 3.443 testes**. E2E real (minimax): task
-`COMPLETE` com auto-verificação (od/wc/sha256), inclusive interceptando e corrigindo sozinho um bug de
-`echo -n` no meio da execução. 🐺
+frentes de fricção no uso real — troca de provider/modelo pouco visível, qualidade baixa nas chamadas de
+tool e falta de skills práticas para workflows do dia a dia (pesquisa, monitoramento, automação). Suíte:
+**3.364 → 3.443 testes**. E2E real (minimax): task `COMPLETE` com auto-verificação (od/wc/sha256),
+inclusive interceptando e corrigindo sozinho um bug de `echo -n` no meio da execução. 🐺
 
-### 🔀 Troca de modelo (reclamação #1 do dono)
+### 🔀 Troca de modelo
 - **`okami/llm/model_aliases.py`**: resolver ÚNICO de alias/tier — aliases semânticos (`sonnet`, `opus`,
   `haiku`, `codex`, `gpt`, `minimax`, `mimo`, `grok`, …), tiers dinâmicos `fast`/`smart`, validação contra
   o catálogo de providers, extensível via `model_aliases:` no yaml.
@@ -198,7 +197,7 @@ Desde o `v0.9.0-alpha`: **193 commits · 403 arquivos · +23.841/−1.021 linhas
 testes**. 🐺
 
 ### 🔎 Auditoria E2E vs Hermes (uso real, 8 agentes) — por que o agente "parecia burro"
-Sintoma reportado pelo dono: respostas lentas, tarefa simples travando, formatação quebrada no Telegram.
+Sintoma em uso real: respostas lentas, tarefa simples travando, formatação quebrada no Telegram.
 Não era 1 bug — era uma cadeia de degradação silenciosa. Achados e correções, do sintoma à causa:
 - **probe de tool-calling nativo quebrado (TypeError silencioso)**: todo provider NÃO-hardcoded (ex.:
   minimax) caía pro rail JSON-em-texto sem avisar — perdia tool-calling nativo, thinking vazava no texto,
@@ -266,7 +265,7 @@ missing/59 parciais mapeados) em ondas por área — loop → tools → telegram
 - **edit fuzzy** unicode→ASCII (aspas curvas/travessão/nbsp não derrubam mais a edição).
 
 ### 🤖 Onda 3 — MULTI-AGENTE: cada agente seu próprio gateway, supervisionado (watchdog + auto-restart)
-O dono queria N agentes, cada um com gateway/cron/heartbeat/tasks próprios. A fundação já existia (homes
+Objetivo: suportar N agentes, cada um com gateway/cron/heartbeat/tasks próprios. A fundação já existia (homes
 isolados em agents/<id>/, tokens próprios, load_agents) — faltava o ciclo de vida em runtime.
 - **`okami/gateway/supervisor.py` (AgentSupervisor)**: sobe cada agente como SEU PRÓPRIO processo de
   gateway (`okami gateway --foreground --agent <id>`), com registro durável em ~/.okami/runtime/agents.json
@@ -279,14 +278,14 @@ isolados em agents/<id>/, tokens próprios, load_agents) — faltava o ciclo de 
 
 ### 🛰️ Onda 2 (continuação) — graceful drain + auto-diagnóstico + remote-from-chat
 - **env_check** (tool + okami/core/envhealth.py): auto-diagnóstico do ambiente (pip/venv gravável,
-  binários git/ssh/rg/ffmpeg…, disco) com issues acionáveis; alerta o dono no boot se algo está ruim.
+  binários git/ssh/rg/ffmpeg…, disco) com issues acionáveis; alerta o usuário no boot se algo está ruim.
 - **parada graciosa**: SIGTERM/SIGINT → drena e persiste o dedup; _seen_msgs sobrevive ao restart
   (.okami/seen_msgs.json) → não reprocessa mensagem após reiniciar.
 - **remote_add** (tool): cadastra host SSH/Tailscale pelo chat (config.set_local → okami.local.yaml),
   validado contra injeção; libera o alias no remote_connect (inclusive Telegram).
 
 ### 🛰️ autonomia na VPS (auditoria × Hermes, wave 1) — monitor de host, auto-restart, web resiliente
-Auditoria de VPS-readiness vs Hermes (8 dimensões → roadmap). Wave 1 (os críticos que o dono pediu):
+Auditoria de VPS-readiness vs Hermes (8 dimensões → roadmap). Wave 1 (os itens críticos priorizados):
 - **`system_monitor`** (tool, novo `okami/core/sysmon.py`): saúde do HOST — disco/RAM/CPU/load/uptime,
   cross-plataforma (stdlib p/ disco sempre + psutil auto-instalado p/ o resto), com alertas acionáveis
   (disco/RAM/cpu altos) pra o agente decidir adiar/limpar antes de tarefa pesada. (antes o memwatch só
@@ -317,21 +316,22 @@ gracioso). Novo `okami/core/platform_compat.py` centraliza o que difere entre PO
 +15 testes. 2770 passed. O agente roda nas 3 plataformas, VPS ou local, sem depender de sorte.
 
 ### 🌐 provisão remota (VPS-first) — o agente bootstrappa o PRÓPRIO acesso (SSH + GitHub)
-Falha de arquitetura: o agente assumia "o host já tem as credenciais do dono" (gh/git/ssh herdados) —
-errado pra uma VPS 24/7, onde não existe login herdado. Pior, o jail `.ssh`/`.env` e o `sanitized_env`
-IMPEDIAM o agente de se provisionar. Agora ele monta o acesso sozinho, dirigido pelo dono via canal:
+Falha de arquitetura: o agente assumia que o host já tinha as credenciais do usuário (gh/git/ssh
+herdados) — errado pra uma VPS 24/7, onde não existe login herdado. Pior, o jail `.ssh`/`.env` e o
+`sanitized_env` IMPEDIAM o agente de se provisionar. Agora ele monta o acesso sozinho, dirigido pelo
+usuário via canal:
 - **`okami/integrations/provision.py`**: primitivas sancionadas (furam o jail só aqui) — gerar chave
   ed25519, importar chave privada (0600), ssh-keyscan→known_hosts, configurar GitHub por token
   (credential-helper FILE-BASED → funciona mesmo com env sanitizado) ou por SSH (url.insteadOf), status
   e verify. Segredo NUNCA volta no retorno; HOME injetável (não polui ~/.gitconfig real).
 - **Tools `ssh_identity` e `git_auth`** (danger=dangerous → approval-gated; negadas no Telegram sem o
-  grant). O dono cola um PAT (store_secret) ou deixa o agente GERAR a chave e mostrar só a pública.
-- **Skill nativa `acesso-vps`**: ensina o procedimento ponta-a-ponta (token vs chave SSH, guiar o dono a
-  adicionar a pubkey no GitHub, verificar) — dispara em "git push/clone/permission denied/ssh".
+  grant). O usuário cola um PAT (store_secret) ou deixa o agente GERAR a chave e mostrar só a pública.
+- **Skill nativa `acesso-vps`**: ensina o procedimento ponta-a-ponta (token vs chave SSH, guiar o usuário
+  a adicionar a pubkey no GitHub, verificar) — dispara em "git push/clone/permission denied/ssh".
 +21 testes (módulo + tools). Instalação remota deixa de depender da máquina do usuário.
 
 ### 🎙️ voz EMBUTIDA + recursos NATIVOS (skills e plugins que viajam no pacote)
-- **STT (Whisper) ligado por padrão + auto-install**: o dono mandou áudio e o agente não entendeu —
+- **STT (Whisper) ligado por padrão + auto-install**: nota de voz enviada ao agente ficava sem resposta —
   o stack de voz existia, mas STT era opt-in (nota de voz descartada em silêncio) e `import faster_whisper`
   cru (falhava sem o extra). Agora STT é default ON (só `voice.stt.enabled: false` desliga) e
   faster-whisper/edge-tts AUTO-INSTALAM na 1ª vez via lazy_deps. UX: aviso "🎤 transcrevendo…" na 1ª
@@ -370,7 +370,7 @@ resultado longo pelo agente, que é o ponto do subagente) e usa id int (o contra
 
 ### 🧱 subagente: o agente PAI lê o resultado de volta + cap + GC (revisão vs Hermes)
 Revisão do subagente contra a delegação do Hermes (workflow). Gap central confirmado: o background spawn
-era fire-and-forget pro DONO — o agente pai não conseguia USAR o resultado (não dava pra encadear). O
+era fire-and-forget pro USUÁRIO — o agente pai não conseguia USAR o resultado (não dava pra encadear). O
 Hermes resolve com fila global + turno forjado (que ele mesmo desliga em sessão stateless); aqui o
 caminho soberano é mais simples: leitura sob demanda + await curto. Adições:
 - **tool `spawn_jobs`** (`action=list|status|result|await`): o agente pai LÊ o resultado de um background
@@ -388,7 +388,7 @@ caminho soberano é mais simples: leitura sob demanda + await curto. Adições:
 O `spawn` era 100% BLOQUEANTE: uma tarefa longa (ou fan-out de 6 subagentes) congelava o turno do pai por
 5-25 min, o canal só mostrava "⏳ ~N min". Agora `spawn` aceita `background=true`: roda o subagente numa
 thread daemon e **retorna na hora** ("▶ rodando em segundo plano, te aviso"); ao terminar, persiste o
-resultado em `.okami/spawn/<id>.json` e **avisa o dono no chat que pediu** (captura o `ctx.notify` daquele
+resultado em `.okami/spawn/<id>.json` e **avisa no chat que pediu** (captura o `ctx.notify` daquele
 turno → vai pro chat certo mesmo após o turno acabar, sem o problema do `_last_chat` global). O modo
 síncrono segue sendo o DEFAULT (zero regressão). Núcleo em `okami/core/spawn_jobs.py` (testável sem
 thread). +6 testes. (Próximo: progresso "passo N/M" durante o background — item 6.)
@@ -412,7 +412,7 @@ no loop do Hermes. Gaps reais são poucos; começando a fechá-los:
   brando. Agora tenta estático e, se vier 403/casca-de-JS/Cloudflare/corpo minúsculo, re-tenta no
   **Playwright** (browser de verdade, contexto persistente p/ login) que renderiza JS e passa muitos
   bloqueios. Bloqueio SSRF não re-tenta; sem Playwright → devolve o estático. `web_extract` usa isto.
-  Ainda NÃO vence captcha (decisão do dono: handoff p/ browser real, na fila). +10 testes.
+  Ainda NÃO vence captcha (decisão de escopo: handoff p/ browser real, na fila). +10 testes.
 
 ### 💬 fix: formatação do Telegram (tags HTML cruas viravam texto literal)
 Bug real (caso FIPE): a dica de plataforma MANDAVA o modelo escrever HTML (`<b>negrito</b>`), mas o
@@ -442,7 +442,8 @@ síncrona, e re-geração por falso-positivo do Action-or-Terminate. **Leva 1 (a
 - **browse sem Playwright**: action≠read (screenshot/click/…) falha CLARO ("instale Playwright") em vez de
   degradar SILENCIOSO p/ fetch (o agente pedia screenshot e recebia texto achando que deu certo).
 - **tool `send_message`**: entrega direta de texto por um canal SEM rodar o LLM (avisos/relatórios);
-  usa o token do PRÓPRIO agente (channels.telegram), target=chat_id ou vazio→dono; `danger=sensitive`
+  usa o token do PRÓPRIO agente (channels.telegram), target=chat_id ou vazio→destinatário padrão;
+  `danger=sensitive`
   (go/no-go). Fecha a lacuna "o agente não tinha como mandar msg a um target sem improvisar shell".
 
 ### 🛠️ fix: check() nas tools de integração (não falham mais feio em runtime)
@@ -465,7 +466,7 @@ abrir o Docker e rodou ~160 min até um timeout transitório de modelo+fallback.
 segurança → matriz confiança×verdict → instala + lockfile; `name=` instala uma skill de repo-biblioteca;
 HIGH+ bloqueia; clawhub/npx só com `allow_exec=true`; `danger=dangerous` (go/no-go). +9 testes.
 
-Rodada **#20** — fechados os 3 itens que o dono pediu para "finalizar a implantação": **computer-use
+Rodada **#20** — fechados os 3 itens que faltavam para completar a implantação: **computer-use
 EMBUTIDO**, **inbound dos 9 canais novos** e os **plugins built-in do Hermes**. Caça adversarial (workflow
 de 60 subagentes, 3 céticos por achado) → **10 bugs reais corrigidos**. **2.630 testes passando** · gates
 limpos.
@@ -596,7 +597,7 @@ corrigidos com TDD. Novo comparativo (`docs/COMPETITIVE_RESEARCH_16.md`) achou *
   meia-config de TLS (só cert ou só key) erra em vez de servir HTTP em silêncio.
 - **PluginContext trust-gated** (`okami/plugins.py`): plugin só troca de provider se for `trusted` +
   `allow_provider_override` + o provider estar na `allowed_providers`; não-confiável fica preso ao default
-  (plugin de terceiro não redireciona tráfego/gasto à revelia do dono).
+  (plugin de terceiro não redireciona tráfego/gasto à revelia do usuário).
 - **Telemetria de custo por-vendor**: `okami cost [--json]` — `summarize_by_vendor` agrega por quem
   respondeu (`served_by`); assinatura (claude/codex) = "incluído" (NUNCA inventa $), pay-per-token estima
   pelo pricing conhecido.
@@ -682,7 +683,7 @@ pesquisa (#7–#15). O restante p/ "100 absoluto" é só validação em TRÁFEGO
 
 ### 🤖 Automação & extensibilidade
 - **Blueprints** (`okami blueprint list|show|use`): automação parametrizada com slots tipados
-  (time/enum/weekdays) que vira job de cron — sem o dono digitar cron cru.
+  (time/enum/weekdays) que vira job de cron — sem precisar digitar cron cru.
 - **Kanban swarm** (`okami swarm <goal> --run`): workers paralelos → verificador → sintetizador com
   blackboard JSON; o `--run` executa de verdade via run_task; worker que explode é isolado.
 - **Plugins** (`okami plugins`): descoberta por pasta (`.okami/plugins/<n>/plugin.yaml`) + entry-point pip

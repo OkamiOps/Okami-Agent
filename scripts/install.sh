@@ -23,6 +23,13 @@ die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 mkdir -p "$OKAMI_DIR"
 
+# Versão ANTES de mexer em nada — se já havia um install, é o "de onde" do old→new no final.
+# Chama o binário direto (não via PATH — pode não estar exportado ainda nesta sessão).
+OLD_VERSION=""
+if [ -x "$OKAMI_DIR/bin/okami" ]; then
+  OLD_VERSION="$("$OKAMI_DIR/bin/okami" --version 2>/dev/null || true)"
+fi
+
 # shell rc do shell atual (onde persistimos PATH/OKAMI_HOME).
 shell_rc() {
   case "${SHELL:-}" in *zsh) echo "$HOME/.zshrc";; *bash) echo "$HOME/.bashrc";; *) echo "$HOME/.profile";; esac
@@ -79,6 +86,19 @@ if [ -d "$HOME/.okami-agent" ] && [ "$HOME/.okami-agent" != "$SRC" ]; then
   say "install antigo em ~/.okami-agent não é mais usado — pode remover: rm -rf ~/.okami-agent"
 fi
 
-ok "pronto! tudo em $OKAMI_DIR  (src/ · tools/ · bin/ · dados em runtime)"
+# 5) confere que o binário instalado FUNCIONA e reporta a versão (old→new se já havia install —
+# é o jeito de saber, na hora, que "rodar o instalador de novo" realmente atualizou algo).
+NEW_VERSION="$("$OKAMI_DIR/bin/okami" --version 2>/dev/null || true)"
+[ -n "$NEW_VERSION" ] || die "instalado, mas '$OKAMI_DIR/bin/okami --version' não respondeu — algo quebrou na instalação."
+if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  ok "atualizado: $OLD_VERSION → $NEW_VERSION"
+elif [ -n "$OLD_VERSION" ]; then
+  ok "já estava na última versão: $NEW_VERSION"
+else
+  ok "instalado: $NEW_VERSION"
+fi
+
+ok "tudo em $OKAMI_DIR  (src/ · tools/ · bin/ · dados em runtime)"
 printf '\n  Agora rode:  \033[1mokami setup\033[0m   (e depois  okami chat)\n'
+printf '  Pra atualizar depois:  \033[1mokami upgrade\033[0m   (ou rode este instalador de novo)\n'
 printf '  Se "okami" não for encontrado, reabra o terminal.\n'

@@ -8,7 +8,7 @@ from okami.cli.commands import (  # noqa: F401,E402
     basics, task, skills, memory, setup, persona, cron,
     chat, media, gateway, provider, model, config, misc,
     auth, policy, observability, readiness, curator, channel, fsaccess, sendmsg,
-    remote, lsp_cmd, gemini, promptsize,
+    remote, lsp_cmd, gemini, promptsize, upgrade,
 )
 
 # Re-exports p/ compatibilidade (testes e o gateway importam de okami.cli):

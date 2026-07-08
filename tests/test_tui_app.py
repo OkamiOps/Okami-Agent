@@ -56,6 +56,32 @@ def test_sink_event_tool_start_sets_running_step_clears(tmp_path):
     assert out["after_step"] is None                                                 # desarmou no resultado
 
 
+def test_sink_event_step_passes_measured_duration_to_tool_block(tmp_path, monkeypatch):
+    # tool_start→step no MESMO tool: sink_event mede o intervalo e passa `secs=` pro tool_block (card
+    # final ganha timing, sem depender do harness reportar duração — medido 100% no cliente).
+    import time as _t
+    from okami import tui_app as _tui_app
+    calls = []
+    orig = _tui_app._tui.tool_block
+
+    def _spy(e, detail, *, secs=None):
+        calls.append(secs)
+        return orig(e, detail, secs=secs)
+    monkeypatch.setattr(_tui_app._tui, "tool_block", _spy)
+
+    async def scenario():
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test():
+            app.sink_event({"kind": "tool_start", "tool": "read_file", "args": {"path": "x.py"}})
+            _t.sleep(0.01)
+            app.sink_event({"kind": "step", "tool": "read_file", "args": {"path": "x.py"},
+                            "ok": True, "out": "dados"})
+
+    asyncio.run(scenario())
+    assert calls and calls[-1] is not None and calls[-1] >= 0.0   # duração medida, não None
+
+
 def test_status_text_shows_session_timer(tmp_path):
     # paridade Hermes (StatusRule mostra a duração da sessão)
     import time as _t

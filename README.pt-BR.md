@@ -127,7 +127,10 @@ okami chat      # conversa no terminal
 **Tudo numa pasta só — `~/.okami/`** (ou `$OKAMI_HOME`), como o `~/.openclaw`/`~/.hermes`: o instalador
 não espalha pelo SO. O código fica em `~/.okami/src`, o venv isolado em `~/.okami/tools`, o launcher em
 `~/.okami/bin`, e os dados (skills, agents, sessões, `.env`, credenciais) em `~/.okami/` em runtime.
-Atualizar/desinstalar = rodar o instalador de novo / `uv tool uninstall okami-agent`.
+
+**Atualizar: `okami upgrade`** — puxa o código mais recente pra `~/.okami/src` e reinstala no lugar,
+imprimindo versão_antiga → versão_nova. Rodar o instalador de novo (`curl … | bash` / `irm … | iex`)
+faz a mesma coisa e é seguro rodar de novo a qualquer hora. Desinstalar: `uv tool uninstall okami-agent`.
 
 <details><summary><b>Dev (rodar do código, sem instalar global)</b></summary>
 
@@ -145,11 +148,15 @@ Sem uv: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 <details><summary><b>Docker (qualquer SO)</b></summary>
 
 ```bash
-make docker-build                                            # docker build -f deploy/Dockerfile
+make docker-build                                            # docker build -f deploy/Dockerfile (multi-stage, uv, non-root)
+docker compose -f deploy/docker-compose.yml run --rm okami setup   # primeira vez: configura providers
 docker compose -f deploy/docker-compose.yml run --rm okami doctor
 docker compose -f deploy/docker-compose.yml run --rm okami task "crie hello.txt" -e file_exists:hello.txt
 docker run --rm --entrypoint python okami-agent -m pytest -q  # roda a suíte na imagem Linux
 ```
+O estado (skills, agents, sessões, `.env`, credenciais — ou seja, `$OKAMI_HOME`) persiste no volume
+nomeado `okami-data` (montado em `/data`), independente do bind-mount do repo — sobrevive a
+`docker compose down` (só `down -v` apaga). Pra atualizar, `git pull` e rode `make docker-build` de novo.
 > Para um LMStudio na máquina host, aponte `api_base` para `http://host.docker.internal:PORT/v1`.
 </details>
 

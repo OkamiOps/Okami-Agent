@@ -277,9 +277,12 @@ if _HAS_TEXTUAL:
             if kind == "tool_start":                      # terminal VIVO: guarda a tool em execução p/ o _tick
                 self._running = (e.get("tool", ""), e.get("args") or {}, time.monotonic())
                 return                                    # (o card final, com resultado, vem no 'step')
+            secs = None
             if kind == "step":                            # terminou → some o indicador vivo; o card vai pro log
+                if self._running and self._running[0] == e.get("tool"):   # duração medida no CLIENTE
+                    secs = time.monotonic() - self._running[2]            # (tool_start→step; paralelo não tem)
                 self._running = None
-            block = _tui.tool_block(e, self._details)     # tool-card (edit→diff, write→código, etc.)
+            block = _tui.tool_block(e, self._details, secs=secs)  # tool-card (edit→diff, write→código, +tempo)
             if block is not None:
                 self.query_one("#log", RichLog).write(block)
 
@@ -627,6 +630,19 @@ if _HAS_TEXTUAL:
             except Exception:  # noqa: BLE001
                 return len(self.ep.session(self._cid).history) // 2
 
+        def _usage_fragment(self) -> str:
+            """'12K↑ 3K↓ · incluído' (ou custo estimado) p/ a barra de status — mesma fonte do /usage.
+            '' se ainda não contou nada, ou se der qualquer erro (custo é cosmético, nunca derruba a UI)."""
+            try:
+                pc = self.ep.cfg.provider() if self.ep.cfg else None
+                if pc is None:
+                    return ""
+                entry = self.ep.store.entry(self._cid)
+                return _tui.usage_fragment(entry, transport=pc.transport,
+                                           provider=self.ep.cfg.default_provider, model=pc.model)
+            except Exception:  # noqa: BLE001
+                return ""
+
         def _status_text(self):
             from rich.text import Text
             busy = self._busy()
@@ -653,6 +669,9 @@ if _HAS_TEXTUAL:
             t.append(f"· {turns} trocas ", style="#6c6d80")
             t.append(f"· ⏱ {_tui.fmt_elapsed(time.monotonic() - self._session_start)} ",
                      style="#6c6d80")                     # relógio da sessão (paridade StatusRule)
+            usage = self._usage_fragment()
+            if usage:
+                t.append(f"· {usage} ", style="#6c6d80")
             try:                                           # tarefas de fundo ativas (spawn/delegate)
                 nbg = len(getattr(self.ep, "_bg", {}) or {})
             except Exception:  # noqa: BLE001

@@ -126,6 +126,18 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
 
     _busy_since = [None]                          # quando o agente começou a pensar (p/ o elapsed ao vivo)
 
+    def _usage_fragment() -> str:
+        """'12K↑ 3K↓ · incluído' p/ o rodapé — mesma fonte do /usage. '' se nada contado ainda ou erro
+        (custo é cosmético, nunca derruba o REPL)."""
+        try:
+            pc = ep.cfg.provider() if ep.cfg else None
+            if pc is None:
+                return ""
+            return tui.usage_fragment(ep.store.entry(cid), transport=pc.transport,
+                                      provider=ep.cfg.default_provider, model=pc.model)
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _toolbar():
         if cid in ep._pending:                    # APROVAÇÃO pendente → barra BERRANTE (preto sobre amarelo)
             return ANSI("\x1b[1;30;43m " + _tr("chat.approval_bar",
@@ -138,12 +150,24 @@ def _run_repl(ep, cid, console, tui, *, model_label: str, ctx_pct) -> None:
         if _busy():                               # contador AO VIVO de quanto o agente está pensando (volta o elapsed)
             if _busy_since[0] is None:
                 _busy_since[0] = _t.monotonic()
-            state = f"🧠 {_tr('chat.toolbar.thinking', _default='thinking')}  {int(_t.monotonic() - _busy_since[0])}s"
+            live = getattr(ep, "_live_tool", None)   # tool RODANDO agora (setada pelo _on_event) → mostra
+            if live and live.get("tool"):            # ela em vez de "thinking" genérico (paridade TUI)
+                el = int(_t.monotonic() - live["t0"])
+                prev = tui._args_preview(live.get("args") or {})
+                state = f"{tui.tool_emoji(live['tool'])} {tui.tool_verb(live['tool'])}"
+                if prev:
+                    state += f" {prev}"
+                state += f"  {el}s"
+            else:
+                state = (f"🧠 {_tr('chat.toolbar.thinking', _default='thinking')}  "
+                         f"{int(_t.monotonic() - _busy_since[0])}s")
         else:
             _busy_since[0] = None
             state = "● " + _tr("chat.toolbar.ready", _default="ready")
         q = f"  ·  {len(inflight)} {_tr('chat.toolbar.queued', _default='queued')}" if inflight else ""
-        return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} {_tr('status.turns', _default='turns')}  ·  {state}{q}"
+        usage = _usage_fragment()
+        u = f"  ·  {usage}" if usage else ""
+        return ANSI(f" {model_label}  ·  ctx {pct}%  ·  {turns} {_tr('status.turns', _default='turns')}  ·  {state}{q}{u}"
                     f"    {_tr('chat.toolbar.keys', _default='Ctrl-C cancel · Ctrl-D exit')} ")
 
     # WIN3: SIGWINCH (resize) + /redraw — repinta limpo quando o terminal fica com lixo (reflow, glitch de
@@ -424,16 +448,29 @@ def chat(
                           + f"{tail}[/dim]")
             _expl["n"] = _expl["ok"] = 0
 
+    ep._live_tool = {"tool": None, "args": None, "t0": None}   # tool RODANDO agora → o toolbar lê isto
+    #   (mesma ideia do self._running da TUI, só que exposto no ep pq o toolbar mora em _run_repl)
+
     def _on_event(e: dict) -> None:               # progresso ao vivo: tool-calls, loop, compaction…
-        if e.get("kind") == "step":
+        import time as _time
+        kind = e.get("kind")
+        if kind == "tool_start":                  # anuncia ANTES de rodar → toolbar mostra ela viva
+            ep._live_tool = {"tool": e.get("tool", ""), "args": e.get("args") or {}, "t0": _time.monotonic()}
+            return
+        secs = None
+        if kind == "step":
             _step_log.append(e)                   # guarda TODO step (mesmo coalescido) p/ o /replay
-        if (e.get("kind") == "step" and e.get("tool") in _READ_TOOLS
+            live = ep._live_tool
+            if live.get("tool") == e.get("tool") and live.get("t0") is not None:
+                secs = _time.monotonic() - live["t0"]   # duração medida no cliente (tool_start→step)
+            ep._live_tool = {"tool": None, "args": None, "t0": None}
+        if (kind == "step" and e.get("tool") in _READ_TOOLS
                 and getattr(ep, "_details", "collapsed") == "collapsed"):
             _expl["n"] += 1
             _expl["ok"] += 1 if e.get("ok") else 0
             return                                # não imprime 1 linha por leitura — acumula
         _flush_expl()                             # qualquer outro evento → descarrega o resumo antes
-        block = tui.tool_block(e, getattr(ep, "_details", "collapsed"))   # edit→diff, write→código
+        block = tui.tool_block(e, getattr(ep, "_details", "collapsed"), secs=secs)  # edit→diff, +tempo
         if block is not None:
             console.print(block)
 

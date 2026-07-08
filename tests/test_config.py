@@ -116,3 +116,64 @@ def test_status_localizes_to_portuguese(tmp_path, monkeypatch):
         assert "Sessão" in out and "Próximos passos" in out and "Canais" in out
     finally:
         i18n.set_lang(None)
+
+
+# --- `okami config` menu: trocar provider/modelo (owner: friction #1 — não tinha como trocar fácil) ---
+
+def test_config_menu_lists_provider_model_entry(tmp_path, monkeypatch):
+    # o menu interativo do `okami config` (sem subcomando) precisa oferecer trocar provider/modelo
+    # e ver providers configurados, não só set/get/edit/show/check.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
+    import okami.menu as _menu
+    seen_choices = []
+
+    def _fake_select(title, choices, *, default=None):
+        if not seen_choices:
+            seen_choices.extend(list(choices))
+        return "sair"
+
+    monkeypatch.setattr(_menu, "_interactive", lambda: True)
+    monkeypatch.setattr(_menu, "select", _fake_select)
+    res = runner.invoke(app, ["config"])
+    assert res.exit_code == 0
+    values = [c[0] for c in seen_choices]
+    assert "provider" in values and "providers" in values
+
+
+def test_config_menu_provider_entry_dispatches_to_model_flow(tmp_path, monkeypatch):
+    # selecionar a entrada de provider/modelo no menu do config deve chamar o MESMO fluxo
+    # interativo do `okami model` (sem args) — não uma reimplementação.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
+    import okami.menu as _menu
+    picks = iter(["provider", "sair"])
+    monkeypatch.setattr(_menu, "_interactive", lambda: True)
+    monkeypatch.setattr(_menu, "select", lambda *a, **k: next(picks))
+
+    calls = []
+    import okami.cli.commands.model as _model_mod
+    monkeypatch.setattr(_model_mod, "model_cmd", lambda **kw: calls.append(kw))
+
+    res = runner.invoke(app, ["config"])
+    assert res.exit_code == 0
+    assert calls and calls[0] == {"token": None, "save": True, "as_json": False}
+
+
+def test_config_menu_provider_entry_headless_fallback(tmp_path, monkeypatch):
+    # sem TTY (picker do `okami model` não dá pra abrir), a entrada do menu degrada mostrando
+    # o provider/modelo atual + a dica `okami model <alias>` — igual aos outros ramos do menu.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "okami.yaml").write_text(_YAML, encoding="utf-8")
+    import okami.menu as _menu
+    monkeypatch.setattr(_menu, "_interactive", lambda: False)
+    from okami.cli.commands.config import _switch_provider_model
+    from rich.console import Console
+    import okami.cli.commands.config as _config_mod
+    import io
+    buf = io.StringIO()
+    monkeypatch.setattr(_config_mod, "console", Console(file=buf, force_terminal=False))
+    _switch_provider_model()
+    out = buf.getvalue()
+    assert "lmstudio" in out and "openai/x" in out
+    assert "okami model" in out

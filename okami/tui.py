@@ -616,13 +616,26 @@ def replay_view(steps: list[dict], n: int = 10):
     return Group(*blocks)
 
 
-def event_line(e: dict, detail: str = "collapsed") -> Text | None:
+def fmt_duration(secs: float) -> str:
+    """Duração curta de um tool-call: '340ms' (<1s) · '2.3s' (<60s) · '1m 05s' (paridade fmt_elapsed,
+    mas com precisão de ms — um tool-call típico dura frações de segundo, '0s' não diz nada)."""
+    s = max(0.0, float(secs))
+    if s < 1:
+        return f"{int(round(s * 1000))}ms"
+    if s < 60:
+        return f"{s:.1f}s"
+    m, rem = divmod(int(round(s)), 60)
+    return f"{m}m {rem:02d}s"
+
+
+def event_line(e: dict, detail: str = "collapsed", *, secs: float | None = None) -> Text | None:
     """Linha ao vivo p/ um evento do harness (tool-call, loop, compaction…). None = não mostrar.
 
     É o que faz o terminal sentir VIVO: em vez de 'pensando…' por 30s e cuspir tudo, mostra cada
     passo enquanto acontece — agora com EMOJI por tipo (🛠️ tool · 🔁 loop · 🧠 escalar…) p/ você bater
     o olho e saber o que tá rolando. `detail` (/details): hidden = só o final · collapsed = 1 linha por
-    passo (default) · expanded = com os args."""
+    passo (default) · expanded = com os args. `secs` (opcional): quanto a tool DEMOROU (tool_start→step,
+    medido no cliente) — vira um sufixo dim '· 340ms' no card final (paridade Hermes: timing por chamada)."""
     from rich.markup import escape                       # CONTEÚDO dinâmico (cmd/args/razão) pode ter '[/]'/
     k = e.get("kind")                                     # '[x]' → escapa SEMPRE, senão from_markup quebra o turno
     if k == "step":                                       # (MarkupError "closing tag '[/]' …"). Tags de estilo
@@ -637,8 +650,9 @@ def event_line(e: dict, detail: str = "collapsed") -> Text | None:
             ec = _exit_code_of(e.get("out") or "")
             if ec is not None:                            # escapa: '[exit N]' literal, não é tag de markup
                 fail_suffix = f" [{MUTE}]{escape(f'[exit {ec}]')}[/]"
+        dur_suffix = f" [{DIM}]· {escape(fmt_duration(secs))}[/]" if secs is not None else ""
         t = Text.from_markup(f"  {emoji} [{markc}]{mark}[/] [{SOFT}]{escape(str(e['tool']))}[/]{fail_suffix}"
-                             + (f" [{MUTE}]{escape(str(prev))}[/]" if prev else ""))
+                             + (f" [{MUTE}]{escape(str(prev))}[/]" if prev else "") + dur_suffix)
         return t
     if k == "approval_request":
         return Text.from_markup(f"  🔐 [{ORANGE}]{_tr('event.approval', _default='approval:')}[/] "
@@ -721,12 +735,13 @@ def _lang_for(path: str) -> str:
             "go": "go", "rs": "rust", "sql": "sql", "toml": "toml"}.get(ext, "text")
 
 
-def tool_block(e: dict, detail: str = "collapsed"):
-    """Card de um tool-call: a linha do event_line + (edição → DIFF colorido; escrita → conteúdo com
-    syntax; leitura/shell → preview da saída no modo expanded). Eventos não-step caem no event_line."""
+def tool_block(e: dict, detail: str = "collapsed", *, secs: float | None = None):
+    """Card de um tool-call: a linha do event_line (+ duração, se `secs` vier) + (edição → DIFF
+    colorido; escrita → conteúdo com syntax; leitura/shell → preview da saída no modo expanded).
+    Eventos não-step caem no event_line (secs é ignorado — só tool-call tem duração medida)."""
     if e.get("kind") != "step":
         return event_line(e, detail)
-    line = event_line(e, detail)
+    line = event_line(e, detail, secs=secs)
     if line is None:                                       # detail=hidden → suprime o passo
         return None
     from rich.console import Group
@@ -804,6 +819,23 @@ def fmt_elapsed(seconds) -> str:
         return f"{m}m {s}s"
     h, m = divmod(m, 60)
     return f"{h}h {m}m"
+
+
+def usage_fragment(entry: dict | None, *, transport: str, provider: str, model: str) -> str:
+    """Fragmento compacto 'Xin↑ Yout↓ · incluído|~$0.0123' p/ status bar/toolbar (tokens + custo
+    ACUMULADOS da sessão — mesma fonte do /usage, okami.llm.usage). '' se nada foi contado ainda
+    (sessão nova) — o chamador então NÃO mostra a fatia (não polui o rodapé com zero)."""
+    from okami.llm.usage import CanonicalUsage, estimate_cost, format_tokens
+    u = CanonicalUsage.from_dict((entry or {}).get("usage") or {})
+    if not u.total_tokens:
+        return ""
+    cr = estimate_cost(u, transport=transport, provider=provider, model=model)
+    frag = f"{format_tokens(u.input_tokens)}↑ {format_tokens(u.output_tokens)}↓"
+    if cr.status == "included":
+        frag += " · incluído"
+    elif cr.amount_usd is not None:
+        frag += f" · {cr.label}"
+    return frag
 
 
 def status_bar(*, model: str, ctx_pct: int, turns: int, elapsed: float) -> Text:

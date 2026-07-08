@@ -77,3 +77,56 @@ def test_tool_block_non_step_falls_back_to_event_line():
 def test_tool_block_hidden_suppresses_step():
     e = {"kind": "step", "tool": "read_file", "ok": True, "args": {"path": "a"}, "out": "x"}
     assert tui.tool_block(e, "hidden") is None
+
+
+# ----------------------------------------------------------------- tool duration (secs)
+def test_fmt_duration_sub_second_is_ms():
+    assert tui.fmt_duration(0.34) == "340ms"
+
+
+def test_fmt_duration_seconds_one_decimal():
+    assert tui.fmt_duration(2.3) == "2.3s"
+
+
+def test_fmt_duration_minutes():
+    assert tui.fmt_duration(65) == "1m 05s"
+
+
+def test_fmt_duration_never_negative():
+    assert tui.fmt_duration(-3) == "0ms"
+
+
+def test_event_line_shows_duration_when_secs_given():
+    e = {"kind": "step", "tool": "run_shell", "ok": True, "args": {"cmd": "ls"}, "out": "x"}
+    out = _render(tui.event_line(e, "collapsed", secs=1.234))
+    assert "1.2s" in out
+
+
+def test_event_line_omits_duration_when_secs_absent():
+    e = {"kind": "step", "tool": "run_shell", "ok": True, "args": {"cmd": "ls"}, "out": "x"}
+    out = _render(tui.event_line(e, "collapsed"))
+    assert "s[/]" not in out and "ms" not in out
+
+
+def test_tool_block_forwards_secs_to_event_line():
+    e = {"kind": "step", "tool": "read_file", "ok": True, "args": {"path": "a"}, "out": "x"}
+    out = _render(tui.tool_block(e, "collapsed", secs=0.5))
+    assert "500ms" in out
+
+
+# ----------------------------------------------------------------- usage_fragment (footer tokens+cost)
+def test_usage_fragment_empty_when_no_usage_yet():
+    assert tui.usage_fragment({}, transport="litellm", provider="minimax", model="MiniMax-M3") == ""
+    assert tui.usage_fragment(None, transport="litellm", provider="minimax", model="MiniMax-M3") == ""
+
+
+def test_usage_fragment_shows_included_for_subscription_transport():
+    entry = {"usage": {"input": 1200, "output": 300}}
+    frag = tui.usage_fragment(entry, transport="claude_cli", provider="anthropic", model="claude-opus-4-8")
+    assert "1.2K↑" in frag and "300↓" in frag and "incluído" in frag
+
+
+def test_usage_fragment_shows_estimated_cost_for_paid_transport():
+    entry = {"usage": {"input": 1_000_000, "output": 1_000_000}}
+    frag = tui.usage_fragment(entry, transport="litellm", provider="minimax", model="MiniMax-M3")
+    assert "1M↑" in frag and "1M↓" in frag and "$" in frag

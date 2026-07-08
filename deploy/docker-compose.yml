@@ -2,6 +2,7 @@
 #   docker compose -f deploy/docker-compose.yml build
 #   docker compose -f deploy/docker-compose.yml run --rm okami doctor
 #   docker compose -f deploy/docker-compose.yml run --rm okami task "crie hello.txt" -e file_exists:hello.txt
+#   docker compose -f deploy/docker-compose.yml run --rm okami setup      # configura (grava em /data → volume okami-data)
 # host.docker.internal aponta um LMStudio na máquina host (api_base: http://host.docker.internal:PORT/v1).
 services:
   okami:
@@ -9,10 +10,22 @@ services:
       context: ..                 # build a partir da RAIZ do repo (copia okami/, tests/, etc.)
       dockerfile: deploy/Dockerfile
     image: okami-agent
+    environment:
+      # $OKAMI_HOME dentro do container — o Dockerfile já fixa isto, repetido aqui só pra ficar
+      # explícito no compose (e sobrevive se alguém trocar o Dockerfile sem olhar aqui).
+      - OKAMI_HOME=/data
     volumes:
+      # Código do repo (dev loop: edite no host, roda no container sem rebuild).
       - ../:/app
+      # Estado do Okami (skills, agents, sessões, .env, credenciais, secrets.vault.json) — um
+      # volume NOMEADO, separado do bind-mount do repo acima, então sobrevive a
+      # `docker compose down` (só some com `down -v`) e não fica solto dentro do checkout.
+      - okami-data:/data
     working_dir: /app
     extra_hosts:
       - "host.docker.internal:host-gateway"
     stdin_open: true
     tty: true
+
+volumes:
+  okami-data:

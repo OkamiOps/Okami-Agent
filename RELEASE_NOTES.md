@@ -12,32 +12,31 @@
 
 ## A história desta release
 
-Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o dono não deixou a barra descer pra "manter
-paridade". A resposta veio direta: **"paridade não basta — acha onde o Hermes está na frente e
-ULTRAPASSA."**
+Depois da `v0.12.0-beta` fechar 3 gaps de uso real, o objetivo passou de "manter paridade" com o Hermes
+para **ultrapassar nos pontos onde ele ainda está na frente**.
 
-Fizemos o mapeamento pedido: 6 dimensões (mídia, gateway, TUI/humanização, harness/tools,
+Fizemos um mapeamento em 6 dimensões (mídia, gateway, TUI/humanização, harness/tools,
 memória/skills/plugins, computer/browser), comparando ponto a ponto com o Hermes. O resultado não foi
-unilateral — achamos os gaps reais que o dono já suspeitava (GPT Image via assinatura quebrado, qualidade
-de tool-call, skills, humanização, profundidade de browser, edição de mídia/PDF), mas também achamos
-onde **já estávamos na frente** e ninguém tinha documentado: HTML→PDF sem depender de Chromium (o Hermes
-depende), identidade partida em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) contra um blob genérico único do
-Hermes, checkpoints de sessão, cofre de segredo cifrado.
+unilateral — achamos gaps reais (GPT Image via assinatura quebrado, qualidade de tool-call, skills,
+humanização, profundidade de browser, edição de mídia/PDF), mas também achamos onde **já estávamos na
+frente** e ninguém tinha documentado: HTML→PDF sem depender de Chromium (o Hermes depende), identidade
+partida em 3 arquivos (`SOUL`/`VOICE`/`PERSONA`) contra um blob genérico único do Hermes, checkpoints de
+sessão, cofre de segredo cifrado.
 
 Esta release é a **primeira onda de implementação** desse backlog — 4 frentes em paralelo (mídia,
 segurança/quick-wins, hooks, browser) mais a costura entre elas.
 
-**O headline é o pedido #1 do dono**: geração de imagem nativa (GPT Image) estava **quebrada** — o código
-antigo postava pro endpoint REST pago (`api.openai.com/v1/images`), voltava `401` porque exige uma API
-key paga que o dono não tem e não quer usar (ele opera 100% via assinatura). Reescrevemos pra postar pro
-**endpoint da própria assinatura codex** (`chatgpt.com/backend-api/codex/responses`, tool
+**O headline é a geração de imagem nativa via assinatura**: geração de imagem (GPT Image) estava
+**quebrada** — o código antigo postava pro endpoint REST pago (`api.openai.com/v1/images`), voltava `401`
+porque exige uma API key paga separada, fora do modelo de assinatura em que o agente opera. Reescrevemos
+pra postar pro **endpoint da própria assinatura codex** (`chatgpt.com/backend-api/codex/responses`, tool
 `image_generation`, modelo `gpt-image-2`), com headers anti-Cloudflare corretos e resolução de
 `account_id` via fallback (o claim do JWT normalmente não vem preenchido). **Verificamos ao vivo**:
 gerou um PNG real de 861KB através da assinatura, texto→imagem e imagem→imagem na mesma chamada.
 
 ## ✨ Highlights
 
-- **GPT Image nativo via assinatura codex** (pedido #1 do dono) — estava quebrado (`401` no REST pago),
+- **GPT Image nativo via assinatura codex** — estava quebrado (`401` no REST pago),
   agora posta pro endpoint da assinatura; texto→imagem **e** imagem→imagem na mesma chamada;
   **verificado ao vivo** (PNG real, 861KB).
 - **`codex_headers.py`** (novo) — headers anti-Cloudflare (`originator`/UA `codex_cli_rs` +
@@ -61,7 +60,8 @@ gerou um PNG real de 861KB através da assinatura, texto→imagem e imagem→ima
 
 ## 🎨 Mídia — GPT Image nativo via assinatura
 
-O gap #1 do dono, agora fechado fim a fim (dependendo do fix de token-store em andamento — ver abaixo):
+O gap principal identificado no mapeamento, agora fechado fim a fim (dependendo do fix de token-store em
+andamento — ver abaixo):
 
 - `imagegen.py` reescrito: endpoint `chatgpt.com/backend-api/codex/responses` + tool `image_generation`
   (`gpt-image-2`) em vez do REST pago que dava `401`.

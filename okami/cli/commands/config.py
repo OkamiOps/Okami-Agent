@@ -105,6 +105,35 @@ def _redact(obj):
     return obj
 
 
+def _switch_provider_model() -> None:
+    """Dispara o MESMO fluxo interativo do `okami model` (sem args) — troca de provider/modelo por
+    alias, com persistência em okami.local.yaml via _write_model_override. Reusa okami/cli/commands/
+    model.py (não duplica a lógica de resolução/gravação, que mora em okami/llm/model_aliases.py).
+
+    Sem TTY: degrada mostrando o efetivo atual + dica de comando, igual aos outros ramos do menu."""
+    from okami import menu
+    from okami.cli.commands.model import _effective, model_cmd
+
+    cfg = _load()
+    if not menu._interactive():
+        pid, model, source = _effective(cfg)
+        console.print(f"🧠 [bold]{pid}[/bold] · {model}  [dim]({source})[/dim]")
+        console.print(_ui_hint("sem TTY — use: okami model <alias> (ex.: okami model sonnet)"))
+        return
+    model_cmd(token=None, save=True, as_json=False)
+
+
+def _ui_hint(msg: str) -> str:
+    from okami.cli import _ui
+    return _ui.hint(msg)
+
+
+def _show_providers() -> None:
+    """`ver providers configurados` — reusa o `okami providers` (basics.py), sem duplicar a listagem."""
+    from okami.cli.commands.basics import list_providers
+    list_providers(json_out=False)
+
+
 config_app = typer.Typer(invoke_without_command=True,
                          help=_tr("cli.config", _default="Config (hermes/openclaw-style): show/get/set/edit/path/check. "
                                   "No subcommand opens the interactive panel. Secrets→.env, rest→okami.local.yaml."))
@@ -235,10 +264,12 @@ def config_main(ctx: typer.Context) -> None:
     _render_config_view()
     from okami import menu
     if not menu._interactive():                       # script/pipe: só mostra (não trava pedindo input)
-        console.print(_ui.hint("show · get <k> · set <k> <v> · edit · path · check"))
+        console.print(_ui.hint("show · get <k> · set <k> <v> · edit · path · check · okami model <alias>"))
         return
     while True:
         pick = menu.select("config — o que fazer?", [
+            ("provider", "trocar provider/modelo (picker)", ""),
+            ("providers", "ver providers configurados", ""),
             ("set", "mudar um valor (segredo→.env, resto→local)", ""),
             ("get", "ler um valor", ""),
             ("edit", "abrir no editor ($EDITOR)", ""),
@@ -248,7 +279,11 @@ def config_main(ctx: typer.Context) -> None:
         ], default="set")
         if pick in (None, "sair"):
             return
-        if pick == "set":
+        if pick == "provider":
+            _switch_provider_model()
+        elif pick == "providers":
+            _show_providers()
+        elif pick == "set":
             key = menu.text("chave (ex.: memory.backend ou OPENAI_API_KEY)").strip()
             if not key:
                 continue
