@@ -29,6 +29,20 @@ from okami.llm.usage import as_completion
 from okami.memory import compaction as _compaction
 
 
+_ERR_NUM = _re.compile(r"0x[0-9a-fA-F]+|\b[0-9a-f]{8,}\b|-?\d+")   # hex, tokens longos, qualquer número
+_ERR_PATH = _re.compile(r"(/[\w.\-]+)+|[A-Za-z]:\\[\w.\\\-]+")      # caminho posix ou windows
+
+
+def _norm_err(s: str) -> str:
+    """Normaliza a mensagem de erro p/ a CHAVE do circuit breaker: tira o que VARIA entre tentativas da
+    mesma abordagem quebrada (porta/PID/errno/hex, /tmp/xxxx, caminho) → variantes cosméticas do mesmo
+    erro colidem e o breaker de 3x dispara (sem isto o modelo martela N workarounds sem nunca ser cortado)."""
+    s = (s or "")[:200].lower()
+    s = _ERR_PATH.sub("P", s)
+    s = _ERR_NUM.sub("#", s)
+    return " ".join(s.split())[:80]
+
+
 # BAIL: encerrar pedindo permissão / oferecendo um menu de próximos passos em vez de CONCLUIR. É o modo
 # de falha clássico do modelo fraco ("Responde com 1 ou 2 que eu sigo", "quer que eu já aplique…?",
 # "Posso seguir?"). Pego só os padrões DISTINTIVOS — não casa um relatório que de fato entregou.
@@ -1183,7 +1197,11 @@ class Harness:
             fail = classify_tool(res)
             self.events.emit("failure", scope="tool", tool=action.tool, kind=fail.kind.value,
                              action=fail.action.value, reason=fail.reason)
-            key = f"{action.tool}:{res.output[:60]}"
+            # CHAVE NORMALIZADA (fix flail 49-passos): antes chaveava o erro CRU → cada workaround gerava
+            # erro com porta/PID/path/tmp DIFERENTE (ex.: '-88 em /tmp/xY3 porta 8931' vs '.../zK9 8932'),
+            # a chave nunca colidia e o breaker de 3x NUNCA disparava — o modelo martelava 49 variações da
+            # MESMA abordagem quebrada. Agora números/hex/paths viram '#'/'P' → variantes cosméticas colidem.
+            key = f"{action.tool}:{_norm_err(res.output)}"
             self._failures[key] = self._failures.get(key, 0) + 1
             # determinístico (sandbox/bad_request) NÃO melhora repetindo → corta logo; senão, 3x.
             deterministic = fail.kind in (FailureKind.SANDBOX_DENY, FailureKind.BAD_REQUEST)
