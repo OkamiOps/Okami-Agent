@@ -42,6 +42,36 @@ def test_run_task_end_to_end_smoke(tmp_path, monkeypatch):
     assert t.state == TaskState.COMPLETE and "oi!" in (t.result or "")   # caminho REAL do gateway roda
 
 
+def test_run_task_accepts_gateway_hooks_set_no_interrupt(tmp_path, monkeypatch):
+    """REGRESSÃO (7939d6e): o gateway passa kw['set_no_interrupt'] mas run_task não tinha o param nem
+    **kwargs → TODO turno pelo gateway (Telegram) estourava TypeError, mascarado como '❌ error'. A suíte
+    só testava o caminho CLI (okami task), que não passa esse hook. Trava o contrato runner↔Harness p/
+    ESTE param (mesma armadilha do chat_id): tem que existir em run_task E em Harness.__init__."""
+    import inspect
+    import okami.llm.providers as prov
+    from okami.config import build_config
+    from okami.core import TaskState
+    from okami.core.harness.loop import Harness
+    from okami.llm.usage import Completion
+    from okami.runner import run_task
+
+    assert "set_no_interrupt" in inspect.signature(run_task).parameters
+    assert "set_no_interrupt" in inspect.signature(Harness.__init__).parameters
+
+    def _fake(cfg, messages, **kw):
+        return Completion(text='```json\n{"tool": "respond", "args": {"message": "ok"}}\n```',
+                          provider="p", model="m")
+    monkeypatch.setattr(prov, "complete_messages_ex", _fake)
+    monkeypatch.setattr(prov, "complete_messages", lambda *a, **k: _fake(*a, **k).text)
+
+    flags: list = []
+    cfg = build_config({"default_provider": "p", "providers": {"p": {"model": "m"}}})
+    # exatamente como o endpoint injeta: um setter de fase não-interruptível na sessão
+    t = run_task(cfg, tmp_path, "oi", surface="telegram", chat_id="telegram:1",
+                 set_no_interrupt=lambda v: flags.append(v))
+    assert t.state == TaskState.COMPLETE           # não crasha mais com o hook do gateway
+
+
 # ---------------------------------------------------------------- E2E: fallback de stream sem traceback
 def test_stream_fallback_warning_has_no_traceback():
     """Achado RODANDO o app: provider fora → o aviso 'stream instável; caindo no robusto' (fallback

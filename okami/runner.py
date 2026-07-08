@@ -172,6 +172,8 @@ def run_task(
     allow_paths: list | None = None,             # pastas extras liberadas além do workspace (config tools.allow_paths)
     remote=None,                                 # alvo de execução REMOTO (RemoteTarget) — FS/shell rodam LÁ
     set_remote=None,                             # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
+    set_no_interrupt=None,                        # hook p/ marcar fase não-interruptível na sessão (compactação/
+                                                 # subagente) → gateway demota /busy interrupt p/ queue. None = CLI.
     core_block: str | None = None,               # #10: identidade/memória JÁ renderizada (review reusa a do pai →
                                                  # prefixo byte-idêntico = prefix-cache + pula a re-leitura do disco)
     emit: Callable[[str], None] = lambda m: None,
@@ -427,6 +429,8 @@ def run_task(
         _hkw["remote"] = remote
     if set_remote is not None:        # persiste o alvo na sessão (sobrevive ao turno)
         _hkw["set_remote"] = set_remote
+    if set_no_interrupt is not None:  # marca fase sensível (compactação/subagente) → demote guard no gateway
+        _hkw["set_no_interrupt"] = set_no_interrupt
     try:
         harness = Harness(generate, t, ws, **_hkw)
     except TypeError:                 # ctor ainda sem `notify`/`clarify` (landing paralelo) → fail-open

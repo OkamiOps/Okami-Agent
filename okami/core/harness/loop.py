@@ -267,6 +267,9 @@ class Harness:
         clarify=None,                   # hook BLOQUEANTE: pergunta ao dono e devolve a resposta (#8 item 1)
         remote=None,                    # alvo de execução remoto (RemoteTarget) — FS/shell rodam LÁ
         set_remote=None,                # hook p/ persistir o alvo remoto na sessão (sobrevive ao turno)
+        set_no_interrupt=None,          # hook p/ marcar fase NÃO-interruptível na sessão (compactação/subagente):
+                                        # enquanto True o gateway demota /busy interrupt → queue (não corta no meio
+                                        # de um passo sensível). None = sem sessão (CLI puro) → no-op.
         stream_tokens: bool = False,    # #16: streaming token-a-token → emite eventos 'token' ao gerar
         native_tools: bool = False,     # provider honra function-calling NATIVO (probe confirmou) → ramo nativo do prompt
     ):
@@ -282,6 +285,7 @@ class Harness:
         # exige passar approve explícito (ex.: yolo do gateway). Não-sensível roda normal (não chama isto).
         self.approve = approve if approve is not None else (lambda req: False)
         self.cancel = cancel or (lambda: False)       # /stop do gateway (§13)
+        self._set_no_interrupt = set_no_interrupt or (lambda v: None)   # marca fase sensível na sessão (no-op no CLI)
         self.system_extra = system_extra  # skills forçadas / sections (§4.2, §8)
         self.core_block = core_block      # .md sempre injetados: AGENTS/USER/MEMORY (§6 tier core)
         self.memory = memory  # backend de memória (§6) — opcional
@@ -449,14 +453,20 @@ class Harness:
     def _compact(self, *, keep_tail: int = 6) -> int:
         """Compacta self.messages reinjetando a CHECKLIST operacional em aberto (item 9). Devolve o nº
         de fatos destilados. FAIL-OPEN com o kwarg pending_todos: uma implementação de compact que ainda
-        não conhece o parâmetro (stub de teste antigo / fork) é chamada sem ele — nunca quebra o turno."""
+        não conhece o parâmetro (stub de teste antigo / fork) é chamada sem ele — nunca quebra o turno.
+        Fase NÃO-interruptível: cortar o turno no meio de uma compactação corrompe o histórico (pares
+        tool_call/tool órfãos) → marca a sessão p/ o gateway demotar /busy interrupt → queue enquanto roda."""
+        self._set_no_interrupt(True)
         try:
-            self.messages, promoted = _compaction.compact(
-                self.messages, self.memory, keep_tail=keep_tail,
-                pending_todos=self._pending_todos())
-        except TypeError:                              # compact sem suporte a pending_todos → modo legado
-            self.messages, promoted = _compaction.compact(
-                self.messages, self.memory, keep_tail=keep_tail)
+            try:
+                self.messages, promoted = _compaction.compact(
+                    self.messages, self.memory, keep_tail=keep_tail,
+                    pending_todos=self._pending_todos())
+            except TypeError:                          # compact sem suporte a pending_todos → modo legado
+                self.messages, promoted = _compaction.compact(
+                    self.messages, self.memory, keep_tail=keep_tail)
+        finally:
+            self._set_no_interrupt(False)
         return promoted
 
     # --- audit + budget de resultado de tool (Sprint 2) ---------------------
