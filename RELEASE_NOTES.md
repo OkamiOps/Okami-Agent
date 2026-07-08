@@ -1,7 +1,6 @@
-# Okami Agent — `v0.11.0-beta` "As Três Reclamações" 🐺
+# Okami Agent — `v0.12.0-beta` "O Fluxo Real" 🐺
 
-**1 commit denso · 5 ondas paralelas** · suíte **3.364 → 3.443 testes** · lançada no **MESMO DIA** da
-`v0.10.0-beta` (2026-07-08).
+**3 commits · suíte 3.468 → 3.500 testes** · lançada **2026-07-08**.
 
 > ⚠️ **Beta.** A superfície de comandos e config ainda pode mudar até a GA. Recomendado para uso real
 > (inclusive em VPS 24/7) — mas rode `okami policy check --strict` antes de expor publicamente. Feedback
@@ -13,90 +12,131 @@
 
 ## A história desta release
 
-A `v0.10.0-beta` saiu de manhã, promovida por maturidade depois da auditoria E2E vs Hermes. No mesmo dia,
-o dono trouxe **3 reclamações diretas**, de uso real, sem rodeio:
+Depois da `v0.11.0-beta`, o dono não deixou passar: **"você fala que estamos em paridade e eu trago
+vários pontos onde estamos anos-luz atrás do Hermes."** Não veio de auditoria de código — veio de operar
+o agente de verdade, no dia a dia, e sentir a distância que o diff não mostra.
 
-1. **"Não consigo trocar fácil de provider ou de modelo."** Cada canal (CLI, `/model` no Telegram,
-   config) resolvia alias de um jeito diferente — sem validação, sem lista, sem persistência.
-2. **"Nossas chamadas de tools são péssimas."** Todo parâmetro de "modo" era texto livre pro modelo
-   chutar — sem `enum`, sem `default`, sem `min`/`max`. Um bug real disso: `spawn.background` sem tipo
-   declarado deixava a string `"false"` virar `True` no runtime.
-3. **"Não preciso de skill para pokemon, mas seria legal skill pra workflow, pra pesquisa e etc."** As
-   skills builtin eram mais demonstração do que ferramenta do dia a dia.
+Três gaps concretos, de uso real:
 
-Cada reclamação virou uma análise curta e uma onda de correção — e no meio do caminho apareceram mais duas
-frentes que dependiam da mesma limpeza: a cadeia de fuzzy-match do `edit` (pra parar de escolher sozinho
-entre matches ambíguos) e o hook `transform_tool_result` nos plugins (pra security-guidance virar aviso em
-vez de veto mudo). Cinco ondas, um commit, um dia.
+1. **"Não dá pra corrigir o agente NO MEIO do turno sem cancelar tudo."** O único jeito de intervir era
+   `/busy` interrupt: cancela e recomeça do zero — perde o progresso do turno inteiro por um ajuste
+   pequeno.
+2. **"Assinatura/token-plan não pode depender de eu logar via CLI."** O dono achava que o onboarding de
+   provider exigia CLI local pra assinatura — o que inviabiliza operar 100% remoto.
+3. **"Não consigo mandar uma chave pelo chat quando não tenho acesso ao `.env`."** Numa VPS remota, editar
+   `.env` na mão não é sempre possível — e mandar a chave crua pro modelo ver não é aceitável.
 
-**Validação de ponta a ponta:** rodamos o cenário real de novo com minimax — task terminou `COMPLETE` com
-auto-verificação mecânica (`od`/`wc`/`sha256`), e no meio da execução o próprio agente **interceptou e
-corrigiu sozinho** um bug de `echo -n` que teria corrompido o output. É o tipo de correção que só aparece
-quando o schema da tool é rico o suficiente pra o modelo perceber que algo saiu errado.
+No meio de mapear o gap #1, apareceu uma coisa pior: **uma regressão crítica autoinfligida** pela própria
+onda de auditoria da `v0.10.0-beta`. `run_task`/`Harness` não aceitavam o parâmetro `set_no_interrupt`
+que o endpoint do gateway já injetava desde `7939d6e` — resultado, **todo turno vindo do Telegram
+estourava `TypeError`**, mascarado como um simples `❌ error`. O E2E anterior só cobria o caminho CLI
+(`okami task`), que não passa por esse hook — nunca pegou. Corrigida primeiro, antes de qualquer feature
+nova.
+
+**Honestidade em vez de spin**: a alegação de "paridade com Hermes" das últimas releases era real pra
+auditoria de código — mas **superestimada pra uso real**. Os 3 gaps acima só apareceram operando o agente
+de verdade, não lendo diff. Esta release fecha essa lacuna e assume o erro.
 
 ## ✨ Highlights
 
-- **`okami model`** — comando novo: picker interativo, switch direto, `list --json`. Resolver único
-  (`okami/llm/model_aliases.py`) com aliases semânticos (`sonnet`, `opus`, `haiku`, `codex`, `gpt`,
-  `minimax`, `mimo`, `grok`, …) e tiers dinâmicos `fast`/`smart`, validados contra o catálogo de
-  providers — extensível via `model_aliases:` no yaml.
-- **`/model` no Telegram usa o MESMO resolver** — ganhou `--save` (persiste em `okami.local.yaml`) e
-  `/models` numerado, pra trocar de modelo do celular sem digitar nome completo.
-- **Typo de alias vira erro com sugestão** (did-you-mean) em vez de aplicar silenciosamente um override
-  errado.
-- **Schema de tool rico** — `to_openai_schema` agora emite `enum`/`default`/`minimum`/`maximum`; antes
-  todo parâmetro de modo era texto livre e o modelo chutava. Corrigido em `search_files`, `spawn_jobs`,
-  `todo_write`, `spawn`, `manage_skill`, `browse`.
-- **Bug real corrigido**: `spawn.background` sem tipo `boolean` fazia a string `"false"` virar `True`.
-- **Edit ganha 3 estratégias fuzzy novas** (`escape_normalized`, `trimmed_boundary`, `block_anchor`) —
-  paridade com a cadeia de 9 estratégias do Hermes; mais de 1 match continua sendo tratado como ambíguo,
-  o edit nunca escolhe sozinho. Did-you-mean top-3 com número de linha.
-- **4 skills builtin práticas**: `watchers` (RSS/GitHub/JSON com watermark dedup — base do "me avisa
-  quando X mudar"), `pesquisa-web` com scripts de arxiv+wikipedia, `stocks` (Yahoo Finance sem API key),
-  `github` (CI/merge/issues, `gh`-first).
-- **`security-guidance` vira aviso, não veto mudo** — o hook `transform_tool_result` anexa o aviso ao
-  resultado da tool; o próprio modelo vê e se autocorrige, em vez de a tool simplesmente falhar sem
-  explicação.
-- **`todo_write`** ganha leitura sem args, merge por `id`, status `cancelled` (paridade com o
-  `TODO_SCHEMA` do Hermes).
+- **Regressão crítica corrigida**: `run_task`/`Harness.__init__` agora aceitam `set_no_interrupt` —
+  encerra o `TypeError` que quebrava TODO turno pelo gateway do Telegram desde a `v0.10.0-beta`.
+- **Efeito colateral bom**: o demote guard do `/busy` interrupt — código morto até agora, nada setava
+  `no_interrupt=True` — **passa a funcionar de verdade**; `_compact()` marca a compactação como fase
+  não-interrompível.
+- **`/steer <texto>`** (novo) — injeta uma mensagem direta do usuário no turno em andamento **sem
+  cancelar** (marcador anti prompt-injection + nota de trust no system prompt); `/busy steer` faz toda
+  mensagem nova durante um turno virar steer em vez de interromper.
+- **`Session.pending_steer`** nunca perde a mensagem: drena após cada resultado de tool, defere se não há
+  onde anexar; `cancel`/`stop`/`retry` limpam o pendente.
+- **Onboarding de provider desbloqueado** — diagnóstico revelou que minimax/mimo/grok já eram `api_key`
+  direto e Codex já era OAuth device-flow nativo; o gap real era descoberta, não arquitetura. Presets
+  novos: `minimax-oauth` (assinatura), `minimax-cn` (região China), `xai-oauth` (SuperGrok/Premium+),
+  `custom` reetiquetado como "traga seu próprio provider".
+- **Segredo via chat** — dono remoto sem acesso ao `.env` manda a API key no Telegram; detecção no
+  INBOUND do gateway ANTES do modelo ver, cofre cifrado (`Fernet`, só-ciphertext, 0600), `deleteMessage`
+  automático e confirmação — o modelo só vê "🔐 guardei a credencial X", **nunca o valor cru**.
+- **Bug de ordering fechado**: redação da resposta agora roda ANTES de persistir (antes vazava no
+  transcript/histórico).
+- **+40 testes de segurança** cobrindo o cofre e a detecção de segredo inline.
 
-## 🔀 Troca de modelo
+## 🔥 Regressão — gateway crashava TODO turno
 
-- `okami/llm/model_aliases.py`: resolver único de alias/tier, validado contra o catálogo de providers.
-- `okami model`: picker / switch / `list --json`.
-- `/model` no gateway usa o mesmo resolver, com `--save` e `/models` numerado.
-- Did-you-mean em vez de override silencioso em typo de alias.
+Regressão da própria onda P0 (`7939d6e`, `v0.10.0-beta`): o endpoint do gateway injeta
+`kw['set_no_interrupt']`, mas `run_task` não tinha o parâmetro nem `**kwargs` — toda run pelo gateway
+(Telegram) estourava `TypeError`, mascarado como `❌ error`. O E2E só cobria o caminho CLI (`okami task`),
+que não passa esse hook — o gateway real ficou quebrado sem ninguém perceber.
 
-## 🛠️ Tools
+- `run_task` ganha `set_no_interrupt`, encadeado no `_hkw` (mesmo padrão do `set_remote`).
+- `Harness.__init__` aceita e guarda (`self._set_no_interrupt`, no-op no CLI).
+- `_compact()` passa a marcar a compactação como fase não-interrompível — o demote guard do `/busy`
+  interrupt, morto desde sempre, agora funciona de verdade.
+- Regressão travada em `tests/test_it11_fixes.py` (contrato runner↔Harness).
 
-- `to_openai_schema` emite `enum`/`default`/`minimum`/`maximum` (`arg_constraints`), aplicado em 6 tools.
-- `spawn.background`: bug de tipo booleano corrigido (`"false"` virava `True`).
-- `todo_write`: leitura sem args, merge por `id`, status `cancelled`.
+## 🎯 `/steer` — corrige o turno sem cancelar
 
-## ✏️ Edit
+Antes só existia `/busy` interrupt: cancela o turno em andamento e recomeça do zero. Bom pra "para tudo",
+péssimo pra "ajusta uma coisa pequena sem perder o progresso".
 
-- Cadeia de estratégias fuzzy: `escape_normalized`, `trimmed_boundary`, `block_anchor` — paridade com o
-  Hermes; ambiguidade nunca é resolvida por escolha automática.
-- Did-you-mean top-3 com números de linha; `read_file` ganha `line_numbers` opt-in.
+- `/steer <texto>`: injeta uma **MENSAGEM DIRETA DO USUÁRIO** no contexto do turno já rodando, com
+  marcador anti prompt-injection e uma nota explícita de trust no system prompt.
+- `/busy steer`: modo em que toda mensagem nova chegando durante um turno vira steer automaticamente, em
+  vez de disparar o interrupt.
+- `Session.pending_steer` + `steer_source` encadeados `run_task → Harness` (mesmo padrão do
+  `set_no_interrupt`); drenado após cada resultado de tool; se não houver onde anexar no momento, fica
+  **deferido** (nunca perdido); `cancel`/`stop`/`retry` limpam o steer pendente.
 
-## 🧩 Skills
+## 🔑 Onboarding de provider — assinatura/token-plan sem CLI
 
-- `watchers`: RSS/GitHub/JSON com poll + watermark dedup, pra cron → Telegram.
-- `pesquisa-web`: scripts de arxiv + wikipedia com HTTP compartilhado.
-- `stocks`: Yahoo Finance sem API key.
-- `github`: CI/merge/issues, `gh`-first com fallback.
-- Frontmatter `requires_tools`/`fallback_for_tools` esconde skill sem tooling disponível.
+Diagnóstico honesto: Okami já não dependia de CLI local pra minimax/mimo/grok (já `api_key` direto) nem
+pro Codex (já OAuth device-flow nativo) — o gap era **descoberta**, não arquitetura.
 
-## 🔌 Plugins
+- Presets novos em `provider_catalog.py`: `minimax-oauth` (assinatura), `minimax-cn` (região China,
+  `api.minimaxi.com`), `xai-oauth` (SuperGrok/Premium+, `client_id` real).
+- `custom` reetiquetado como "traga seu próprio provider" (token-plan / API-key / endpoint
+  OpenAI-compatível).
+- Nenhum transport novo — só torna visível o que já existia.
 
-- Hook `transform_tool_result`: não-bloqueante, componível, isolado por plugin.
-- `security-guidance`: veto vira aviso anexado ao resultado da tool.
+## 🔐 Segredo via chat
+
+Cenário real: dono remoto sem acesso ao `.env` manda a chave direto no Telegram. Escolhas travadas do
+dono: **"salvar, apagar e confirmar"** + **"só no cofre, nunca no LLM"**.
+
+- Detecção no **INBOUND do gateway, ANTES do modelo ver** (`okami/core/redact.py`): prefixos de chave
+  conhecidos (`ghp_`/`sk-`/`xai-`/`AKIA`/…) + padrão `NOME=valor` com keyword sensível e valor ≥12 chars
+  sem espaço; guard contra falso-positivo (frase natural tipo "a senha é X" e valores curtos não
+  disparam).
+- Cofre cifrado novo (`okami/core/secretvault.py`): **Fernet**, chave 32B em `$OKAMI_HOME/.secret_key`
+  (0600, lazy), vault JSON **só-ciphertext** (0600, escrita atômica); `resolve_secret` resolve
+  `vault > env > .env`; `apply_vault_to_environ` popula `os.environ` no boot (`config._load_env`) —
+  providers/oauth leem do cofre sem precisar editar nada.
+- Fluxo: `vault_set` → `deleteMessage` no Telegram → confirmação `🔐 guardei a credencial X` → texto
+  sanitizado in-place segue pro histórico/`run_task` — **o modelo vê só a nota, nunca o valor**.
+- Bug de ordering corrigido: `redact(reply)` rodava DEPOIS de persistir — vazava no transcript/histórico;
+  agora roda antes.
+- Nova dependência: `cryptography>=42`.
+
+## 🔒 Nota de segurança
+
+O valor cru da credencial **nunca entra no contexto do modelo** em nenhum ponto do fluxo — nem no goal do
+`run_task`, nem no histórico, nem na resposta antes da redação. Verificação independente confirmou: valor
+cru ausente do disco (só ciphertext no vault, permissão 0600), sem falso-positivo na detecção de
+linguagem natural. +40 testes de segurança cobrindo cofre + detecção inline.
+
+## ⚠️ Beta — sobre a alegação de paridade
+
+- A "paridade com Hermes" reportada nas releases anteriores era real pra **auditoria de código**, mas
+  **superestimada pra uso real** — os 3 gaps desta release (e a regressão do gateway) só apareceram
+  operando o agente de verdade, não lendo diff. Esta release fecha essa lacuna especificamente.
+- Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
+- Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
+  publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
+- **Em andamento, fora desta release**: 3 fixes de provider (crash de streaming do Claude, token store do
+  401 no Codex, parser do `claude_cli`) rodando em sessões separadas — devem sair numa próxima patch.
 
 ## ✅ Release verification
 
-- **3.443 testes** passando (`uv run pytest -q`), subindo de 3.364.
-- E2E real (minimax): task `COMPLETE` com auto-verificação mecânica (`od`/`wc`/`sha256`), incluindo
-  auto-correção de um bug de `echo -n` no meio da execução.
+- **3.500 testes** passando (`uv run pytest -q`), subindo de 3.468.
 - Reprodução local:
   ```bash
   uv sync --frozen
@@ -105,14 +145,6 @@ quando o schema da tool é rico o suficiente pra o modelo perceber que algo saiu
   uv run bandit -c pyproject.toml -r okami -q
   uv run okami policy check --strict
   ```
-
-## ⚠️ Beta — o que ainda pode mudar
-
-- Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
-- Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
-  publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
-- **Em andamento, fora desta release**: 3 fixes de provider (crash de streaming do Claude, token store do
-  401 no Codex, parser do `claude_cli`) rodando em sessões separadas — devem sair numa próxima patch.
 
 ## 🚀 Instalação / upgrade
 
@@ -130,8 +162,9 @@ okami doctor    # confirma que a versão instalada bate com o pyproject (sem ver
 okami chat      # conversa no terminal
 ```
 
-Nenhuma migração manual de config é necessária — `okami.yaml`/`okami.local.yaml` existentes continuam
-válidos.
+Nova dependência nesta release: **`cryptography>=42`** (cofre de segredos) — `uv sync`/`pip install -U`
+já resolve, nenhuma migração manual de config é necessária. `okami.yaml`/`okami.local.yaml` existentes
+continuam válidos.
 
 ## 📄 License
 

@@ -10,12 +10,12 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
-![version](https://img.shields.io/badge/version-0.11.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.12.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3443%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-3500%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,28 +24,28 @@ ou onde você quiser.
 
 ---
 
-> 🐺 **Beta público (`v0.11.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
+> 🐺 **Beta público (`v0.12.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
 > comandos/config ainda pode mudar até a GA — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md) e as
 > [RELEASE_NOTES](RELEASE_NOTES.md).
 
-> ### ✨ Novo no `0.11.0-beta`
-> Lançada no MESMO DIA da `v0.10.0-beta` — 1 commit denso, 5 ondas paralelas, motivada por 3 reclamações
-> diretas do dono: difícil trocar de provider/modelo, chamadas de tools péssimas, e skills builtin sem
-> uso prático. Suíte: **3.364 → 3.443 testes**.
-> - **`okami model`** — comando novo: picker interativo, switch direto, `list --json`. Resolver único
->   (`okami/llm/model_aliases.py`) com aliases semânticos (`sonnet`, `opus`, `haiku`, `codex`, `gpt`,
->   `minimax`, `mimo`, `grok`, …) e tiers dinâmicos `fast`/`smart`. `/model` no Telegram usa o mesmo
->   resolver, ganhou `--save` e `/models` numerado.
-> - **Schema de tool com contratos reais** — `to_openai_schema` agora emite `enum`/`default`/`minimum`/
->   `maximum`; achou um bug real: `spawn.background` sem tipo booleano fazia a string `"false"` virar
->   `True` em runtime.
-> - **Edit ganha 3 estratégias fuzzy novas** (`escape_normalized`, `trimmed_boundary`, `block_anchor`),
->   paridade com a cadeia de 9 estratégias do Hermes; ambiguidade continua nunca sendo resolvida sozinha.
-> - **4 skills builtin práticas**: `watchers` (RSS/GitHub/JSON com dedup), `pesquisa-web` com scripts de
->   arxiv+wikipedia, `stocks` (Yahoo Finance sem API key), `github` (CI/merge/issues).
-> - **`security-guidance` vira aviso, não veto mudo** — o hook `transform_tool_result` anexa o aviso ao
->   resultado da tool; o modelo vê e se autocorrige.
+> ### ✨ Novo no `0.12.0-beta`
+> O dono não deixou passar: "você fala que estamos em paridade e eu trago vários pontos onde estamos
+> anos-luz atrás do Hermes" — 3 gaps de uso real que auditoria de código não pega, mais uma regressão
+> crítica autoinfligida achada no meio do caminho. Suíte: **3.468 → 3.500 testes**.
+> - **Fix crítico**: `run_task`/`Harness` agora aceitam `set_no_interrupt` — fecha um `TypeError` que
+>   estava derrubando **TODO turno do gateway do Telegram** desde a `v0.10.0-beta` (mascarado como erro
+>   genérico; o E2E só-CLI nunca pegou).
+> - **`/steer <texto>`** (novo) — injeta mensagem no turno já em andamento, **sem cancelar**; `/busy
+>   steer` faz toda mensagem nova durante um turno virar steer em vez de interromper.
+> - **Onboarding de provider desbloqueado** — minimax/mimo/grok já eram `api_key` direto e Codex já era
+>   OAuth device-flow nativo; o gap real era descoberta no menu. Presets novos: `minimax-oauth`,
+>   `minimax-cn`, `xai-oauth`.
+> - **Segredo via chat** — manda a API key direto no Telegram quando não tem acesso ao `.env`; detectado
+>   no inbound do gateway antes do modelo ver, guardado num cofre cifrado (`Fernet`, só-ciphertext,
+>   0600), mensagem apagada, modelo vê só a confirmação.
+> - Honestidade: a alegação de "paridade" valia pra auditoria de código, mas era superestimada pra uso
+>   real — esta release fecha essa lacuna e assume a regressão.
 
 O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
 
@@ -313,6 +313,7 @@ mean"):
 | categoria | comandos |
 |---|---|
 | sessão | `/new` `/stop` `/retry` `/compact` `/sessions` `/resume <n>` `/export [arq]` `/exit` |
+| controle | `/steer <texto>` (injeta no turno em andamento sem cancelar) `/busy steer` |
 | modelo | `/model [id]` `/models` `/think <nível>` |
 | identidade | `/feedback <texto>` `/persona <preset>` `/undo` `/like` `/dislike` `/different` |
 | info | `/help` `/commands` `/status` `/usage` `/tools` `/whoami` |

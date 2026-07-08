@@ -6,6 +6,68 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.12.0-beta] — 2026-07-08
+
+O dono não deixou passar: "você fala que estamos em paridade e eu trago vários pontos onde estamos
+anos-luz atrás do Hermes." Nada de auditoria de código — 3 reclamações de **uso real**, do jeito que só
+quem opera o agente no dia a dia acha. E no meio do caminho de mapear a primeira, apareceu uma regressão
+autoinfligida da própria onda de auditoria anterior (`v0.10.0-beta`): **todo turno pelo gateway do
+Telegram estava quebrado**. Suíte: **3.468 → 3.500 testes**.
+
+### 🔥 Regressão crítica — gateway crashava TODO turno (`da85c42`)
+- `run_task`/`Harness.__init__` não aceitavam `set_no_interrupt`, param que o endpoint do gateway injeta
+  desde a onda P0 (`7939d6e`) — `TypeError` mascarado como `❌ error` em CADA turno vindo do Telegram. O
+  E2E anterior só cobria o caminho CLI (`okami task`), que não passa esse hook — nunca pegou.
+- Corrigido: `run_task` ganha `set_no_interrupt`, encadeado no `_hkw` (padrão do `set_remote`);
+  `Harness.__init__` aceita e guarda (`self._set_no_interrupt`, no-op no CLI).
+- Efeito colateral bom: o demote guard do `/busy` interrupt — morto até agora, nada setava
+  `no_interrupt=True` — **passa a funcionar de verdade**: `_compact()` marca a compactação como fase
+  não-interrompível.
+- Regressão travada em `test_it11_fixes.py` (contrato runner↔Harness).
+
+### 🎯 `/steer` — injeta no turno em andamento sem cancelar (gap #1 do dono)
+- `/steer <texto>`: injeta uma **MENSAGEM DIRETA DO USUÁRIO** no contexto do turno já rodando (marcador
+  anti prompt-injection + nota de trust explícita no system prompt) — SEM cancelar. Ao lado do `/busy`
+  interrupt (cancela e recomeça), agora existe também `/busy steer` (toda mensagem nova durante um turno
+  vira steer em vez de interromper).
+- `Session.pending_steer` + `steer_source` encadeados `run_task → Harness` (mesmo padrão do
+  `set_no_interrupt`); drenado após cada resultado de tool; se não houver onde anexar, fica **deferido**
+  (nunca é perdido); `/cancel`, `/stop` e `/retry` limpam o steer pendente.
+
+### 🔑 Onboarding de provider — assinatura/token-plan sem refém de CLI (gap #2 do dono)
+- Diagnóstico: Okami já NÃO dependia de CLI pra minimax/mimo/grok (já eram `api_key` direto) nem pro
+  Codex (já OAuth device-flow nativo) — o gap real era **descoberta** no menu, não arquitetura.
+- Presets novos em `provider_catalog.py`: `minimax-oauth` (assinatura), `minimax-cn` (região China,
+  `api.minimaxi.com`), `xai-oauth` (SuperGrok/Premium+, `client_id` real); `custom` reetiquetado como
+  "traga seu próprio provider" (token-plan/API-key/endpoint OpenAI-compat).
+- Nenhum transport novo — só torna visível o que já existia.
+
+### 🔐 Segredo via chat — cofre cifrado, apaga e confirma (gap #3 do dono)
+- Cenário: dono remoto sem acesso ao `.env` manda a API key direto no Telegram, o agente guarda seguro e
+  continua. Escolhas travadas do dono: **"salvar, apagar e confirmar"** + **"só no cofre, nunca no LLM"**.
+- Detecção no **INBOUND do gateway, ANTES do modelo ver** (`okami/core/redact.py`): prefixos de chave
+  conhecidos (`ghp_`/`sk-`/`xai-`/`AKIA`/…) + padrão `NOME=valor` com keyword sensível e valor ≥12 chars
+  sem espaço; guard contra falso-positivo (linguagem natural tipo "a senha é X" e valores curtos não
+  disparam).
+- Cofre cifrado novo (`okami/core/secretvault.py`): Fernet, chave 32B em `$OKAMI_HOME/.secret_key` (0600,
+  lazy), vault JSON **só-ciphertext** (0600, escrita atômica); `resolve_secret` resolve `vault > env >
+  .env`; `apply_vault_to_environ` popula `os.environ` no boot (`config._load_env`) — providers/oauth leem
+  do cofre **sem editar nada**.
+- Fluxo de captura: `vault_set` → `deleteMessage` no Telegram → confirmação `🔐 guardei a credencial X` →
+  texto sanitizado in-place segue pro histórico/`run_task` (o modelo vê só a nota, nunca o valor).
+- Bug de ordering corrigido no caminho: `redact(reply)` rodava DEPOIS de persistir — vazava no
+  transcript/histórico; agora roda antes.
+- Nova dependência: `cryptography>=42`. +40 testes de segurança; verificação independente confirma valor
+  cru ausente do disco (só ciphertext, 0600), sem falso-positivo.
+
+### ⚠️ Sobre a paridade
+A alegação de "paridade com Hermes" das releases anteriores era real pra auditoria de código, mas
+**superestimada pra uso real** — os 3 gaps acima (e a regressão do gateway) só apareceram operando o
+agente de verdade, não lendo diff. Esta release fecha essa lacuna e assume o erro.
+
+### 🧪 Suíte
+- **3.500 testes passando** (3.468 → 3.500).
+
 ## [0.11.0-beta] — 2026-07-08
 
 Lançada no MESMO DIA da `v0.10.0-beta`. 1 commit (`4bfbc14`), mas denso: **5 ondas paralelas** atacando 3
@@ -640,6 +702,7 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.12.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.12.0-beta
 [0.11.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.11.0-beta
 [0.10.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.10.0-beta
 [0.1.0-alpha]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.1.0-alpha

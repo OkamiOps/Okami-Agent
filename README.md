@@ -10,12 +10,12 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 (skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
 or wherever you want.
 
-![version](https://img.shields.io/badge/version-0.11.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.12.0--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3443%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-3500%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,27 +24,28 @@ or wherever you want.
 
 ---
 
-> 🐺 **Public beta (`v0.11.0-beta`).** Okami is open for you to try. The command/config surface may
+> 🐺 **Public beta (`v0.12.0-beta`).** Okami is open for you to try. The command/config surface may
 > still change before GA — before exposing it publicly, run `okami policy check --strict` first.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
-> ### ✨ New in `0.11.0-beta`
-> Shipped the **same day** as `v0.10.0-beta` — 1 dense commit, 5 parallel waves, driven by 3 direct owner
-> complaints: hard to switch provider/model, tool calls were bad, and builtin skills weren't practical.
-> Suite: **3,364 → 3,443 tests**.
-> - **`okami model`** — new command: interactive picker, direct switch, `list --json`. Single resolver
->   (`okami/llm/model_aliases.py`) with semantic aliases (`sonnet`, `opus`, `haiku`, `codex`, `gpt`,
->   `minimax`, `mimo`, `grok`, …) and dynamic `fast`/`smart` tiers. `/model` on Telegram uses the same
->   resolver, gained `--save` and a numbered `/models`.
-> - **Tool schemas got real constraints** — `to_openai_schema` now emits `enum`/`default`/`minimum`/
->   `maximum`; a real bug this caught: `spawn.background` had no boolean type, so the string `"false"`
->   turned into `True` at runtime.
-> - **Edit gained 3 fuzzy-match strategies** (`escape_normalized`, `trimmed_boundary`, `block_anchor`),
->   parity with Hermes's 9-strategy chain; ambiguous matches are still never auto-resolved.
-> - **4 practical builtin skills**: `watchers` (RSS/GitHub/JSON polling with dedup), `pesquisa-web` with
->   arxiv+wikipedia scripts, `stocks` (Yahoo Finance, no API key), `github` (CI/merge/issues).
-> - **`security-guidance` now warns instead of silently vetoing** — the `transform_tool_result` hook
->   appends the warning to the tool result so the model sees it and self-corrects.
+> ### ✨ New in `0.12.0-beta`
+> The owner pushed back: "you claim parity but I keep hitting spots where we're light-years behind
+> Hermes" — 3 real-usage gaps a code audit doesn't catch, plus a critical self-inflicted regression found
+> along the way. Suite: **3,468 → 3,500 tests**.
+> - **Critical fix**: `run_task`/`Harness` now accept `set_no_interrupt` — closes a `TypeError` that was
+>   crashing **every single Telegram gateway turn** since `v0.10.0-beta` (masked as a generic error; the
+>   CLI-only E2E never caught it).
+> - **`/steer <text>`** (new) — inject a message into the turn that's already running, **without
+>   cancelling** it; `/busy steer` makes every new message during a turn act as steer instead of
+>   interrupting.
+> - **Provider onboarding unblocked** — minimax/mimo/grok were already `api_key`-based and Codex already
+>   native OAuth device-flow; the real gap was menu discoverability. New presets: `minimax-oauth`,
+>   `minimax-cn`, `xai-oauth`.
+> - **Secret via chat** — send an API key straight into Telegram when you have no `.env` access; detected
+>   at gateway inbound before the model ever sees it, stored in an encrypted vault (`Fernet`,
+>   ciphertext-only, 0600), message auto-deleted, model sees only a confirmation note.
+> - Honest framing: the "parity" claim held for code audits but was overstated for real-usage flows —
+>   this release closes that gap and owns the regression.
 >
 > Full notes in the [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md).
 
@@ -337,6 +338,7 @@ mean"):
 | category | commands |
 |---|---|
 | session | `/new` `/stop` `/retry` `/compact` `/sessions` `/resume <n>` `/export [file]` `/exit` |
+| control | `/steer <text>` (inject into the running turn without cancelling) `/busy steer` |
 | model | `/model [id]` `/models` `/think <level>` |
 | identity | `/feedback <text>` `/persona <preset>` `/undo` `/like` `/dislike` `/different` |
 | info | `/help` `/commands` `/status` `/usage` `/tools` `/whoami` |
