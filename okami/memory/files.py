@@ -22,7 +22,7 @@ _LAYERS = [
     (["VOICE.md"], "voice", "VOZ / TOM (VOICE.md)", 6000),
     # padrões de "chatbot de atendimento" a NUNCA soar — carregado SEMPRE (não é archival), logo
     # abaixo de VOICE.md (é a mesma família: como você fala vs. como você NUNCA fala).
-    (["ANTISLOP.md"], "antislop", "ANTISLOP / NUNCA SOE ASSIM (ANTISLOP.md)", 6000),
+    (["ANTISLOP.md"], "antislop", "ANTISLOP / NUNCA SOE ASSIM (ANTISLOP.md)", 9000),   # 29 padrões + voz + self-audit
     (["PERSONA.md", "PROFILE.md"], "persona", "PERSONA / SELF (PERSONA.md)", 6000),
     # auto-descobre convenções do projeto (estilo Hermes/Claude Code): 1º que existir.
     (["AGENTS.md", "CLAUDE.md", ".cursorrules", ".hermes.md"], "agents", "INSTRUÇÕES DO PROJETO", 4000),

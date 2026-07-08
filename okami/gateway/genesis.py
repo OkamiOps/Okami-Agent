@@ -26,16 +26,50 @@ Não use remember_user agora — o about_user do finish_setup já cuida disso.
 ==="""
 
 
+# Fallback determinístico (item real-usage-gaps): se o modelo é fraco em tool-calling (ex.: minimax) e
+# nunca chama `finish_setup`, o GENESIS_BLOCK ("não mencione isto ao usuário") reinjetaria PRA SEMPRE —
+# a pessoa fica presa num onboarding invisível, sem saída e sem entender por quê. Depois de N turnos com
+# a gênese pendente, sela sozinho (com o que já foi aprendido, ou vazio) e para de injetar.
+_GENESIS_MAX_TURNS = 6
+
+
 def genesis_pending(ws) -> bool:
     """Gênese pendente? (primeira config ainda não feita). Selado por .okami/genesis.done; um agente
-    pré-existente que JÁ conhece o usuário (tem USER.md) é considerado configurado e é selado na hora."""
+    pré-existente que JÁ conhece o usuário (tem USER.md) é considerado configurado e é selado na hora;
+    ou por N turnos sem o modelo chamar finish_setup (guarda anti-loop de onboarding, ver _GENESIS_MAX_TURNS)."""
     ws = Path(ws)
     if (ws / ".okami" / "genesis.done").exists():
         return False
     if (ws / "USER.md").exists():            # já conhece a pessoa → não re-onboarda; sela uma vez
         _seal_genesis(ws)
         return False
+    if _genesis_turn_count(ws) >= _GENESIS_MAX_TURNS:
+        _seal_genesis(ws)                    # modelo nunca chamou finish_setup → sela sozinho, não trava o usuário
+        return False
     return True
+
+
+def bump_genesis_turn(ws) -> int:
+    """Conta mais um turno com a gênese pendente — chamado 1x por turno pelo gateway, só quando o
+    GENESIS_BLOCK foi de fato injetado. Persistido em .okami/genesis_turns (sobrevive a restart)."""
+    ws = Path(ws)
+    n = _genesis_turn_count(ws) + 1
+    marker = ws / ".okami" / "genesis_turns"
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(n), encoding="utf-8")
+    except OSError as e:
+        from okami import log
+        log.warn(f"genesis: não consegui gravar genesis_turns ({e}) — o fallback de N turnos pode não disparar.")
+    return n
+
+
+def _genesis_turn_count(ws) -> int:
+    p = Path(ws) / ".okami" / "genesis_turns"
+    try:
+        return int((p.read_text(encoding="utf-8") or "0").strip() or "0")
+    except (OSError, ValueError):
+        return 0
 
 
 def _seal_genesis(ws) -> None:

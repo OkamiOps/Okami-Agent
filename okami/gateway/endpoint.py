@@ -16,7 +16,7 @@ from typing import Callable
 from okami.core.approval import smart_judge        # juiz LLM de aprovação no modo smart (item 13)
 from okami.core.redact import redact               # DLP de saída (#7 item 2): mascara segredo antes do send
 from okami.gateway.endpoint_commands import EndpointCommandsMixin
-from okami.gateway.genesis import GENESIS_BLOCK, _history_block, genesis_pending
+from okami.gateway.genesis import GENESIS_BLOCK, _history_block, bump_genesis_turn, genesis_pending
 from okami.gateway.sessions import TranscriptStore
 from okami.i18n import t as _tr
 
@@ -390,6 +390,35 @@ class AgentEndpoint(EndpointCommandsMixin):
         except Exception:  # noqa: BLE001 — compaction é best-effort
             from okami import log
             log.dbg("compaction falhou", exc_info=True)
+
+    def _maybe_auto_title(self, chat_id, s: Session) -> None:
+        """Título automático (paridade Hermes maybe_auto_title): dispara só na 1ª troca da conversa e só
+        se ninguém setou um título à mão (/title sempre vence — nunca pisamos nele). Roda em thread própria
+        via self._spawn — NUNCA adiciona latência ao turno (mesmo princípio de _maybe_compact/aux_complete
+        em fundo, item 57). Em teste, spawn=lambda fn: fn() torna isto síncrono e determinístico."""
+        if self.cfg is None or s.title:
+            return
+        n = int(self.store.entry(chat_id).get("node_count", 0))
+        if n > 2 or len(s.history) < 2:              # só na 1ª troca (1 USER + 1 AGENTE = node_count 2)
+            return
+        user_text = s.history[-2][1] if s.history[-2][0] == "USER" else ""
+        assistant_text = s.history[-1][1]
+
+        def _job(cid=chat_id, u=user_text, a=assistant_text) -> None:
+            from okami.gateway.title import generate_title
+            title = generate_title(self.cfg, u, a)
+            if not title:
+                return
+            cur = self.store.entry(cid)
+            if cur.get("title"):                      # corrida: /title manual chegou antes → não pisa
+                return
+            self.store.update_entry(cid, title=title)
+            with self._sessions_lock:
+                live = self.sessions.get(str(cid))
+                if live is not None and not live.title:
+                    live.title = title
+
+        self._spawn(_job)
 
     def _observe_llm(self, chat_id, s: "Session") -> None:
         """A cada N turnos (persona.llm_every), uma leitura mais RICA por LLM (pega sarcasmo pelo tom,
@@ -941,6 +970,18 @@ class AgentEndpoint(EndpointCommandsMixin):
             self.channel.send(chat_id, "📝 " + _tr(
                 "gw.title_renamed", _default="conversation renamed: {title}", title=s.title))
             return
+        if low == "/skip-setup":            # saída manual do onboarding de gênese (§8.2) — trava conhecida:
+            from okami.gateway.genesis import _seal_genesis, genesis_pending as _gp   # modelo fraco em tool-
+            if not _gp(self.ws):                                                       # calling nunca chama
+                self.channel.send(chat_id, "✅ " + _tr(                                # finish_setup sozinho
+                    "gw.setup_already_done", _default="setup is already done — nothing to skip."))
+                return
+            _seal_genesis(self.ws)
+            self.channel.send(chat_id, "✅ " + _tr(
+                "gw.setup_skipped",
+                _default="setup skipped — I'll keep going with sensible defaults. Shape how I talk "
+                         "anytime with /feedback."))
+            return
         cmd_bg = low.split(maxsplit=1)[0]
         if cmd_bg in ("/background", "/bg"):            # roda EM PARALELO (sessão isolada) e avisa no fim
             prompt = text.split(maxsplit=1)[1].strip() if " " in text else ""
@@ -1469,6 +1510,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         genesis = genesis_pending(self.ws)                 # 1ª config (§8.2): onboarding de primeiro contato
         if genesis:
             ctx = GENESIS_BLOCK + ("\n\n" + ctx if ctx else "")
+            bump_genesis_turn(self.ws)   # guarda anti-loop: N turnos sem finish_setup → sela sozinho (fallback)
         if getattr(self.channel, "supports_media", False):   # canal com anexo → agente sabe o MEDIA:<path>
             ctx = MEDIA_HINT + ("\n\n" + ctx if ctx else "")
         if images:                                         # foto recebida → salva no inbox + instrui (§13)
@@ -1674,6 +1716,7 @@ class AgentEndpoint(EndpointCommandsMixin):
             self._observe(chat_id, text)                  # aprende o estilo do usuário (gradual, auto)
             self._observe_llm(chat_id, s)                 # a cada N turnos, leitura mais rica por LLM
             self._maybe_compact(chat_id)                  # transcript longo → nó SUMMARY (§6.4)
+            self._maybe_auto_title(chat_id, s)             # 1ª troca sem título manual → batiza a conversa (fundo)
         except Exception as e:  # noqa: BLE001 — USER já está no transcript → detectável como interrompido
             # DLP de saída (#7 item 2): a mensagem de erro pode carregar um segredo (chave numa stacktrace,
             # token num traceback) → redige ANTES de mandar pro canal.

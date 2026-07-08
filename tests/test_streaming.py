@@ -108,3 +108,23 @@ def test_streaming_on_for_local_tier_without_native():
     from okami.llm.streaming import streaming_enabled
     # local sem native_tools (None) → _is_local(pc) via tier="local" resolve sem probe/rede → False nativo
     assert streaming_enabled(_cfg_native(tier="local", native_tools=None)) is True
+
+
+# ── FIX 4: has_tools=False permite streaming nativo QUANDO o chamador garante que a chamada não leva tools= ──
+def test_streaming_default_none_keeps_old_behavior_when_native():
+    from okami.llm.streaming import streaming_enabled
+    # has_tools não informado (default None) → comportamento ANTIGO intacto: nativo bloqueia sempre.
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=True)) is False
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=True), has_tools=None) is False
+
+
+def test_streaming_on_when_native_but_caller_guarantees_no_tools():
+    from okami.llm.streaming import streaming_enabled
+    # chamador SABE (has_tools=False) que esta chamada específica não vai levar tools= → streaming liberado.
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=True), has_tools=False) is True
+
+
+def test_streaming_off_when_native_and_caller_confirms_tools():
+    from okami.llm.streaming import streaming_enabled
+    # has_tools=True é só um reforço explícito do caso de sempre (nativo + tools → off).
+    assert streaming_enabled(_cfg_native(tier="weak", native_tools=True), has_tools=True) is False

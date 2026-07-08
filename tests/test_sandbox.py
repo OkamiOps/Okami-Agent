@@ -65,7 +65,7 @@ def test_run_shell_timeout_override_is_clamped(tmp_path, monkeypatch):
     from okami.core.tools import RunShell, ToolContext
     seen = {}
 
-    def spy(cmd, ws, policy):
+    def spy(cmd, ws, policy, **kwargs):
         seen["timeout"] = policy.timeout
         return SandboxResult(0, "ok")
     monkeypatch.setattr(_sb, "run_sandboxed", spy)

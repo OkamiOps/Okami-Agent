@@ -638,9 +638,12 @@ class RunShell(Tool):
     description = ("Executa um comando de shell no workspace, sob sandbox (timeout, teto de saída, env "
                    "sanitizado; isolamento real com backend docker). Em perfil read-only, comando que "
                    "altera estado é bloqueado. Comando demorado: passe timeout=N (máx 1800s) ou, p/ algo "
-                   "realmente longo (servidor/build), use process_start (background, sem teto). Cada chamada "
-                   "roda do ZERO no workspace — cwd e env NÃO persistem entre comandos: encadeie com `&&` "
-                   "(ex.: `cd sub && npm test`) ou use caminho absoluto.")
+                   "realmente longo (servidor/build), use process_start (background, sem teto). cwd e "
+                   "env (export) PERSISTEM entre chamadas desta MESMA conversa (backend local) — `cd sub` "
+                   "numa chamada vale na próxima, `export FOO=bar` também. `cd` continua PRESO ao "
+                   "workspace (cd pra fora é recusado, cwd não muda). Backend docker efêmero (sem "
+                   "reuse_container) e ambiente remoto: sem essa persistência — encadeie com `&&` "
+                   "(ex.: `cd sub && npm test`) ou use caminho absoluto nesses casos.")
     args_schema = {"cmd": "comando a executar",
                    "timeout": "(opc) segundos até cortar o comando — default 120, máx 1800"}
     arg_types = {"timeout": "integer"}
@@ -693,7 +696,11 @@ class RunShell(Tool):
             if note:
                 out += f"\n[{note}]"
             return ToolResult(ok, out, effect=eff)
-        res = run_sandboxed(cmd, ctx.workspace, policy)
+        session_key = str(getattr(ctx, "chat_id", "") or id(ctx))   # #stateful-shell: conversa (chat_id)
+        # ou, sem chat_id (CLI puro), a identidade do próprio ToolContext — persiste dentro do MESMO
+        # Harness/processo (cd/export sobrevivem entre chamadas do turno/conversa), mas NUNCA vaza
+        # entre ctx diferentes (dois Harness/testes não compartilham cwd).
+        res = run_sandboxed(cmd, ctx.workspace, policy, session_key=session_key)
         ok, note = interpret_exit_code(cmd, res.returncode)      # grep/rg/diff/test exit≠0 ≠ falha real
         out = f"exit={res.returncode}\n{redact(strip_ansi(res.output))}"   # strip_ansi→redact (igual ao bg log)
         if note:

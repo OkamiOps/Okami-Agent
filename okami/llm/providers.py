@@ -355,16 +355,39 @@ def _cache_marker() -> dict:
     return m
 
 
+def _can_carry_cache_marker(msg: dict) -> bool:
+    """A mensagem tem onde COLAR o cache_control (paridade Hermes `_can_carry_marker`,
+    agent/prompt_caching.py:52-73)? Em turno tool-heavy, uma mensagem assistant que é SÓ tool_calls
+    (sem texto) ou um tool-result vazio tem `content` None/"" — o litellm/Anthropic não tem um bloco de
+    TEXTO pra receber o marcador ali, e gastar um dos 4 breakpoints numa mensagem que o provider vai
+    IGNORAR é desperdício (sobra menos breakpoint p/ conteúdo real). Só carrega marcador: string
+    não-vazia, ou lista não-vazia com PELO MENOS um bloco de TEXTO não-vazio em QUALQUER posição — espelha
+    a busca-de-trás-pra-frente que `apply_prompt_caching` faz abaixo (a marca vai no último bloco de TEXTO,
+    não necessariamente o último item da lista — ex.: [texto, imagem] marca o texto, não a imagem)."""
+    c = msg.get("content")
+    if isinstance(c, str):
+        return bool(c.strip())
+    if isinstance(c, list) and c:
+        return any(isinstance(p, dict) and p.get("type") == "text" and bool((p.get("text") or "").strip())
+                   for p in c)
+    return False
+
+
 def apply_prompt_caching(messages: list[dict], model: str) -> list[dict]:
     """Prompt caching EXPLÍCITO da Anthropic (pesquisa #5 item 58): marca system + as 3 últimas
-    mensagens com `cache_control: ephemeral` (máx. 4 breakpoints da API) — ~75% de economia de
-    input em conversa longa. Só p/ modelos Claude via litellm; outros providers não conhecem o
-    formato (devolve a lista ORIGINAL, sem custo). Transports CLI/OAuth não passam por aqui."""
+    mensagens COM CONTEÚDO REAL (`_can_carry_cache_marker`) com `cache_control: ephemeral` (máx. 4
+    breakpoints da API) — ~75% de economia de input em conversa longa. Só p/ modelos Claude via
+    litellm; outros providers não conhecem o formato (devolve a lista ORIGINAL, sem custo). Transports
+    CLI/OAuth não passam por aqui."""
     if not _ANTHROPIC_MODEL.search(model or ""):
         return messages
     out = [dict(m) for m in messages]
     targets = {0} if out and out[0].get("role") == "system" else set()
-    targets |= set(range(max(len(out) - 3, 0), len(out)))
+    # candidatos: mensagens NÃO-system que realmente carregam o marcador (pula tool_call/tool_result
+    # vazio — mirror do Hermes: gastar breakpoint numa mensagem ignorada pelo provider é desperdício).
+    carriers = [i for i in range(len(out)) if i not in targets and _can_carry_cache_marker(out[i])]
+    remaining = 4 - len(targets)
+    targets |= set(carriers[-remaining:]) if remaining > 0 else set()
     for i in targets:
         c = out[i].get("content")
         if isinstance(c, str):

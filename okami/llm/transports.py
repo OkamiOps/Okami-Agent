@@ -82,10 +82,24 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     if directive:
         prompt = f"({directive})\n\n{prompt}"        # nudge de extended thinking p/ o Claude
     cmd = [binary, "-p", "--output-format", "json", "--model", model_short]
-    try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=_CALL_TIMEOUT)
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"claude -p timeout ({_CALL_TIMEOUT}s)") from e
+    # ---- FIX 3 (cache/sessão do claude_cli) --------------------------------------------------
+    # Hoje cada chamada spawna um `claude -p` NOVO e manda o transcript INTEIRO achatado (`_flatten`)
+    # — subprocess frio, sem reuso do cache/sessão do próprio CLI. O `claude` (verificado ao vivo,
+    # `claude --help`) tem `--session-id <uuid>` (cria/usa uma sessão com ESTE id) e `--resume
+    # [id]` (retoma sessão já existente) — ambos funcionam com `-p`. Plumbing: se o chamador passar
+    # um `session_id` estável (mesmo id em TODAS as chamadas da mesma conversa) via `overrides` —
+    # hoje NENHUM caller do Okami passa isto, então o comportamento atual (subprocess frio) fica
+    # INTACTO por default — a gente primeiro tenta RETOMAR (`--resume`, reusa o estado/cache do CLI
+    # p/ aquela sessão); se a sessão ainda não existe (1ª chamada desta conversa, `--resume` falha),
+    # cai pra `--session-id` (cria a sessão com este id p/ a PRÓXIMA chamada já poder retomar).
+    # NÃO fabricamos flag nenhuma: as duas testadas aqui aparecem literalmente no --help do binário.
+    session_id = (overrides or {}).get("session_id")
+    if session_id:
+        r = _run_claude_cli(cmd + ["--resume", session_id], prompt)
+        if r.returncode != 0:                          # sessão ainda não existe → cria com este id
+            r = _run_claude_cli(cmd + ["--session-id", session_id], prompt)
+    else:
+        r = _run_claude_cli(cmd, prompt)
     if r.returncode != 0:
         raise RuntimeError(f"claude -p falhou (exit {r.returncode}): {r.stderr.strip()[:400]}")
     out = r.stdout.strip()
@@ -98,6 +112,14 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     except json.JSONDecodeError:
         return Completion(text=out, usage=normalize_usage(None, transport="claude_cli"),
                           provider=pc.name, model=model_short)
+
+
+def _run_claude_cli(cmd: list[str], prompt: str):
+    """`subprocess.run` do `claude -p` isolado (mockável em teste) — mesmo timeout p/ toda variante de cmd."""
+    try:
+        return subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=_CALL_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"claude -p timeout ({_CALL_TIMEOUT}s)") from e
 
 
 # --------------------------------------------------------------------- codex_oauth

@@ -302,11 +302,18 @@ if _HAS_TEXTUAL:
                 return None
 
         def on_input_changed(self, event) -> None:
-            # autocomplete: digitou '/' → popula o menu navegável; some ao apagar ou começar os args.
+            # autocomplete: '/' no início → menu de comandos; '@fragmento' em qualquer ponto → menu
+            # de caminhos do workspace (fuzzy). Um menu só por vez — o modo decide o accept.
             menu = self._cmdmenu()
             if menu is None:
                 return
-            matches = _tui.command_matches(event.value)
+            value = event.value
+            if value.lstrip().startswith("/"):
+                self._menu_mode = "cmd"
+                matches = _tui.command_matches(value)
+            else:
+                self._menu_mode = "ref"
+                matches = _tui.ref_matches(value, self.ep.ws) if "@" in value else []
             if not matches:
                 menu.display = False
                 return
@@ -326,11 +333,30 @@ if _HAS_TEXTUAL:
             inp.cursor_position = len(inp.value)
             inp.focus()
 
+        def _accept_ref(self, value) -> None:
+            """Completa o fragmento depois do último '@' com o caminho escolhido (mantém o resto do
+            texto já digitado antes da referência)."""
+            menu = self._cmdmenu()
+            if menu is not None:
+                menu.display = False
+            inp = self.query_one("#input", Input)
+            s = inp.value
+            at = s.rfind("@")
+            if at == -1:
+                return
+            inp.value = s[:at] + "@" + str(value) + " "
+            inp.cursor_position = len(inp.value)
+            inp.focus()
+
         def _accept_highlighted(self) -> bool:
             menu = self._cmdmenu()
             if menu is None or not menu.display or not menu.option_count or menu.highlighted is None:
                 return False
-            self._accept_cmd(menu.get_option_at_index(menu.highlighted).id)
+            chosen = menu.get_option_at_index(menu.highlighted).id
+            if getattr(self, "_menu_mode", "cmd") == "ref":
+                self._accept_ref(chosen)
+            else:
+                self._accept_cmd(chosen)
             return True
 
         def on_key(self, event) -> None:

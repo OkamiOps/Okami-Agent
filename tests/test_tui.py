@@ -99,3 +99,41 @@ def test_author_rule_is_a_strong_separator():
     out = _render(tui.author_rule("okami", color="#ff7527", when="21:36"))
     assert "▌" in out and "okami" in out and "21:36" in out
     assert "─" in out                                  # régua horizontal de verdade
+
+
+def test_ref_matches_suggests_workspace_paths(tmp_path):
+    # FIX 3: '@' dispara autocomplete fuzzy de caminhos do workspace (paridade com '/' de comandos).
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("x", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("x", encoding="utf-8")
+    hits = [name for _, name in tui.ref_matches("olha @sr", tmp_path)]
+    assert "src/main.py" in hits
+    assert all("main.py" not in h or "src/" in h for h in hits)
+
+
+def test_ref_matches_respects_typed_prefix(tmp_path):
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    hits = [name for _, name in tui.ref_matches("@file:a", tmp_path)]
+    assert hits == ["file:a.py"]                        # mantém o prefixo 'file:' na substituição
+
+
+def test_ref_matches_empty_when_not_typing_a_ref(tmp_path):
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    assert tui.ref_matches("oi tudo bem", tmp_path) == []
+    assert tui.ref_matches("@diff", tmp_path) == []      # sem argumento de caminho
+    assert tui.ref_matches("@a.py e mais texto", tmp_path) == []   # já terminou de digitar a ref
+
+
+def test_ref_matches_ignores_git_and_pycache_dirs(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("x", encoding="utf-8")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "x.pyc").write_text("x", encoding="utf-8")
+    hits = [name for _, name in tui.ref_matches("@", tmp_path)]
+    assert not any(".git" in h or "__pycache__" in h for h in hits)
+
+
+def test_command_matches_still_works_alongside_ref_matches():
+    # '/' continua funcionando (não foi regredido pela adição do '@').
+    ids = [name for _, name in tui.command_matches("/mo")]
+    assert {"model", "models", "mouse"} <= set(ids)

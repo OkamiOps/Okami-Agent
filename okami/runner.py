@@ -19,6 +19,14 @@ from okami.memory import files as memfiles
 from okami.memory import make_embedder, open_memory
 from okami.skills.skill_security import scan_path
 
+# Leaf subagent (spawnado via _spawn abaixo) NUNCA herda o poder de spawnar de novo (além do teto de
+# profundidade, defesa-em-camadas) nem de AUTORAR/instalar skill — só quem recebeu a tarefa do dono
+# decide isso. Mantém read/write/edit/shell/search (o filho ainda faz trabalho real). Segue o mesmo
+# mecanismo de registry_filter que o review fork usa (okami/learning/review.py REVIEW_TOOLS), mas como
+# DENYLIST aplicado sobre o registry JÁ MONTADO do pai (não um allowlist fixo) — não precisa enumerar
+# tudo que MCP/plugin podem ter contribuído.
+SUBAGENT_DENY_TOOLS = {"spawn", "spawn_jobs", "manage_skill", "install_skill"}
+
 
 def _should_review(ws, interval: int, clean: bool) -> bool:
     """Incrementa o contador de turnos LIMPOS em .okami/learning.json e diz se é hora do review (a cada
@@ -214,9 +222,15 @@ def run_task(
                 graw, _ = load_raw()
                 scfg, sws, shome = effective_config(graw, spec), spec.dir, spec.dir
         plugin_hooks.invoke("subagent_start", subgoal=subgoal, agent=agent, depth=depth + 1)
+        # leaf: registry do FILHO = registry JÁ FINAL do pai (nesta closure, `registry` só é lido aqui
+        # dentro — em runtime, quando a tool spawn dispara — bem depois de montado lá embaixo) MENOS o
+        # conjunto que subagente não deve ter (spawn/spawn_jobs/manage_skill/install_skill). Continua um
+        # allowlist (mesmo mecanismo do review), só que derivado dinamicamente em vez de fixo.
+        child_filter = set(registry.keys()) - SUBAGENT_DENY_TOOLS
         sub = run_task(scfg, sws, subgoal, model=model_, max_steps=12, depth=depth + 1,
                        agent_home=shome, open_fs=open_fs, allow_paths=allow_paths,   # herda acesso amplo
-                       surface="subagent", emit=emit, on_event=on_event)   # #6: progresso do bg spawn
+                       surface="subagent", emit=emit, on_event=on_event,   # #6: progresso do bg spawn
+                       registry_filter=child_filter)   # nunca spawn/manage_skill/install_skill num leaf
         plugin_hooks.invoke("subagent_stop", subgoal=subgoal, agent=agent, depth=depth + 1,
                             state=sub.state.value, result=sub.result or sub.reason or "")
         return (sub.result or sub.reason or sub.state.value)[:2000]

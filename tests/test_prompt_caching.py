@@ -63,3 +63,47 @@ def test_cache_marker_1h_optin(monkeypatch):
     monkeypatch.setenv("OKAMI_CACHE_TTL", "1h")
     from okami.llm.providers import _cache_marker
     assert _cache_marker().get("ttl") == "1h"
+
+
+# ---- FIX 2: cache_control não desperdiça breakpoint em mensagem vazia (mirror Hermes _can_carry_marker) ----
+
+def test_skips_empty_assistant_toolcall_message():
+    # turno tool-heavy: assistant emite só tool_calls (content vazio) — sem TEXTO onde grudar o marcador.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "faça X"},
+        {"role": "assistant", "content": ""},                 # pure tool_call — não carrega marcador
+        {"role": "tool", "content": ""},                      # tool-result vazio — idem
+        {"role": "user", "content": "continue"},
+    ]
+    out = apply_prompt_caching(msgs, "anthropic/claude-sonnet-4-6")
+    assert _has_cache(out[0])                                 # system
+    assert not _has_cache(out[2])                             # assistant vazio: SEM marcador
+    assert not _has_cache(out[3])                             # tool vazio: SEM marcador
+    assert _has_cache(out[1])                                 # os 3 breakpoints restantes vão pro que TEM
+    assert _has_cache(out[4])                                 # conteúdo real (user "faça X" e "continue")
+
+
+def test_skips_empty_list_content_message():
+    # content = lista vazia ou lista cujo último bloco não é texto (ex.: só imagem) — idem: pula.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "m1"},
+        {"role": "user", "content": "m2"},
+        {"role": "assistant", "content": []},                  # lista vazia — sem onde grudar
+        {"role": "user", "content": "m3"},
+    ]
+    out = apply_prompt_caching(msgs, "anthropic/claude-sonnet-4-6")
+    assert not _has_cache(out[3])
+    assert _has_cache(out[1]) and _has_cache(out[2]) and _has_cache(out[4])
+
+
+def test_can_carry_cache_marker_helper():
+    from okami.llm.providers import _can_carry_cache_marker
+    assert _can_carry_cache_marker({"content": "oi"}) is True
+    assert _can_carry_cache_marker({"content": ""}) is False
+    assert _can_carry_cache_marker({"content": None}) is False
+    assert _can_carry_cache_marker({"content": []}) is False
+    assert _can_carry_cache_marker({"content": [{"type": "image_url", "image_url": {}}]}) is False
+    assert _can_carry_cache_marker({"content": [{"type": "text", "text": "oi"}]}) is True
+    assert _can_carry_cache_marker({"content": [{"type": "text", "text": "  "}]}) is False

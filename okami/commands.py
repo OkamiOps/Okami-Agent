@@ -96,6 +96,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("reload", "hot-reload the config (without restarting)", "system", ("reloadconfig",), tier="power"),
     CommandDef("restart", "restart the gateway (applies updated code/config)", "system", tier="power"),
     CommandDef("memory", "pending memory writes: /memory pending|approve|reject (write_approval)", "system", tier="power"),
+    CommandDef("skip-setup", "seal the first-contact setup now and stop the onboarding prompts",
+               "system", ("finish-setup",), tier="power"),
 ]
 
 CATEGORY_ORDER = ["session", "model", "identity", "info", "system"]

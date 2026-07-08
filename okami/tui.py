@@ -906,6 +906,60 @@ def command_hints(typed: str, *, limit: int = 8):
     return t
 
 
+_REF_IGNORE_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".mypy_cache",
+                     ".pytest_cache", ".ruff_cache", "dist", "build", ".idea", ".DS_Store"}
+_REF_TYPED_PREFIXES = ("file:", "folder:")
+_REF_NO_PATH = ("diff", "staged")     # `@diff`/`@staged` não completam caminho (sem argumento)
+
+
+def ref_matches(typed: str, workspace, *, limit: int = 20):
+    """[(label, replacement)] de arquivos do workspace que casam com o fragmento sendo digitado
+    depois do último '@' (fuzzy: substring, sem distinguir maiúsc/minúsc). [] = nenhum (não está
+    digitando uma referência agora, ou não há match). `replacement` é o que entra depois do '@'
+    (preserva o prefixo `file:`/`folder:` se o usuário já começou a digitá-lo)."""
+    s = typed or ""
+    at = s.rfind("@")
+    if at == -1:
+        return []
+    frag = s[at + 1:]
+    if not frag or " " in frag or "\n" in frag:      # só enquanto digita o TOKEN da referência
+        return []
+    prefix = ""
+    for kind in _REF_TYPED_PREFIXES:
+        if frag.startswith(kind):
+            prefix, frag = kind, frag[len(kind):]
+            break
+    if frag in _REF_NO_PATH or frag.startswith("git:"):
+        return []
+    try:
+        ws = Path(workspace)
+        if not ws.is_dir():
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    frag_low = frag.lower()
+    out = []
+    try:
+        for p in sorted(ws.rglob("*")):
+            if not p.is_file():
+                continue
+            rel_parts = p.relative_to(ws).parts
+            if any(part in _REF_IGNORE_DIRS or part.startswith(".") for part in rel_parts[:-1]):
+                continue
+            rel = "/".join(rel_parts)
+            if frag_low and frag_low not in rel.lower():
+                continue
+            lbl = Text(no_wrap=True, overflow="ellipsis")
+            lbl.append("@" + prefix, style=f"bold {CYAN}")
+            lbl.append(rel, style=FG)
+            out.append((lbl, prefix + rel))
+            if len(out) >= limit:
+                break
+    except Exception:  # noqa: BLE001 — workspace ilegível/gigante: não trava o autocomplete
+        return []
+    return out
+
+
 def help_table() -> Table:
     """Tabela dos slash commands — gerada do REGISTRO declarativo (okami/commands.py). Localizada."""
     from okami import commands as _cmds

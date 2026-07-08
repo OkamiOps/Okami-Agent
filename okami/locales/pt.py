@@ -529,6 +529,7 @@ MESSAGES: dict[str, str] = {
     "cmd.reload": "recarrega a config em quente (sem reiniciar)",
     "cmd.restart": "reinicia o gateway (aplica código/config novos)",
     "cmd.memory": "escritas de memória pendentes: /memory pending|approve|reject (write_approval)",
+    "cmd.skip-setup": "encerra a configuração inicial agora e para os avisos de onboarding",
     # ── doctor (okami doctor) ──
     "doctor.lint_summary": "{p} ok · {w} avisos · {f} falhas",
     "doctor.version_drift": "okami.__version__ ({installed}) ≠ pyproject.toml ({proj}) — instalação "

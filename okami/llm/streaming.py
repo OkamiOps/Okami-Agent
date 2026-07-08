@@ -14,7 +14,7 @@ from __future__ import annotations
 from okami.llm.usage import Completion, normalize_usage
 
 
-def streaming_enabled(cfg, provider: str | None = None) -> bool:
+def streaming_enabled(cfg, provider: str | None = None, *, has_tools: bool | None = None) -> bool:
     """Streaming token-a-token ligado? `harness.streaming` explícito SEMPRE vence. Sem ele, o default é
     TIER-AWARE: liga sozinho p/ modelo de PROTOCOLO-TEXTO (json_constrained — tier local/weak), onde o
     streaming é seguro (a ação JSON vem no próprio texto) E mais NECESSÁRIO (modelo local lento: o usuário
@@ -26,7 +26,20 @@ def streaming_enabled(cfg, provider: str | None = None) -> bool:
     (`stream_messages_deltas`) NUNCA anexa `tools=` — então, se o veredito nativo está ativo p/ este
     provider/modelo, streamar quer dizer chamar o endpoint SEM tools, o modelo não tem function-calling
     p/ usar, devaneia em <think> e não sobra ação parseável (tarefa cai como "rejeitado, sem ação").
-    Por isso, nativo ativo → NUNCA streama (tier vira irrelevante), até existir streaming+tools de verdade.
+    Por isso, nativo ativo → NUNCA streama, EXCETO quando o chamador já sabe (e AVISA via `has_tools=False`)
+    que ESTA chamada específica não vai levar `tools=` — turno puramente conversacional, sem function-calling
+    em jogo. `has_tools=None` (default) preserva o comportamento antigo: bloqueia sempre que nativo, porque
+    sem essa informação não dá pra saber se a chamada vai carregar tools.
+
+    FIX 4 (gap Hermes) — POR QUE o parâmetro existe mas fica DORMENTE hoje: o único caller real
+    (`okami/runner.py`, fora do escopo deste módulo) decide `_streaming` UMA VEZ por task, ANTES de montar
+    `eff2`/`tools` de cada chamada de `generate()` — e naquele fluxo o protocolo de AÇÃO do Okami faz
+    `respond`/`task_complete` serem TOOLS de verdade (`_native_tools_for`, runner.py): todo turno nativo
+    SEMPRE leva `tools=`, mesmo o "só responder". Não existe hoje, na prática, uma chamada nativa
+    verdadeiramente sem tools — então religar streaming exigiria redesenhar o protocolo de ação (fora do
+    escopo/arquivos que este fix pode tocar: loop.py/runner.py). Implementamos o parâmetro (testável,
+    zero-risco — default None não muda NADA) para o dia em que o caller for ajustado a diferenciar
+    "responder puro" de "turno com tools" e puder passar `has_tools=False` nesse caso.
     Usa o MESMO veredito (cache L1/L2) que `_complete_one` consulta — sem probe duplicado, sem descasamento
     de decisão entre o texto do prompt e o payload real da chamada."""
     try:
@@ -40,7 +53,7 @@ def streaming_enabled(cfg, provider: str | None = None) -> bool:
         pc = cfg.provider(provider)     # MESMO provider que o call site vai de fato usar (não o default cego)
         try:                                              # nativo ativo → payload precisa de tools= → sem streaming
             from okami.llm.native_capability import native_supported
-            if native_supported(pc):
+            if native_supported(pc) and has_tools is not False:   # has_tools=False: chamador GARANTE sem tools=
                 return False
         except Exception:  # noqa: BLE001 — veredito indisponível (fixture de teste, provider incompleto)
             pass           # cai no default tier-aware abaixo (comportamento anterior preservado)

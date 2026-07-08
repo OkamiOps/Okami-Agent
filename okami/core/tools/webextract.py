@@ -31,8 +31,10 @@ class WebExtract(Tool):
                 return aux_complete(cfg, "extract", [
                     {"role": "system", "content": _EXTRACT_SUMMARIZE_PROMPT},
                     {"role": "user", "content": txt}], max_tokens=800)
+        workspace = getattr(ctx, "workspace", None)   # cache do texto cru vai p/ <workspace>/.okami/webcache
         try:
-            out = web_extract(url, max_chars=max_chars, summarize=summarize)
+            out = web_extract(url, max_chars=max_chars, summarize=summarize,
+                              workspace=str(workspace) if workspace else ".")
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"web_extract falhou: {e}")
         return ToolResult(True, untrusted_wrap("web_extract", out), effect=False)

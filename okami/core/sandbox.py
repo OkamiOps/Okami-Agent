@@ -22,6 +22,8 @@ Perfil (mode) → política: `read-only` bloqueia comando que MUTA (e monta o wo
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import threading
@@ -175,6 +177,127 @@ def _cap(text: str, limit: int) -> str:
     return f"{text[:head]}\n…[{omitted:,} bytes omitidos no meio]…\n{text[-tail:]}"
 
 
+# ---------------------------------------------------------------------------------------------
+# Estado por-CONVERSA do backend LOCAL (cwd + env exportado) — Hermes tem isto; Okami rodava cada
+# `run_shell` do ZERO (Popen(cwd=workspace) sempre), então `cd sub` ou `export FOO=bar` sumiam na
+# chamada seguinte. Chaveado por `session_key` (RunShell passa ctx.chat_id, ou id(ctx) se não houver
+# chat_id — ver files.py). session_key="" (chamada direta de run_sandboxed sem chave) continua
+# 100% stateless — retrocompat com todo caller/teste existente.
+# ---------------------------------------------------------------------------------------------
+_SESSION_CWD: dict[str, Path] = {}
+_SESSION_ENV: dict[str, dict[str, str]] = {}
+_MAX_SESSION_ENV_VARS = 200          # teto de vars rastreadas por sessão — não deixa balloonar
+
+_CWD_MARKER = "__OKAMI_CWD__"
+_ENV_BEGIN = "__OKAMI_ENV_BEGIN__"
+_ENV_END = "__OKAMI_ENV_END__"
+
+# `cd <alvo>` no INÍCIO do comando ou logo após ; & | && || — heurística (não é parser de shell completo,
+# mas cobre o caso real: comando começa/encadeia com cd literal). Var ($VAR) e `cd -` não dá pra resolver
+# estaticamente → deixa passar (mesma postura de hoje: local NÃO confina o filesystem de verdade).
+_CD_RE = re.compile(r'(?:^|[;&|]\s*)cd\s+([^\s;&|]+)')
+
+
+def _within_jail(path: Path, workspace: Path) -> bool:
+    try:
+        path.relative_to(workspace)
+        return True
+    except ValueError:
+        return False
+
+
+def reset_session(session_key: str) -> None:
+    """Limpa cwd/env rastreados de uma conversa — usado por teste e por /clear de sessão."""
+    _SESSION_CWD.pop(session_key, None)
+    _SESSION_ENV.pop(session_key, None)
+
+
+def _session_cwd(session_key: str, workspace: Path) -> Path:
+    """cwd rastreado da sessão, se ainda válido/dentro do jail; senão o workspace (default)."""
+    if not session_key:
+        return workspace
+    cwd = _SESSION_CWD.get(session_key)
+    if cwd is None or not _within_jail(cwd, workspace) or not cwd.is_dir():
+        return workspace
+    return cwd
+
+
+def _session_env(session_key: str) -> dict[str, str]:
+    if not session_key:
+        return {}
+    return dict(_SESSION_ENV.get(session_key, {}))
+
+
+def _check_cd_jail(cmd: str, cwd: Path, workspace: Path) -> Path | None:
+    """Se `cmd` tenta `cd` pra FORA do workspace, devolve o alvo (proibido); None = OK.
+
+    O backend local não confina o filesystem de verdade (cat /etc/passwd ainda lê — ver docstring do
+    módulo), mas o cwd RASTREADO entre chamadas precisa ficar preso ao workspace, senão um `cd /etc`
+    vira o novo diretório-base de TODOS os comandos seguintes da conversa."""
+    for m in _CD_RE.finditer(cmd):
+        target = m.group(1).strip("'\"")
+        if not target or target.startswith("$") or target == "-":
+            continue                                    # var/`cd -` não dá pra resolver estaticamente
+        p = Path(target) if target.startswith("/") else (cwd / target)
+        try:
+            p = p.resolve()
+        except OSError:
+            continue
+        if not _within_jail(p, workspace):
+            return p
+    return None
+
+
+def _wrap_stateful(cmd: str, cwd: Path) -> str:
+    """Envolve `cmd` num script sh que: entra no cwd rastreado, roda o comando, e IMPRIME marcadores
+    com o cwd final + `env` completo — parseados depois por `_extract_state` e removidos do output
+    devolvido ao modelo (o modelo nunca vê os marcadores)."""
+    quoted_cwd = shlex.quote(str(cwd))
+    return (
+        f"cd {quoted_cwd} || exit 97\n"
+        f"{cmd}\n"
+        "__okami_ec=$?\n"
+        f"printf '\\n{_CWD_MARKER}%s\\n' \"$(pwd)\"\n"
+        f"printf '{_ENV_BEGIN}\\n'\n"
+        "env\n"
+        f"printf '{_ENV_END}\\n'\n"
+        "exit $__okami_ec\n"
+    )
+
+
+def _extract_state(stdout: str, workspace: Path):
+    """Extrai (novo_cwd, env_exportado, stdout_LIMPO — sem os marcadores) de uma execução envolvida
+    por `_wrap_stateful`. Se os marcadores não aparecerem (ex.: cd falhou antes de rodar o resto, ou
+    o comando não passou por _wrap_stateful), devolve (None, None, stdout) inalterado."""
+    idx = stdout.find(_CWD_MARKER)
+    if idx == -1:
+        return None, None, stdout
+    cleaned = stdout[:idx].rstrip("\n")
+    lines = stdout[idx:].splitlines()
+    new_cwd = None
+    if lines and lines[0].startswith(_CWD_MARKER):
+        raw = lines[0][len(_CWD_MARKER):].strip()
+        try:
+            p = Path(raw).resolve()
+            if _within_jail(p, workspace):
+                new_cwd = p
+        except OSError:
+            pass
+    env_map: dict[str, str] = {}
+    in_env = False
+    for line in lines[1:]:
+        if line == _ENV_BEGIN:
+            in_env = True
+            continue
+        if line == _ENV_END:
+            break
+        if in_env and "=" in line:
+            k, _, v = line.partition("=")
+            if k:
+                env_map[k] = v
+    return new_cwd, env_map, cleaned
+
+
 def _rlimit_preexec(policy: SandboxPolicy):
     """preexec_fn POSIX que aplica SÓ os rlimits ligados (>0). None se nada a setar (sem fork-hook
     → sem o aviso de thread-safety do subprocess no caso comum)."""
@@ -324,8 +447,12 @@ def _ensure_container(name: str, workspace: Path, policy: SandboxPolicy) -> bool
 
 
 def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None,
-                  *, env: dict | None = None) -> SandboxResult:
-    """Executa `cmd` sob a política. docker se backend=docker E docker presente; senão local."""
+                  *, env: dict | None = None, session_key: str = "") -> SandboxResult:
+    """Executa `cmd` sob a política. docker se backend=docker E docker presente; senão local.
+
+    `session_key` (novo): quando não-vazio E backend local, o cwd e o env exportado (`export`/`cd`)
+    PERSISTEM entre chamadas com a MESMA chave (uma conversa) — ver `_wrap_stateful`/`_extract_state`.
+    session_key="" (default) é 100% stateless, igual ao comportamento de sempre."""
     policy = policy or default_policy()
     eff = policy.effective_backend()
     if eff == "docker" and not _docker_daemon_ok():
@@ -356,6 +483,21 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
                 proxy = EgressProxy(policy.egress_allow)
                 proxy.start()
                 env = {**env, **proxy.proxy_env()}  # curl/pip/npm/requests passam pelo filtro
+            # cwd/env PERSISTENTES por conversa (session_key não-vazia): `cd sub` e `export FOO=bar` de
+            # uma chamada valem na PRÓXIMA — ver _wrap_stateful/_extract_state. session_key="" (caller
+            # direto de run_sandboxed sem chave) fica exatamente como sempre foi: cada chamada do zero.
+            track_state = bool(session_key)
+            if track_state:
+                base_cwd = _session_cwd(session_key, workspace)
+                violation = _check_cd_jail(cmd, base_cwd, workspace)
+                if violation is not None:               # cd pra FORA do workspace → recusa, cwd intocado
+                    return SandboxResult(126, f"sandbox: cd fora do workspace bloqueado ({violation}) — "
+                                         f"o cwd rastreado da conversa fica preso a {workspace}.")
+                run_env = {**env, **_session_env(session_key)}   # env sanitizado + exports persistidos
+                exec_cmd = _wrap_stateful(cmd, base_cwd)
+            else:
+                run_env = env
+                exec_cmd = cmd
             # shell=True é o PROPÓSITO do sandbox local (rodar o comando); a defesa é o backend docker, não evitar shell.
             # stdin=DEVNULL: comando que ESPERA input (read, prompt, cat sem args) recebe EOF e SAI — não
             # pendura os 60s do timeout esperando algo que nunca vem (era causa de "trava no shell").
@@ -366,7 +508,20 @@ def run_sandboxed(cmd: str, workspace: Path, policy: SandboxPolicy | None = None
             # Resultado: um comando que já tinha imprimido 90% do output e travou nos 10% finais devolvia
             # "timeout (Ns): cmd" pelado — o modelo perdia justamente a saída que ajudaria a diagnosticar.
             # Mesmo padrão do execute_code.py (_kill via threading.Timer, lê o que já saiu antes do kill).
-            r = _run_shell_capturing(cmd, workspace, env, policy)
+            r = _run_shell_capturing(exec_cmd, workspace, run_env, policy)
+            if track_state and not r.timed_out:
+                # marcadores só saem se o script inteiro rodou até o fim (sem timeout) — extrai e
+                # LIMPA do output antes do modelo ver (nunca vaza __OKAMI_CWD__/__OKAMI_ENV_*__).
+                new_cwd, exported_env, cleaned = _extract_state(r.stdout or "", workspace)
+                if new_cwd is not None:
+                    _SESSION_CWD[session_key] = new_cwd
+                if exported_env is not None:
+                    diff = {k: v for k, v in exported_env.items() if run_env.get(k) != v}
+                    merged = {**_SESSION_ENV.get(session_key, {}), **diff}
+                    if len(merged) > _MAX_SESSION_ENV_VARS:   # teto — não deixa a sessão balloonar
+                        merged = dict(list(merged.items())[-_MAX_SESSION_ENV_VARS:])
+                    _SESSION_ENV[session_key] = merged
+                r.stdout = cleaned
     except subprocess.TimeoutExpired:
         return SandboxResult(124, f"timeout ({policy.timeout}s): {cmd}", timed_out=True)
     finally:

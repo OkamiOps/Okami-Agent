@@ -36,6 +36,47 @@ def _load() -> OkamiConfig:
         raise typer.Exit(1)
 
 
+_MISSING_CONFIG_HINT = (
+    "Rode:  [bold]okami setup[/bold]  (ou [bold]okami setup provider[/bold] para só o essencial)"
+)
+
+
+def _load_or_offer_setup() -> OkamiConfig:
+    """Como `_load()`, mas quando a config está AUSENTE (não outros erros) convida a rodar o wizard
+    na hora — paridade Hermes (main.py:2279-2306 "Run setup now? [Y/n]"). Interativo → pergunta e, se
+    sim, roda `okami setup` inline e recarrega; não-interativo (pipe/CI) → orientação concreta + exit 1
+    sem perguntar nada (nunca trava esperando input que não vem).
+
+    De propósito NÃO mora em `_load()` — `_load()` é usado por ~30 comandos (inclusive helpers de
+    view tipo `_summary_fields`) que precisam continuar falhando limpo sem abrir um wizard no meio do
+    render. Só o caminho de "resolver o agente pra rodar" (chat/media/promptsize via `_resolve_agent`)
+    oferece o convite."""
+    try:
+        return load_config()
+    except FileNotFoundError as e:
+        return _offer_setup(e)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]Falha ao carregar config:[/red] {e}")
+        raise typer.Exit(1)
+
+
+def _offer_setup(err: Exception) -> OkamiConfig:
+    from okami import menu
+
+    if not menu._interactive():
+        console.print(f"[red]Falha ao carregar config:[/red] {err}")
+        console.print(f"[dim]{_MISSING_CONFIG_HINT}[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[yellow]Nenhuma config encontrada[/yellow] — {err}")
+    if menu.confirm("Rodar `okami setup` agora?", default=True):
+        from okami.cli.commands.setup import setup as cmd_setup
+        cmd_setup(section=None, memory=None, honcho_url=None, honcho_key=None,
+                  embedder_url=None, embedder_model=None)
+        return load_config()
+    console.print(f"[dim]{_MISSING_CONFIG_HINT}[/dim]")
+    raise typer.Exit(1)
+
+
 def _ping_models(api_base: str, timeout: float = 6.0) -> tuple[bool, str, list[str]]:
     """Pinga /models. Devolve (ok, msg, ids) — os `ids` deixam o doctor (item 15b) distinguir
     "endpoint off" de "modelo errado/typo" via model_present. Lista vazia quando não há ids/no erro."""
@@ -504,9 +545,9 @@ def _resolve_agent(agent: str | None, workspace: str):
         return Path.cwd()                          # padrão: trabalha NA pasta onde você rodou o okami
 
     if not agent:                                  # sem -a → tenta o agente default
-        try:
-            agent = (_load().agents or {}).get("default")
-        except Exception:  # noqa: BLE001
+        try:                                       # load_config() DIRETO (não `_load()`): checagem muda,
+            agent = (load_config().agents or {}).get("default")  # não deve imprimir nem oferecer setup —
+        except Exception:  # noqa: BLE001           # isso é papel do fallback abaixo (print/oferta 1x só)
             agent = None
     if agent:
         from okami.agents import effective_config, load_agents
@@ -519,7 +560,7 @@ def _resolve_agent(agent: str | None, workspace: str):
         return effective_config(graw, spec), _ws_file(), agent, spec.dir
     # sem agente: casa = workspaces/default (memória isolada na casa global), arquivos = --workspace/CWD
     from okami.home import base_dir
-    return _load(), _ws_file(), "okami", base_dir() / "workspaces" / "default"
+    return _load_or_offer_setup(), _ws_file(), "okami", base_dir() / "workspaces" / "default"
 
 
 def _write_local(update: dict) -> None:

@@ -121,6 +121,38 @@ def test_tui_slash_shows_navigable_command_menu(tmp_path):
     assert out["hidden_after"] is False and out["hidden"] is False
 
 
+def test_tui_at_shows_navigable_ref_menu(tmp_path):
+    # FIX 3: digitar '@sr' mostra o menu de CAMINHOS do workspace; Enter completa o destacado.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("x", encoding="utf-8")
+    out = {}
+
+    async def scenario():
+        from textual.widgets import Input, OptionList
+        app = OkamiChatApp(cfg=None, ws=str(tmp_path), name="okami", cid="terminal",
+                           run_task=_fake_runner, spawn=lambda fn: fn())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            menu = app.query_one("#cmdmenu", OptionList)
+            inp = app.query_one("#input", Input)
+            inp.value = "olha @sr"
+            app.on_input_changed(type("E", (), {"value": "olha @sr"})())
+            out["shown"] = menu.display
+            out["ids"] = [menu.get_option_at_index(i).id for i in range(menu.option_count)]
+            handled = app._accept_highlighted()
+            out["completed"] = app.query_one("#input", Input).value
+            out["handled"] = handled
+            # '/' continua funcionando depois de um '@' completado (não ficou preso em modo ref)
+            app.on_input_changed(type("E", (), {"value": "/mo"})())
+            out["slash_ids"] = [menu.get_option_at_index(i).id for i in range(menu.option_count)]
+
+    asyncio.run(scenario())
+    assert out["shown"] is True
+    assert "src/main.py" in out["ids"]
+    assert out["handled"] is True and out["completed"] == "olha @src/main.py "
+    assert {"model", "models", "mouse"} <= set(out["slash_ids"])
+
+
 def test_command_matches_filters_and_ignores_args():
     from okami import commands as _cmds
     from okami import tui

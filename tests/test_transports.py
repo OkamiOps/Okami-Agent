@@ -30,6 +30,85 @@ def test_dispatch_returns_none_for_litellm():
     assert transports.dispatch(pc, [{"role": "user", "content": "hi"}], None) is None
 
 
+# ---- FIX 3: claude_cli — plumbing de session_id (--resume / --session-id), sem quebrar o caminho antigo ----
+
+class _FakeProc:
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def _pc_claude():
+    return ProviderConfig(name="claude", model="anthropic/claude-opus-4-8", transport="claude_cli")
+
+
+def test_claude_cli_no_session_id_runs_single_call_unchanged(monkeypatch):
+    """Sem session_id (default de HOJE, nenhum caller passa) — comportamento ANTIGO: 1 chamada, sem --resume/--session-id."""
+    monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
+    calls = []
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _FakeProc(0, stdout='{"result": "oi"}')
+
+    monkeypatch.setattr(transports.subprocess, "run", _fake_run)
+    comp = transports.claude_cli_complete(_pc_claude(), [{"role": "user", "content": "oi"}], None)
+    assert comp.text == "oi"
+    assert len(calls) == 1
+    assert "--resume" not in calls[0] and "--session-id" not in calls[0]
+
+
+def test_claude_cli_session_id_resumes_when_session_exists(monkeypatch):
+    """session_id passado + --resume funciona de primeira → UMA chamada só (reusa a sessão do CLI)."""
+    monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
+    calls = []
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _FakeProc(0, stdout='{"result": "retomado"}')
+
+    monkeypatch.setattr(transports.subprocess, "run", _fake_run)
+    comp = transports.claude_cli_complete(_pc_claude(), [{"role": "user", "content": "oi"}], None,
+                                          overrides={"session_id": "11111111-1111-1111-1111-111111111111"})
+    assert comp.text == "retomado"
+    assert len(calls) == 1
+    assert "--resume" in calls[0]
+    assert "11111111-1111-1111-1111-111111111111" in calls[0]
+
+
+def test_claude_cli_session_id_falls_back_to_create_when_resume_fails(monkeypatch):
+    """1ª chamada da conversa: sessão ainda não existe → --resume falha (exit != 0) → cai p/ --session-id (cria)."""
+    monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
+    calls = []
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "--resume" in cmd:
+            return _FakeProc(1, stderr="no such session")
+        return _FakeProc(0, stdout='{"result": "criado"}')
+
+    monkeypatch.setattr(transports.subprocess, "run", _fake_run)
+    comp = transports.claude_cli_complete(_pc_claude(), [{"role": "user", "content": "oi"}], None,
+                                          overrides={"session_id": "22222222-2222-2222-2222-222222222222"})
+    assert comp.text == "criado"
+    assert len(calls) == 2
+    assert "--resume" in calls[0]
+    assert "--session-id" in calls[1]
+    assert "22222222-2222-2222-2222-222222222222" in calls[1]
+
+
+def test_claude_cli_session_id_both_fail_raises(monkeypatch):
+    monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
+
+    def _fake_run(cmd, **kw):
+        return _FakeProc(1, stderr="boom")
+
+    monkeypatch.setattr(transports.subprocess, "run", _fake_run)
+    import pytest
+    with pytest.raises(RuntimeError):
+        transports.claude_cli_complete(_pc_claude(), [{"role": "user", "content": "oi"}], None,
+                                       overrides={"session_id": "x"})
+
+
 def test_codex_sse_accumulates_deltas():
     lines = [
         b'event: response.created',
