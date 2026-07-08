@@ -108,11 +108,15 @@ class SearchFiles(Tool):
         offset = max(0, _as_int(args.get("offset"), 0) or 0)
 
         ws_root = Path(ctx.workspace).resolve()      # rglob devolve absoluto → relative_to precisa do resolvido
+        # incidente 2026-07-08: grep NUNCA varre arquivo de credencial — senão o próprio match VAZA o segredo
+        # no resultado (pior que enumerar). INCONDICIONAL (nem yolo), nos dois caminhos (rg e puro-Python).
+        from okami.core.tools.base import _SENSITIVE_PATH
+        _ok = lambda p: not _SENSITIVE_PATH.search(str(p))
         candidates = _rg_candidate_files(root, q, bool(args.get("ignore_case")), glob)
         if candidates is not None:                    # fast-path rg: só os arquivos que JÁ têm match
-            paths = sorted({p for p in candidates if p.is_file()})
+            paths = sorted({p for p in candidates if p.is_file() and _ok(p)})
         else:                                         # fallback puro-Python: todo arquivo sob root
-            paths = sorted(p for p in root.rglob("*") if not p.is_dir())
+            paths = sorted(p for p in root.rglob("*") if not p.is_dir() and _ok(p))
         per_file: dict[str, int] = {}
         blocks: list[str] = []
         seen = 0

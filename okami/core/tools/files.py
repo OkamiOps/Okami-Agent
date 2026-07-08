@@ -426,7 +426,11 @@ class ListDir(Tool):
             return ToolResult(True, f"[📡 {remote.alias}]\n{rr.output.strip() or '(vazio)'}", effect=False)
         try:
             p = _safe_path(ctx, rel)
-            entries = sorted(e.name + ("/" if e.is_dir() else "") for e in p.iterdir())
+            # incidente 2026-07-08: read_file já barra o CONTEÚDO de credencial, mas list_dir ENUMERAVA o
+            # nome (client_secret_*.json, credentials.json, .aws…) → o agente sabia que existia e partia p/
+            # o yolo. Some da listagem também (INCONDICIONAL, nem yolo): não existe p/ o agente.
+            entries = sorted(e.name + ("/" if e.is_dir() else "")
+                             for e in p.iterdir() if not _SENSITIVE_PATH.search(str(p / e.name)))
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao listar {rel}: {e}")
         return ToolResult(True, "\n".join(entries) or "(vazio)", effect=False)
@@ -457,6 +461,8 @@ class FindFiles(Tool):
             rel = p.relative_to(ctx.workspace)               # _SKIP só vale DENTRO do workspace — senão um
             if any(part in self._SKIP for part in rel.parts):  # ancestral skip-listed (o agente roda sob
                 continue                                     # ~/.okami/…) zerava TODA busca (find_files cego)
+            if _SENSITIVE_PATH.search(str(p)):               # incidente 2026-07-08: não ENUMERA credencial
+                continue                                     # (read_file já barra o conteúdo; aqui some o nome)
             if q in _norm_name(p.name):
                 hits.append(str(rel) + ("/" if p.is_dir() else ""))
                 if len(hits) >= 60:
