@@ -60,6 +60,14 @@ class Budget:
     # isolado bater o próprio teto. Este teto SOMA as duas falhas (nesta ordem ou naquela); zera só
     # quando alguma tool de fato DISPACHA de verdade (_handle_tool_result).
     max_tool_failures: int = 6
+    # ANTI-MARTELO (2026-07-08, uso real): chamar a MESMA tool dezenas de vezes numa tarefa (args mudando a
+    # cada chamada → o fingerprint/anti-loop acima NÃO pega) é o padrão nº1 de "agente burro": logs reais
+    # mostraram 134× execute_code (200 passos, bateu o teto), 67× move_path, 46× run_shell numa única tarefa.
+    # Um agente esperto percebe cedo que travou e PARA/PERGUNTA. Nudge de consciência em warn/push (não bloqueia,
+    # só faz o modelo repensar/fazer em lote); corte forçado (task_complete/blocked) em max_same_tool.
+    warn_same_tool: int = 12     # Nª chamada da mesma tool → 1º nudge "isso costuma ser abordagem travada/dá lote"
+    push_same_tool: int = 25     # 2º nudge mais forte
+    max_same_tool: int = 40      # martelou demais → força ENTREGAR ou PERGUNTAR (raro num refactor legítimo)
     max_poll_waits: int = 8      # ESPERAS repetidas num processo em background (process_wait/poll/log) antes de
     #                              cobrar como loop — esperar um build/teste lento NÃO é loop inútil, é I/O
     max_total_turns: int = 1000  # backstop bem acima de max_steps → o limite que vale é o de passos

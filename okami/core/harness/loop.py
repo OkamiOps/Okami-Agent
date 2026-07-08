@@ -394,6 +394,9 @@ class Harness:
         self._obs_chars = 0                            # teto AGREGADO de tool-output do turno (Hermes: 200K)
         self._loop_warned: set[str] = set()             # fingerprints já AVISADOS (warn-before-block, WIN1)
         self._pending_loop_warn: str | None = None      # aviso a anexar DEPOIS do próximo tool-result (WIN1)
+        self._tool_counts: dict[str, int] = {}          # anti-martelo: quantas vezes cada tool foi chamada na tarefa
+        self._same_tool_nudged: set[str] = set()        # thresholds já avisados (1x cada) p/ não spammar
+        self._pending_same_tool_warn: str | None = None  # nudge anti-martelo, flushado junto do result
         # AGREGAÇÃO de falha PRÉ-dispatch (WIN1, paridade Hermes tool_guardrails.py:298-319): nome
         # ALUCINADO e args FALTANDO são hoje contadores DISJUNTOS (_consecutive_violations vs
         # _consecutive_arg_fails), cada um resetado pelo OUTRO modo de erro — um modelo que ALTERNA entre
@@ -912,6 +915,31 @@ class Harness:
                     "abordagem — ou, se a repetição é de propósito (ex.: esperar um processo), explique "
                     "o porquê na próxima mensagem. Repetir sem mudar nada vai bloquear em breve.")
 
+            # --- Anti-martelo (§3.6b): martelar a MESMA tool dezenas de vezes (args mudam → o fingerprint
+            # acima não pega). É o padrão nº1 de agente burro (134× execute_code / 67× move_path em logs reais). ---
+            self._tool_counts[action.tool] = self._tool_counts.get(action.tool, 0) + 1
+            _tn = self._tool_counts[action.tool]
+            if _tn >= self.budget.max_same_tool:
+                if self._try_escalate(f"martelou {action.tool} {_tn}x sem concluir"):
+                    continue
+                self._batch = []
+                self._emit("same_tool_halt", tool=action.tool, count=_tn)
+                self._reject(action,                                       # NATIVO → erro role=tool; JSON → user
+                             f"erro: '{action.tool}' já foi chamada {_tn}x nesta tarefa — isso é martelar, não "
+                             "progredir. PARE: entregue com task_complete o que já tem, ou task_blocked com o que "
+                             "travou. NÃO chame de novo.",
+                             f"PARE: você chamou '{action.tool}' {_tn}x. Isso é esforço em loop, não progresso. "
+                             "Emita task_complete com o resultado até aqui, ou task_blocked com a razão — não martele mais.")
+                continue
+            _tk = f"{action.tool}:{_tn}"
+            if _tn in (self.budget.warn_same_tool, self.budget.push_same_tool) and _tk not in self._same_tool_nudged:
+                self._same_tool_nudged.add(_tk)
+                self._emit("same_tool_warn", tool=action.tool, count=_tn)
+                self._pending_same_tool_warn = (
+                    f"Você já chamou '{action.tool}' {_tn} vezes nesta tarefa. Isso quase sempre significa que a "
+                    "abordagem travou ou que dá pra resolver de UMA vez (um comando/patch em lote). Pare e repense: "
+                    "há um caminho mais direto? Se está preso, ENTREGUE o que já tem ou PERGUNTE ao dono — não martele.")
+
             tool = self.registry[action.tool]
 
             # --- Tools terminais ---
@@ -1094,6 +1122,9 @@ class Harness:
         if self._pending_loop_warn is not None:        # warn-before-block (WIN1): DEPOIS do result, nunca antes
             self.messages.append({"role": "user", "content": self._pending_loop_warn})
             self._pending_loop_warn = None
+        if self._pending_same_tool_warn is not None:   # anti-martelo: nudge DEPOIS do result (mesma razão)
+            self.messages.append({"role": "user", "content": self._pending_same_tool_warn})
+            self._pending_same_tool_warn = None
         # NÃO-PROGRESSO por OUTPUT (OpenClaw): tool read-only/poll que devolve a MESMA saída de novo
         # e de novo é I/O à toa — o anti-loop por args não pega (args podem até variar). Avisa 1x/tool.
         if res.ok and not res.effect:
