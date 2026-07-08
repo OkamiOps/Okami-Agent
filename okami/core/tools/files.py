@@ -110,10 +110,11 @@ class ReadFile(Tool):
         rel = args.get("path")
         if not isinstance(rel, str) or not rel:
             return ToolResult(False, "read_file: 'path' precisa ser uma string não-vazia.", effect=False)
-        mode = getattr(ctx.sandbox, "mode", "")          # simetria com run_shell: read_file NÃO pode ser a
-        if mode != "yolo" and _SENSITIVE_PATH.search(rel):  # porta dos fundos p/ exfiltrar segredo
-            return ToolResult(False, "sandbox: arquivo sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
-                              f"bloqueado p/ não vazar segredo. Use o perfil yolo se for de propósito. ({rel})",
+        if _SENSITIVE_PATH.search(rel):                  # INCONDICIONAL (nem yolo): ler credencial do usuário
+            return ToolResult(False,                     # é exfiltração, não trabalho. yolo NÃO é porta dos fundos.
+                              "arquivo de credencial/segredo (.env/.ssh/.aws/credenciais/OAuth/keychain/*.pem/"
+                              f"*.key) — leitura BLOQUEADA (nem yolo passa). Não vasculhe credencial do usuário; "
+                              f"se falta uma, PEÇA ao dono pelo canal seguro (ele guarda cifrada no cofre). ({rel})",
                               effect=False)
         remote = getattr(ctx, "remote", None)            # AMBIENTE REMOTO: lê na máquina remota (cat)
         if remote is not None:
@@ -469,9 +470,10 @@ def _fs_pair(ctx, args):
         v = args.get(k)
         if not isinstance(v, str) or not v:
             return ToolResult(False, f"'{k}' precisa ser uma string não-vazia.", effect=False)
-        if getattr(ctx.sandbox, "mode", "") != "yolo" and _SENSITIVE_PATH.search(v):
-            return ToolResult(False, "caminho sensível (.env/.ssh/.aws/credenciais/*.pem/*.key) — "
-                              f"bloqueado p/ não vazar segredo. ({v})", effect=False)
+        if _SENSITIVE_PATH.search(v):                    # INCONDICIONAL (nem yolo) — igual read_file
+            return ToolResult(False, "caminho de credencial/segredo (.env/.ssh/.aws/credenciais/OAuth/keychain) "
+                              f"— BLOQUEADO (nem yolo passa). Peça a credencial ao dono pelo canal seguro. ({v})",
+                              effect=False)
     try:
         return _safe_path(ctx, args["src"]), _safe_path(ctx, args["dst"])
     except ValueError as e:
@@ -664,9 +666,10 @@ class RunShell(Tool):
         if mode == "read-only" and eff:                          # defesa em profundidade (perfil)
             return ToolResult(False, f"sandbox read-only: comando que altera estado bloqueado ({cmd[:80]})",
                               effect=False)
-        if mode != "yolo" and _SENSITIVE_PATH.search(cmd):       # P0.1: não deixa ler/exfiltrar segredo
-            return ToolResult(False, "sandbox: comando toca caminho sensível (.env/.ssh/.aws/credenciais/"
-                              f"*.pem/*.key) — bloqueado. Use o perfil yolo se for de propósito. ({cmd[:80]})",
+        if _SENSITIVE_PATH.search(cmd):                          # INCONDICIONAL (nem yolo) — exfil não é trabalho
+            return ToolResult(False, "sandbox: comando toca caminho de credencial/segredo (.env/.ssh/.aws/"
+                              "credenciais/OAuth/keychain/*.pem/*.key) — BLOQUEADO (nem yolo passa). Não leia "
+                              f"credencial do usuário; peça ao dono pelo canal seguro. ({cmd[:80]})",
                               effect=False)
         if mode != "yolo":                                       # #12: Tirith — scan de CONTEÚDO (homograph,
             from okami.core.tirith import scan_command           # pipe-to-interpreter, terminal-injection) que o

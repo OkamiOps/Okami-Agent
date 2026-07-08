@@ -86,9 +86,10 @@ def test_read_file_blocks_secrets_like_shell_does():
     assert ReadFile().run({"path": ".env"}, ctx).ok is False              # read_file TEM que bloquear igual
     assert ReadFile().run({"path": "id_rsa"}, ctx).ok is False
     assert ReadFile().run({"path": "normal.txt"}, ctx).ok is True         # arquivo comum: lê normal
-    # yolo = intenção explícita → libera (mesma válvula do shell)
+    # incidente 2026-07-08: yolo NÃO é mais válvula de escape p/ credencial (era o furo que o agente usava
+    # pra propor 'roda em yolo pra ler credentials.json'). Bloqueio de segredo agora é INCONDICIONAL.
     yolo = ToolContext(workspace=ws, sandbox=dataclasses.replace(default_policy(), mode="yolo"))
-    assert ReadFile().run({"path": ".env"}, yolo).ok is True
+    assert ReadFile().run({"path": ".env"}, yolo).ok is False
 
 
 def _harness_run(outputs, goal, ws, **kw):

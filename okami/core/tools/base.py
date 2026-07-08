@@ -67,6 +67,12 @@ _SENSITIVE_PATH = re.compile(
     r"\.okami/credentials|\.codex/auth|[/~.]ssh\b|[/~.]aws\b|\.gnupg|id_rsa|id_ed25519|"
     r"\.pem\b|\.key\b|/etc/(passwd|shadow|sudoers?)|credentials\.json|\.netrc|\.npmrc|\.pypirc|"
     r"secrets?\.(env|json|ya?ml)"
+    # incidente 2026-07-08: OAuth do usuário (Google/gog) — client_secret_*.json, token.json, auth.json,
+    # o Keychain do macOS e os stores de CLI sob ~/Library/Application Support/<app>/ (gogcli etc.). O agente
+    # tinha vasculhado isso no Downloads/Documents; agora barrado por NOME, INCONDICIONAL (nem yolo passa).
+    r"|client[_-]?secret[\w.-]*\.json|[/~.]oauth[\w.-]*\.json"       # client_secret_*.json / oauth*.json (nomes de segredo)
+    r"|Library/Keychains|login\.keychain"                            # Keychain do macOS
+    r"|Application Support/[^/]+/(?:credentials|auth|token|keyring)" # store de CLI (gogcli/…) — QUALIFICADO por path (não nome solto)
     # Configs de ferramenta que guardam token — QUALIFICADAS POR PATH (Docker/GitHub/K8s); NAO o nome solto
     # ('config.json'/'settings.json' sao comuns -> narrowed, falso-positivo do audit anterior).
     r"|\.docker/config\.json|\.git-credentials|\.config/gh/hosts|\.kube/config|gh/hosts"
