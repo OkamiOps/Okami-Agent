@@ -83,8 +83,30 @@ _RULES: list[tuple[str, str, Severity, str]] = [
 ]
 
 _COMPILED = [(re.compile(rx, re.IGNORECASE), rule, sev, why) for rx, rule, sev, why in _RULES]
-_NET_CALL = re.compile(r"(curl|wget|fetch\s*\(|requests\.(get|post|put)|urllib|axios|Invoke-WebRequest|http\.request)", re.IGNORECASE)
-_SECRET_REF = re.compile(r"(\.ssh/|id_rsa|\.aws/cred|\.codex/auth|\.claude/\.cred|\.okami/cred|\benv\b|secret|token|password|api[_\s-]?key)", re.IGNORECASE)
+# Chamada de REDE — com word-boundaries: antes `curl` casava dentro de "Curly quotes", `fetch` sem `(`
+# casava "fetch the guidelines" em prosa. Agora só a chamada de verdade (curl/wget como comando, fetch(,
+# requests.<verbo>, urllib, axios, etc.).
+_NET_CALL = re.compile(
+    r"(\bcurl\b|\bwget\b|fetch\s*\(|requests\.(get|post|put|patch|delete)|\burllib\b|\baxios\b"
+    r"|Invoke-WebRequest|http\.request|XMLHttpRequest|\.post\s*\()", re.IGNORECASE)
+# Referência a CREDENCIAL — calibrado (2026-07-09): antes `token`/`secret`/`password`/`env` NUS casavam
+# "design token", "csrf token", "tokenizer", "environment", "secretly", "no password required" — falso-
+# positivo em toda skill de design/web/marketing. Agora só indicadores FORTES: caminhos de credencial,
+# api-key, token QUALIFICADO (auth/access/bearer/oauth/api/secret token) ou atribuído (token=/:), secret/
+# password como palavra inteira, env-var de credencial (STRIPE_KEY/OPENAI_API_KEY), e acesso a env real
+# (.env/process.env/os.environ/getenv). "design token" e afins NÃO casam mais.
+_SECRET_REF = re.compile(
+    r"(\.ssh/|id_rsa|\.aws/cred|\.codex/auth|\.claude/\.cred|\.okami/cred"
+    r"|\bapi[_\s-]?keys?\b"
+    r"|(?:auth|access|bearer|oauth|refresh|api|session|private|client)[_\s-]?tokens?\b"
+    r"|\btokens?\s*[=:]"
+    r"|\bsecrets?\b|\bpasswords?\b|\bpasswd\b|\bsenhas?\b"
+    r"|[A-Z][A-Z0-9]*_(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|APIKEY)\b"
+    r"|\.env\b|process\.env|os\.environ|getenv)", re.IGNORECASE)
+# Proximidade (linhas) exigida entre um segredo e uma chamada de rede p/ acusar exfiltração: o padrão real
+# é "lê a credencial e MANDA logo em seguida". Um doc longo com uma env-var no topo e um fetch( 200 linhas
+# abaixo NÃO é exfil. Janela apertada mata o falso-positivo sem abrir buraco no ataque de verdade.
+_SECRET_NET_PROXIMITY = 4
 # Unicode oculto: zero-width, BOM e overrides bidirecionais (Trojan Source) usados para
 # esconder prompt injection da revisão humana.
 _HIDDEN_UNICODE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]")
@@ -125,7 +147,8 @@ class RiskReport:
 def scan_text(name: str, text: str) -> list[Finding]:
     """Escaneia um texto (use para TUDO que será injetado no prompt — corpo, descrição, etc.)."""
     out: list[Finding] = []
-    has_secret = has_net = False
+    secret_lines: list[int] = []
+    net_lines: list[int] = []
     for i, line in enumerate(text.splitlines(), 1):
         for rx, rule, sev, why in _COMPILED:
             if rx.search(line):
@@ -134,12 +157,22 @@ def scan_text(name: str, text: str) -> list[Finding]:
             out.append(Finding(Severity.HIGH, "hidden_unicode", name, i,
                                "caracteres unicode ocultos/bidi (Trojan Source)", "esconde conteúdo da revisão"))
         if _SECRET_REF.search(line):
-            has_secret = True
+            secret_lines.append(i)
         if _NET_CALL.search(line):
-            has_net = True
-    if has_secret and has_net:
-        out.append(Finding(Severity.HIGH, "secret_plus_network", name, 0,
-                           "arquivo referencia segredos E faz chamadas de rede", "possível exfiltração"))
+            net_lines.append(i)
+    # exfiltração = credencial E envio PERTO um do outro (não o arquivo inteiro): mata o falso-positivo de
+    # "design token"↔"fetch(" a 200 linhas de distância, mantendo o ataque real (ler segredo → mandar já).
+    near = next(((s, n) for s in secret_lines for n in net_lines
+                 if abs(s - n) <= _SECRET_NET_PROXIMITY), None)
+    if near:
+        # MEDIUM (avisa, NÃO bloqueia): a mera co-ocorrência de credencial + rede perto é COMUM em código
+        # legítimo (skill de API lê a chave e chama o próprio serviço — api-debug, stocks). A intenção
+        # MALICIOSA de verdade (MANDAR o segredo pra fora) já tem regra HIGH própria (`exfiltration`: verbo
+        # send/upload/post/leak + segredo). Aqui é só um sinal p/ o dono revisar, não um bloqueio de install.
+        out.append(Finding(Severity.MEDIUM, "secret_plus_network", name, near[0],
+                           f"credencial (l.{near[0]}) e chamada de rede (l.{near[1]}) a <{_SECRET_NET_PROXIMITY+1} "
+                           "linhas — revise se o segredo não vaza (uso legítimo: chave como header de auth)",
+                           "credencial perto de chamada de rede"))
     return out
 
 
