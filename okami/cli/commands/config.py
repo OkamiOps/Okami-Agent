@@ -128,38 +128,79 @@ def _ui_hint(msg: str) -> str:
     return _ui.hint(msg)
 
 
-def _authenticate_provider() -> None:
-    """`autenticar provider (login)` — abre um picker dos providers de ASSINATURA/OAuth e chama o
-    `okami login <id>` no escolhido (device-flow ou CLI-delegado). Reusa oauth/login existentes; não
-    duplica lógica de auth. É o que o dono pediu: abrir os providers e só autenticar, sem editar .env.
+def _provider_auth_state(cfg, pid: str):
+    """Como o provider `pid` autentica e se JÁ está autenticado. Retorna (metodo, key_env, ok):
+    - metodo: 'oauth' (device-flow/CLI: codex/claude/...) | 'api_key' (cola a chave no .env: minimax/mimo/grok/…)
+    - key_env: nome da env var da chave (só p/ api_key)
+    - ok: bool — já autenticado (token presente / env var setada)."""
+    import os
+    from okami.llm import oauth
+    pc = cfg.provider(pid)
+    auth = (getattr(pc, "auth", "") or "").lower()
+    key_env = getattr(pc, "api_key_env", None) or getattr(pc, "key_env", None)
+    if pid == "codex" or getattr(pc, "login_cmd", None) or getattr(pc, "oauth", None) or "oauth" in auth or "subscription" in auth:
+        try:
+            ok = oauth.codex_logged_in() if pid == "codex" else bool(oauth.load_tokens(pid))
+        except Exception:  # noqa: BLE001
+            ok = False
+        return "oauth", None, ok
+    if key_env:            # api_key / token-plan (minimax/mimo/grok/…): a chave mora no .env
+        val = os.environ.get(key_env) or ""
+        if not val:        # também confere o .env resolvido pela config
+            try:
+                val = str(getattr(pc, "api_key", "") or "")
+            except Exception:  # noqa: BLE001
+                val = ""
+        return "api_key", key_env, bool(val and val not in ("", "lm-studio"))
+    return "none", None, True     # provider sem credencial (ex.: lmstudio local)
 
-    Sem TTY: lista os providers autenticáveis + a dica de comando (degrada, não trava)."""
+
+def _authenticate_provider() -> None:
+    """`autenticar provider` — abre TODOS os providers que precisam de credencial (assinatura/OAuth E
+    token-plan/API-key) e autentica o escolhido no método certo: device-flow/CLI (codex/claude…) OU
+    colar a Subscription Key no .env (minimax/mimo/grok…). É o que o dono pediu: abrir os providers e
+    autenticar, sem editar arquivo. Reusa login()/config_set — não duplica auth.
+
+    Sem TTY: lista os providers + status + a dica de comando (degrada, não trava)."""
     from okami import menu
     from okami.cli.commands.basics import login
 
     cfg = _load()
-    from okami.llm import oauth
-    # só providers que autenticam por assinatura/OAuth/CLI (têm login_cmd ou bloco oauth ou são codex)
-    auth_ps = []
+    rows = []      # (pid, metodo, key_env, ok)
     for pid in (cfg.providers or {}):
-        pc = cfg.provider(pid)
-        if pid == "codex" or getattr(pc, "login_cmd", None) or getattr(pc, "oauth", None):
-            try:
-                logged = oauth.codex_logged_in() if pid == "codex" else bool(oauth.load_tokens(pid))
-            except Exception:  # noqa: BLE001
-                logged = False
-            auth_ps.append((pid, "● logado" if logged else "○ não autenticado"))
-    if not auth_ps:
-        console.print(_ui_hint("nenhum provider de assinatura/OAuth configurado — adicione com `okami provider add`."))
+        method, key_env, ok = _provider_auth_state(cfg, pid)
+        if method == "none":
+            continue                          # local/sem credencial não aparece no menu de auth
+        rows.append((pid, method, key_env, ok))
+    if not rows:
+        console.print(_ui_hint("nenhum provider que exija login — adicione com `okami provider add`."))
         return
+
+    def _label(pid, method, ok):
+        badge = "● autenticado" if ok else "○ falta autenticar"
+        how = "OAuth/device" if method == "oauth" else "API key (.env)"
+        return f"{pid} — {badge} · {how}"
+
     if not menu._interactive():
-        for pid, st in auth_ps:
-            console.print(f"  {pid}  [dim]{st}[/dim]")
-        console.print(_ui_hint("sem TTY — use: okami login <id> (ex.: okami login codex)"))
+        for pid, method, key_env, ok in rows:
+            console.print(f"  {_label(pid, method, ok)}")
+        console.print(_ui_hint("sem TTY — OAuth: okami login <id> · API key: okami config set <KEY_ENV> <valor>"))
         return
-    choice = menu.select("Autenticar qual provider?", [(pid, f"{pid} — {st}", "") for pid, st in auth_ps])
-    if choice:
-        login(choice)      # device-flow / CLI-delegado de verdade (basics.py)
+    choice = menu.select("Autenticar qual provider?",
+                         [(pid, _label(pid, method, ok), "") for pid, method, key_env, ok in rows])
+    if not choice:
+        return
+    method, key_env, _ok = _provider_auth_state(cfg, choice)
+    if method == "oauth":
+        login(choice)                         # device-flow / CLI-delegado de verdade (basics.py)
+    elif method == "api_key" and key_env:     # token-plan: cola a chave → vai pro .env (config_set)
+        console.print(_ui_hint(f"{choice}: cole a Subscription Key / API key (fica só no .env, mascarada)."))
+        val = menu.text(f"{key_env}", password=True)
+        if val and val.strip():
+            config_set(key_env, val.strip())
+            console.print(f"🔐 [green]{choice} autenticado[/] — {key_env} salvo no .env.")
+        else:
+            console.print(_ui_hint("nada colado — cancelado."))
 
 
 def _show_providers() -> None:

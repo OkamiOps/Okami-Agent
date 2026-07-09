@@ -56,18 +56,31 @@ def model_cmd(
     pid, model, source = _effective(cfg)
     console.print(f"🧠 [bold]{pid}[/bold] · {model}  [dim]({source})[/dim]")
     from okami import menu
+    # Picker dos MODELOS REAIS de cada provider CONFIGURADO (não aliases abstratos) — o dono quer escolher
+    # entre as contas/CLIs/APIs que ELE tem, com os modelos que cada uma expõe. Marca o atual e o auth.
+    from okami.cli.commands.config import _provider_auth_state
     rows = []
-    seen: set[str] = set()
-    for alias, provider, hint in known_aliases(cfg):
-        if alias in seen:
-            continue
-        seen.add(alias)
+    cur_full = f"{pid}/{model}" if model else pid
+    for provider in (cfg.providers or {}):
         pc = cfg.providers.get(provider)
-        tier = pc.tier if pc else "?"
-        ready = "✓" if (pc and pc.ready) else "…"
-        label = f"{alias:<10} → {provider}" + (f"/{hint}" if hint else "")
-        rows.append((alias, label, f"tier={tier} · {ready}"))
-    picked = menu.select("Trocar pra qual?", rows, default=pid)
+        if pc is None:
+            continue
+        _method, _kenv, authed = _provider_auth_state(cfg, provider)
+        auth_badge = "✓ auth" if authed else "✗ falta login"
+        tier = getattr(pc, "tier", "?") or "?"
+        models = list(getattr(pc, "models", None) or [])
+        if not models:                                   # provider sem lista → usa o modelo default dele
+            dm = getattr(pc, "model", "") or ""
+            models = [dm] if dm else []
+        for m in models:
+            token = f"{provider}/{m}"                     # resolve() aceita '<provider>/<model>'
+            here = " ← atual" if (token == cur_full or (m == model and provider == pid)) else ""
+            label = f"{provider:<9} · {m}"
+            rows.append((token, label, f"tier={tier} · {auth_badge}{here}"))
+    if not rows:                                         # fallback: sem modelos reais → volta pros aliases
+        for alias, provider, hint in known_aliases(cfg):
+            rows.append((alias, f"{alias} → {provider}", ""))
+    picked = menu.select("Trocar pra qual modelo?", rows, default=cur_full)
     if not picked:
         console.print("[dim]cancelado.[/dim]")
         raise typer.Exit(1)
