@@ -1,0 +1,14 @@
+name: google-meet
+hooks: []
+description: >
+  Port MÍNIMO do plugin google_meet do Hermes (join numa call, transcrição de legendas ao vivo, fala em
+  tempo real via bridge de áudio). Registra as tools `meet_join`/`meet_status`/`meet_transcript`/
+  `meet_leave` via `ctx.register_tool` (a superfície fica ESTÁVEL pro modelo), mas a ORQUESTRAÇÃO real
+  (spawn de Chromium headless via Playwright, scraping de legendas, ponte de áudio realtime
+  BlackHole/PulseAudio + OpenAI Realtime, process_manager multi-processo, node host remoto) NÃO foi
+  portada — cada tool devolve `ok=False` com uma mensagem clara do que falta implementar e aponta pro
+  código-fonte original (`hermes-agent/plugins/google_meet/`). Reduzido de propósito: portar a
+  orquestração completa (~950 linhas, dependência pesada de Playwright/Chromium + roteamento de áudio
+  de SO) fica fora do escopo desta wave — melhor uma tool honesta sobre o que falta do que uma cópia
+  quebrada que finge funcionar.
+config: {}

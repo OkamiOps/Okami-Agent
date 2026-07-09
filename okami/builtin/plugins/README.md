@@ -48,6 +48,15 @@ Confiança: plugin de pasta entra **untrusted** (não pode trocar de provider à
   workspace no contexto de CADA turno — o modelo sabe onde está sem gastar uma tool call em `git status`.
   Fail-safe: fora de repo git / sem `git` no PATH → string vazia (silêncio). `OKAMI_GITCONTEXT_DISABLE=1`
   desliga; `OKAMI_GITCONTEXT_MAX_FILES` limita quantos nomes de arquivo lista antes de resumir em "+N mais".
+- **`google-meet/`** — **port MÍNIMO** do plugin `google_meet` do Hermes. Registra as tools
+  `meet_join`/`meet_status`/`meet_transcript`/`meet_leave` (via `ctx.register_tool`) pra manter a
+  superfície estável, mas a orquestração real (Chromium headless via Playwright, scraping de legendas,
+  ponte de áudio realtime OpenAI Realtime + BlackHole/PulseAudio) não foi portada — cada tool devolve
+  `ok=False` explicando exatamente o que falta e aponta pro código-fonte original.
+- **`teams/`** — **port MÍNIMO** do plugin `teams_pipeline` do Hermes. Registra `teams_pipeline_status`
+  (diagnóstico: quais credenciais do Microsoft Graph estão no ambiente) e `teams_meeting_summary` (stub
+  estável) — a pipeline completa (webhooks do Graph, download de transcript/gravação, resumo via LLM,
+  sinks Notion/Linear/Teams, job store durável) não foi portada.
 
 ## Paridade com os plugins built-in do Hermes
 
@@ -60,7 +69,9 @@ Os built-in do Hermes (`hermes-agent/docs/.../built-in-plugins`) mapeiam assim n
 | `image_gen/openai`, `openai-codex`, `xai` | **Nativo**: tool `generate_image` + registry de backends nomeados (G4). |
 | `kanban/dashboard` | **Nativo**: Kanban swarm do dispatcher multi-agente (#12 Onda C). |
 | `observability/langfuse`, `nemo_relay` | **Nativo**: event log + `okami cost` + `okami insights` + telemetria; relé externo via hook `after_tool` (ver `usage-observer/`). |
-| `google_meet`, `teams_pipeline`, `spotify` | **Superfície MCP**: integrações externas OAuth-pesadas vivem como servidores MCP soberanos (mesma decisão do computer-use), não como plugin de pasta. |
+| `google_meet` | **Portado (mínimo)** como plugin (`plugins/google-meet/`) — tools registradas, orquestração real (Playwright/Chromium/áudio) não portada; ver seção acima. |
+| `teams_pipeline` | **Portado (mínimo)** como plugin (`plugins/teams/`) — tools registradas, pipeline Graph real não portada; ver seção acima. |
+| `spotify` | **Superfície MCP**: integração externa OAuth vive como servidor MCP soberano (mesma decisão do computer-use), não como plugin de pasta. |
 | `hermes-achievements` | Fora de escopo (gamificação de histórico de sessão); sem equivalente planejado. |
 
 Princípio: o que já é **tool embutida** não vira plugin redundante; o que é **hook de ciclo de vida**

@@ -1,0 +1,16 @@
+name: teams
+hooks: []
+description: >
+  Port MÍNIMO do plugin teams_pipeline do Hermes (pipeline de resumo de reunião do Microsoft Teams
+  Graph-backed: baixa transcript/gravação, resume via LLM, escreve em Notion/Linear/responde no Teams,
+  com store durável + subscriptions de webhook do Graph + retry). O Hermes original é ~2.4k linhas
+  (pipeline.py/subscriptions.py/store.py/meetings.py/models.py/runtime.py/cli.py) e só registrava
+  superfície de CLI de operador (nenhuma tool de modelo). Este port registra duas tools de modelo —
+  `teams_pipeline_status` (diagnóstico: quais credenciais do Microsoft Graph estão configuradas) e
+  `teams_meeting_summary` (stub — pede resumo de uma reunião, hoje sempre devolve o que falta) — em vez
+  da orquestração completa. Falta: app registration no Microsoft Graph (tenant/client id/secret),
+  assinatura de webhook pra callState/onlineMeeting, download de transcript/gravação, resumo via LLM,
+  e os sinks de saída (Notion/Linear/resposta no Teams). Reduzido de propósito: a pipeline completa
+  depende de infraestrutura durável (job store + subscriptions renovadas por cron) fora do escopo desta
+  wave.
+config: {}
