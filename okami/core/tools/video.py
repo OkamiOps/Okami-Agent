@@ -43,4 +43,5 @@ class GenerateVideo(Tool):
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"falha ao gerar vídeo: {e}")
         how = " (a partir de imagem)" if image else ""
-        return ToolResult(True, f"vídeo gerado{how}: {args['path']}", effect=True)
+        # MEDIA:<path> na saída → gateway anexa o vídeo sozinho (igual pdf/image), sem depender de eco.
+        return ToolResult(True, f'vídeo gerado{how}: {out}\nMEDIA:"{out}"', effect=True)

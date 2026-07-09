@@ -504,4 +504,7 @@ class GenerateImage(Tool):
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"falha ao gerar imagem: {e}")
         how = f" (com {len(refs)} referência(s))" if refs else ""
-        return ToolResult(True, f"imagem gerada{how}: {args['path']}", effect=True)
+        # MEDIA:<path absoluto> na SAÍDA da tool → o gateway anexa a imagem SOZINHO (igual generate_pdf),
+        # sem depender do modelo ECOAR a tag na resposta final. Bug real (2026-07-09): imagem gerada mas
+        # nunca entregue no Telegram porque a saída só dizia "imagem gerada: path" (sem MEDIA:).
+        return ToolResult(True, f'imagem gerada{how}: {p}\nMEDIA:"{p}"', effect=True)
