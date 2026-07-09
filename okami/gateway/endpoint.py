@@ -79,6 +79,7 @@ class Session:
         self.model_override = ""         # modelo desta sessão (/model <id>) — vence o default
         self.provider_override = ""      # provider desta sessão (/model <provider>) — ex.: codex (OpenAI via assinatura)
         self.native_override = ""        # /native-tools desta sessão: ""=smart default | "on" | "off"
+        self.show_reasoning = True       # /reasoning off → NÃO streama o pensamento no chat (modelo pensa igual)
         self.title = ""                  # nome amigável da conversa (/title) — aparece no /status e /sessions
         self.voice_off = False           # /voice off → NUNCA responde em áudio nesta sessão
         self.voice_always = False        # /voice on → SEMPRE áudio. Default (ambos False): ESPELHA a entrada
@@ -218,6 +219,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         s.resume_attempts = int(e.get("resume_attempts", 0))
         s.reasoning_effort = e.get("reasoning_effort", "")
         s.native_override = e.get("native_override", "")
+        s.show_reasoning = bool(e.get("show_reasoning", True))
         s.title = e.get("title", "")
         s.voice_off = bool(e.get("voice_off", False))
         s.voice_always = bool(e.get("voice_always", False))
@@ -242,7 +244,7 @@ class AgentEndpoint(EndpointCommandsMixin):
         """Atualiza só os METADADOS (yolo/overlay/resume_attempts) — não toca no transcript."""
         self.store.update_entry(chat_id, yolo=s.yolo, persona_overlay=s.persona_overlay,
                                 resume_attempts=s.resume_attempts, reasoning_effort=s.reasoning_effort,
-                                native_override=s.native_override,
+                                native_override=s.native_override, show_reasoning=s.show_reasoning,
                                 title=s.title, voice_off=s.voice_off, voice_always=s.voice_always,
                                 busy_mode=s.busy_mode, approved_cats=sorted(s.approved_cats))
 
@@ -843,6 +845,19 @@ class AgentEndpoint(EndpointCommandsMixin):
                 s.reasoning_effort = arg
                 self.channel.send(chat_id, "🧠 " + _tr(
                     "gw.think_set", _default="think = {arg} (applies in this session).", arg=arg))
+            self._save_meta(chat_id, s)
+            return
+        if low.startswith("/thoughts") or low.startswith("/pensamento"):   # EXIBIÇÃO do pensamento (≠ /think,
+            arg = text.split(None, 1)[1].strip().lower() if len(text.split(None, 1)) > 1 else ""  # que é esforço)
+            if arg in ("off", "no", "nao", "não", "hide", "0", "false"):
+                s.show_reasoning = False
+                self.channel.send(chat_id, "🙈 " + _tr("gw.thoughts_off", _default=(
+                    "pensamento OCULTO no chat — o modelo continua pensando igual, só não te enche mais. "
+                    "Você vê só o progresso das ferramentas e a resposta final. (/thoughts on p/ voltar)")))
+            else:
+                s.show_reasoning = True
+                self.channel.send(chat_id, "👁️ " + _tr("gw.thoughts_on",
+                    _default="pensamento VISÍVEL no chat ao vivo. (/thoughts off p/ ocultar)"))
             self._save_meta(chat_id, s)
             return
         if low.startswith("/native-tools") or low.startswith("/native_tools"):
@@ -1559,7 +1574,8 @@ class AgentEndpoint(EndpointCommandsMixin):
             else:
                 kw_pre = None
             if _status_id is not None:                    # streaming-by-edit: edita a msg de status ao vivo
-                on_ev = self._status_on_event(chat_id, _status_id, _thinking, on_ev)
+                on_ev = self._status_on_event(chat_id, _status_id, _thinking, on_ev,
+                                              show_reasoning=s.show_reasoning)
             live = {"steps": 0, "tokens": 0, "tool": ""}   # estado VIVO p/ o heartbeat (passo + tokens correndo)
 
             def on_ev(e, _base=on_ev):                     # noqa: E306 — SEMPRE rastreia (mesmo sem base) p/ alimentar
@@ -1743,15 +1759,20 @@ class AgentEndpoint(EndpointCommandsMixin):
                 self._spawn(lambda t=nxt_text, im=nxt_img, ov=nxt_override: self._run(
                     chat_id, t, s, images=im, surface_override=ov))
 
-    def _status_on_event(self, chat_id, status_id, header: str, base):
+    def _status_on_event(self, chat_id, status_id, header: str, base, show_reasoning: bool = True):
         """on_event que EDITA a msg de status ao vivo com o progresso (tool-calls), com throttle. Encadeia
-        o on_event original (base) se houver. Best-effort — edição nunca quebra o turno."""
+        o on_event original (base) se houver. Best-effort — edição nunca quebra o turno.
+
+        show_reasoning=False (/reasoning off): NÃO streama o texto parcial/pensamento na msg de status — o
+        modelo pensa igual, só não enche o chat; mostra só o progresso das ferramentas + resposta final."""
+        import re as _re
         import time as _t
 
         from okami.gateway.streamedit import StreamEditor
         from okami.tui import tool_emoji
         ed = StreamEditor(header=header)
         tok = {"text": ""}                  # #16: buffer do streaming token-a-token
+        _think_re = _re.compile(r"<think>.*?</think>", _re.DOTALL | _re.IGNORECASE)
 
         def _ev(e):
             if base is not None:
@@ -1761,7 +1782,11 @@ class AgentEndpoint(EndpointCommandsMixin):
                     pass
             k = e.get("kind")
             if k == "token":                # streaming: vai mostrando a resposta parcial na msg de status
-                tok["text"] = (tok["text"] + e.get("text", ""))[-4000:]   # buffer LIMITADO: a edição só usa
+                if not show_reasoning:      # /reasoning off: não exibe o pensamento ao vivo (modelo pensa igual)
+                    return
+                # <think>…</think> é raciocínio bruto vazado — NUNCA aparece no chat, nem com reasoning on
+                raw = (tok["text"] + e.get("text", ""))[-4000:]
+                tok["text"] = _think_re.sub("", raw)
                 #                                  os últimos 3500; resposta longa não incha memória sem teto
                 now = _t.monotonic()
                 if ed.due(now, len(tok["text"])):    # passa o tamanho do buffer → adaptativo funciona no stream

@@ -53,6 +53,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("models", "list available models", "model"),
     CommandDef("think", "reasoning effort (minimal·low·medium·high·off)", "model",
                ("reasoning",), args="<level>"),
+    CommandDef("thoughts", "show/hide the live thinking in chat (model still thinks)", "model",
+               ("pensamento",), args="on|off"),
     # ---- identity / taste ----
     CommandDef("feedback", "shape how the agent talks (evolves VOICE/PERSONA)", "identity",
                args="<text>"),

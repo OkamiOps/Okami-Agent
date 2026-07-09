@@ -77,6 +77,15 @@ def _run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> su
     return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, env=env)
 
 
+def _head_sha(src: Path) -> str:
+    """SHA curto do HEAD do checkout — a versão em pyproject nem sempre bumpa a cada commit, então
+    comparar SHA (não só a string de versão) é o que revela se o `git pull` de fato trouxe código novo."""
+    if not shutil.which("git"):
+        return ""
+    r = _run(["git", "rev-parse", "--short", "HEAD"], cwd=src)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def git_pull(src: Path, *, allow_dirty: bool = False) -> tuple[bool, str]:
     """`git pull --ff-only` no checkout gerenciado — mesma política do install.sh (nunca reescreve
     histórico local silenciosamente). `allow_dirty=True` degrada pra "segue com o que já tem"
@@ -216,6 +225,7 @@ def upgrade(
     ):
         raise typer.Exit(code=0)
 
+    sha_before = _head_sha(src)                       # p/ saber se o pull trouxe COMMIT novo (versão pode não bumpar)
     console.print(f"› atualizando {src}…")
     ok, msg = git_pull(src, allow_dirty=allow_dirty)
     if not ok:
@@ -226,6 +236,7 @@ def upgrade(
         raise typer.Exit(code=1)
 
     new = new_version_from_src(src) or "?"
+    sha_after = _head_sha(src)
 
     console.print("› reinstalando (uv tool install --force)…")
     ok, msg = uv_tool_install(src)
@@ -233,10 +244,16 @@ def upgrade(
         console.print(f"[red]✗[/] uv tool install falhou: {msg}")
         raise typer.Exit(code=1)
 
-    if old == new:
-        console.print(f"[green]✓[/] já estava na última versão: {old}")
-    else:
+    # Compara por SHA de commit, não só string de versão — muitos commits saem sem bumpar a versão em
+    # pyproject, e antes o upgrade dizia "já estava na última versão" mesmo tendo puxado código novo.
+    changed = bool(sha_before and sha_after and sha_before != sha_after)
+    if changed:
+        vtxt = f"{old} → {new}" if old != new else new
+        console.print(f"[green]✓[/] atualizado: {vtxt}  [dim]({sha_before} → {sha_after})[/dim]")
+    elif old != new:
         console.print(f"[green]✓[/] atualizado: {old} → {new}")
+    else:
+        console.print(f"[green]✓[/] já estava na última versão: {old} [dim]({sha_after})[/dim]")
     console.print("  [dim]Abra um terminal novo (ou rode `hash -r`) se `okami --version` ainda mostrar a versão antiga.[/dim]")
 
     warning = shadow_warning(installed_bin_path())

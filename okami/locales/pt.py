@@ -496,6 +496,7 @@ MESSAGES: dict[str, str] = {
     "cmd.model": "mostra ou troca o modelo desta sessão",
     "cmd.models": "lista os modelos disponíveis",
     "cmd.think": "esforço de raciocínio (minimal·low·medium·high·off)",
+    "cmd.thoughts": "mostra/oculta o pensamento ao vivo no chat (o modelo pensa igual)",
     # identidade / gosto
     "cmd.feedback": "molda o jeito do agente falar (evolui VOICE/PERSONA)",
     "cmd.persona": "muda o tom só nesta sessão (/persona off volta)",
