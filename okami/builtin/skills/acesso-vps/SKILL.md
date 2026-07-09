@@ -42,3 +42,6 @@ de um token ou de uma chave privada na resposta.
 - Prefira GERAR a chave na VPS (a privada nunca sai) a importar uma chave que o dono digita no chat.
 - Se faltar permissão pra rodar a tool, é o grant de shell/provisão — peça ao dono pra liberar.
 - `git_auth` action=status mostra o estado atual sem revelar segredo nenhum.
+- Credencial faltando é sempre um PEDIDO ao dono pelo canal seguro (`store_secret`) — nunca
+  vasculhe o disco atrás de token/chave/cookie de outra ferramenta, e nunca proponha `--yolo` ou
+  qualquer bypass de sandbox pra contornar a falta de acesso. Veja `ferramentas-nativas-primeiro`.

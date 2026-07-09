@@ -1,7 +1,7 @@
 ---
 name: editar-pdf
 description: Edita PDF existente — metadata (título/autor), corrige texto pontual (título/data/nome), junta/divide/gira páginas. Pura-Python (pypdf), sem serviço externo.
-triggers: [editar pdf, corrigir pdf, mudar o pdf, trocar o título do pdf, juntar pdf, dividir pdf, girar pagina, metadata do pdf]
+triggers: [editar pdf, corrigir pdf, mudar o pdf, trocar o título do pdf, juntar pdf, dividir pdf, girar pagina, metadata do pdf, html para pdf, gerar pdf]
 intent_examples:
   - "corrige a data nesse PDF, tá 'janeiro' e devia ser 'fevereiro'"
   - "muda o título do documento pra 'Relatório Q3'"
@@ -21,7 +21,10 @@ overlay (apaga um retângulo e escreve o texto novo por cima — é assim que ed
 texto pontual sem re-renderizar o documento inteiro).
 
 Para GERAR um PDF do zero (markdown/HTML → PDF), use a tool `generate_pdf`, não esta skill — esta é
-só para PDF que já existe.
+só para PDF que já existe. `generate_pdf` é pura-Python (xhtml2pdf/fpdf2) e resolve em ms **sem
+Chromium/Puppeteer/Playwright** — não suba um browser headless pra isso: numa VPS sem display
+costuma falhar (sandbox do Chromium) e é muito mais lento mesmo quando funciona. Veja também a
+skill `ferramentas-nativas-primeiro`.
 
 ## Como rodar
 

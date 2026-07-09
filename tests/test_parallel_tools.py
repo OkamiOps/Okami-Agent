@@ -116,6 +116,74 @@ def test_run_parallel_batch_timeout_returns_partial_results(tmp_path):
     assert results[2].output == "out-fast"
 
 
+# ----------------------------------------------------------------- heartbeat
+class _MediumTool:
+    """Dorme um pouco menos que o batch_timeout mas mais que o heartbeat_interval — dá tempo do
+    heartbeat disparar pelo menos uma vez antes do lote terminar (sem estourar o teto)."""
+
+    def __init__(self, secs):
+        self.secs = secs
+
+    def run(self, args, ctx):
+        time.sleep(self.secs)
+        return ToolResult(True, "ok", False)
+
+
+def test_run_parallel_emits_heartbeat_during_long_batch(tmp_path):
+    registry = {"slow": _MediumTool(0.15)}
+    acts = [Action("slow", {})]
+    ctx = ToolContext(workspace=tmp_path)
+    ticks: list[tuple[float, list[str]]] = []
+    results = parallel.run_parallel(
+        acts, registry, ctx, batch_timeout=5.0, heartbeat_interval=0.05,
+        on_heartbeat=lambda elapsed, still: ticks.append((elapsed, list(still))),
+    )
+    assert results[0].ok is True
+    assert ticks, "heartbeat deveria ter disparado pelo menos uma vez durante o lote longo"
+    assert all(still == ["slow"] for _elapsed, still in ticks)
+
+
+def test_run_parallel_no_heartbeat_without_callback(tmp_path):
+    # comportamento DEFAULT inalterado: sem on_heartbeat, nada quebra, resultado normal.
+    registry = {"fast": _SleepTool(0.01, "f")}
+    acts = [Action("fast", {})]
+    ctx = ToolContext(workspace=tmp_path)
+    results = parallel.run_parallel(acts, registry, ctx)
+    assert results[0].output == "out-f"
+
+
+def test_run_parallel_heartbeat_silent_when_batch_finishes_fast(tmp_path):
+    # lote rápido (bem abaixo do heartbeat_interval) não deveria disparar heartbeat nenhum.
+    registry = {"fast": _SleepTool(0.01, "f")}
+    acts = [Action("fast", {})]
+    ctx = ToolContext(workspace=tmp_path)
+    ticks = []
+    parallel.run_parallel(
+        acts, registry, ctx, batch_timeout=5.0, heartbeat_interval=30.0,
+        on_heartbeat=lambda elapsed, still: ticks.append((elapsed, still)),
+    )
+    assert ticks == []
+
+
+def test_run_parallel_timeout_does_not_leak_threads(tmp_path):
+    # depois do timeout de lote, o executor não deve deixar threads vivas além da(s) travada(s) —
+    # shutdown(wait=False) abandona sem bloquear o chamador (cancelamento gracioso).
+    import threading
+
+    before = threading.active_count()
+    registry = {"hang": _HangTool()}
+    acts = [Action("hang", {})]
+    ctx = ToolContext(workspace=tmp_path)
+    t0 = time.monotonic()
+    results = parallel.run_parallel(acts, registry, ctx, batch_timeout=0.1)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 1.0                          # não bloqueou esperando a hang thread
+    assert results[0].ok is False
+    # a thread travada (2s de sleep) ainda pode estar viva por um instante, mas o CHAMADOR não
+    # ficou preso nela — active_count não cresce sem limite (só a 1 thread abandonada, no máximo).
+    assert threading.active_count() <= before + 2
+
+
 # ----------------------------------------------------------------- integração no loop (lote read-only)
 def test_loop_runs_readonly_batch_in_parallel(tmp_path):
     """O loop, com um lote LÍDER de leituras, executa via run_parallel e emite cada step em ordem."""

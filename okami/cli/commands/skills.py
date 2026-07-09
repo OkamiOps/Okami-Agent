@@ -118,6 +118,58 @@ def _skill_hub_action(action: str, name: str) -> None:
         return
 
 
+def _skill_discover_action(action: str, query: str, *, as_json: bool, do_install: bool) -> None:
+    """`okami skill search <query>` / `okami skill browse` — DESCOBRE skills no catálogo GitHub
+    confiável (okami.skills.registry) e, se pedido, instala pela pipeline EXISTENTE (`learn`/
+    `install_from_source` — quarentena+scan+lockfile inalterados)."""
+    import json as _json
+
+    from okami.skills.registry import default_source
+
+    src = default_source()
+    try:
+        cands = src.search(query, 20) if action == "search" else src.browse(20)
+    except Exception as e:  # noqa: BLE001 — descoberta nunca deve derrubar o CLI
+        console.print(f"[red]falha ao consultar o catálogo:[/red] {e}")
+        raise typer.Exit(1)
+
+    if as_json:
+        console.print(_json.dumps([c.__dict__ for c in cands], ensure_ascii=False, indent=2))
+        return
+    if not cands:
+        hint = f" p/ '{query}'" if query else ""
+        console.print(f"[dim]nenhuma skill encontrada{hint} nos taps confiáveis.[/dim] "
+                      "[dim]amplie com: okami skill tap github <org>[/dim]")
+        return
+
+    table = Table(title="Skills catalog" if action == "browse" else f"Skills catalog — busca '{query}'")
+    table.add_column("#", justify="right")
+    table.add_column("nome", style="bold")
+    table.add_column("descrição")
+    table.add_column("fonte")
+    table.add_column("confiança")
+    for i, c in enumerate(cands, 1):
+        table.add_row(str(i), c.name, c.description[:70], c.source, c.trust)
+    console.print(table)
+    console.print("[dim]instale com: okami learn <fonte> --name <apenas-esta>[/dim]" if not do_install else "")
+
+    if not do_install:
+        return
+    chosen = cands[0]
+    console.print(f"[dim]instalando #1: {chosen.name} ({chosen.source})…[/dim]")
+    from okami.home import skills_dir
+    from okami.skills.install import install_from_source
+    res = install_from_source(chosen.source, skills_dir(), Path("."),
+                              only=chosen.only, confirm=True)
+    if res.ok:
+        console.print(f"[green]✓ instalada:[/green] {', '.join(res.installed)}")
+        if res.reason:
+            console.print(f"[yellow]{res.reason}[/yellow]")
+    else:
+        console.print(f"[red]✗ falha:[/red] {res.reason}")
+        raise typer.Exit(1)
+
+
 @app.command("skill", help=_tr("cli.skill_cmd", _default="Manage skills: okami skill new|list|verify|remove [name]."))
 def skill(
     action: str = typer.Argument(..., help=_tr("cli.skill.action", _default="new | list | verify | remove.")),
@@ -125,8 +177,11 @@ def skill(
     description: str = typer.Option("", "--description", "-d", help=_tr("cli.skill.desc", _default="One-line description (≤120 chars).")),
     triggers: str = typer.Option("", "--triggers", "-t", help=_tr("cli.skill.triggers", _default="Comma-separated trigger keywords.")),
     body: str = typer.Option("", "--body", "-b", help=_tr("cli.skill.body", _default="Skill body in markdown (## Quando usar / ## Como / ## Cuidados). Omit to open $EDITOR.")),
+    as_json: bool = typer.Option(False, "--json", help=_tr("cli.skill.json", _default="With search/browse: print raw JSON instead of a table.")),
+    install: bool = typer.Option(False, "--install", help=_tr("cli.skill.install", _default="With search/browse: install the first result right away (no picker).")),
 ) -> None:
-    """Gerencia skills: new (criar), list (instaladas + proveniência), verify (integridade), remove."""
+    """Gerencia skills: new (criar), list (instaladas + proveniência), verify (integridade), remove,
+    search/browse (descobrir no catálogo GitHub confiável — item 11.5, o gap 'não sei o owner/repo')."""
     import re as _re
 
     import yaml as _yaml
@@ -181,8 +236,11 @@ def skill(
             raise typer.Exit(1)
         console.print(bundle_invocation_message(name, resolved))
         return
+    if action in ("search", "browse"):
+        _skill_discover_action(action, name, as_json=as_json, do_install=install)
+        return
     if action != "new":
-        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove | tap | bundle | config")
+        console.print(f"[red]ação '{action}' não reconhecida — use:[/red] new | list | verify | remove | tap | bundle | config | search | browse")
         raise typer.Exit(2)
     if not name.strip():
         console.print("[red]informe o nome:[/red] okami skill new <nome>")

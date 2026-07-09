@@ -384,6 +384,9 @@ class Harness:
         self.messages: list[dict] = []
         self._action_schema = action_schema(self.registry)
         self._fingerprints: deque[str] = deque(maxlen=12)
+        from okami.core.harness.loopguard import IdempotentCache
+        self._idem_cache = IdempotentCache()            # read-only idêntico serve do cache (mata o reler 134x);
+        #   zerado a cada tool com efeito (nunca serve conteúdo obsoleto — ver _handle_tool_result)
         self._failures: dict[str, int] = {}
         self._consecutive_violations = 0
         self._consecutive_arg_fails = 0                # ações parseáveis mas SEM arg obrigatório, seguidas
@@ -1125,10 +1128,15 @@ class Harness:
                 continue
             self._fingerprints.append(fp)
             self._emit("tool_start", n=step_n + 1, tool=action.tool, args=action.args)   # terminal VIVO:
-            try:                                           # anuncia ANTES de rodar (spinner+relógio na TUI)
-                res = tool.run(action.args, self.ctx)
-            except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
-                res = ToolResult(False, f"erro na tool {action.tool}: {e}")
+            cached = self._idem_cache.served(action.tool, action.args)   # read-only idêntico já obtido nesta
+            if cached is not None:                         # rodada (sem mutação no meio) → serve, não re-roda
+                res = cached                               # (o cache se zera a cada efeito → nunca é obsoleto)
+            else:
+                try:                                       # anuncia ANTES de rodar (spinner+relógio na TUI)
+                    res = tool.run(action.args, self.ctx)
+                except Exception as e:  # noqa: BLE001 — uma tool NUNCA derruba o harness
+                    res = ToolResult(False, f"erro na tool {action.tool}: {e}")
+                self._idem_cache.put(action.tool, action.args, res)
             step_n = self._handle_tool_result(t, step_n, action, res)
             _last_progress = _wt.monotonic()              # passo executado = ATIVIDADE → reseta o anti-travamento (trabalho longo nunca expira)
 
@@ -1157,6 +1165,8 @@ class Harness:
         _transform = getattr(self.hooks, "transform_tool_result", None)   # duck-typed: hooks doubles em
         if callable(_transform):                          # teste que só implementam .fire() seguem OK
             res.output = self.hooks.transform_tool_result(action.tool, action.args, res.output)  # §11
+        if res.effect:                                    # mutou algo (write/edit/shell/…) → invalida o cache
+            self._idem_cache.clear()                      # read-only: o próximo read reflete o novo estado
         step_n += 1
         self._consecutive_arg_fails = 0               # dispatch de verdade → zera o contador de args malformados
         self._consecutive_action_failures = 0          # dispatch de verdade → zera o agregado também (WIN1)

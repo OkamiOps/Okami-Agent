@@ -15,6 +15,88 @@ def _add_line_numbers(text: str, start: int) -> str:
     return out + "\n" if text.endswith("\n") else out
 
 
+_MAX_LINE_LEN = 2000  # teto por LINHA (paridade Hermes tools/file_operations.py:869-893) — um minificado/
+                      # linha gigante não floda o contexto mesmo com o arquivo inteiro dentro do teto geral
+
+
+def _truncate_long_lines(text: str, max_len: int = _MAX_LINE_LEN) -> str:
+    """Corta cada linha individual acima de `max_len` chars, com marcador (paridade Hermes). Não mexe
+    no nº de linhas (offset/limit/line_numbers continuam batendo). No-op se nenhuma linha estourar OU se
+    o texto é um blob de UMA linha só sem quebra nenhuma (ex.: saída de comando/base64 sem '\\n') — aí
+    não é "1 linha gigante entre outras normais" (o alvo real do cap), é o conteúdo inteiro; o teto GERAL
+    de arquivo (100_000 chars) já cobre esse caso sem cortar no meio de um blob que o chamador quer inteiro."""
+    if "\n" not in text:
+        return text
+    lines = text.split("\n")
+    changed = False
+    out = []
+    for ln in lines:
+        if len(ln) > max_len:
+            out.append(ln[:max_len] + f" […] linha truncada {len(ln)} chars […]")
+            changed = True
+        else:
+            out.append(ln)
+    return "\n".join(out) if changed else text
+
+
+def _strip_bom(text: str) -> tuple[str, bool]:
+    """(texto sem BOM inicial, tinha BOM?). `read_text_capped` usa utf-8 puro (não utf-8-sig) — o BOM
+    (U+FEFF) sobrevive no texto lido e poluiria a 1ª linha (visível ao modelo, quebra o match de `old`)."""
+    if text.startswith("﻿"):
+        return text[1:], True
+    return text, False
+
+
+def _detect_line_ending(p) -> str | None:
+    """Sniffa CRLF vs LF direto dos BYTES em disco — `read_text_capped`/`Path.read_text` fazem
+    universal-newline translation (\\r\\n → \\n) e essa info se perde no texto já decodificado.
+    None = indeterminado (novo arquivo, vazio, ou sem quebra de linha na amostra)."""
+    try:
+        sample = p.read_bytes()[:4096]
+    except OSError:
+        return None
+    if b"\r\n" in sample:
+        return "\r\n"
+    if b"\n" in sample:
+        return "\n"
+    return None
+
+
+def _has_bom_on_disk(p) -> bool:
+    try:
+        return p.read_bytes()[:3] == b"\xef\xbb\xbf"
+    except OSError:
+        return False
+
+
+def _restore_line_ending(text: str, target: str) -> str:
+    """Reconverte o texto (sempre trabalhado em LF internamente) pro line-ending ORIGINAL do arquivo
+    antes de escrever — senão o 1º edit/write num arquivo CRLF (Windows) normaliza silenciosamente
+    pra LF. Idempotente: colapsa qualquer \\r\\n/\\r solto pra \\n antes de expandir p/ o alvo."""
+    lf = text.replace("\r\n", "\n").replace("\r", "\n")
+    return lf.replace("\n", "\r\n") if target == "\r\n" else lf
+
+
+def _read_did_you_mean(p, rel: str, *, max_results: int = 3) -> str:
+    """Quando read_file mira um path que não existe, sugere até 3 nomes PARECIDOS na mesma pasta
+    (paridade Hermes _suggest_similar_files) — tira o modelo do loop de re-chutar variação de nome
+    ('mian.py' → 'main.py'). '' se a pasta não existir/estiver vazia ou nada bater minimamente."""
+    import difflib
+    import os
+    try:
+        siblings = sorted(e.name for e in p.parent.iterdir())
+    except OSError:
+        return ""
+    if not siblings:
+        return ""
+    matches = difflib.get_close_matches(p.name, siblings, n=max_results, cutoff=0.5)
+    if not matches:
+        return ""
+    prefix = os.path.dirname(rel)
+    sug = ", ".join(f"{prefix}/{m}" if prefix else m for m in matches)
+    return f" Você quis dizer: {sug}?"
+
+
 def _as_int(v) -> int | None:
     """Aceita int ou string numérica (o modelo às vezes manda "5"); senão None."""
     if v is None or v == "":
@@ -137,7 +219,7 @@ class ReadFile(Tool):
                               "o conteúdo (read_file é só p/ arquivo).", effect=False)
         if not p.exists():
             return ToolResult(False, f"arquivo não existe: {rel} — NÃO chute o caminho; use list_dir p/ navegar "
-                              "ou find_files p/ achar pelo nome.", effect=False)
+                              "ou find_files p/ achar pelo nome." + _read_did_you_mean(p, rel), effect=False)
         from okami.core.read_extract import extract_text, is_extractable
         if is_extractable(rel):               # #9: .docx/.xlsx/.ipynb → extrai texto (senão vem binário/lixo)
             text = extract_text(p)
@@ -153,6 +235,8 @@ class ReadFile(Tool):
             text = read_text_capped(p)        # teto de tamanho → não estoura memória
         except Exception as e:  # noqa: BLE001 — inclui FileTooLarge (msg clara)
             return ToolResult(False, f"erro ao ler {rel}: {e}", effect=False)
+        text, _ = _strip_bom(text)            # BOM (se houver) não aparece pro modelo — write/edit restauram
+        text = _truncate_long_lines(text)     # per-line cap — 1 linha minificada não floda o contexto
         from okami.core.tools.file_state import record_read
         record_read(ctx, rel, p)              # grounding + baseline de mtime p/ o anti-stale (item 7)
         hint = ""                             # #8 item 7: convenção da subpasta (1× por pasta/turno)
@@ -236,15 +320,25 @@ class WriteFile(Tool):
             except Exception:  # noqa: BLE001 — checkpoint é best-effort, nunca bloqueia a escrita
                 pass
         before = ""
-        if p.exists():                                  # lint-delta: erro pré-existente não nagueia
+        existed = p.exists()
+        # sniff line-ending/BOM ORIGINAIS antes de qualquer leitura/escrita — write_text_atomic vai
+        # sobrescrever o arquivo, então isto tem que rodar ANTES (CRLF/BOM preservation).
+        orig_ending = _detect_line_ending(p) if existed else None
+        orig_bom = _has_bom_on_disk(p) if existed else False
+        if existed:                                     # lint-delta: erro pré-existente não nagueia
             try:
                 from okami.core.file_safety import read_text_capped
-                before = read_text_capped(p)
+                before, _ = _strip_bom(read_text_capped(p))
             except Exception:  # noqa: BLE001
                 before = ""
         from okami.core.file_safety import FileTooLarge, write_text_atomic
+        out_content = content                          # conteúdo em LF/sem BOM (o que o modelo manda) — a
+        if orig_ending == "\r\n":                       # versão em disco preserva o line-ending/BOM originais
+            out_content = _restore_line_ending(out_content, "\r\n")
+        if orig_bom and not out_content.startswith("﻿"):
+            out_content = "﻿" + out_content
         try:
-            n = write_text_atomic(p, content)   # atômico (sem arquivo meia-escrito) + teto de tamanho
+            n = write_text_atomic(p, out_content)   # atômico (sem arquivo meia-escrito) + teto de tamanho
         except FileTooLarge as e:
             return ToolResult(False, str(e))
         record_read(ctx, rel, p)  # acabou de escrever → conhece o conteúdo + atualiza baseline anti-stale
@@ -364,6 +458,10 @@ class EditFile(Tool):
         if stale:
             return ToolResult(False, stale, effect=False)
         from okami.core.file_safety import MAX_WRITE_BYTES, read_text_capped, write_text_atomic
+        # sniff line-ending/BOM ORIGINAIS antes da leitura (write_text_atomic vai sobrescrever depois) —
+        # CRLF/BOM preservation: sem isto, o 1º edit num arquivo Windows normaliza silenciosamente pra LF.
+        orig_ending = _detect_line_ending(p)
+        orig_bom = _has_bom_on_disk(p)
         try:
             # P1 do audit 2026-06-07: EditFile usava MAX_READ_BYTES (5MB) e quebrava com
             # mensagem confusa ("use run_shell p/ fatiar") mesmo quando o `old` cabia nos
@@ -372,6 +470,7 @@ class EditFile(Tool):
             text = read_text_capped(p, limit=MAX_WRITE_BYTES)
         except Exception as e:  # noqa: BLE001
             return ToolResult(False, f"erro ao ler {rel}: {e}")
+        text, _ = _strip_bom(text)   # o `old` do modelo vem de um read_file já sem BOM — compara igual
         # Cadeia de matching fuzzy (paridade Hermes, 9 estratégias — fuzzy_match.py): tenta exato primeiro,
         # depois vai afrouxando (whitespace/indentação/escape/unicode/âncora/similaridade), parando na
         # PRIMEIRA que casar de forma ÚNICA. Substitui o antigo fallback único (_fuzzy_replace).
@@ -391,7 +490,12 @@ class EditFile(Tool):
                 ctx.checkpoints.snapshot(rel)
             except Exception:  # noqa: BLE001
                 pass
-        write_text_atomic(p, new_text)        # escrita atômica (rede de segurança)
+        out_text = new_text                   # new_text é LF/sem BOM — restaura o original antes de gravar
+        if orig_ending == "\r\n":
+            out_text = _restore_line_ending(out_text, "\r\n")
+        if orig_bom and not out_text.startswith("﻿"):
+            out_text = "﻿" + out_text
+        write_text_atomic(p, out_text)        # escrita atômica (rede de segurança)
         record_read(ctx, rel, p)              # conhece o conteúdo + atualiza baseline anti-stale
         from okami.core.code_lint import lint_delta, semantic_delta  # item 6/16: erro NOVO pela edição
         from okami.core.code_security import security_warn            # #9: padrão perigoso introduzido

@@ -19,10 +19,17 @@ seriais — paralelizar escrita exige um modelo de transação que não cabe aqu
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor, wait as _futures_wait
+from typing import Callable
 
 from okami.core.harness.models import PARALLEL_BATCH_TIMEOUT_S
 from okami.core.tools import ToolResult
+
+# Intervalo-padrão de heartbeat (porte Hermes agent/tool_executor.py — "Heartbeat every ~30s"): sem
+# isto, um lote longo (várias reads grandes, ou uma perto do teto de 420s) fica MUDO — gateway/UI não
+# sabe se travou ou só está demorando. 30s casa com o Hermes.
+HEARTBEAT_INTERVAL_S: float = 30.0
 
 
 def _target_paths(action) -> list[str]:
@@ -61,7 +68,9 @@ def paths_collide(actions: list) -> bool:
 
 
 def run_parallel(actions: list, registry: dict, ctx, max_workers: int = 8,
-                 batch_timeout: float = PARALLEL_BATCH_TIMEOUT_S) -> list[ToolResult]:
+                 batch_timeout: float = PARALLEL_BATCH_TIMEOUT_S,
+                 heartbeat_interval: float = HEARTBEAT_INTERVAL_S,
+                 on_heartbeat: Callable[[float, list[str]], None] | None = None) -> list[ToolResult]:
     """Roda as `actions` em paralelo (ThreadPool); devolve os ToolResult na ORDEM DE ENTRADA.
 
     Exceção de uma tool vira ToolResult(False, "erro na tool …") — exatamente como o loop embrulha,
@@ -73,7 +82,16 @@ def run_parallel(actions: list, registry: dict, ctx, max_workers: int = 8,
     vez de só a tool travada). Estourou o teto → cada tool AINDA rodando vira ToolResult(False, …) de
     timeout; as que JÁ terminaram mantêm o resultado real. O worker travado fica ABANDONADO (thread
     daemon-like via shutdown(wait=False)) — mesma troca do Hermes: não trava o processo, mas a thread
-    detached segue existindo até terminar sozinha."""
+    detached segue existindo até terminar sozinha.
+
+    `on_heartbeat(elapsed_seconds, still_running_tools)` (porte Hermes _touch_activity a cada ~30s de
+    lote concorrente): opcional — sem callback, nada muda (default None). Com callback, é chamado a
+    cada `heartbeat_interval` segundos ENQUANTO o lote ainda tem tool pendente, pra o gateway/UI saber
+    que o lote está vivo (não travado) em vez de ficar mudo até o timeout ou o fim do lote.
+    Cancelamento gracioso: no timeout, futures ainda NA FILA (não iniciadas) são canceladas
+    (`fut.cancel()`) — Python não preempta uma thread já rodando, então uma tool em andamento segue
+    até terminar sozinha, mas o executor é abandonado (`shutdown(wait=False)`) em vez de bloquear o
+    harness esperando por ela; nenhuma thread trava o processo."""
     if not actions:
         return []
 
@@ -89,7 +107,28 @@ def run_parallel(actions: list, registry: dict, ctx, max_workers: int = 8,
     workers = max(1, min(max_workers, len(actions)))
     ex = ThreadPoolExecutor(max_workers=workers)
     futures = [ex.submit(_one, action) for action in actions]
-    _done, not_done = _futures_wait(futures, timeout=batch_timeout)
+
+    # Espera em POLLS curtos (em vez de um único wait(batch_timeout)) — permite emitir heartbeat
+    # periódico sem atrasar a detecção de "lote todo terminou" nem estourar o teto total.
+    poll_s = min(heartbeat_interval, batch_timeout) if heartbeat_interval > 0 else batch_timeout
+    poll_s = max(poll_s, 0.01)
+    start = time.monotonic()
+    last_heartbeat = start
+    not_done: set = set(futures)
+    while True:
+        elapsed = time.monotonic() - start
+        remaining = batch_timeout - elapsed
+        if remaining <= 0:
+            not_done = {f for f in futures if not f.done()}
+            break
+        _done, not_done = _futures_wait(futures, timeout=min(poll_s, remaining))
+        if not not_done:
+            break
+        now = time.monotonic()
+        if on_heartbeat is not None and (now - last_heartbeat) >= heartbeat_interval:
+            last_heartbeat = now
+            still = [action.tool for action, fut in zip(actions, futures) if fut in not_done]
+            on_heartbeat(now - start, still)
     timed_out = bool(not_done)
     results: list[ToolResult] = []
     for action, fut in zip(actions, futures):

@@ -37,6 +37,12 @@ Okami) → `~/.git-credentials` (o que o próprio `git` já tiver em cache). Sem
 chamadas de leitura ainda funcionam (rate limit anônimo mais baixo); operações de escrita
 (merge, criar issue, comentar) exigem credencial configurada.
 
+Essa é a lista FECHADA de onde procurar — não vá além dela. Se nenhuma das três tiver o token,
+NÃO vasculhe outros arquivos do disco (perfil de browser, chaveiro do sistema, config de outra
+CLI) atrás de credencial: peça ao dono um token pelo canal seguro e guarde com `store_secret`
+(veja a skill `acesso-vps` para o fluxo completo). Nunca proponha `--yolo`/bypass de sandbox pra
+contornar a falta de acesso.
+
 ## Checar/esperar o CI
 
 Com `gh`:

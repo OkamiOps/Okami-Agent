@@ -51,6 +51,7 @@ TOOL_REGISTRY: tuple[ToolSpec, ...] = (
     ToolSpec("remember_user", "memória"),
     ToolSpec("session_search", "memória"),
     ToolSpec("use_skill", "skill"),
+    ToolSpec("search_skills", "skill"),                         # descoberta no catálogo (read-only, sem exec)
     ToolSpec("manage_skill", "skill", tier="power", danger="sensitive"),
     ToolSpec("install_skill", "skill", tier="power", danger="dangerous"),
     ToolSpec("spawn", "subagente", tier="power", danger="sensitive"),
