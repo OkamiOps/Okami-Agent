@@ -160,7 +160,19 @@ de prioridade, porque composição é o que mais denuncia "gerado por IA".
 
 Se o pedido pedir explicitamente um dos mundos visuais do dono (arquitetura brutalista/serena,
 dark tech científico, robótica lúdica, saúde/longevidade, marca real Agent Smith/Lionclaw) ou só
-"faz um site no meu estilo", carregue o catálogo completo com paleta, tipografia, layout, motion e
-o movimento distintivo de cada um dos 10 sites de demonstração dele, mais a seção "como reproduzir"
-com as técnicas comuns aos 10:
-`${OKAMI_SKILL_DIR}/references/estilos-do-marcos.md`.
+"faz um site no meu estilo", isto é **implementação, não só taste** — os arquivos de referência têm
+`:root` de cores exato, técnica-assinatura em código real (Three.js/GSAP/CSS puro) e código mínimo
+reproduzível, extraídos linha a linha do HTML/CSS/JS de cada site. Fluxo de duas etapas:
+
+1. **Índice** (~1 tela, escolha o estilo): `${OKAMI_SKILL_DIR}/references/estilos-do-marcos.md` —
+   os 10 nomes, essência, paleta+fontes, movimento distintivo, postura 3D/motion e o pointer para
+   o detalhe de cada um.
+2. **Detalhe do estilo escolhido** (carregue ANTES de escrever a primeira linha de CSS):
+   `${OKAMI_SKILL_DIR}/references/estilo-NN-nome.md` — token block, fontes+uso, a técnica-
+   assinatura com código real, postura de hero/3D com valores exatos de posicionamento, motion,
+   layout, assets.
+
+Para as técnicas que se repetem nos 10 (sistema de token CSS, a dicotomia protagonista-vs-ambiente
+do 3D — não force um efeito interativo quando o estilo pede atmosfera de fundo —, fallback sem
+WebGL, `prefers-reduced-motion`, GSAP+Three.js desacoplados), veja
+`${OKAMI_SKILL_DIR}/references/tecnicas-transversais.md`.
