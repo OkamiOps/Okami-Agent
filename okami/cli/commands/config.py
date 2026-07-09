@@ -209,6 +209,94 @@ def _show_providers() -> None:
     list_providers(json_out=False)
 
 
+# Catálogo de chaves de INTEGRAÇÃO (ferramentas) que o dono pode setar pelo menu, SEM editar arquivo.
+# Cada uma vira env var no .env global (0600). Nome → (ENV_VAR, p/ quê). "Outra…" cobre qualquer futura.
+_INTEGRATION_KEYS = [
+    ("OpenRouter",       "OPENROUTER_API_KEY",  "modelos via OpenRouter (provider)"),
+    ("ElevenLabs (TTS)", "ELEVENLABS_API_KEY",  "voz/TTS premium"),
+    ("Firecrawl (web)",  "FIRECRAWL_API_KEY",   "web scrape/extract robusto"),
+    ("Tavily (busca)",   "TAVILY_API_KEY",      "web search com API"),
+    ("Exa (busca)",      "EXA_API_KEY",         "web search neural"),
+    ("Brave (busca)",    "BRAVE_API_KEY",       "web search Brave"),
+    ("Serper (busca)",   "SERPER_API_KEY",      "Google search via Serper"),
+    ("OpenAI (API key)", "OPENAI_API_KEY",      "OpenAI pago (se usar API key, não assinatura)"),
+    ("Anthropic (key)",  "ANTHROPIC_API_KEY",   "Anthropic pago (se usar API key)"),
+    ("Groq",             "GROQ_API_KEY",        "inferência rápida Groq"),
+    ("DeepSeek",         "DEEPSEEK_API_KEY",    "DeepSeek API"),
+    ("HuggingFace",      "HF_TOKEN",            "modelos/datasets HuggingFace"),
+    ("GitHub token",     "GITHUB_TOKEN",        "gh API sem gh CLI"),
+]
+
+
+def _manage_api_keys() -> None:
+    """`chave / API (ferramenta ou provider)` — seta QUALQUER API key pelo menu (nunca editar .env no vim).
+    Catálogo das comuns + 'outra' pra qualquer env var futura. Grava no .env global via config_set."""
+    import os
+
+    from okami import menu
+    if not menu._interactive():
+        console.print(_ui_hint("sem TTY — use: okami config set <ENV_VAR> <valor> (ex.: okami config set FIRECRAWL_API_KEY fc-...)"))
+        return
+    rows = []
+    for name, env, why in _INTEGRATION_KEYS:
+        mark = "● setada" if os.environ.get(env) else "○ vazia"
+        rows.append((env, f"{name} [{env}]", f"{why} · {mark}"))
+    rows.append(("__other__", "outra chave (digitar o nome da env var)", "qualquer API key futura"))
+    picked = menu.select("Qual chave setar?", rows)
+    if not picked:
+        return
+    env = picked
+    if env == "__other__":
+        env = menu.text("nome da env var (ex.: MISTRAL_API_KEY)").strip().upper()
+        if not env:
+            return
+    val = menu.text(f"valor de {env}", password=True)
+    if val and val.strip():
+        config_set(env, val.strip())      # roteia p/ .env global (0600), mascarado — sem editar arquivo
+    else:
+        console.print(_ui_hint("nada colado — cancelado."))
+
+
+def _manage_allowlist() -> None:
+    """`allowlist (quem pode falar no Telegram)` — adiciona/remove chat id pelo menu, grava em
+    okami.local.yaml (channels.telegram.allow_chats) via _write_local. Nunca editar arquivo/vim na VPS."""
+    from okami import menu
+    from okami.cli._shared import _write_local
+    from okami.config import config_dir
+    import yaml as _yaml
+    p = config_dir() / "okami.local.yaml"
+    data = (_yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}) or {}
+    cur = (((data.get("channels") or {}).get("telegram") or {}).get("allow_chats")) or []
+    console.print(f"[bold]allowlist atual (Telegram):[/bold] {cur or '(vazia — deny-by-default)'}")
+    if not menu._interactive():
+        console.print(_ui_hint("sem TTY — use: okami config set channels.telegram.allow_chats '<id1>,<id2>'"))
+        return
+    action = menu.select("O que fazer?", [
+        ("add", "adicionar um chat id (quem pode falar)", ""),
+        ("del", "remover um chat id", ""),
+        ("open", "abrir p/ QUALQUER UM (allow_all — inseguro)", ""),
+        ("sair", "voltar", ""),
+    ])
+    cur = list(cur)
+    if action == "add":
+        cid = menu.text("chat id a LIBERAR (número; veja o seu no /whoami do bot)").strip()
+        if cid and cid not in cur:
+            cur.append(cid)
+    elif action == "del" and cur:
+        cid = menu.select("remover qual?", [(str(x), str(x), "") for x in cur])
+        if cid in cur:
+            cur.remove(cid)
+    elif action == "open":
+        if menu.confirm("Liberar o bot p/ QUALQUER pessoa? (inseguro)", default=False):
+            _write_local({"channels": {"telegram": {"allow_all": True}}})
+            console.print("[yellow]⚠ allow_all=true — o bot responde qualquer um.[/yellow]")
+        return
+    else:
+        return
+    _write_local({"channels": {"telegram": {"allow_chats": cur, "allow_all": False}}})
+    console.print(f"[green]✓ allowlist →[/green] {cur or '(vazia)'} [dim]→ okami.local.yaml[/dim]")
+
+
 config_app = typer.Typer(invoke_without_command=True,
                          help=_tr("cli.config", _default="Config (hermes/openclaw-style): show/get/set/edit/path/check. "
                                   "No subcommand opens the interactive panel. Secrets→.env, rest→okami.local.yaml."))
@@ -353,7 +441,9 @@ def config_main(ctx: typer.Context) -> None:
     while True:
         pick = menu.select("config — o que fazer?", [
             ("provider", "trocar provider/modelo (picker)", ""),
-            ("autenticar", "autenticar provider (login assinatura/OAuth)", ""),
+            ("autenticar", "autenticar provider (login assinatura/OAuth/API key)", ""),
+            ("chave", "chave / API de ferramenta (ElevenLabs, Firecrawl, OpenRouter…)", ""),
+            ("allowlist", "allowlist do Telegram (quem pode falar)", ""),
             ("providers", "ver providers configurados", ""),
             ("set", "mudar um valor (segredo→.env, resto→local)", ""),
             ("get", "ler um valor", ""),
@@ -368,6 +458,10 @@ def config_main(ctx: typer.Context) -> None:
             _switch_provider_model()
         elif pick == "autenticar":
             _authenticate_provider()
+        elif pick == "chave":
+            _manage_api_keys()
+        elif pick == "allowlist":
+            _manage_allowlist()
         elif pick == "providers":
             _show_providers()
         elif pick == "set":
