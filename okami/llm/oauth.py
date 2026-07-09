@@ -258,33 +258,48 @@ def _codex_refresh(refresh_token: str, now: Callable[[], float]) -> dict | None:
     return new
 
 
+def _codex_cli_auth_token(now: Callable[[], float]) -> str | None:
+    """Fallback: token do codex CLI (~/.codex/auth.json — ex.: logado pelo `codex login`)."""
+    if not _CLI_AUTH.exists():
+        return None
+    try:
+        d = json.loads(_CLI_AUTH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    t = d.get("tokens", d) if isinstance(d.get("tokens", d), dict) else {}
+    at = t.get("access_token")
+    rt = t.get("refresh_token")
+    # O okami NÃO escreve no auth.json (é do codex CLI). Se o token copiado já
+    # expirou e há refresh_token, renova p/ o NOSSO store — que daí cuida do refresh.
+    claims = _decode_jwt_claims(at) if at else {}
+    exp = claims.get("exp", 0)
+    if rt and exp and exp - 60 <= now():
+        if new := _codex_refresh(rt, now):
+            return new["access_token"]
+    return at
+
+
 def codex_access_token(now: Callable[[], float] = time.time) -> str | None:
-    """Token válido do Codex: nosso store (com refresh) → fallback ~/.codex/auth.json."""
+    """Token válido do Codex: nosso store (com refresh) → fallback ~/.codex/auth.json.
+
+    INCIDENTE 2026-07 (imagem/chat 401 na máquina do dono): se o nosso store tem um token
+    EXPIRADO e SEM refresh_token (ou o refresh falha), a versão antiga fazia `return
+    data.get('access_token')` — devolvia o token MORTO e nunca caía no ~/.codex/auth.json
+    VÁLIDO. Resultado: generate_image passava no check() (token truthy) mas 401 na hora →
+    o agente floundava em pdf/screenshot. Agora: store morto e irrecuperável → CAI pro CLI
+    antes de devolver lixo; só devolve o token do store se ele estiver de fato utilizável."""
     data = load_tokens("codex")
     if data:
         if data.get("expires_at", 0) - 60 > now():
-            return data.get("access_token")
+            return data.get("access_token")            # store ainda válido
         rt = data.get("refresh_token")
         if rt and (new := _codex_refresh(rt, now)):
-            return new["access_token"]
-        return data.get("access_token")
-    if _CLI_AUTH.exists():  # fallback: token do codex CLI (ex.: auth.json copiado de outra máquina)
-        try:
-            d = json.loads(_CLI_AUTH.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-        t = d.get("tokens", d) if isinstance(d.get("tokens", d), dict) else {}
-        at = t.get("access_token")
-        rt = t.get("refresh_token")
-        # O okami NÃO escreve no auth.json (é do codex CLI). Se o token copiado já
-        # expirou e há refresh_token, renova p/ o NOSSO store — que daí cuida do refresh.
-        claims = _decode_jwt_claims(at) if at else {}
-        exp = claims.get("exp", 0)
-        if rt and exp and exp - 60 <= now():
-            if new := _codex_refresh(rt, now):
-                return new["access_token"]
-        return at
-    return None
+            return new["access_token"]                 # renovou pelo refresh do store
+        # store EXPIRADO e sem refresh que preste → NÃO devolve o token morto: tenta o CLI.
+        if cli := _codex_cli_auth_token(now):
+            return cli
+        return data.get("access_token")                # nada melhor disponível (último recurso)
+    return _codex_cli_auth_token(now)
 
 
 def codex_account_id(now: Callable[[], float] = time.time) -> str:
