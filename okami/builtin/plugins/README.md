@@ -43,6 +43,11 @@ Confiança: plugin de pasta entra **untrusted** (não pode trocar de provider à
   + `after_task` (apaga no fim). Conservador: só `.tmp`/`.bak`/`~`/dirs `tmp|temp|scratch`, nunca symlink/dir.
 - **`usage-observer/`** — exemplo de manifesto `after_tool` (ponto de extensão p/ telemetria própria; sem
   script = no-op). A observabilidade nativa (event log, `okami cost`, `okami insights`) já cobre o caso comum.
+- **`git-context/`** — plugin novo (não existe assim no Hermes; usa `ctx.register_context` do sistema
+  UNIFICADO, `pre_llm_call`). Injeta branch + ahead/behind do upstream + arquivos sujos do repo git do
+  workspace no contexto de CADA turno — o modelo sabe onde está sem gastar uma tool call em `git status`.
+  Fail-safe: fora de repo git / sem `git` no PATH → string vazia (silêncio). `OKAMI_GITCONTEXT_DISABLE=1`
+  desliga; `OKAMI_GITCONTEXT_MAX_FILES` limita quantos nomes de arquivo lista antes de resumir em "+N mais".
 
 ## Paridade com os plugins built-in do Hermes
 
@@ -61,3 +66,16 @@ Os built-in do Hermes (`hermes-agent/docs/.../built-in-plugins`) mapeiam assim n
 Princípio: o que já é **tool embutida** não vira plugin redundante; o que é **hook de ciclo de vida**
 (security-guidance, disk-cleanup) é portado como plugin real; o que é **integração externa pesada** fica
 na superfície **MCP**, não num plugin de pasta.
+
+### Avaliado e DESCARTADO (não vira plugin — evita filler)
+
+- **"tool-audit"/"command-logger" via `post_tool_call`** (logar comando destrutivo pra revisão depois):
+  redundante com o que JÁ existe nativo — `.okami/audit.jsonl` grava TODA tool call + decisão de
+  aprovação com HMAC ENCADEADO (tamper-evident, `Harness._audit` em `core/harness/loop.py`), e comando
+  catastrófico já é BLOQUEADO incondicionalmente antes de rodar (`detect_hardline` em `core/approval.py`
+  + Tirith em `run_shell`). Um plugin de log adicional duplicaria uma trilha que já é mais completa e
+  mais forte (encadeada) do que qualquer coisa que um hook `post_tool_call` conseguiria escrever.
+- **Demais built-in do Hermes em `plugins/*`** (browser, memory, model-providers, platforms, web, cron,
+  dashboard_auth, observability, image/video gen) não são hooks de ciclo de vida — são INTEGRAÇÕES com
+  serviço externo; já mapeadas na tabela acima como nativo/MCP. Nada ali sobra pra portar como plugin
+  de hook.

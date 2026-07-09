@@ -1,0 +1,14 @@
+name: git-context
+hooks: [pre_llm_call]
+description: >
+  Injeta o ESTADO ATUAL do repo git (branch, arquivos sujos, ahead/behind do upstream) no contexto de
+  CADA turno via ctx.register_context (pre_llm_call, port do Hermes) — o modelo sabe em que branch/
+  estado o workspace está SEM gastar uma chamada de tool (`git status`) só pra descobrir. Alto valor
+  diário p/ um agente de código: evita commit na branch errada, evita "esqueci que tinha stash",
+  evita re-perguntar em que branch está. Read-only (nunca escreve/nunca veta), fail-safe (fora de repo
+  git ou `git` ausente → string vazia, silêncio total — não polui o contexto).
+config:
+  # Opcional: quantos arquivos sujos listar por nome antes de resumir em "+N mais". Default 6.
+  OKAMI_GITCONTEXT_MAX_FILES: "6"
+  # Opcional: "1" desliga o plugin (nenhum contexto injetado) sem desinstalar.
+  OKAMI_GITCONTEXT_DISABLE: ""

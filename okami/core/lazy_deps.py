@@ -45,6 +45,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "pdf.edit": ("pypdf>=4.0.0",),
     # HTML→PDF nativo e RÁPIDO (sem Chromium/Puppeteer): renderiza CSS razoável em ~ms
     "pdf.html": ("xhtml2pdf>=0.2.11",),
+    # extração de texto/OCR de PDF e imagem de documento (skill documentos-ocr) — pura-Python
+    "pdf.pymupdf": ("pymupdf>=1.24.0",),
     # imagem (vision/resize)
     "image.pillow": ("Pillow>=10.0.0",),
     # janela nativa do dashboard (desktop) — webview do SO, sem Electron
