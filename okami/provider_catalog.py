@@ -80,18 +80,16 @@ PRESETS: list[Preset] = [
     # (client_id/device_authorization_url/token_url) não são publicados oficialmente — inferidos por
     # convenção RFC 8628 sobre o domínio api.minimax.io; confirme em platform.minimax.io/docs antes de
     # depender disso em produção (mesmo aviso que já existe em config.py `experimental`).
+    # OAuth REAL da MiniMax (paridade Hermes hermes_cli/auth.py): client_id/URLs/scope confirmados; inferência
+    # no endpoint /anthropic (protocolo Anthropic Messages, NÃO /v1 OpenAI-compat — era o erro do preset antigo).
     Preset("minimax-oauth", "MiniMax (assinatura via OAuth)",
-           "device flow nativo, SEM Subscription Key — EXPERIMENTAL (endpoints a confirmar)",
-           base={"model": "openai/MiniMax-M2.7", "api_base": "https://api.minimax.io/v1",
+           "login OAuth (SEM Subscription Key) — protocolo real do Hermes",
+           base={"model": "MiniMax-M2.7", "api_base": "https://api.minimax.io/anthropic",
                  "native_tools": True, "auth": "oauth_subscription", "transport": "minimax_oauth",
-                 "tier": "weak", "context_window": 1000000, "experimental": True,
-                 "oauth": {"client_id": "CONFIRMAR",
-                           "device_authorization_url": "https://api.minimax.io/oauth/device/code",
-                           "token_url": "https://api.minimax.io/oauth/token", "scope": ""}},
-           model_prefix="openai/", models=["MiniMax-M2.7", "MiniMax-M3", "MiniMax-M2.5", "MiniMax-M2.1"],
-           login="minimax_oauth",
-           note="EXPERIMENTAL: client_id/URLs OAuth ainda não confirmados oficialmente pela MiniMax — "
-                "revise `oauth:` no okami.yaml antes de logar. Login: okami login minimax-oauth."),
+                 "auth_flow": "minimax_oauth", "tier": "weak", "context_window": 1000000},
+           model_prefix="anthropic/", models=["MiniMax-M2.7", "MiniMax-M3", "MiniMax-M2.5", "MiniMax-M2.1"],
+           login="minimax-oauth",
+           note="Login: okami login minimax-oauth (device flow OAuth). Inferência em /anthropic."),
     # DISCOVERABILITY (item 2): mesmo Token Plan da MiniMax, endpoint REGIONAL China (Hermes:
     # plugins/model-providers/minimax/__init__.py `minimax_cn`, base_url=https://api.minimaxi.com — nota
     # "minimaxi.com", não "minimax.io"). Chave própria (MINIMAX_CN_API_KEY) — contas/planos são distintos
@@ -147,20 +145,46 @@ PRESETS: list[Preset] = [
     # e o device_login genérico do Okami (okami/llm/oauth.py) só aceita uma URL estática — usamos a
     # convenção RFC 8628 sobre o mesmo issuer (auth.x.ai/oauth2/token); confirme via discovery antes de
     # depender em produção.
+    # xAI OAuth REAL (paridade Hermes): token_url resolvido por OIDC discovery (auth.x.ai/.well-known/...),
+    # não uma URL fixa — o fluxo okami/llm/oauth_xai.py cuida disso + rotação de refresh_token.
     Preset("xai-oauth", "xAI / Grok (assinatura SuperGrok)",
-           "device flow OAuth (SuperGrok/Premium+), SEM API key — EXPERIMENTAL (token_url a confirmar)",
+           "login OAuth (SuperGrok/Premium+), SEM API key — device flow + OIDC discovery",
            base={"model": "xai/grok-4", "api_base": "https://api.x.ai/v1", "auth": "oauth_subscription",
-                 "transport": "minimax_oauth",  # reaproveita o transport OAuth genérico (bearer via litellm)
-                 "tier": "strong", "context_window": 256000, "experimental": True,
-                 "oauth": {"client_id": "b1a00492-073a-47ea-816f-4c329264a828",
-                           "device_authorization_url": "https://auth.x.ai/oauth2/device/code",
-                           "token_url": "https://auth.x.ai/oauth2/token",
-                           "scope": "openid profile email offline_access grok-cli:access api:access"}},
+                 "transport": "minimax_oauth", "auth_flow": "xai_oauth",
+                 "tier": "strong", "context_window": 256000},
            model_prefix="xai/", models=["grok-4", "grok-4-fast", "grok-3", "grok-3-mini"],
-           login="minimax_oauth",
-           note="EXPERIMENTAL: token_url inferido por convenção (xAI usa OIDC discovery, não uma URL "
-                "fixa) — confirme antes de logar. client_id/device_code_url são os mesmos publicados "
-                "pelo Hermes (hermes_cli/auth.py). Login: okami login xai-oauth."),
+           login="xai-oauth",
+           note="Login: okami login xai-oauth (device flow; abre auth.x.ai)."),
+    # Anthropic Claude por ASSINATURA sem o CLI `claude` (PKCE paste-code, paridade Hermes) — destrava a
+    # assinatura direto, com fallback pra ~/.claude e Keychain. Alternativa ao preset `claude` (que usa o CLI).
+    Preset("claude-oauth", "Anthropic Claude (assinatura via OAuth)",
+           "login OAuth PKCE (SEM o CLI `claude`) — cola o code, pronto",
+           base={"model": "claude-subscription/claude-opus-4-8", "api_base": "https://api.anthropic.com",
+                 "auth": "oauth_subscription", "transport": "minimax_oauth", "auth_flow": "anthropic_pkce",
+                 "tier": "strong", "context_window": 200000},
+           model_prefix="claude-subscription/",
+           models=["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+           login="claude-oauth",
+           note="Login: okami login claude-oauth (abre claude.ai, você cola o code#state)."),
+    # Nous Research (assinatura) — device flow RFC 8628 (paridade Hermes).
+    Preset("nous", "Nous Research (assinatura)", "login OAuth device flow (portal.nousresearch.com)",
+           base={"model": "Hermes-4-405B", "api_base": "https://inference-api.nousresearch.com/v1",
+                 "auth": "oauth_subscription", "transport": "minimax_oauth", "auth_flow": "nous_device",
+                 "native_tools": True, "tier": "strong", "context_window": 128000},
+           model_prefix="openai/", models=["Hermes-4-405B", "Hermes-4-70B"], login="nous",
+           note="Login: okami login nous (device flow)."),
+    # Qwen (Alibaba) por OAuth — sem login próprio aqui: loga pelo CLI `qwen`, o Okami lê/renova o arquivo dele.
+    Preset("qwen-oauth", "Qwen (assinatura via CLI qwen)", "usa o login do CLI `qwen` (Okami lê/renova o token)",
+           base={"model": "qwen-max", "api_base": "https://portal.qwen.ai/v1", "auth": "oauth_subscription",
+                 "transport": "minimax_oauth", "auth_flow": "qwen_cli", "tier": "strong", "context_window": 256000},
+           model_prefix="openai/", models=["qwen-max", "qwen-plus", "qwen-coder-plus"], login="qwen-oauth",
+           note="Logue pelo CLI `qwen` uma vez; o Okami lê e renova ~/.qwen/oauth_creds.json sozinho."),
+    # GitHub Copilot — device flow + exchange do token (paridade Hermes copilot_auth).
+    Preset("copilot", "GitHub Copilot", "login OAuth device (usa sua assinatura Copilot)",
+           base={"model": "gpt-4.1", "auth": "oauth_subscription", "transport": "minimax_oauth",
+                 "auth_flow": "copilot_device", "tier": "strong", "context_window": 128000},
+           model_prefix="openai/", models=["gpt-4.1", "claude-sonnet-4.5", "o4-mini"], login="copilot",
+           note="Login: okami login copilot (device flow no github.com/login/device)."),
     Preset("mistral", "Mistral AI", "Mistral Large/Codestral — API key",
            base={"api_base": "https://api.mistral.ai/v1", "auth": "api_key", "tier": "strong",
                  "context_window": 128000},

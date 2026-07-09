@@ -186,9 +186,20 @@ def _authenticate_provider() -> None:
             console.print(f"  {_label(pid, method, ok)}")
         console.print(_ui_hint("sem TTY — OAuth: okami login <id> · API key: okami config set <KEY_ENV> <valor>"))
         return
-    choice = menu.select("Autenticar qual provider?",
-                         [(pid, _label(pid, method, ok), "") for pid, method, key_env, ok in rows])
+    # +opção de autenticar um provider NOVO do catálogo (grok/nous/claude-oauth/copilot/…) sem editar
+    # arquivo — o dono tem assinaturas além das já configuradas e o menu antes só listava as do okami.yaml.
+    _ADD = "➕ adicionar/autenticar outro provider (catálogo)"
+    opts = [(pid, _label(pid, method, ok), "") for pid, method, key_env, ok in rows]
+    opts.append(("__add__", _ADD, ""))
+    choice = menu.select("Autenticar qual provider?", opts)
     if not choice:
+        return
+    if choice == "__add__":
+        from okami.cli.commands.provider import provider_add_cmd
+        try:
+            provider_add_cmd(default=None)        # catálogo → configura em okami.yaml → loga (device/paste-key)
+        except SystemExit:
+            pass
         return
     method, key_env, _ok = _provider_auth_state(cfg, choice)
     if method == "oauth":

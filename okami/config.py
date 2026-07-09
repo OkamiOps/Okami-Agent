@@ -137,6 +137,9 @@ class ProviderConfig(BaseModel):
     auth: str = "api_key"           # api_key | oauth_subscription  (ver §16 / okami-provider-auth)
     transport: str = "litellm"      # litellm | claude_cli | codex_oauth | minimax_oauth
     oauth: dict[str, Any] | None = None     # device flow: client_id, device_authorization_url, token_url, scope
+    auth_flow: str = ""                     # fluxo OAuth dedicado (paridade Hermes): anthropic_pkce |
+                                            # minimax_oauth | xai_oauth | nous_device | qwen_cli |
+                                            # copilot_device — despachado por okami/llm/oauth_flows.py
     login_cmd: list[str] | None = None      # CLI oficial p/ delegar login (ex.: codex login --device-auth)
     models: list[str] = Field(default_factory=list)  # ids alternativos disponíveis no plano
     tier: str = "unknown"           # strong | weak | local | unknown  (§3.5)

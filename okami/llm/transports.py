@@ -354,9 +354,17 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
 # --------------------------------------------------------------------- minimax_oauth
 def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
                            overrides: dict | None = None) -> Completion:
-    """MiniMax via OAuth token plan: usa o access_token do store como bearer no LiteLLM."""
+    """Bearer OAuth via LiteLLM (usado por minimax/xai/nous/claude-oauth/copilot/qwen). O token vem do
+    fluxo dedicado (auth_flow → okami/llm/oauth_flows) quando o provider declara um; senão cai no device
+    flow genérico antigo (pc.oauth)."""
     from okami.llm import oauth
-    token = oauth.get_valid_token(pc.name, pc.oauth)
+    token = None
+    flow = getattr(pc, "auth_flow", "") or ""
+    if flow:
+        from okami.llm import oauth_flows
+        token = oauth_flows.token_for(flow)       # fluxo dedicado (refresh embutido)
+    if not token:
+        token = oauth.get_valid_token(pc.name, pc.oauth)   # fallback: device flow genérico
     if not token:
         raise RuntimeError(f"Sem token OAuth para '{pc.name}'. Rode: okami login {pc.name}")
     import litellm

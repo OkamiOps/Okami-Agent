@@ -78,9 +78,9 @@ def test_minimax_oauth_preset_wires_oauth_transport_and_login():
     p = preset("minimax-oauth")
     assert p.base.get("transport") == "minimax_oauth"
     assert p.base.get("auth") == "oauth_subscription"
-    assert p.login == "minimax_oauth"
-    oauth = p.base.get("oauth") or {}
-    assert oauth.get("device_authorization_url") and oauth.get("token_url")
+    # fluxo OAuth REAL (paridade Hermes): auth_flow dedicado, não mais o oauth-dict com URLs chutadas
+    assert p.base.get("auth_flow") == "minimax_oauth"
+    assert p.base.get("api_base", "").endswith("/anthropic")   # protocolo Anthropic, não /v1
 
 
 def test_minimax_oauth_builds_valid_provider_config():
@@ -89,8 +89,7 @@ def test_minimax_oauth_builds_valid_provider_config():
     pc = cfg.providers["minimax-oauth"]
     assert pc.transport == "minimax_oauth"
     assert pc.auth == "oauth_subscription"
-    assert pc.oauth and pc.oauth["device_authorization_url"]
-    assert pc.experimental is True                    # endpoints não confirmados oficialmente
+    assert pc.auth_flow == "minimax_oauth"            # despachado por okami/llm/oauth_flows
 
 
 # --- item 2: minimax China region -----------------------------------------------------------------
@@ -145,11 +144,11 @@ def test_custom_preset_can_be_added_under_arbitrary_ids():
 # --- item 4: xAI/Grok subscription (OAuth) ---------------------------------------------------------
 
 
-def test_xai_oauth_preset_is_pickable_and_experimental():
+def test_xai_oauth_preset_is_pickable():
     p = preset("xai-oauth")
     assert p is not None
     assert ("xai-oauth", p.label, p.hint) in menu_choices()
-    assert p.base.get("experimental") is True
+    assert p.base.get("auth_flow") == "xai_oauth"     # OIDC discovery no fluxo dedicado (não URL fixa)
 
 
 def test_xai_oauth_builds_valid_provider_config():
@@ -157,7 +156,7 @@ def test_xai_oauth_builds_valid_provider_config():
     cfg = _build_one("xai-oauth", p.base)
     pc = cfg.providers["xai-oauth"]
     assert pc.auth == "oauth_subscription"
-    assert pc.oauth and pc.oauth["client_id"] == "b1a00492-073a-47ea-816f-4c329264a828"  # valor real do Hermes
+    assert pc.auth_flow == "xai_oauth"
 
 
 # --- geral: todo preset novo/existente sobrevive a um build_config real --------------------------

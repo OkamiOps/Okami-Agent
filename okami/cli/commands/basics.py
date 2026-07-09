@@ -715,6 +715,18 @@ def login(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
 
+    if getattr(pc, "auth_flow", ""):   # fluxo OAuth dedicado (paridade Hermes): anthropic/minimax/xai/nous/qwen/copilot
+        from okami.llm import oauth_flows
+        try:
+            oauth_flows.run_login(pc.auth_flow, lambda m: console.print(m))
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]Falha no login:[/red] {e}")
+            raise typer.Exit(1)
+        ok = oauth_flows.is_logged_in(pc.auth_flow)
+        console.print(f"[green]✓ login '{provider}' concluído[/green]" if ok
+                      else f"[yellow]login '{provider}' não concluiu — token não encontrado[/yellow]")
+        return
+
     if pc.transport == "codex_oauth":  # device flow NATIVO da OpenAI (sem codex CLI)
         if oauth.codex_logged_in():     # re-login/troca de conta: diz quem está logado e que isto SUBSTITUI
             who = oauth.codex_email() or oauth.codex_account_id() or "conta atual"
