@@ -67,13 +67,18 @@ SDIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -n "$SDIR" ] && [ -f "$SDIR/../pyproject.toml" ]; then
   SRC="$(cd "$SDIR/.." && pwd)"; say "usando o repo local: $SRC"
 elif [ -d "$SRC/.git" ]; then
-  say "atualizando $SRC"
-  if ! git -C "$SRC" pull --ff-only; then
-    if [ "${OKAMI_INSTALL_ALLOW_DIRTY:-}" = "1" ]; then
-      say "⚠ git pull falhou — OKAMI_INSTALL_ALLOW_DIRTY=1 → instalando a versão LOCAL existente (pode estar velha)."
-    else
-      die "git pull falhou (sem rede? working copy suja?). Resolva, ou force com OKAMI_INSTALL_ALLOW_DIRTY=1."
-    fi
+  say "atualizando $SRC (fetch do GitHub + reset p/ origin)"
+  # fetch + reset --hard origin/<branch> (robusto: traz o GitHub mesmo com checkout divergido/sujo — o
+  # `git pull --ff-only` virava no-op/aborto silencioso nesses casos). src é código, não dados do usuário
+  # (esses moram em ~/.okami) → stash de segurança antes do reset, nada é perdido de fato.
+  if git -C "$SRC" fetch origin --prune 2>/dev/null; then
+    _BR="$(git -C "$SRC" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#.*/##')"; _BR="${_BR:-main}"
+    [ -n "$(git -C "$SRC" status --porcelain)" ] && git -C "$SRC" stash push -u -m okami-install-autostash >/dev/null 2>&1
+    git -C "$SRC" reset --hard "origin/$_BR" >/dev/null 2>&1 || die "git reset p/ origin/$_BR falhou."
+  elif [ "${OKAMI_INSTALL_ALLOW_DIRTY:-}" = "1" ]; then
+    say "⚠ git fetch falhou — OKAMI_INSTALL_ALLOW_DIRTY=1 → instalando a versão LOCAL existente (pode estar velha)."
+  else
+    die "git fetch falhou (sem rede?). Resolva, ou force com OKAMI_INSTALL_ALLOW_DIRTY=1."
   fi
 else
   command -v git >/dev/null 2>&1 || die "git é necessário para clonar."

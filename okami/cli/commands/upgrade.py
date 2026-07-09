@@ -86,18 +86,38 @@ def _head_sha(src: Path) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _default_branch(src: Path) -> str:
+    """Branch que o origin considera HEAD (normalmente 'main'). Fallback: 'main'."""
+    r = _run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=src)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip().split("/", 1)[-1]      # 'origin/main' → 'main'
+    return "main"
+
+
 def git_pull(src: Path, *, allow_dirty: bool = False) -> tuple[bool, str]:
-    """`git pull --ff-only` no checkout gerenciado — mesma política do install.sh (nunca reescreve
-    histórico local silenciosamente). `allow_dirty=True` degrada pra "segue com o que já tem"
-    em vez de abortar (espelha `OKAMI_INSTALL_ALLOW_DIRTY=1` do instalador). Retorna (ok, msg)."""
+    """Traz a ÚLTIMA versão do GitHub de forma robusta (padrão Hermes) — `git fetch origin` + reconcilia
+    o checkout gerenciado com `origin/<branch>`, em vez de `git pull --ff-only` (que vira NO-OP silencioso
+    ou aborta quando o checkout divergiu/tem mudança local — foi o que fazia o upgrade "não pegar").
+
+    Mudanças locais no src gerenciado NÃO são para existir (é código, não dados do usuário — esses moram
+    fora, em ~/.okami). Fazemos `stash -u` de segurança antes do reset (nada é perdido — fica no stash),
+    depois `reset --hard origin/<branch>`. Retorna (ok, msg)."""
     if not shutil.which("git"):
         return False, "git não encontrado no PATH"
-    result = _run(["git", "pull", "--ff-only"], cwd=src)
-    if result.returncode == 0:
-        return True, (result.stdout.strip() or "already up to date")
-    if allow_dirty:
-        return True, "git pull falhou — mantendo o checkout local como está (--allow-dirty)"
-    return False, (result.stderr or result.stdout).strip() or "git pull falhou"
+    fetch = _run(["git", "fetch", "origin", "--prune"], cwd=src)
+    if fetch.returncode != 0:
+        if allow_dirty:
+            return True, "git fetch falhou — mantendo o checkout local (--allow-dirty / sem rede?)"
+        return False, (fetch.stderr or fetch.stdout).strip() or "git fetch falhou (sem rede?)"
+    branch = _default_branch(src)
+    # mudança local no src (não deveria haver) → stash de segurança, nunca reset --hard cego perdendo tudo
+    dirty = _run(["git", "status", "--porcelain"], cwd=src).stdout.strip()
+    if dirty:
+        _run(["git", "stash", "push", "-u", "-m", "okami-upgrade-autostash"], cwd=src)
+    reset = _run(["git", "reset", "--hard", f"origin/{branch}"], cwd=src)
+    if reset.returncode != 0:
+        return False, (reset.stderr or reset.stdout).strip() or f"git reset p/ origin/{branch} falhou"
+    return True, (reset.stdout.strip() or f"reconciliado com origin/{branch}")
 
 
 def _tool_env() -> dict:

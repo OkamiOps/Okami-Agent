@@ -120,15 +120,24 @@ def test_cli_upgrade_reports_old_to_new_version(monkeypatch, tmp_path):
     monkeypatch.setattr(up.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     calls = []
+    state = {"sha": "aaaaaaa"}          # SHA antes; muda depois do reset (simula commit novo do GitHub)
 
     def fake_run(cmd, cwd=None, env=None):
         calls.append(cmd)
-        if cmd[:2] == ["git", "pull"]:
-            # simula o pull trazendo o pyproject.toml novo pro disco
+        if cmd[:2] == ["git", "rev-parse"] and "HEAD" in cmd:
+            return _ok(state["sha"])
+        if cmd[:2] == ["git", "fetch"]:
+            return _ok("")
+        if cmd[:3] == ["git", "symbolic-ref", "--short"]:
+            return _ok("origin/main")
+        if cmd[:2] == ["git", "status"]:
+            return _ok("")             # limpo
+        if cmd[:3] == ["git", "reset", "--hard"]:
+            state["sha"] = "bbbbbbb"    # reset moveu p/ origin/main → SHA novo
             (src / "pyproject.toml").write_text(
                 '[project]\nname = "okami-agent"\nversion = "0.13.0-beta"\n', encoding="utf-8"
             )
-            return _ok("Fast-forward")
+            return _ok("HEAD is now at bbbbbbb")
         return _ok("Installed okami-agent")
 
     monkeypatch.setattr(up, "_run", fake_run)
@@ -136,7 +145,8 @@ def test_cli_upgrade_reports_old_to_new_version(monkeypatch, tmp_path):
     res = CliRunner().invoke(app, ["upgrade", "--yes"])
     assert res.exit_code == 0, res.output
     assert "0.11.0-beta" in res.output and "0.13.0-beta" in res.output
-    assert any(c[:2] == ["git", "pull"] for c in calls)
+    assert any(c[:2] == ["git", "fetch"] for c in calls)
+    assert any(c[:3] == ["git", "reset", "--hard"] for c in calls)
     assert any("tool" in c and "install" in c for c in calls)
 
 
