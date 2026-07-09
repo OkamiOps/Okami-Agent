@@ -128,6 +128,40 @@ def _ui_hint(msg: str) -> str:
     return _ui.hint(msg)
 
 
+def _authenticate_provider() -> None:
+    """`autenticar provider (login)` — abre um picker dos providers de ASSINATURA/OAuth e chama o
+    `okami login <id>` no escolhido (device-flow ou CLI-delegado). Reusa oauth/login existentes; não
+    duplica lógica de auth. É o que o dono pediu: abrir os providers e só autenticar, sem editar .env.
+
+    Sem TTY: lista os providers autenticáveis + a dica de comando (degrada, não trava)."""
+    from okami import menu
+    from okami.cli.commands.basics import login
+
+    cfg = _load()
+    from okami.llm import oauth
+    # só providers que autenticam por assinatura/OAuth/CLI (têm login_cmd ou bloco oauth ou são codex)
+    auth_ps = []
+    for pid in (cfg.providers or {}):
+        pc = cfg.provider(pid)
+        if pid == "codex" or getattr(pc, "login_cmd", None) or getattr(pc, "oauth", None):
+            try:
+                logged = oauth.codex_logged_in() if pid == "codex" else bool(oauth.load_tokens(pid))
+            except Exception:  # noqa: BLE001
+                logged = False
+            auth_ps.append((pid, "● logado" if logged else "○ não autenticado"))
+    if not auth_ps:
+        console.print(_ui_hint("nenhum provider de assinatura/OAuth configurado — adicione com `okami provider add`."))
+        return
+    if not menu._interactive():
+        for pid, st in auth_ps:
+            console.print(f"  {pid}  [dim]{st}[/dim]")
+        console.print(_ui_hint("sem TTY — use: okami login <id> (ex.: okami login codex)"))
+        return
+    choice = menu.select("Autenticar qual provider?", [(pid, f"{pid} — {st}", "") for pid, st in auth_ps])
+    if choice:
+        login(choice)      # device-flow / CLI-delegado de verdade (basics.py)
+
+
 def _show_providers() -> None:
     """`ver providers configurados` — reusa o `okami providers` (basics.py), sem duplicar a listagem."""
     from okami.cli.commands.basics import list_providers
@@ -278,6 +312,7 @@ def config_main(ctx: typer.Context) -> None:
     while True:
         pick = menu.select("config — o que fazer?", [
             ("provider", "trocar provider/modelo (picker)", ""),
+            ("autenticar", "autenticar provider (login assinatura/OAuth)", ""),
             ("providers", "ver providers configurados", ""),
             ("set", "mudar um valor (segredo→.env, resto→local)", ""),
             ("get", "ler um valor", ""),
@@ -290,6 +325,8 @@ def config_main(ctx: typer.Context) -> None:
             return
         if pick == "provider":
             _switch_provider_model()
+        elif pick == "autenticar":
+            _authenticate_provider()
         elif pick == "providers":
             _show_providers()
         elif pick == "set":
