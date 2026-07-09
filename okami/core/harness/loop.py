@@ -440,6 +440,8 @@ class Harness:
         self._obs_chars = 0                            # teto AGREGADO de tool-output do turno (Hermes: 200K)
         self._loop_warned: set[str] = set()             # fingerprints já AVISADOS (warn-before-block, WIN1)
         self._pending_loop_warn: str | None = None      # aviso a anexar DEPOIS do próximo tool-result (WIN1)
+        self._pending_flounder_warn: str | None = None  # freio de floundering: nudge de convergência
+        self._pending_flounder_stop = False             # floundering sem escape → para com entrega parcial
         self._tool_counts: dict[str, int] = {}          # anti-martelo: quantas vezes cada tool foi chamada na tarefa
         self._same_tool_nudged: set[str] = set()        # thresholds já avisados (1x cada) p/ não spammar
         self._pending_same_tool_warn: str | None = None  # nudge anti-martelo, flushado junto do result
@@ -449,6 +451,8 @@ class Harness:
         # os dois nunca deixa nenhum dos dois isolados bater o próprio teto. Este é o contador UNIFICADO:
         # soma as duas falhas, na ORDEM que vierem, e só zera quando uma tool de fato DISPACHA de verdade.
         self._consecutive_action_failures = 0
+        self._tool_error_streak = 0                     # tools que FALHARAM (res.ok=False) seguidas, mesmo c/
+        self._tool_error_warned = False                 # args diferentes → freio de floundering (puppeteer -88)
         self._verify_nudged = False                    # verify-on-stop (WIN2): já empurrei p/ verificar? (1x)
 
     def _note_compact_gain(self, before: int, after: int) -> bool:
@@ -658,6 +662,9 @@ class Harness:
         self._shrunk_retry = False                        # recuperação por encolhimento: 1x por episódio de falha
         while True:
             turns += 1
+            if self._pending_flounder_stop:               # freio de floundering: N erros seguidos sem escapar
+                return self._fail(t, f"preso: {self.budget.max_tool_error_streak} erros de tool seguidos sem "
+                                  "convergir — entrega parcial (evita moer 49 passos/1.3M tok num erro só)")
             _stall = self.budget.max_stall_seconds
             if _stall > 0 and _wt.monotonic() - _last_progress > _stall:   # travou (sem concluir passo) → para LIMPO
                 t.state = TaskState.BLOCKED
@@ -1173,6 +1180,23 @@ class Harness:
         t.steps.append(Step(step_n, action.tool, action.args, res.output, res.effect, res.ok))
         self._emit("step", n=step_n, tool=action.tool, args=action.args, ok=res.ok, effect=res.effect,
                    out=(res.output or "")[:500])      # preview p/ o /replay (inspecionar o que retornou)
+        # FREIO DE FLOUNDERING: erros de tool SEGUIDOS (mesmo variando a abordagem) = preso num problema.
+        if res.ok:
+            self._tool_error_streak = 0
+            self._tool_error_warned = False
+        else:
+            self._tool_error_streak += 1
+            if self._tool_error_streak >= self.budget.max_tool_error_streak:
+                if self._try_escalate(f"{self._tool_error_streak} erros de tool seguidos (preso)"):
+                    self._tool_error_streak = 0; self._tool_error_warned = False
+                else:
+                    self._pending_flounder_stop = True   # não dá p/ escalar → para com entrega parcial (abaixo)
+            elif self._tool_error_streak >= self.budget.warn_tool_error_streak and not self._tool_error_warned:
+                self._tool_error_warned = True
+                self._pending_flounder_warn = (
+                    f"[FREIO: {self._tool_error_streak} tentativas falharam seguidas. PARE de tentar variações "
+                    "do mesmo caminho. Ou (a) ENTREGUE o que já funciona com task_complete, ou (b) declare "
+                    "task_blocked explicando o bloqueio pro dono decidir. NÃO fique moendo.]")
         # REFUND de passo (item 5, espelha o budget de poll): execute_code read-only é META-trabalho (rodou
         # N tools num ÚNICO passo de modelo) — não deve queimar o orçamento de passos. BOUNDED (cap =
         # max_poll_waits) p/ nunca virar loop infinito; o anti-loop/no-progress/stall continuam valendo.
@@ -1190,6 +1214,10 @@ class Harness:
         if self._pending_loop_warn is not None:        # warn-before-block (WIN1): DEPOIS do result, nunca antes
             self.messages.append({"role": "user", "content": self._pending_loop_warn})
             self._pending_loop_warn = None
+        if self._pending_flounder_warn is not None:    # freio de floundering: nudge de convergência (1x)
+            self.messages.append({"role": "user", "content": self._pending_flounder_warn})
+            self._pending_flounder_warn = None
+        # _pending_flounder_stop é checado no topo do while do run() (não dá p/ dar _fail daqui: retorna int)
         if self._pending_same_tool_warn is not None:   # anti-martelo: nudge DEPOIS do result (mesma razão)
             self.messages.append({"role": "user", "content": self._pending_same_tool_warn})
             self._pending_same_tool_warn = None

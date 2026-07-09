@@ -379,3 +379,18 @@ def test_need_input_without_options_unchanged(tmp_path):
                 Task(goal="x"), tmp_path).run()
     assert r.state == TaskState.NEEDS_INPUT
     assert r.reason == "Qual o nome do cliente?"
+
+
+def test_freio_de_floundering_para_em_erros_seguidos(tmp_path):
+    """Uso real (2026-07-09): gerar 1 PDF girou 49 passos/8min/1.3M tok preso no puppeteer -88, tentando
+    workaround atrás de workaround. Cada tool falhava (ok=False) com args DIFERENTES → o anti-loop por
+    fingerprint não pegava. O freio de floundering para em ~max_tool_error_streak erros, NÃO em 200 passos."""
+    from okami.core import Budget
+    # o modelo insiste em ler arquivos inexistentes (paths sempre diferentes → cada um falha, sem repetir fp)
+    outputs = [J("read_file", path=f"nao-existe-{i}.txt") for i in range(50)]
+    h = Harness(Script(outputs), Task(goal="faz algo impossível"), tmp_path,
+                budget=Budget(max_tool_error_streak=6, warn_tool_error_streak=3))
+    r = h.run()
+    # parou MUITO antes dos 200 passos (freio), com falha honesta (entrega parcial), não moendo 50 chamadas
+    assert len(r.steps) <= 10, f"freio não pegou: {len(r.steps)} passos (devia parar em ~6-7)"
+    assert r.state == TaskState.FAILED

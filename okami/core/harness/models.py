@@ -60,6 +60,14 @@ class Budget:
     # isolado bater o próprio teto. Este teto SOMA as duas falhas (nesta ordem ou naquela); zera só
     # quando alguma tool de fato DISPACHA de verdade (_handle_tool_result).
     max_tool_failures: int = 6
+    # FREIO DE FLOUNDERING (2026-07-09, uso real): um tool que FALHA (res.ok=False) várias vezes SEGUIDAS —
+    # mesmo com ações/args DIFERENTES a cada vez — é o padrão do "agente preso num erro" (log real: gerar 1
+    # PDF ficou 49 passos/8min/1.3M tok girando em torno do puppeteer -88, tentando workaround atrás de
+    # workaround). O anti-loop por fingerprint NÃO pega (ações variam). Após `warn_tool_error_streak` erros
+    # seguidos: nudge forte pra convergir (entregar o que tem OU declarar bloqueio); em `max_tool_error_streak`
+    # escala pro modelo forte, senão para com entrega parcial — em vez de moer até o teto de passos.
+    warn_tool_error_streak: int = 3
+    max_tool_error_streak: int = 6
     # ANTI-MARTELO (2026-07-08, uso real): chamar a MESMA tool dezenas de vezes numa tarefa (args mudando a
     # cada chamada → o fingerprint/anti-loop acima NÃO pega) é o padrão nº1 de "agente burro": logs reais
     # mostraram 134× execute_code (200 passos, bateu o teto), 67× move_path, 46× run_shell numa única tarefa.

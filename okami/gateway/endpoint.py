@@ -1424,15 +1424,24 @@ class AgentEndpoint(EndpointCommandsMixin):
 
         def _loop():
             last = t0
-            while not stop.wait(5.0):                      # checa a cada 5s; só manda a cada `interval`
+            hb_msg_id = None                               # id da ÚNICA msg de heartbeat — editada, não re-enviada
+            while not stop.wait(5.0):                      # checa a cada 5s; só atualiza a cada `interval`
                 now = time.time()
                 if heartbeat_due(start=t0, now=now, interval=interval, last=last):
                     last = now
                     _lv = live or {}
+                    body = heartbeat_message(
+                        elapsed_s=now - t0, steps=int(_lv.get("steps", 0) or 0),
+                        tokens=int(_lv.get("tokens", 0) or 0), tool=str(_lv.get("tool", "") or ""))
                     try:
-                        self.channel.send(chat_id, heartbeat_message(
-                            elapsed_s=now - t0, steps=int(_lv.get("steps", 0) or 0),
-                            tokens=int(_lv.get("tokens", 0) or 0), tool=str(_lv.get("tool", "") or "")))
+                        # UMA mensagem que se atualiza (paridade Hermes) — antes era um send() por minuto,
+                        # que num turno de 8 min despejava 8 mensagens e enchia o chat. Agora: 1ª envia,
+                        # as próximas EDITAM a mesma. Sem edit_message no canal → cai no send antigo.
+                        if hb_msg_id is not None and hasattr(self.channel, "edit_message"):
+                            self.channel.edit_message(chat_id, hb_msg_id, body)
+                        else:
+                            sent = self.channel.send(chat_id, body)
+                            hb_msg_id = sent if isinstance(sent, (int, str)) else getattr(sent, "message_id", None)
                     except Exception:  # noqa: BLE001 — heartbeat nunca derruba o turno
                         return
 
