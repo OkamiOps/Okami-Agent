@@ -139,12 +139,17 @@ def _tool_env() -> dict:
 
 
 def uv_tool_install(src: Path) -> tuple[bool, str]:
-    """`uv tool install --force <src>` — reinstala o `okami` isolado (mesmo passo 3 do install.sh),
-    NO MESMO local do binário em execução (ver _tool_env)."""
+    """`uv tool install --reinstall --force <src>` — reinstala o `okami` isolado NO MESMO local do
+    binário em execução (ver _tool_env).
+
+    `--reinstall` é OBRIGATÓRIO, não só `--force`: `--force` sobrescreve o entry-point mas REUSA o build
+    em cache do pacote — então um `git pull` que muda só o CÓDIGO (sem bump de versão) NÃO chegava ao venv
+    instalado, e o `okami upgrade` "não pegava" (o src atualizava, o venv rodado ficava velho). `--reinstall`
+    reconstrói o pacote a partir do src atual, que é o que o comando promete."""
     uv = shutil.which("uv")
     if not uv:
         return False, "uv não encontrado — instale: https://docs.astral.sh/uv/getting-started/installation/"
-    result = _run([uv, "tool", "install", "--force", str(src)], env=_tool_env())
+    result = _run([uv, "tool", "install", "--reinstall", "--force", str(src)], env=_tool_env())
     if result.returncode == 0:
         return True, result.stdout.strip()
     return False, (result.stderr or result.stdout).strip() or "uv tool install falhou"

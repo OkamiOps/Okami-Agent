@@ -340,3 +340,18 @@ def test_cli_upgrade_warns_on_shadowed_path(monkeypatch, tmp_path):
     assert res.exit_code == 0, res.output
     assert shadow_path in res.output
     assert "rm -f" in res.output
+
+
+def test_uv_tool_install_usa_reinstall_nao_so_force(monkeypatch, tmp_path):
+    """Regressão: `--force` sozinho reusa o build em cache → git pull de código sem bump de versão NÃO
+    chegava no venv (o upgrade 'não pegava'). Tem que ser `--reinstall`."""
+    from okami.cli.commands import upgrade as up
+    captured = {}
+    monkeypatch.setattr(up.shutil, "which", lambda _: "/usr/bin/uv")
+    def _fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        class R: returncode = 0; stdout = "ok"; stderr = ""
+        return R()
+    monkeypatch.setattr(up, "_run", _fake_run)
+    up.uv_tool_install(tmp_path)
+    assert "--reinstall" in captured["cmd"], f"upgrade sem --reinstall: {captured['cmd']}"

@@ -72,7 +72,7 @@ if ($scriptDir -and (Test-Path (Join-Path $scriptDir '..\pyproject.toml'))) {
 
 # 3) instala o okami DENTRO de .okami (UV_TOOL_DIR/BIN_DIR acima)
 Say "instalando o okami em $OkamiDir..."
-uv tool install --force $Src
+uv tool install --reinstall --force $Src
 
 # 4) PATH do usuario: garante .okami\bin (idempotente) + OKAMI_HOME se custom
 $binDir = Join-Path $OkamiDir 'bin'

@@ -89,7 +89,7 @@ fi
 say "instalando o okami em ${OKAMI_DIR}…"   # chaves OBRIGATÓRIAS: $VAR colado em char não-ASCII (…) +
                                             # set -u + locale UTF-8 → bash inclui os bytes do '…' no nome
                                             # da var → 'unbound variable'. Nunca deixe $VAR grudado em unicode.
-uv tool install --force "$SRC"
+uv tool install --reinstall --force "$SRC"
 ensure_path "$OKAMI_DIR/bin"
 
 # 4) migra um install antigo espalhado (~/.okami-agent) — só avisa, não apaga
