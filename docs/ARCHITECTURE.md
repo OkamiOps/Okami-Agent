@@ -152,6 +152,12 @@ baterem (§3.4) — "concluído" é asserção do harness, nunca só do modelo.
 `K` passos sem efeito observável → forcing function → persistindo, `FAILED` com diagnóstico.
 Heartbeat de progresso para usuário/painel.
 
+Cada chamada ao modelo também recebe um `RequestContext` novo, com orçamento total, TTFB e idle,
+cancelamento linearizado e callbacks de abort do transporte. Retry e fallback da mesma chamada
+compartilham esse contexto; uma nova geração ou escalada começa com outro contexto. Assim, timeout
+e cancelamento atravessam provider, streaming e transport sem reaproveitar relógios de chamadas
+anteriores.
+
 ### 3.4 Critérios de saída verificados
 `exitCriteria` checáveis (build passa, testes verdes, arquivo existe, gate de contrato §4).
 Falha → lista exata do que falta → volta a trabalhar.
@@ -327,8 +333,20 @@ malware. Regra: **nada entra em `skills/` sem passar por scan**.
 
 ## 5. Providers (router + fallback)
 
-Base em **LiteLLM** (unifica 100+ backends numa só interface `completion`), com camada própria de
-roteamento por capacidade/custo/disponibilidade + rotação/fallback (estilo "auth profile rotation").
+O núcleo resolve `(provider, model, endpoint, api_mode, transport, credencial, capabilities,
+billing)` em um `RuntimeTarget` imutável. `TargetResolver` é a entrada única para aliases,
+overrides e fallbacks; credenciais entram no target apenas como referência segura, nunca como
+segredo resolvido.
+
+`TransportRegistry` seleciona adapters nomeados para CLI, OAuth, APIs nativas e LiteLLM. O
+**LiteLLM agora é um adapter explícito de compatibilidade**, e não o lugar onde o roteamento vive:
+chamadas, streams e detecção de parâmetros suportados ficam isolados em `litellm_compat.py`, com
+política de descarte por request e sem mutar globals no import.
+
+Fallback aceita tanto o formato legado `fallback: [provider]` quanto destinos estruturados com
+`provider`, `model`, `base_url` e `api_mode`. A cadeia é normalizada, deduplicada e filtrada antes
+da execução; cancelamento impede novas tentativas e o resultado registra o provider/modelo que
+realmente serviu a resposta.
 
 | Provider | Auth | Papel sugerido |
 |---|---|---|
