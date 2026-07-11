@@ -207,6 +207,18 @@ def test_collect_channels_global_and_agent():
     assert ("(global)", "telegram") in ch and ("bot", "slack") in ch
 
 
+def test_versioned_telegram_examples_are_explicitly_deny_by_default():
+    from pathlib import Path as _P
+    import yaml
+
+    root = _P(__file__).resolve().parent.parent
+    for path in sorted((root / "examples" / "company" / "agents").glob("*/agent.yaml")):
+        telegram = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("channels", {}).get("telegram")
+        assert telegram is not None
+        assert telegram.get("allow_chats") == []
+        assert not telegram.get("allow_all")
+
+
 def test_scaffold_is_valid_yaml():
     import yaml
     parsed = yaml.safe_load(scaffold())

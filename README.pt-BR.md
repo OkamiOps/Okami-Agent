@@ -15,7 +15,7 @@ ou onde você quiser.
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
 ![litellm](https://img.shields.io/badge/compat-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-4079%20passing-3fb950)
+![tests](https://img.shields.io/badge/tests-4081%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -31,7 +31,7 @@ ou onde você quiser.
 
 > ### ✨ Novo no `v0.15-beta` — Tools nativas e controle de providers
 > Esta release endurece o núcleo de execução e tira o roteamento de providers do centro do agente.
-> **40 commits · 4.079 testes passando**.
+> **41 commits · 4.081 testes passando**.
 > - **Streaming nativo com histórico atômico** — deltas estruturados de tool call, retomada segura após
 >   crash e compaction que nunca separa uma chamada do resultado.
 > - **Cancelamento por request** — deadlines total/TTFB/idle, abort cooperativo, retry interrompível e

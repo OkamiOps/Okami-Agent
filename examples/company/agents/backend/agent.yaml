@@ -1,4 +1,4 @@
 role: "Manager de Backend — APIs, banco, performance. Só intervém em backend."
 default_provider: lmstudio
 channels:
-  telegram: { token: "${BACKEND_BOT_TOKEN}" }
+  telegram: { token: "${BACKEND_BOT_TOKEN}", allow_chats: [] }

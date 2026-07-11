@@ -13,6 +13,16 @@ import yaml
 @pytest.fixture(autouse=True)
 def _okami_home_to_tmp(tmp_path, monkeypatch):
     monkeypatch.setenv("OKAMI_HOME", str(tmp_path))
+    from okami import home
+    monkeypatch.setattr(home, "base_dir", lambda: tmp_path)
+    monkeypatch.setattr(home, "agents_dir", lambda: tmp_path / "agents")
+
+
+def test_fixture_isolates_agent_storage(tmp_path):
+    from okami.home import agents_dir, base_dir
+
+    assert base_dir() == tmp_path
+    assert agents_dir() == tmp_path / "agents"
 
 
 def _tg(agent_id="okami"):

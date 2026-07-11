@@ -8,7 +8,7 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [0.15-beta] — 2026-07-11
 
-O `v0.15-beta` fecha a maior onda desde a abertura do beta: **40 commits** que endurecem o harness,
+O `v0.15-beta` fecha a maior onda desde a abertura do beta: **41 commits** que endurecem o harness,
 separam provider/modelo de transport, tornam tool calls nativas recuperáveis e colocam a troca de modelo
 do Telegram no mesmo caminho de resolução usado pelo restante do produto. A comparação usou o snapshot
 recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitetura inteira.
@@ -68,7 +68,9 @@ recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitet
 
 ### ✅ Qualidade e compatibilidade
 
-- **4.079 testes passando, 7 skipped** na validação final.
+- **4.081 testes passando, 7 skipped** na validação final.
+- `aiohttp` elevado para `3.14.1`, eliminando as vulnerabilidades conhecidas apontadas pelo `pip-audit`.
+- Exemplos Telegram agora começam em deny-by-default, e os testes de setup não vazam configuração para o workspace.
 - **75 achados Ruff → zero**; `uv run ruff check okami tests` passa no repositório inteiro.
 - YAML legado, aliases, fallbacks por nome e transports CLI/OAuth continuam válidos.
 - Sem migração obrigatória de configuração. LiteLLM permanece disponível como compatibilidade.
