@@ -68,7 +68,6 @@ def streaming_enabled(cfg, provider: str | None = None, *, has_tools: bool | Non
 def stream_messages_deltas(cfg, messages, *, provider=None, model=None,
                            request: RequestContext | None = None, **overrides):
     """Itera os deltas de texto a partir de MENSAGENS (espelha providers.stream_complete, mas messages-in)."""
-    import litellm
     from okami.llm import errors as _err
     from okami.llm import providers as _p
     pc = cfg.provider(provider)
@@ -77,7 +76,21 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None,
     overrides = _p._bounded_request_overrides(request, overrides)
     messages = _p._sanitize_messages(messages)       # surrogate/control char não estoura o encode (idem complete)
     messages = _p._ensure_reasoning_echo(messages, pc)   # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
-    via = _p.transports.dispatch(pc, messages, model, overrides)
+    if not hasattr(cfg, "providers"):
+        # Legacy injected configs have no target map; retain the compatibility
+        # dispatch hook used by older integrations and tests.
+        via = _p.transports.dispatch(pc, messages, model, overrides)
+    else:
+        from okami.llm.target_resolver import TargetResolver
+        from okami.llm.transport_registry import CompletionRequest, default_transport_registry
+
+        target = TargetResolver().resolve(cfg, provider=provider, model=model)
+        registry = default_transport_registry()
+        via = registry.complete(
+            target,
+            pc,
+            CompletionRequest(messages=messages, overrides=dict(overrides), request=request),
+        ) if target.transport != "litellm" else None
     if via is not None:                              # transports CLI/OAuth não streamam → entrega de uma vez
         if request is not None:
             request.check()
@@ -88,10 +101,15 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None,
     produced = False
     reasoning_open = False                                # raciocínio (reasoning_content) vem SEM tag em
     try:                                                  # minimax/DeepSeek/Kimi → envolve em <think> na ORIGEM
-        source = litellm.completion(**_p._kwargs(pc, messages, stream=True, model=model, **overrides))
-        close = getattr(source, "close", None)
-        if request is not None and callable(close):
-            request.register_abort(lambda reason: close())
+        from okami.llm.target_resolver import TargetResolver
+        from okami.llm.transport_registry import CompletionRequest, default_transport_registry
+
+        target = TargetResolver().resolve(cfg, provider=provider, model=model)
+        source = default_transport_registry().stream(
+            target,
+            pc,
+            CompletionRequest(messages=messages, overrides=dict(overrides), request=request),
+        )
         for chunk in source:
             if request is not None:
                 request.check()

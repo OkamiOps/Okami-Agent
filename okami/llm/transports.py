@@ -395,7 +395,7 @@ def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str 
         token = oauth.get_valid_token(pc.name, pc.oauth)   # fallback: device flow genérico
     if not token:
         raise RuntimeError(f"Sem token OAuth para '{pc.name}'. Rode: okami login {pc.name}")
-    import litellm
+    from okami.llm.litellm_compat import completion as compat_completion
 
     kw: dict = {"model": model or pc.model, "messages": messages, "api_key": token}
     if pc.api_base:
@@ -405,7 +405,7 @@ def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str 
         kw["timeout"] = _call_timeout({"timeout": kw["timeout"]})
     if overrides and overrides.get("timeout") is not None:
         kw["timeout"] = _call_timeout(overrides)
-    resp = litellm.completion(**kw)
+    resp = compat_completion(**kw)
     return Completion(text=resp.choices[0].message.content or "",
                       usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
                       provider=pc.name, model=model or pc.model)
@@ -457,23 +457,21 @@ def copilot_cli_complete(pc, messages, model, overrides=None, *, _run=None, _bin
 
 def dispatch(pc: ProviderConfig, messages: list[dict], model: str | None,
              overrides: dict | None = None, raw_messages: list[dict] | None = None):
-    """Resultado via transport não-litellm (`Completion`), ou None se for litellm (segue no LiteLLM).
-    `raw_messages` (field-kept, com reasoning_items) é repassado SÓ ao codex p/ o replay — os outros transports
-    e o litellm seguem com `messages` totalmente sanitizado (sem vazar campo p/ provider estrito)."""
-    if pc.transport == "claude_cli":
-        return claude_cli_complete(pc, messages, model, overrides)
-    if pc.transport == "codex_oauth":
-        return (codex_oauth_complete(pc, messages, model, overrides, raw_messages=raw_messages)
-                if raw_messages is not None                  # passa o field-kept SÓ quando há (replay);
-                else codex_oauth_complete(pc, messages, model, overrides))   # senão: assinatura antiga (mocks)
-    if pc.transport == "minimax_oauth":
-        return minimax_oauth_complete(pc, messages, model, overrides)
-    if pc.transport == "gemini_native":
-        return gemini_native_complete(pc, messages, model, overrides)
-    if pc.transport == "bedrock_native":
-        return bedrock_native_complete(pc, messages, model, overrides)
-    if pc.transport == "gemini_cloudcode":
-        return gemini_cloudcode_complete(pc, messages, model, overrides)
-    if pc.transport == "copilot_cli":
-        return copilot_cli_complete(pc, messages, model, overrides)
-    return None
+    """Compatibility wrapper around the transport registry.
+
+    The historical ``None`` result for LiteLLM is retained because callers that
+    still build the final LiteLLM request themselves depend on it.  New provider
+    and streaming paths use the registry directly.
+    """
+    if getattr(pc, "transport", "litellm") == "litellm":
+        return None
+    from okami.llm.target_resolver import TargetResolver
+    from okami.llm.transport_registry import CompletionRequest, default_transport_registry
+
+    target = TargetResolver().resolve_provider(pc, model=model)
+    request = CompletionRequest(
+        messages=messages,
+        overrides=dict(overrides or {}),
+        raw_messages=raw_messages,
+    )
+    return default_transport_registry().complete(target, pc, request)

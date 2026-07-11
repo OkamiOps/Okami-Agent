@@ -12,16 +12,23 @@ import re
 import inspect
 import math
 import time
+import copy
 from collections.abc import Iterator
 
-import litellm
-
 from okami.llm import errors as _err
-from okami.llm import transports
+import okami.llm.transports as transports  # noqa: F401 - legacy monkeypatch/import surface
+import okami.llm.litellm_compat as _litellm_compat
 from okami.llm.retry import retry_delay
 from okami.llm.request import RequestCancelled, RequestContext, RequestWatchdogTimeout
-from okami.llm.usage import Completion, as_completion, normalize_usage
+from okami.llm.runtime import RuntimeTarget
+from okami.llm.target_resolver import TargetResolver
+from okami.llm.transport_registry import CompletionRequest, default_transport_registry
+from okami.llm.usage import Completion, as_completion
 from okami.config import OkamiConfig, ProviderConfig
+
+# Compatibility attribute for integrations that monkeypatch the old provider
+# module.  All executable calls go through ``litellm_compat``/the registry.
+litellm = _litellm_compat.litellm
 
 
 class EmptyResponse(RuntimeError):
@@ -63,11 +70,6 @@ def _ensure_reasoning_echo(messages: list[dict], pc) -> list[dict]:
             m = {**m, "reasoning_content": " "}      # campo presente satisfaz o contrato (sem custo de CoT real)
         out.append(m)
     return out
-
-# Tolera params não suportados por um provider específico e reduz ruído de log.
-litellm.drop_params = True
-litellm.suppress_debug_info = True
-
 
 def _effective_model(pc: ProviderConfig, model: str | None) -> str:
     """Resolve o model efetivo.
@@ -296,13 +298,15 @@ def complete(
     model: str | None = None,
     **overrides,
 ) -> str:
-    pc = cfg.provider(provider)
+    target = TargetResolver().resolve(cfg, provider=provider, model=model)
+    pc = cfg.provider(target.provider)
     messages = _build_messages(prompt, system)
-    via = transports.dispatch(pc, messages, model, overrides)
-    if via is not None:
-        return as_completion(via).text
-    resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
-    return _message_text(resp.choices[0].message)
+    result = default_transport_registry().complete(
+        target,
+        pc,
+        CompletionRequest(messages=messages, overrides=dict(overrides)),
+    )
+    return as_completion(result).text
 
 
 def _stringify_content(content) -> str:
@@ -525,14 +529,43 @@ def _bounded_request_overrides(request: RequestContext | None, overrides: dict) 
     return bounded
 
 
+def _complete_target(target, pc, messages, response_schema, overrides, raw_messages=None,
+                     request: RequestContext | None = None) -> Completion:
+    """Execute one immutable destination while keeping legacy injected callables working."""
+    target_pc = pc
+    if target.model != getattr(pc, "model", None) or target.base_url != getattr(pc, "api_base", None):
+        if hasattr(pc, "model_copy"):
+            target_pc = pc.model_copy(update={"model": target.model, "api_base": target.base_url})
+        else:
+            target_pc = copy.copy(pc)
+            target_pc.model = target.model
+            target_pc.api_base = target.base_url
+    kwargs = {}
+    if raw_messages is not None:
+        kwargs["raw_messages"] = raw_messages
+    if _accepts_keyword(_complete_one, "runtime_target"):
+        kwargs["runtime_target"] = target
+    return _invoke_with_optional_request(
+        _complete_one, target_pc, messages, target.model, response_schema, overrides,
+        request=request, **kwargs,
+    )
+
+
 def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=None,
-                  request: RequestContext | None = None) -> Completion:
+                  request: RequestContext | None = None, runtime_target: RuntimeTarget | None = None) -> Completion:
     if request is not None:
         request.check()
     overrides = _bounded_request_overrides(request, overrides)
-    # só passa raw_messages quando há (codex c/ replay) → mantém compat com mocks de dispatch de 4 args
-    via = (transports.dispatch(pc, messages, model, overrides, raw_messages=raw_messages)
-           if raw_messages is not None else transports.dispatch(pc, messages, model, overrides))
+    target = runtime_target or TargetResolver().resolve_provider(pc, model=model)
+    registry = default_transport_registry()
+    request_envelope = CompletionRequest(
+        messages=messages,
+        response_schema=response_schema,
+        overrides=dict(overrides),
+        raw_messages=raw_messages,
+        request=request,
+    )
+    via = registry.complete(target, pc, request_envelope) if target.transport != "litellm" else None
     if via is not None:
         result = as_completion(via)
         if request is not None:
@@ -551,23 +584,24 @@ def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=
             overrides["tools"] = openai_tools(default_registry())         # só cai no default se ninguém passou.
         overrides.setdefault("tool_choice", pc.tool_choice or "required")  # força chamada (sem bail): respond/
         _native_sent = True                                 # task_complete SÃO tools → sempre válido
+    request_envelope.overrides = dict(overrides)
     try:
-        resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
+        resp = registry.complete(target, pc, request_envelope)
     except Exception as e:  # noqa: BLE001
         if _native_sent and _is_tool_schema_error(e):       # schema tropeçou no grammar-converter mesmo após
             from okami.llm.schema_sanitizer import sanitize_tool_schemas   # sanitização proativa → re-sanitiza
             # AGRESSIVO sobre as MESMAS tools que já estavam no payload (preserva o registry FILTRADO por
             # surface que o runner passou) — reverter p/ default_registry reintroduziria run_shell/spawn etc.
             overrides["tools"] = sanitize_tool_schemas(overrides["tools"], aggressive=True)   # e retenta 1x
-            resp = litellm.completion(**_kwargs(pc, messages, stream=False, model=model, **overrides))
+            request_envelope.overrides = dict(overrides)
+            resp = registry.complete(target, pc, request_envelope)
         else:
             raise
-    choice = resp.choices[0]
-    result = Completion(text=_message_text(choice.message),                 # content; vazio → reasoning_content
-                        tool_calls=_extract_tool_calls(choice.message),     # antes JOGADO FORA (P0.4)
-                        finish_reason=getattr(choice, "finish_reason", "") or "stop",
-                        usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
-                        provider=pc.name, model=_effective_model(pc, model))
+    result = as_completion(resp)
+    if not result.provider:
+        result.provider = target.provider
+    if not result.model:
+        result.model = target.model
     if request is not None:
         request.check()
         request.observe()
@@ -633,6 +667,8 @@ def complete_messages_ex(
     cancel=None,
     on_heartbeat=None,
     request: RequestContext | None = None,
+    _runtime_target: RuntimeTarget | None = None,
+    _fallback_chain: tuple[RuntimeTarget, ...] | None = None,
     **overrides,
 ) -> Completion:
     """Completa a partir de uma lista de mensagens (harness §3) e devolve um `Completion` (texto +
@@ -642,7 +678,28 @@ def complete_messages_ex(
     _request_check(request, cancel)
     _orig = messages                                 # pré-sanitize (carrega reasoning_items) p/ o replay Codex
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
-    pc = cfg.provider(provider)
+    if _runtime_target is not None:
+        target = _runtime_target
+        pc = cfg.provider(target.provider)
+    elif hasattr(cfg, "providers"):
+        target = TargetResolver().resolve(cfg, provider=provider, model=model)
+        pc = cfg.provider(target.provider)
+    else:
+        # Small injected config doubles used by the legacy test surface do not
+        # expose the Pydantic provider map; retain their old provider() contract.
+        pc = cfg.provider(provider)
+        target = TargetResolver().resolve_provider(pc, model=model)
+    if target.model != getattr(pc, "model", None) or target.base_url != getattr(pc, "api_base", None):
+        if hasattr(pc, "model_copy"):
+            pc = pc.model_copy(update={"model": target.model, "api_base": target.base_url})
+        else:
+            pc = copy.copy(pc)
+            pc.model = target.model
+            pc.api_base = target.base_url
+    model = target.model
+    fallback_chain = _fallback_chain
+    if fallback_chain is None:
+        fallback_chain = (target, *TargetResolver().fallback_targets(cfg, target)) if hasattr(cfg, "providers") else (target,)
     messages = _ensure_reasoning_echo(messages, pc)  # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
     # REPLAY de reasoning (Codex store=false): SÓ o transport codex recebe a versão field-kept (com
     # reasoning_items); litellm/minimax/etc seguem com o `messages` totalmente sanitizado (sem vazar campo).
@@ -671,11 +728,8 @@ def complete_messages_ex(
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            one_kwargs = {}
-            if _raw is not None and _accepts_keyword(_complete_one, "raw_messages"):
-                one_kwargs["raw_messages"] = _raw
-            res = as_completion(_invoke_with_optional_request(
-                _complete_one, pc, send, model, response_schema, ov, request=request, **one_kwargs))
+            res = as_completion(_complete_target(
+                target, pc, send, response_schema, ov, raw_messages=_raw, request=request))
             _request_check(request, cancel)
             if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada…
                 from okami.llm.stream_diag import classify_completion
@@ -684,7 +738,9 @@ def complete_messages_ex(
                 if classify_completion(res) != "length_truncation":
                     raise EmptyResponse("resposta vazia do provider")
             if not res.provider:                      # garante served-by mesmo no caminho legado/teste
-                res.provider = pc.name
+                res.provider = target.provider
+            if not res.model:
+                res.model = target.model
             if _was_blocked:                          # voltou a responder → limpa a marca cross-sessão
                 _rg.clear(pc.name)
             if ov.get("_api_key"):                    # chave respondeu → tira do pool persistente (item 20)
@@ -751,23 +807,28 @@ def complete_messages_ex(
     _request_check(request, cancel)
     tried = (_tried or set()) | {pc.name}
     if do_fallback:
-        for fb in (pc.fallback or []):
-            if fb in tried or fb not in cfg.providers:
-                continue
-            fbc = cfg.provider(fb)
-            if fbc.experimental:                          # opt-in só explícito — nunca failover automático
-                continue
-            # pula só quem tem requisito de AUTH não atendido (login/CLI/env key) — tomaria 401 na cara.
-            # Provider "bare" (litellm via defaults) segue tentável.
-            needs_login = fbc.transport in ("codex_oauth", "minimax_oauth", "claude_cli") and not fbc.ready
-            needs_key = bool(fbc.api_key_env) and not fbc.resolved_key()
-            if needs_login or needs_key:
+        try:
+            current_index = next(i for i, item in enumerate(fallback_chain) if item == target)
+        except StopIteration:
+            current_index = -1
+        for fallback_target in fallback_chain[current_index + 1:]:
+            if fallback_target.provider in tried:
                 continue
             _request_check(request, cancel)
             try:
-                return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
-                                            _tried=tried, _sleep=_sleep, cancel=cancel,
-                                            on_heartbeat=on_heartbeat, request=request, **overrides)
+                return complete_messages_ex(
+                    cfg,
+                    messages,
+                    response_schema=response_schema,
+                    _tried=tried,
+                    _sleep=_sleep,
+                    cancel=cancel,
+                    on_heartbeat=on_heartbeat,
+                    request=request,
+                    _runtime_target=fallback_target,
+                    _fallback_chain=fallback_chain,
+                    **overrides,
+                )
             except (RequestCancelled, RequestWatchdogTimeout):
                 raise
             except Exception:  # noqa: BLE001
@@ -790,24 +851,27 @@ def stream_complete(
     model: str | None = None,
     **overrides,
 ) -> Iterator[str]:
-    pc = cfg.provider(provider)
+    target = TargetResolver().resolve(cfg, provider=provider, model=model)
+    pc = cfg.provider(target.provider)
     messages = _build_messages(prompt, system)
-    via = transports.dispatch(pc, messages, model, overrides)
-    if via is not None:  # transports CLI/OAuth não streamam: devolve de uma vez
-        yield via
-        return
     # Robustez (dor nº1) também no caminho INTERATIVO: se o stream falha ANTES de qualquer token
     # (429/5xx/timeout/instabilidade), NÃO deixa o turno em branco — cai no caminho robusto
     # (complete_messages_ex: retry + rotação de chave + failover p/ pc.fallback) e entrega de uma vez.
     # Se já streamou parte e quebrar no meio, propaga (não dá p/ refazer limpo sem duplicar).
     produced = False
     try:
-        for chunk in litellm.completion(
-            **_kwargs(pc, messages, stream=True, model=model, **overrides)
-        ):
+        source = default_transport_registry().stream(
+            target, pc, CompletionRequest(messages=messages, overrides=dict(overrides))
+        )
+        for chunk in source:
+            if isinstance(chunk, Completion):
+                delta = chunk.text
+            else:
+                delta = None
             try:
-                d = chunk.choices[0].delta
-                delta = d.content or getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None)
+                if delta is None:
+                    d = chunk.choices[0].delta
+                    delta = d.content or getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None)
             except (AttributeError, IndexError):
                 delta = None
             if delta:

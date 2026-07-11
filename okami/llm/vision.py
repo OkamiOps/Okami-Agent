@@ -50,7 +50,7 @@ def _data_uri(path: Path) -> str:
 
 
 def build_vision_messages(prompt: str, data_uri: str) -> list[dict]:
-    """Mensagens multimodais (texto + imagem) no formato OpenAI/litellm."""
+    """Mensagens multimodais (texto + imagem) no formato OpenAI-compatible."""
     return [
         {"role": "system", "content": _VISION_SYSTEM},
         {"role": "user", "content": [

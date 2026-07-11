@@ -108,19 +108,19 @@ def native_supported(pc, *, probe=None) -> bool:
 def _default_probe(pc) -> bool:
     """UMA chamada minúscula com uma tool trivial + tool_choice=required → o endpoint devolveu tool_call?
     Best-effort: precisa de rede; qualquer erro propaga p/ o caller, que trata como 'não suporta'."""
-    import litellm
-
-    from okami.llm.providers import _kwargs
+    from okami.llm.transport_registry import CompletionRequest, default_transport_registry
+    from okami.llm.target_resolver import TargetResolver
     tools = [{"type": "function", "function": {
         "name": "ack", "description": "Confirme chamando esta ferramenta.",
         "parameters": {"type": "object", "properties": {}, "required": []}}}]
     msgs = [{"role": "user", "content": "Chame a ferramenta ack agora."}]
-    kw = _kwargs(pc, msgs, stream=False, model=None)   # model=None → _kwargs resolve pc.model (bug: faltava o kw)
-    kw["tools"] = tools
-    kw["tool_choice"] = "required"
-    kw["max_tokens"] = 64
-    resp = litellm.completion(**kw)
-    return bool(getattr(resp.choices[0].message, "tool_calls", None))
+    request = CompletionRequest(
+        messages=msgs,
+        overrides={"tools": tools, "tool_choice": "required", "max_tokens": 64},
+    )
+    target = TargetResolver().resolve_provider(pc)
+    resp = default_transport_registry().complete(target, pc, request)
+    return bool(getattr(resp, "tool_calls", None))
 
 
 def reset_native_cache() -> None:

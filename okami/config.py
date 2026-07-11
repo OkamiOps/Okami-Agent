@@ -8,12 +8,16 @@ strong/weak/local para, nas próximas fases, parametrizar o andaime adaptativo.
 from __future__ import annotations
 
 import os
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_logger = logging.getLogger(__name__)
+_WARNED_PROVIDER_EXTRAS: set[str] = set()
 
 # Segredos GLOBAIS do Okami: $OKAMI_HOME/.env (default ~/.okami/.env) — valem em QUALQUER workspace. É aqui que mora um
 # token tipo ELEVENLABS_API_KEY/MIMO_API_KEY — configure uma vez, usa em todo lugar.
@@ -119,6 +123,17 @@ class CapabilityProfile(BaseModel):
     vision: bool = False        # modelo aceita imagem (vision §6) — só multimodais
 
 
+class FallbackTargetConfig(BaseModel):
+    """Secret-free structured fallback destination."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str | None = None
+    base_url: str | None = None
+    api_mode: str | None = None
+
+
 class ProviderConfig(BaseModel):
     """Descrição de um provider de LLM.
 
@@ -148,7 +163,7 @@ class ProviderConfig(BaseModel):
     # explicitamente (okami provider default <id>). Evita que um 401/parse de provider em obras pareça
     # produto quebrado. Hoje: minimax (OAuth device — confirmar endpoints) e mimo (parse da API).
     experimental: bool = False
-    fallback: list[str] = Field(default_factory=list)  # providers de backup se este falhar (§3.5 failover)
+    fallback: list[str | FallbackTargetConfig] = Field(default_factory=list)  # failover compatível
     context_window: int = 0         # janela do modelo em TOKENS (0 = default por tier) — §6.4
     chars_per_token: float = 4.0    # estimativa p/ converter tokens↔chars
     capability: CapabilityProfile = Field(default_factory=CapabilityProfile)
@@ -202,6 +217,35 @@ class ProviderConfig(BaseModel):
     # nuvem fica mais curto. Explícito na config SEMPRE vence o default do tier.
     timeout_seconds: float | None = None
     notes: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _preserve_compatibility_extras(cls, value):
+        if not isinstance(value, dict):
+            return value
+        known = set(cls.model_fields)
+        params = value.get("params")
+        params = dict(params) if isinstance(params, dict) else {}
+        known_conflicts = sorted((set(params) & (known - {"params"})))
+        if known_conflicts:
+            names = ", ".join(known_conflicts)
+            raise ValueError(f"params conflicts with known provider field(s): {names}")
+        extras = {key: item for key, item in value.items() if key not in known}
+        for key, item in extras.items():
+            if key in params:
+                raise ValueError(f"provider key '{key}' conflicts with params['{key}']")
+            params[key] = item
+            if key not in _WARNED_PROVIDER_EXTRAS:
+                _WARNED_PROVIDER_EXTRAS.add(key)
+                _logger.warning("unknown provider key '%s' preserved under params", key)
+        if extras or "params" in value:
+            value = dict(value)
+            value["params"] = params
+            for key in extras:
+                value.pop(key, None)
+        return value
 
     def effective_tool_mode(self) -> str:
         """tool_mode REAL desta config: 'auto' deriva da capacidade (tier/native_tools). Explícito
