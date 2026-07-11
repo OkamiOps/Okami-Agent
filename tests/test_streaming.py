@@ -16,7 +16,7 @@ def test_streaming_generate_falls_back_when_stream_dies_before_token():
 
     def _boom():
         raise RuntimeError("stream caiu antes do 1º token")
-        yield  # noqa: unreachable — generator
+        yield  # generator marker after the intentional exception
 
     def _fallback():
         return Completion(text="resposta robusta")
@@ -72,6 +72,89 @@ def test_streaming_explicit_config_overrides_tier():
     from okami.llm.streaming import streaming_enabled
     assert streaming_enabled(_cfg(tier="local", streaming=False)) is False   # explícito vence
     assert streaming_enabled(_cfg(tier="strong", tool_mode="native", streaming=True)) is True
+
+
+def test_streaming_passes_request_positive_timeout_and_observes_events(monkeypatch):
+    from okami.llm.request import RequestContext, RequestTimeouts
+    from okami.llm.streaming import streaming_generate
+
+    ctx = RequestContext(RequestTimeouts(total_s=3))
+    captured = {}
+
+    def fake_deltas(cfg, messages, **kwargs):
+        captured.update(kwargs)
+        yield "token"
+
+    monkeypatch.setattr("okami.llm.streaming.stream_messages_deltas", fake_deltas)
+    comp = streaming_generate(None, [], request=ctx)
+
+    assert comp.text == "token"
+    assert captured["request"] is ctx
+    assert 0 < captured["timeout"] <= 3
+    assert ctx.first_event_at is not None
+    assert ctx.last_event_at is not None
+
+
+def test_streaming_reraises_request_terminal_error_without_fallback():
+    import pytest
+    from okami.llm.request import RequestCancelled, RequestContext, RequestTimeouts
+    from okami.llm.streaming import streaming_generate
+
+    ctx = RequestContext(RequestTimeouts(total_s=3))
+    ctx.cancel("user")
+    fallback_calls = []
+
+    with pytest.raises(RequestCancelled, match="user"):
+        streaming_generate(None, [], request=ctx, _stream=iter(["visible"]),
+                           _fallback=lambda: fallback_calls.append("fallback"))
+    assert fallback_calls == []
+
+
+def test_streaming_close_is_registered_once_and_abort_unblocks_inflight_stream():
+    import threading
+    from okami.llm.request import RequestCancelled, RequestContext, RequestTimeouts
+    from okami.llm.streaming import streaming_generate
+
+    class ClosableStream:
+        def __init__(self):
+            self.started = threading.Event()
+            self.released = threading.Event()
+            self.close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.started.set()
+            self.released.wait(1)
+            raise StopIteration
+
+        def close(self):
+            self.close_calls += 1
+            self.released.set()
+
+    ctx = RequestContext(RequestTimeouts(total_s=30), abort_grace_s=0.05)
+    stream = ClosableStream()
+    result = {}
+
+    def run():
+        try:
+            streaming_generate(None, [], request=ctx, _stream=stream,
+                               _fallback=lambda: (_ for _ in ()).throw(AssertionError("fallback")))
+        except BaseException as exc:
+            result["error"] = exc
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert stream.started.wait(0.2)
+    ctx.cancel("user")
+    thread.join(0.3)
+    stream.released.set()
+    thread.join(0.3)
+
+    assert not thread.is_alive()
+    assert isinstance(result["error"], RequestCancelled)
+    assert stream.close_calls == 1
 
 
 def test_streaming_failopen_when_provider_raises():

@@ -747,6 +747,10 @@ class Harness:
                     out = self._do_generate(self.messages, self._action_schema)
                 except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
                     from okami.llm.request import RequestCancelled, RequestWatchdogTimeout
+                    # Cancellation owns this boundary.  Sample it before provider
+                    # classification so a late ordinary error cannot start recovery.
+                    if not isinstance(e, (RequestCancelled, RequestWatchdogTimeout)) and self._cancelled_task(t):
+                        return t
                     if isinstance(e, (RequestCancelled, RequestWatchdogTimeout)):
                         t.state = TaskState.BLOCKED
                         if isinstance(e, RequestCancelled):
@@ -773,6 +777,8 @@ class Harness:
                     # RECUPERAÇÃO 1ª: timeout/lento ≈ CONTEXTO GRANDE. ENCOLHE forte (keep_tail=3) e re-gera 1x —
                     # chamada menor = mais rápida, cabe até no fallback local. Antes só escalava p/ modelo mais
                     # forte com o MESMO contexto gigante → pendurava de novo e morria.
+                    if self._cancelled_task(t):
+                        return t
                     if fail.action in (_Act.RETRY, _Act.ESCALATE) and not self._shrunk_retry:
                         self._shrunk_retry = True
                         before = _compaction.estimate_chars(self.messages)
@@ -787,6 +793,8 @@ class Harness:
                                 "concluído nos passos anteriores.]")
                             continue              # re-gera com contexto MENOR (mais rápido, sem trocar modelo)
                     # RECUPERAÇÃO 2ª: escala p/ modelo mais forte (resiliência, não crash)
+                    if self._cancelled_task(t):
+                        return t
                     if fail.action in (_Act.RETRY, _Act.ESCALATE) and self._try_escalate(f"provider: {fail.reason}"):
                         continue
                     from okami.core.errors import friendly_failure   # mensagem HUMANA (não "falhou: overloaded")
@@ -1198,7 +1206,8 @@ class Harness:
             self._tool_error_streak += 1
             if self._tool_error_streak >= self.budget.max_tool_error_streak:
                 if self._try_escalate(f"{self._tool_error_streak} erros de tool seguidos (preso)"):
-                    self._tool_error_streak = 0; self._tool_error_warned = False
+                    self._tool_error_streak = 0
+                    self._tool_error_warned = False
                 else:
                     self._pending_flounder_stop = True   # não dá p/ escalar → para com entrega parcial (abaixo)
             elif self._tool_error_streak >= self.budget.warn_tool_error_streak and not self._tool_error_warned:
@@ -1577,6 +1586,15 @@ class Harness:
         if item is not None:
             self.memory.write(item)
             self.events.emit("memory_write", kind=item.kind, text=item.text[:200])
+
+    def _cancelled_task(self, t: Task) -> bool:
+        """Materialize cancellation at a recovery boundary and stop all follow-up work."""
+        if not self.cancel():
+            return False
+        t.state = TaskState.BLOCKED
+        t.reason = "cancelado pelo usuário (/stop)"
+        self._emit("cancelled")
+        return True
 
     def _fail(self, t: Task, reason: str) -> Task:
         # REDE DE SEGURANÇA GERAL (não-específica da tarefa): qualquer que seja o motivo do corte

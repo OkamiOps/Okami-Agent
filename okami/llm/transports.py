@@ -13,6 +13,8 @@ Cada transport expõe `complete(pc, messages, model) -> str`.
 from __future__ import annotations
 
 import json
+import inspect
+import math
 import shutil
 import subprocess
 import urllib.error
@@ -24,6 +26,30 @@ from okami.llm.usage import Completion, normalize_usage
 # Teto por CHAMADA (read timeout). Antes 300s → um turno podia pendurar ~6min e morrer. Curto o
 # suficiente p/ FALHAR RÁPIDO e o harness encolher+failover; longo o bastante p/ uma geração normal.
 _CALL_TIMEOUT = 150
+
+
+def _call_timeout(overrides: dict | None) -> float:
+    """Read the standard timeout override without inventing vendor parameters."""
+    value = (overrides or {}).get("timeout")
+    if value is None:
+        return float(_CALL_TIMEOUT)
+    if isinstance(value, bool):
+        raise ValueError("timeout must be finite and strictly positive")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("timeout must be finite and strictly positive") from None
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be finite and strictly positive")
+    return timeout
+
+
+def _accepts_keyword(fn, name: str) -> bool:
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def _split_model(pc: ProviderConfig, model: str | None) -> str:
@@ -74,6 +100,7 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     if not binary:
         raise RuntimeError("CLI 'claude' não encontrado no PATH. Instale/logue o Claude Code.")
     model_short = _split_model(pc, model)
+    timeout = _call_timeout(overrides)
     system, transcript = _flatten(messages)
     # Instruções (system) + transcript vão juntos no prompt do -p (evita flags frágeis).
     prompt = (system + "\n\n" + transcript).strip() if system else transcript
@@ -95,11 +122,11 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     # NÃO fabricamos flag nenhuma: as duas testadas aqui aparecem literalmente no --help do binário.
     session_id = (overrides or {}).get("session_id")
     if session_id:
-        r = _run_claude_cli(cmd + ["--resume", session_id], prompt)
+        r = _run_claude_cli(cmd + ["--resume", session_id], prompt, timeout=timeout)
         if r.returncode != 0:                          # sessão ainda não existe → cria com este id
-            r = _run_claude_cli(cmd + ["--session-id", session_id], prompt)
+            r = _run_claude_cli(cmd + ["--session-id", session_id], prompt, timeout=timeout)
     else:
-        r = _run_claude_cli(cmd, prompt)
+        r = _run_claude_cli(cmd, prompt, timeout=timeout)
     if r.returncode != 0:
         raise RuntimeError(f"claude -p falhou (exit {r.returncode}): {r.stderr.strip()[:400]}")
     out = r.stdout.strip()
@@ -114,12 +141,12 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
                           provider=pc.name, model=model_short)
 
 
-def _run_claude_cli(cmd: list[str], prompt: str):
+def _run_claude_cli(cmd: list[str], prompt: str, *, timeout: float = _CALL_TIMEOUT):
     """`subprocess.run` do `claude -p` isolado (mockável em teste) — mesmo timeout p/ toda variante de cmd."""
     try:
-        return subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=_CALL_TIMEOUT)
+        return subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"claude -p timeout ({_CALL_TIMEOUT}s)") from e
+        raise RuntimeError(f"claude -p timeout ({timeout}s)") from e
 
 
 # --------------------------------------------------------------------- codex_oauth
@@ -289,6 +316,7 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
         raise RuntimeError("Sem token Codex. Rode: okami login codex")
     account = oauth.codex_account_id()
     model_short = _split_model(pc, model)
+    timeout = _call_timeout(overrides)
     src = raw_messages if raw_messages is not None else messages
     system, _ = _flatten(messages)
     input_items = _codex_input_items(src)
@@ -326,7 +354,7 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
             req.add_header(k, v)
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "text/event-stream")
-        with urllib.request.urlopen(req, timeout=_CALL_TIMEOUT) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             return _codex_sse(resp)
 
     try:
@@ -373,6 +401,10 @@ def minimax_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str 
     if pc.api_base:
         kw["api_base"] = pc.api_base
     kw.update(pc.params)
+    if "timeout" in kw:
+        kw["timeout"] = _call_timeout({"timeout": kw["timeout"]})
+    if overrides and overrides.get("timeout") is not None:
+        kw["timeout"] = _call_timeout(overrides)
     resp = litellm.completion(**kw)
     return Completion(text=resp.choices[0].message.content or "",
                       usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
@@ -406,12 +438,16 @@ def copilot_cli_complete(pc, messages, model, overrides=None, *, _run=None, _bin
     system, transcript = _flatten(messages)
     prompt = (system + "\n\n" + transcript).strip() if system else transcript
     cmd = [binary, "-p", prompt]
-    run = _run or (lambda c, p: subprocess.run(c, input=p, capture_output=True, text=True,  # noqa: S603
-                                               timeout=_CALL_TIMEOUT))
+    timeout = _call_timeout(overrides)
+    run = _run or (lambda c, p, timeout: subprocess.run(  # noqa: S603
+        c, input=p, capture_output=True, text=True, timeout=timeout))
     try:
-        r = run(cmd, prompt)
+        if _run is not None and not _accepts_keyword(run, "timeout"):
+            r = run(cmd, prompt)
+        else:
+            r = run(cmd, prompt, timeout=timeout)
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"copilot timeout ({_CALL_TIMEOUT}s)") from e
+        raise RuntimeError(f"copilot timeout ({timeout}s)") from e
     if getattr(r, "returncode", 0) != 0:
         raise RuntimeError(f"copilot falhou (exit {r.returncode}): {(r.stderr or '').strip()[:400]}")
     text = (r.stdout or "").strip()

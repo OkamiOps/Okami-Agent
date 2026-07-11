@@ -92,13 +92,18 @@ def _overall_timeout_for(cfg) -> float:
     env = os.environ.get("OKAMI_OVERALL_TIMEOUT")
     if env:
         try:
-            return max(0.0, float(env))
+            value = float(env)
+            if value == value and value not in (float("inf"), float("-inf")):
+                return max(0.0, value)
         except ValueError:
             pass
     h = getattr(cfg, "harness", None) or {}
     v = h.get("overall_timeout") if isinstance(h, dict) else getattr(h, "overall_timeout", None)
     try:
-        return float(v) if v is not None else 300.0
+        value = float(v) if v is not None else 300.0
+        if value != value or value in (float("inf"), float("-inf")):
+            return 300.0
+        return value
     except (TypeError, ValueError):
         return 300.0
 
@@ -148,7 +153,6 @@ def run_task(
     skills_dir: str | None = None,           # None → casa central (okami.home.skills_dir): não espalha
     extra_context: str = "",
     cancel: Callable[[], bool] | None = None,
-    request: RequestContext | None = None,
     notify: Callable[[str], object] | None = None,   # entrega FORA-DO-TURNO ao dono (#7 item 3): o gateway
                                                      # injeta; o harness "toca" o dono no meio da tarefa
                                                      # (vigia/loop/lembrete). None = sem canal (CLI puro).
@@ -235,9 +239,11 @@ def run_task(
     from okami.llm.streaming import streaming_enabled as _stream_on
     _streaming = _stream_on(cfg, provider)   # MESMO provider selecionado p/ esta task (-p/--provider), não o default
 
-    _deadline = _overall_timeout_for(cfg)              # #3: teto GLOBAL compartilhado por retry/fallback
-    if request is None:
-        request = RequestContext(RequestTimeouts(total_s=_deadline if _deadline > 0 else None))
+    _deadline = _overall_timeout_for(cfg)              # #3: teto por geração, compartilhado por retry/fallback
+    _active_request: RequestContext | None = None
+
+    def _new_request() -> RequestContext:
+        return RequestContext(RequestTimeouts(total_s=_deadline if _deadline > 0 else None))
 
     try:                                               # chars/token p/ ESTIMAR tokens quando o provider local
         _cpt = float(cfg.provider(provider).chars_per_token) if cfg else 4.0   # (LMStudio) não reporta usage
@@ -256,15 +262,29 @@ def run_task(
     # normal só roda ENTRE passos; um backoff longo é UM passo bloqueado). Sem on_event → no-op.
     _retry_hb = (lambda: on_event({"type": "retry_wait"})) if on_event else None
 
-    def _request_cancel() -> bool:
-        if request.cancelled:
+    def _harness_cancel() -> bool:
+        request = _active_request
+        if request is not None and request.cancelled:
             return True
         if cancel is not None and cancel():
-            request.cancel("user")
+            if request is not None:
+                request.cancel("user")
             return True
         return False
 
     def generate(messages, schema=None, on_token=None, max_tokens=None):
+        nonlocal _active_request
+        request = _new_request()
+        _active_request = request
+
+        def _request_cancel() -> bool:
+            if request.cancelled:
+                return True
+            if cancel is not None and cancel():
+                request.cancel("user")
+                return True
+            return False
+
         eff2 = dict(eff)
         if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
             eff2["max_tokens"] = int(max_tokens)
@@ -281,18 +301,23 @@ def run_task(
                     on_token(token)
 
                 def _stream_fallback():
-                    return prov.complete_messages_ex(
-                        cfg, messages, provider=provider, model=model,
+                    return prov._invoke_with_optional_request(
+                        prov.complete_messages_ex, cfg, messages, provider=provider, model=model,
                         response_schema=schema, cancel=_request_cancel,
                         on_heartbeat=_retry_hb, request=request, **eff2)
 
                 return streaming_generate(cfg, messages, provider=provider, model=model,
                                           response_schema=schema, on_token=_observe_token,
-                                          _fallback=_stream_fallback, **eff2)
-            return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                             response_schema=schema, cancel=_request_cancel,
-                                             on_heartbeat=_retry_hb, request=request, **eff2)
-        res = request.run(_call, cancel=cancel)         # #3: uma janela compartilhada por retry/fallback
+                                          _fallback=_stream_fallback, request=request, **eff2)
+            return prov._invoke_with_optional_request(
+                prov.complete_messages_ex, cfg, messages, provider=provider, model=model,
+                response_schema=schema, cancel=_request_cancel,
+                on_heartbeat=_retry_hb, request=request, **eff2)
+        try:
+            res = request.run(_call, cancel=_request_cancel)  # uma janela compartilhada por retry/fallback
+        finally:
+            if _active_request is request:
+                _active_request = None
         _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
@@ -302,15 +327,31 @@ def run_task(
     escalate = None
     if escalate_to:
         def escalate(messages, schema=None):  # noqa: F811
+            nonlocal _active_request
+            request = _new_request()
+            _active_request = request
+
+            def _request_cancel() -> bool:
+                if request.cancelled:
+                    return True
+                if cancel is not None and cancel():
+                    request.cancel("user")
+                    return True
+                return False
+
             eff_esc = _native_tools_for(cfg.provider(escalate_to), registry, dict(eff))  # MESMO registry
             #                                FILTRADO da geração normal (senão Telegram recebia run_shell/spawn)
 
             def _call_escalate():
                 request.check()
-                return prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema,
-                                                 cancel=_request_cancel, on_heartbeat=_retry_hb,
-                                                 request=request, **eff_esc)
-            res = request.run(_call_escalate, cancel=cancel)
+                return prov._invoke_with_optional_request(
+                    prov.complete_messages_ex, cfg, messages, provider=escalate_to, response_schema=schema,
+                    cancel=_request_cancel, on_heartbeat=_retry_hb, request=request, **eff_esc)
+            try:
+                res = request.run(_call_escalate, cancel=_request_cancel)
+            finally:
+                if _active_request is request:
+                    _active_request = None
             _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
@@ -462,7 +503,7 @@ def run_task(
         budget=budget, stream_tokens=_streaming, native_tools=_native,
         on_event=on_event, escalate=escalate, system_extra=system_extra,
         memory=mem, core_block=core_block, approve=approve,
-        skills=skills_map, registry=registry, cancel=_request_cancel,
+        skills=skills_map, registry=registry, cancel=_harness_cancel,
         checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
         plugin_hooks=plugin_hooks,    # sistema de hooks UNIFICADO (pre/post_tool_call, pre_llm_call, ...)
         images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos

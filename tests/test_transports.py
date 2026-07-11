@@ -57,6 +57,20 @@ def test_claude_cli_no_session_id_runs_single_call_unchanged(monkeypatch):
     assert "--resume" not in calls[0] and "--session-id" not in calls[0]
 
 
+def test_claude_cli_honors_request_timeout_override(monkeypatch):
+    monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
+    captured = {}
+
+    def _fake_run(cmd, **kw):
+        captured.update(kw)
+        return _FakeProc(0, stdout='{"result": "oi"}')
+
+    monkeypatch.setattr(transports.subprocess, "run", _fake_run)
+    transports.claude_cli_complete(_pc_claude(), [{"role": "user", "content": "oi"}], None,
+                                   overrides={"timeout": 1.25})
+    assert captured["timeout"] == 1.25
+
+
 def test_claude_cli_session_id_resumes_when_session_exists(monkeypatch):
     """session_id passado + --resume funciona de primeira → UMA chamada só (reusa a sessão do CLI)."""
     monkeypatch.setattr(transports, "claude_binary", lambda: "/usr/bin/claude")
@@ -168,6 +182,54 @@ def test_codex_oauth_complete_sends_cloudflare_bypass_headers(monkeypatch):
     assert headers["user-agent"].startswith("codex_cli_rs/")
     assert headers["chatgpt-account-id"] == "acct-77"
     assert headers["authorization"] == "Bearer tok-123"
+
+
+def test_codex_oauth_honors_request_timeout_override(monkeypatch):
+    from okami.llm import oauth
+
+    monkeypatch.setattr(oauth, "codex_access_token", lambda: "tok-123")
+    monkeypatch.setattr(oauth, "codex_account_id", lambda: "acct-77")
+
+    class FakeResp:
+        def __enter__(self):
+            return [b'data: {"type":"response.output_text.delta","delta":"oi"}',
+                    b'data: {"type":"response.completed","response":{}}']
+
+        def __exit__(self, *a):
+            return False
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["timeout"] = timeout
+        return FakeResp()
+
+    monkeypatch.setattr(transports.urllib.request, "urlopen", fake_urlopen)
+    pc = ProviderConfig(name="codex", model="x", transport="codex_oauth")
+    transports.codex_oauth_complete(pc, [{"role": "user", "content": "oi"}], None,
+                                    overrides={"timeout": 1.25})
+    assert captured["timeout"] == 1.25
+
+
+def test_minimax_oauth_honors_request_timeout_override(monkeypatch):
+    from types import SimpleNamespace
+
+    from okami.llm import oauth
+    import litellm
+    from okami.llm import transports as transport_module
+
+    monkeypatch.setattr(oauth, "get_valid_token", lambda *args: "tok")
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))], usage=None)
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    pc = ProviderConfig(name="minimax", model="minimax/m3", transport="minimax_oauth")
+    transport_module.minimax_oauth_complete(pc, [{"role": "user", "content": "oi"}], None,
+                                            overrides={"timeout": 1.25})
+    assert captured["timeout"] == 1.25
 
 
 def test_kwargs_includes_reasoning_effort_and_call_override_wins():

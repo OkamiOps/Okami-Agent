@@ -11,6 +11,7 @@ Atrás de flag `harness.streaming` (default OFF — não muda o comportamento de
 """
 from __future__ import annotations
 
+from okami.llm.request import RequestCancelled, RequestContext, RequestWatchdogTimeout
 from okami.llm.usage import Completion, normalize_usage
 
 
@@ -64,22 +65,36 @@ def streaming_enabled(cfg, provider: str | None = None, *, has_tools: bool | Non
         return False
 
 
-def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overrides):
+def stream_messages_deltas(cfg, messages, *, provider=None, model=None,
+                           request: RequestContext | None = None, **overrides):
     """Itera os deltas de texto a partir de MENSAGENS (espelha providers.stream_complete, mas messages-in)."""
     import litellm
     from okami.llm import errors as _err
     from okami.llm import providers as _p
     pc = cfg.provider(provider)
+    if request is not None:
+        request.check()
+    overrides = _p._bounded_request_overrides(request, overrides)
     messages = _p._sanitize_messages(messages)       # surrogate/control char não estoura o encode (idem complete)
     messages = _p._ensure_reasoning_echo(messages, pc)   # DeepSeek-reasoner/Kimi/MiMo exigem reasoning_content
     via = _p.transports.dispatch(pc, messages, model, overrides)
     if via is not None:                              # transports CLI/OAuth não streamam → entrega de uma vez
+        if request is not None:
+            request.check()
+            if getattr(via, "text", ""):
+                request.observe()
         yield getattr(via, "text", "") or ""
         return
     produced = False
     reasoning_open = False                                # raciocínio (reasoning_content) vem SEM tag em
     try:                                                  # minimax/DeepSeek/Kimi → envolve em <think> na ORIGEM
-        for chunk in litellm.completion(**_p._kwargs(pc, messages, stream=True, model=model, **overrides)):
+        source = litellm.completion(**_p._kwargs(pc, messages, stream=True, model=model, **overrides))
+        close = getattr(source, "close", None)
+        if request is not None and callable(close):
+            request.register_abort(lambda reason: close())
+        for chunk in source:
+            if request is not None:
+                request.check()
             try:
                 d = chunk.choices[0].delta
                 content = d.content
@@ -87,12 +102,16 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
             except (AttributeError, IndexError):
                 content = reasoning = None
             if reasoning:                                 # abre <think> na 1ª vez → scrubber (display) E o
+                if request is not None:
+                    request.observe()
                 if not reasoning_open:                    # strip_think do harness (resposta) tratam igual
                     reasoning_open = True
                     yield "<think>"
                 produced = True
                 yield reasoning
             if content:
+                if request is not None:
+                    request.observe()
                 if reasoning_open:                        # transição raciocínio→resposta: fecha o think
                     reasoning_open = False
                     yield "</think>"
@@ -100,8 +119,12 @@ def stream_messages_deltas(cfg, messages, *, provider=None, model=None, **overri
                 yield content
         if reasoning_open:                                # stream acabou ainda em raciocínio → fecha a tag
             yield "</think>"
+        if request is not None:
+            request.check()
         if not produced:
             raise _p.EmptyResponse("stream vazio")
+    except (RequestCancelled, RequestWatchdogTimeout):
+        raise
     except Exception as e:  # noqa: BLE001
         if produced:
             raise                                    # parte já entregue → propaga (não dá p/ refazer limpo)
@@ -183,45 +206,74 @@ class _ThinkScrubber:
 
 
 def streaming_generate(cfg, messages, *, provider=None, model=None, on_token=None, response_schema=None,
-                       _stream=None, _fallback=None, **overrides) -> Completion:
+                       _stream=None, _fallback=None, request: RequestContext | None = None,
+                       **overrides) -> Completion:
     """Streama os tokens (on_token cada delta), acumula e devolve o Completion. Stream que morre antes do
     1º token / vazio → `_fallback()` (= complete_messages_ex robusto). `_stream`/`_fallback` injetáveis."""
     chunks: list[str] = []
 
+    if request is not None:
+        request.check()
+
     def _fb() -> Completion:
+        if request is not None:
+            request.check()
         if _fallback is not None:
             return _fallback()
         from okami.llm import providers as _p
-        return _p.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                       response_schema=response_schema, **overrides)
+        return _p._invoke_with_optional_request(
+            _p.complete_messages_ex, cfg, messages, provider=provider, model=model,
+            response_schema=response_schema, request=request, **overrides)
 
+    stream_overrides = dict(overrides)
+    if request is not None:
+        from okami.llm import providers as _p
+        stream_overrides = _p._bounded_request_overrides(request, stream_overrides)
+    stream_overrides["request"] = request
     src = _stream if _stream is not None else stream_messages_deltas(
-        cfg, messages, provider=provider, model=model, **overrides)
+        cfg, messages, provider=provider, model=model, **stream_overrides)
+    close = getattr(src, "close", None)
+    if request is not None and _stream is not None and callable(close):
+        request.register_abort(lambda reason: close())
     scrubber = _ThinkScrubber()                          # não VAZA <think> ao vivo no display (o Completion
     #                                                      acumula o texto CRU; scrub é só p/ o on_token)
     try:
         for delta in src:
+            if request is not None:
+                request.check()
             if delta:
+                if request is not None:
+                    request.observe()
                 chunks.append(delta)                     # acumula CRU (harness parseia/limpa depois)
                 if on_token:
                     visible = scrubber.feed(delta)       # só a parte FORA de <think> vai pro display
                     if visible:
                         try:
                             on_token(visible)
+                        except (RequestCancelled, RequestWatchdogTimeout):
+                            raise
                         except Exception:  # noqa: BLE001 — DISPLAY é best-effort: um erro na TUI/edição NÃO
                             pass            # pode truncar a saída do modelo nem mascarar como falha de provider
         if on_token:                                     # fim do stream: emite o tail retido (senão o fim da
             tail = scrubber.flush()                      # resposta some se parecer começo de tag)
             if tail:
-                try:
-                    on_token(tail)
-                except Exception:  # noqa: BLE001
-                    pass
+                    try:
+                        on_token(tail)
+                    except (RequestCancelled, RequestWatchdogTimeout):
+                        raise
+                    except Exception:  # noqa: BLE001
+                        pass
+    except (RequestCancelled, RequestWatchdogTimeout):
+        raise
     except Exception:  # noqa: BLE001 — stream caiu (antes ou no meio)
+        if request is not None:
+            request.check()
         if chunks:                                   # já streamou parte → entrega o que veio (não duplica)
             return Completion(text="".join(chunks), provider=getattr(cfg.provider(provider), "name", "") if cfg else "",
                               usage=normalize_usage(None, transport="litellm"))
         return _fb()
+    if request is not None:
+        request.check()
     if not chunks:                                   # stream vazio → robusto
         return _fb()
     text = "".join(chunks)

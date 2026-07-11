@@ -75,6 +75,21 @@ def test_code_assist_complete_translates_and_unwraps():
     assert captured["body"]["project"] == "proj"          # envelope com o project
 
 
+def test_code_assist_complete_honors_request_timeout_override():
+    from okami.llm.code_assist import code_assist_complete
+    pc = SimpleNamespace(name="gca", model="gemini-2.5-flash", project_id="proj")
+    captured = {}
+
+    def _post(url, body, token, *, timeout):
+        captured["timeout"] = timeout
+        return {"response": {"candidates": [{"content": {"parts": [{"text": "pong"}]},
+                                                   "finishReason": "STOP"}]}}
+
+    code_assist_complete(pc, [{"role": "user", "content": "ping"}], None,
+                         overrides={"timeout": 1.25}, _token=lambda: "ACCESS", _post=_post)
+    assert captured["timeout"] == 1.25
+
+
 def test_code_assist_complete_without_token_raises_clear():
     import pytest
 

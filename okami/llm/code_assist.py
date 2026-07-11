@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import inspect
+import math
 import secrets
 import urllib.parse
 from dataclasses import dataclass
@@ -116,7 +118,19 @@ def parse_quota_buckets(resp: dict) -> list[dict]:
 
 
 # ----------------------------------------------------------------- completion
-def _default_post(url: str, body: dict, token: str) -> dict:
+def _post_timeout(value) -> float:
+    if isinstance(value, bool):
+        raise ValueError("timeout must be finite and strictly positive")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("timeout must be finite and strictly positive") from None
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be finite and strictly positive")
+    return timeout
+
+
+def _default_post(url: str, body: dict, token: str, *, timeout: float = 60) -> dict:
     """POST JSON real ao cloudcode-pa com Bearer. Só usado fora de teste."""
     import json
     import urllib.request
@@ -126,7 +140,7 @@ def _default_post(url: str, body: dict, token: str) -> dict:
         "Authorization": f"Bearer {token}",
         "User-Agent": "okami-code-assist",
     })
-    with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=_post_timeout(timeout)) as r:  # noqa: S310
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -145,7 +159,18 @@ def code_assist_complete(pc, messages: list[dict], model: str | None, overrides:
     env = wrap_code_assist_request(project_id=project, model=mdl, inner_request=inner)
     url = f"{CODE_ASSIST_ENDPOINT}/v1internal:generateContent"
     post = _post or _default_post
-    raw = post(url, env, token)
+    timeout = ov.get("timeout")
+    if timeout is None:
+        raw = post(url, env, token)
+    else:
+        timeout = _post_timeout(timeout)
+        try:
+            params = inspect.signature(post).parameters.values()
+            accepts_timeout = any(p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD
+                                  for p in params)
+        except (TypeError, ValueError):
+            accepts_timeout = False
+        raw = post(url, env, token, timeout=timeout) if accepts_timeout else post(url, env, token)
     rd = unwrap_code_assist_response(raw)
     text, finish, tool_calls = from_gemini_response(rd)
     return Completion(text=text, finish_reason=finish, tool_calls=tool_calls,

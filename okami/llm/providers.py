@@ -9,6 +9,8 @@ o capability profile adaptativo (§3.5).
 from __future__ import annotations
 
 import re
+import inspect
+import math
 import time
 from collections.abc import Iterator
 
@@ -468,17 +470,58 @@ def _request_cancel_probe(request: RequestContext | None, cancel=None):
     return probe
 
 
+def _accepts_keyword(fn, name: str) -> bool:
+    """Return true only when signature inspection proves ``fn`` accepts ``name``."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+
+
+def _invoke_with_optional_request(fn, *args, request: RequestContext | None = None, **kwargs):
+    """Invoke an injected callable without TypeError-based signature guessing.
+
+    A TypeError raised by the callable body propagates unchanged; it is never mistaken
+    for an unsupported compatibility keyword.
+    """
+    if request is not None and _accepts_keyword(fn, "request"):
+        kwargs["request"] = request
+    return fn(*args, **kwargs)
+
+
+def _strict_positive_timeout(value) -> float:
+    if isinstance(value, bool):
+        raise ValueError("timeout must be finite and strictly positive")
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("timeout must be finite and strictly positive") from None
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("timeout must be finite and strictly positive")
+    return timeout
+
+
 def _bounded_request_overrides(request: RequestContext | None, overrides: dict) -> dict:
     """Keep each transport call within the request's remaining finite deadline."""
+    bounded = dict(overrides)
+    if request is not None:
+        request.check()
+    current = bounded.get("timeout")
+    if current is not None:
+        current = _strict_positive_timeout(current)
+        bounded["timeout"] = current
     if request is None:
-        return overrides
+        return bounded
     remaining = request.remaining()
     if remaining is None:
-        return overrides
-    bounded = dict(overrides)
-    current = bounded.get("timeout")
-    if current is None or float(current) > remaining:
-        bounded["timeout"] = remaining
+        return bounded
+    if remaining <= 0:
+        # A normal monotonic clock reaches this branch only immediately before
+        # check() raises.  Keep the explicit guard for clocks with coarse precision.
+        request.check()
+        raise RequestWatchdogTimeout("total")
+    bounded["timeout"] = remaining if current is None else min(current, remaining)
     return bounded
 
 
@@ -628,10 +671,11 @@ def complete_messages_ex(
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            one_kwargs = {"raw_messages": _raw} if _raw is not None else {}
-            if request is not None:
-                one_kwargs["request"] = request
-            res = as_completion(_complete_one(pc, send, model, response_schema, ov, **one_kwargs))
+            one_kwargs = {}
+            if _raw is not None and _accepts_keyword(_complete_one, "raw_messages"):
+                one_kwargs["raw_messages"] = _raw
+            res = as_completion(_invoke_with_optional_request(
+                _complete_one, pc, send, model, response_schema, ov, request=request, **one_kwargs))
             _request_check(request, cancel)
             if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada…
                 from okami.llm.stream_diag import classify_completion
@@ -651,6 +695,11 @@ def complete_messages_ex(
                     pass
             return res
         except (RequestCancelled, RequestWatchdogTimeout):
+            raise
+        except TypeError:
+            # Signature compatibility is decided before invocation.  A TypeError
+            # raised by the provider body is a real provider failure, not a signal
+            # to retry the call without ``request``.
             raise
         except Exception as e:  # noqa: BLE001
             _request_check(request, cancel)

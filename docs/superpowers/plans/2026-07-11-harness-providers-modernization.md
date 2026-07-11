@@ -28,14 +28,22 @@
 - Create: `okami/llm/request.py`
 - Modify: `okami/runner.py`
 - Modify: `okami/llm/providers.py`
+- Modify: `okami/llm/streaming.py`
+- Modify: `okami/llm/transports.py`
+- Modify: `okami/core/harness/loop.py`
 - Test: `tests/test_request_watchdog.py`
 - Test: `tests/test_request_cancellation.py`
 - Test: `tests/test_overall_timeout.py`
+- Test: `tests/test_streaming.py`
+- Test: `tests/test_transports.py`
 
 **Interfaces:**
 - Produces: `RequestTimeouts`, `RequestContext`, `RequestCancelled`, `RequestWatchdogTimeout`.
 - Produces: `RequestContext.run(fn)`, `observe()`, `register_abort()`, `cancel()`, `remaining()` and `check()`.
 - Consumed later by: transport adapters and structured streaming.
+- One fresh context is created for each harness generation call; retry and
+  fallback within that call share it, but TTFB/idle state never leaks into the
+  next generation step.
 
 - [ ] **Step 1: Write the pure watchdog tests**
 
@@ -228,12 +236,18 @@ deadline across retries/fallbacks.
 
 Add explicit `request: RequestContext | None = None` parameters. Keep
 `_run_with_deadline()` as a compatibility wrapper delegating to a context so
-existing imports and tests do not break. `RequestCancelled` must bypass error
-classification, retries and fallback.
+existing imports and tests do not break. Compatibility adapters must omit the
+new keyword for legacy injected callables that do not accept it, without
+catching a `TypeError` raised inside the callable. `RequestCancelled` must
+bypass error classification, retries, recovery, compaction and fallback.
+Streaming and existing native transports must receive a finite positive
+remaining timeout where their API supports it; closable streams register a
+request-local aborter, while transports without a physical abort handle expose
+that limitation explicitly.
 
 - [ ] **Step 7: Run focused tests and commit**
 
-Run: `uv run pytest -q tests/test_request_watchdog.py tests/test_request_cancellation.py tests/test_overall_timeout.py tests/test_provider_retry_timeout.py tests/test_interruptible_backoff.py`
+Run: `uv run pytest -q tests/test_request_watchdog.py tests/test_request_cancellation.py tests/test_overall_timeout.py tests/test_provider_retry_timeout.py tests/test_interruptible_backoff.py tests/test_streaming.py tests/test_transports.py`
 
 Commit: `feat(harness): add request-scoped cancellation watchdog`
 

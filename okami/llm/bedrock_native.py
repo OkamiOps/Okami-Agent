@@ -7,6 +7,7 @@ rede; o client é lazy-import via lazy_deps('provider.bedrock').
 from __future__ import annotations
 
 import json
+import math
 
 from okami.llm.usage import Completion, normalize_usage
 
@@ -112,7 +113,18 @@ def bedrock_native_complete(pc, messages: list[dict], model: str | None, overrid
 
     ov = overrides or {}
     region = (pc.params or {}).get("region") or "us-east-1"
-    client = boto3.client("bedrock-runtime", region_name=region)
+    client_kw = {"region_name": region}
+    if ov.get("timeout") is not None:
+        # botocore's read_timeout is the supported socket-level bound for Converse;
+        # do not put a vendor-specific timeout field into the request payload.
+        from botocore.config import Config
+        if isinstance(ov["timeout"], bool):
+            raise ValueError("timeout must be finite and strictly positive")
+        timeout = float(ov["timeout"])
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be finite and strictly positive")
+        client_kw["config"] = Config(read_timeout=timeout)
+    client = boto3.client("bedrock-runtime", **client_kw)
     req = to_converse_request(messages, tools=ov.get("tools"))
     mdl = model or pc.model
     kw: dict = {"modelId": mdl, "messages": req["messages"]}

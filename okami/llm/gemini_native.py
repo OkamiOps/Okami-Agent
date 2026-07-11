@@ -10,6 +10,7 @@ Hoje o Okami é assinatura-Claude; isto fica PRONTO p/ quando precisar trocar de
 from __future__ import annotations
 
 import json
+import math
 
 from okami.llm.usage import Completion, normalize_usage
 
@@ -134,7 +135,17 @@ def gemini_native_complete(pc, messages: list[dict], model: str | None, override
     from google import genai  # type: ignore
 
     ov = overrides or {}
-    client = genai.Client(api_key=key)
+    client_kwargs = {"api_key": key}
+    if ov.get("timeout") is not None:
+        if isinstance(ov["timeout"], bool):
+            raise ValueError("timeout must be finite and strictly positive")
+        timeout = float(ov["timeout"])
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be finite and strictly positive")
+        from google.genai import types  # type: ignore
+        # google-genai documents HttpOptions.timeout in milliseconds.
+        client_kwargs["http_options"] = types.HttpOptions(timeout=max(1, math.ceil(timeout * 1000)))
+    client = genai.Client(**client_kwargs)
     req = to_gemini_request(messages, tools=ov.get("tools"), generation_config=ov.get("generation_config"))
     mdl = model or pc.model
     config = dict(req.get("generationConfig") or {})

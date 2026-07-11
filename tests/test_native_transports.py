@@ -36,6 +36,73 @@ def test_gemini_response_handles_empty():
     assert from_gemini_response({}) == ("", "stop", [])
 
 
+def test_gemini_native_uses_supported_http_timeout(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from okami.llm import gemini_native
+
+    monkeypatch.setattr("okami.core.lazy_deps.ensure", lambda *args, **kwargs: None)
+    captured = {}
+
+    class HttpOptions:
+        def __init__(self, **kwargs):
+            captured["http_options"] = kwargs
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            return SimpleNamespace(to_dict=lambda: {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    fake_genai = ModuleType("google.genai")
+    fake_genai.Client = Client
+    fake_genai.types = SimpleNamespace(HttpOptions=HttpOptions)
+    fake_google = ModuleType("google")
+    fake_google.genai = fake_genai
+    monkeypatch.setitem(sys.modules, "google", fake_google)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+
+    pc = SimpleNamespace(name="g", model="gemini", api_key="key")
+    gemini_native.gemini_native_complete(pc, [{"role": "user", "content": "x"}], None,
+                                         overrides={"timeout": 1.25})
+    assert captured["http_options"]["timeout"] == 1250
+
+
+def test_bedrock_native_uses_supported_socket_timeout(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from okami.llm import bedrock_native
+
+    monkeypatch.setattr("okami.core.lazy_deps.ensure", lambda *args, **kwargs: None)
+    captured = {}
+
+    class Config:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class Client:
+        def converse(self, **kwargs):
+            return {"output": {"message": {"content": [{"text": "ok"}]}}, "stopReason": "end_turn"}
+
+    fake_boto3 = ModuleType("boto3")
+    fake_boto3.client = lambda name, **kwargs: (captured.update(kwargs) or Client())
+    fake_botocore = ModuleType("botocore")
+    fake_botocore_config = ModuleType("botocore.config")
+    fake_botocore_config.Config = Config
+    monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
+    monkeypatch.setitem(sys.modules, "botocore", fake_botocore)
+    monkeypatch.setitem(sys.modules, "botocore.config", fake_botocore_config)
+
+    pc = SimpleNamespace(name="b", model="claude", params={})
+    bedrock_native.bedrock_native_complete(pc, [{"role": "user", "content": "x"}], None,
+                                           overrides={"timeout": 1.25})
+    assert captured["config"].kwargs["read_timeout"] == 1.25
+
+
 # ── Bedrock native (Converse) ──
 def test_bedrock_converse_translation():
     from okami.llm.bedrock_native import to_converse_request
