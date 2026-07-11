@@ -8,7 +8,7 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [0.15-beta] — 2026-07-11
 
-O `v0.15-beta` fecha a maior onda desde a abertura do beta: **39 commits** que endurecem o harness,
+O `v0.15-beta` fecha a maior onda desde a abertura do beta: **40 commits** que endurecem o harness,
 separam provider/modelo de transport, tornam tool calls nativas recuperáveis e colocam a troca de modelo
 do Telegram no mesmo caminho de resolução usado pelo restante do produto. A comparação usou o snapshot
 recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitetura inteira.
@@ -60,13 +60,15 @@ recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitet
 - Leitura e enumeração de credenciais ficam bloqueadas inclusive em modo yolo; `find_files`, `list_dir`
   e `search_files` não denunciam nomes sensíveis.
 - Scanner `secret_plus_network` foi recalibrado para não acusar falsos positivos comuns de design/web.
+- XML externo de arXiv, RSS, YouTube, DOCX e XLSX passa por `defusedxml`, bloqueando entidades e
+  construções maliciosas antes da extração.
 - Modelo ou ferramenta pedidos nominalmente não podem ser trocados em silêncio.
 - Uso de contexto passa a considerar cache/provider corretamente; reasoning não vaza na resposta e a
   memória fica mais enxuta.
 
 ### ✅ Qualidade e compatibilidade
 
-- **4.075 testes passando, 13 skipped** na validação controlada.
+- **4.079 testes passando, 7 skipped** na validação final.
 - **75 achados Ruff → zero**; `uv run ruff check okami tests` passa no repositório inteiro.
 - YAML legado, aliases, fallbacks por nome e transports CLI/OAuth continuam válidos.
 - Sem migração obrigatória de configuração. LiteLLM permanece disponível como compatibilidade.

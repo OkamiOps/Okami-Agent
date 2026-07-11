@@ -78,11 +78,11 @@ def test_malformed_payload_is_safe():
 # ── #20 bug-hunt [9]: contexto PRECEDENTE entra na detecção de placeholder ──
 def test_placeholder_context_uses_preceding_chars():
     # um comentário "example" logo ANTES do segredo deve suprimir o alerta (é arquivo de exemplo)
-    code = '# example config, do not use in prod\nAPI_KEY = "abcdef123456ZZ"\n'
+    code = '# example config, do not use in prod\nAPI_KEY = "abcdef123456ZZ"\n'  # pragma: allowlist secret
     rc, out = _run({"tool": "write_file", "args": {"path": "ex.py", "content": code}})
     assert rc == 0 and "hardcoded-secret" not in out       # contexto precedente reconheceu placeholder
     # sem o contexto "example", o mesmo segredo É sinalizado
-    rc2, out2 = _run({"tool": "write_file", "args": {"path": "p.py", "content": 'API_KEY = "abcdef123456ZZ"\n'}})
+    rc2, out2 = _run({"tool": "write_file", "args": {"path": "p.py", "content": 'API_KEY = "abcdef123456ZZ"\n'}})  # pragma: allowlist secret
     assert rc2 == 0 and "hardcoded-secret" in out2
 
 

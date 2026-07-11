@@ -6,7 +6,8 @@ from pathlib import Path
 
 from okami.memory import files as mf
 
-_REPO_ANTISLOP = Path(__file__).resolve().parent.parent / "agents" / "okami" / "ANTISLOP.md"
+_REPO_ANTISLOP = (Path(__file__).resolve().parent.parent / "okami" / "builtin" / "identity" /
+                   "ANTISLOP.md")
 
 
 def test_antislop_file_exists_and_parses():
@@ -27,7 +28,6 @@ def test_antislop_file_under_layer_cap():
 
 
 def test_core_block_includes_antislop_content(tmp_path):
-    (tmp_path / "ANTISLOP.md").write_text(_REPO_ANTISLOP.read_text(encoding="utf-8"), encoding="utf-8")
     block = mf.core_block(tmp_path)
     assert "ANTISLOP" in block
     assert "Como posso ajudar" in block             # padrão #1 (abertura de atendente) presente
@@ -46,15 +46,14 @@ def test_core_block_local_antislop_overrides_builtin(tmp_path):
 
 def test_core_block_orders_antislop_after_voice(tmp_path):
     (tmp_path / "VOICE.md").write_text("# VOICE\ntom próximo.\n", encoding="utf-8")
-    (tmp_path / "ANTISLOP.md").write_text(_REPO_ANTISLOP.read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / "PERSONA.md").write_text("# PERSONA\nengenheiro.\n", encoding="utf-8")
     block = mf.core_block(tmp_path)
     assert block.index("VOZ / TOM") < block.index("ANTISLOP") < block.index("PERSONA / SELF")
 
 
-def test_agent_okami_dir_has_antislop_alongside_identity_files():
-    # o agente 'okami' de referência no repo (agents/okami/) carrega ANTISLOP igual a SOUL/VOICE/PERSONA
-    agent_dir = _REPO_ANTISLOP.parent
-    assert (agent_dir / "SOUL.md").exists()
-    assert (agent_dir / "VOICE.md").exists()
-    assert (agent_dir / "ANTISLOP.md").exists()
+def test_builtin_antislop_is_used_without_local_profile(tmp_path):
+    # O perfil em /agents é runtime/local; instalação limpa deve usar o default versionado do pacote.
+    assert not (tmp_path / "ANTISLOP.md").exists()
+    block = mf.core_block(tmp_path)
+    assert "Como posso ajudar" in block
+    assert "ANTISLOP" in block

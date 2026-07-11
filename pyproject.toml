@@ -28,6 +28,7 @@ dependencies = [
     "textual>=0.80",         # TUI de tela cheia do `okami chat --tui` (regiões fixas, mouse, scroll, status pinado)
     "pillow>=10",            # render do logo REAL da Okami como arte de terminal (half-block); degrada p/ lobo geométrico
     "cryptography>=42",      # Fernet — cofre de segredos criptografado em repouso (okami/core/secretvault.py)
+    "defusedxml>=0.7.1",      # parsing seguro de XML recebido/extraído de fontes não confiáveis
 ]
 
 [project.optional-dependencies]

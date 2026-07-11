@@ -54,7 +54,7 @@ def test_mirror_record_default_source_cron():
 
 def test_mirror_record_redige_segredo():
     # Se o texto carregar um segredo, o espelho NÃO o ecoa cru no transcript.
-    papel, texto = mirror_record("token API_KEY=sk-ABCDEFGH12345678ZZ", source="cron")
+    papel, texto = mirror_record("token API_KEY=sk-ABCDEFGH12345678ZZ", source="cron")  # pragma: allowlist secret
     assert "sk-ABCDEFGH12345678ZZ" not in texto
 
 

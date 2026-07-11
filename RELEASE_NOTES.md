@@ -8,8 +8,8 @@
 | **Release** | `v0.15-beta` |
 | **Published** | 2026-07-11 |
 | **Compared with** | `v0.14.3-beta` |
-| **Scope** | 39 commits · 413 files |
-| **Verification** | 4,075 passed · 13 skipped · Ruff clean |
+| **Scope** | 40 commits · 413 files |
+| **Verification** | 4,079 passed · 7 skipped · Ruff clean |
 | **Compatibility** | Existing YAML, aliases and CLI/OAuth transports remain valid |
 
 🌐 [Website](https://okamiagent.com) · 📚 [Documentation](https://okamiagent.com/docs) ·
@@ -165,6 +165,7 @@ These are versioned defaults. Local skills and agent identity files still overri
 - credential files cannot be read even in permissive/yolo execution;
 - file enumeration and search hide sensitive credential names;
 - secret-plus-network scanning was recalibrated to avoid common design/web false positives;
+- external XML from arXiv, RSS, YouTube, DOCX and XLSX is parsed through `defusedxml`;
 - context usage includes provider cache data instead of under-reporting occupancy;
 - provider reasoning stays out of normal user-visible responses;
 - 75 existing Ruff findings were reduced to zero.
@@ -199,7 +200,7 @@ names and CLI/OAuth transports remain supported.
 
 ## ✅ Verification
 
-- [x] `4,075 passed, 13 skipped`
+- [x] `4,079 passed, 7 skipped`
 - [x] `uv run ruff check okami tests` — clean
 - [x] `git diff --check` — clean
 - [x] native tool-call rejection/terminal regressions covered

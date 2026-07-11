@@ -10,7 +10,8 @@ import json
 import zipfile
 from json import JSONDecodeError
 from pathlib import Path
-from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 EXTRACTABLE_EXTENSIONS = (".docx", ".xlsx", ".ipynb")
 _MAX_XLSX_ROWS = 2000
@@ -36,7 +37,7 @@ def extract_text(path) -> str | None:
             return _extract_docx(p)
         if ext == ".xlsx":
             return _extract_xlsx(p)
-    except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError, KeyError, TypeError,
+    except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError, DefusedXmlException, KeyError, TypeError,
             AttributeError, JSONDecodeError):                # #9 review: .ipynb com JSON-lista/cells-string
         return None
     return None

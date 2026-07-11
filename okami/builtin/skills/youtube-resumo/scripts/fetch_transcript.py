@@ -30,7 +30,8 @@ import json
 import re
 import sys
 import urllib.request
-from xml.etree import ElementTree
+from defusedxml import ElementTree
+from defusedxml.common import DefusedXmlException
 
 _UA = "Mozilla/5.0 (compatible; OkamiAgent/1.0; +https://example.invalid/bot)"
 _ID_PATTERNS = (
@@ -103,7 +104,7 @@ def _fetch_via_urllib(video_id: str, languages: list[str] | None) -> list[dict]:
         )
     try:
         root = ElementTree.fromstring(xml_text)
-    except ElementTree.ParseError as e:
+    except (ElementTree.ParseError, DefusedXmlException) as e:
         raise LookupError(
             f"resposta de legenda em formato inesperado ({e}). "
             "Instale youtube-transcript-api para um método mais robusto: pip install youtube-transcript-api"

@@ -1778,6 +1778,7 @@ version = "0.15b0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "defusedxml" },
     { name = "litellm" },
     { name = "numpy" },
     { name = "pillow" },
@@ -1816,6 +1817,7 @@ web = [
 requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "cryptography", specifier = ">=42" },
+    { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "ddgs", marker = "extra == 'web'", specifier = ">=6.0" },
     { name = "edge-tts", marker = "extra == 'voice'", specifier = ">=6.1" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0" },

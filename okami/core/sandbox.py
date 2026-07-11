@@ -358,8 +358,8 @@ def docker_argv(cmd: str, workspace: Path, policy: SandboxPolicy, *, name: str =
         "--security-opt", "no-new-privileges",
         # tmpfs noexec/nosuid (item 25): corta "dropa binário em /tmp e executa". Tamanho-limite
         # p/ não virar bomba de RAM. Escrita REAL do agente vai pro workspace montado (gravável).
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",       # nosec B108 — destino tmpfs dentro do container, não host
+        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",   # nosec B108 — destino tmpfs dentro do container, não host
         "--tmpfs", "/run:rw,noexec,nosuid,size=16m",
     ]
     user = _host_user()
@@ -384,8 +384,8 @@ def _hardening_flags(policy: SandboxPolicy) -> list[str]:
         "--cpus", "1",
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",       # nosec B108 — destino tmpfs dentro do container, não host
+        "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=64m",   # nosec B108 — destino tmpfs dentro do container, não host
         "--tmpfs", "/run:rw,noexec,nosuid,size=16m",
     ]
     user = _host_user()

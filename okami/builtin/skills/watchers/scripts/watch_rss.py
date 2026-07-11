@@ -15,7 +15,8 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _watermark import Watermark, format_items_as_markdown  # type: ignore
@@ -32,7 +33,7 @@ def _parse_feed(xml_bytes: bytes):
     """
     try:
         root = ET.fromstring(xml_bytes)
-    except ET.ParseError as e:
+    except (ET.ParseError, DefusedXmlException) as e:
         print(f"watch_rss: invalid XML: {e}", file=sys.stderr)
         sys.exit(2)
 
