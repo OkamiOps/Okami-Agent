@@ -499,22 +499,14 @@ class Harness:
         mt = self._next_max_tokens
         self._next_max_tokens = None                  # consome: o boost vale só pra ESTA geração
         messages = _filter_thinking_only(messages)    # dropa turno só-de-thinking/placeholder da CÓPIA enviada
-        kw = {"max_tokens": mt} if mt else {}
+        from okami.llm.providers import _accepts_keyword
+        kw = {"max_tokens": mt} if mt and _accepts_keyword(self.generate, "max_tokens") else {}
         _pre_llm = getattr(self.plugin_hooks, "invoke", None)   # pre/post_llm_call (bus unificada, §unify)
         if callable(_pre_llm):
             _pre_llm("pre_llm_call", messages=messages, schema=schema)
-        if self.stream_tokens:
-            try:
-                res = self.generate(messages, schema, on_token=lambda t: self._emit("token", text=t), **kw)
-                if callable(_pre_llm):
-                    _pre_llm("post_llm_call", messages=messages, schema=schema, result=res)
-                return res
-            except TypeError:
-                pass
-        try:
-            res = self.generate(messages, schema, **kw)
-        except TypeError:                              # stub/generate sem max_tokens → chamada simples
-            res = self.generate(messages, schema)
+        if self.stream_tokens and _accepts_keyword(self.generate, "on_token"):
+            kw["on_token"] = lambda t: self._emit("token", text=t)
+        res = self.generate(messages, schema, **kw)
         if callable(_pre_llm):
             _pre_llm("post_llm_call", messages=messages, schema=schema, result=res)
         return res
@@ -716,6 +708,8 @@ class Harness:
             # dono digitando "você está me enganando") entra JÁ nesta iteração — antes era só injetado depois de
             # uma tool executar (_handle_tool_result), então se o modelo ia responder sem tool o recado se perdia.
             self._inject_steer()
+            if self._cancelled_task(t):
+                return t
             # Auto-compaction (§6.4) em DUAS fases (Hermes): primeiro a poda BARATA de tool-results
             # antigos (1-linha + dedup, sem perda — transcript segue na sessão); só se ainda estourar,
             # o compact pesado (drop de mensagens + destilação à memória).
@@ -800,6 +794,8 @@ class Harness:
                     from okami.core.errors import friendly_failure   # mensagem HUMANA (não "falhou: overloaded")
                     return self._fail(t, friendly_failure(fail.reason))
                 comp = as_completion(out)          # tolera str (JSON-em-texto) E Completion (nativo)
+                if self._cancelled_task(t):
+                    return t
                 self._shrunk_retry = False         # gerou com sucesso → libera novo encolhimento p/ falha futura
                 # RESPOSTA VAZIA (modelo de reasoning: tudo no reasoning_content, content=''): NÃO persiste
                 # {role:assistant, content:''} sem tool_calls — o histórico zumbi faz o PRÓXIMO request 400
@@ -827,10 +823,14 @@ class Harness:
                                  cache=getattr(_u, "cache_read_tokens", 0),
                                  tool_call=bool(comp.tool_calls),
                                  secs=round(_wt.monotonic() - _g0, 1))   # quanto a CHAMADA demorou
-                _amsg = {"role": "assistant", "content": comp.text}
+                if comp.tool_calls:
+                    from okami.core.harness.native_history import append_native_assistant
+                    _amsg = append_native_assistant(self.messages, comp.tool_calls, content=comp.text or None)
+                else:
+                    _amsg = {"role": "assistant", "content": comp.text}
+                    self.messages.append(_amsg)
                 if getattr(comp, "reasoning_items", None):   # Codex/o-series store=false: guarda p/ REPLAY no
                     _amsg["reasoning_items"] = comp.reasoning_items   # mesmo turno (só o transport codex lê)
-                self.messages.append(_amsg)
 
                 # LENGTH-CONTINUATION (Hermes): resposta CORTADA pelo limite (finish_reason='length') →
                 # continua EXATAMENTE de onde parou e CONCATENA, em vez de aceitar a entrega pela metade.
@@ -1142,6 +1142,8 @@ class Harness:
             # thread principal (determinístico). Mutação/aprovação NUNCA entram aqui (segue 1-por-turno).
             if (self._batch and all(_is_batchable(a) for a in (action, *self._batch))   # mutação NUNCA em
                     and not paths_collide([action, *self._batch])):                     # paralelo (race) → serial
+                if self._cancelled_task(t):
+                    return t
                 group = [action, *self._batch]
                 self._batch = []                          # consumido inteiro no paralelo
                 self._emit("parallel", n=len(group), tools=[a.tool for a in group])
@@ -1151,6 +1153,8 @@ class Harness:
                     step_n = self._handle_tool_result(t, step_n, ga, gres)
                 _last_progress = _wt.monotonic()          # grupo executado = ATIVIDADE → reseta o anti-travamento
                 continue
+            if self._cancelled_task(t):
+                return t
             self._fingerprints.append(fp)
             self._emit("tool_start", n=step_n + 1, tool=action.tool, args=action.args)   # terminal VIVO:
             cached = self._idem_cache.served(action.tool, action.args)   # read-only idêntico já obtido nesta
@@ -1167,19 +1171,36 @@ class Harness:
 
         return self._fail(t, f"orçamento de {self.budget.max_steps} passos esgotado")
 
+    def _append_native_result(self, action: Action, content: str, *, ok: bool) -> None:
+        call_id = getattr(action, "call_id", "")
+        if not call_id:
+            return
+        existing = next((m for m in reversed(self.messages)
+                         if m.get("role") == "tool" and m.get("tool_call_id") == call_id), None)
+        if existing is not None:
+            if not ok:
+                existing["content"] = f"REJECTED: {content}"
+            return
+        from okami.core.harness.native_history import append_native_tool_result
+        append_native_tool_result(self.messages, call_id, content, ok=ok)
+
+    def _accept_terminal(self, action: Action, content: str, result: Task) -> Task:
+        self._append_native_result(action, content, ok=True)
+        for pending in self._batch:
+            self._append_native_result(
+                pending,
+                f"native call not executed because terminal '{action.tool}' was accepted",
+                ok=False,
+            )
+        self._batch = []
+        return result
+
     def _reject(self, action, native_err: str, user_msg: str) -> None:
         """Recusa uma ação NÃO-dispatchada. NATIVO (action tem call_id e a assistant acima ainda não echoou):
         injeta o erro como role=tool — o modelo vê a própria tool_call + o erro e se auto-corrige (paridade
         Hermes), e a sequência fica válida (echo atômico → sem tool_call órfã). Senão: mensagem de user."""
-        _prev = self.messages[-1] if self.messages else None
-        if (action is not None and getattr(action, "call_id", "") and isinstance(_prev, dict)
-                and _prev.get("role") == "assistant" and "tool_calls" not in _prev):
-            from okami.core.harness.parsing import _oai_tool_call
-            _prev["tool_calls"] = [_oai_tool_call(
-                {"id": action.call_id, "name": action.tool, "arguments": action.args})]
-            if not _prev.get("content"):
-                _prev["content"] = None
-            self.messages.append({"role": "tool", "tool_call_id": action.call_id, "content": native_err})
+        if action is not None and getattr(action, "call_id", ""):
+            self._append_native_result(action, native_err, ok=False)
         else:
             self.messages.append({"role": "user", "content": user_msg})
 
@@ -1362,6 +1383,10 @@ class Harness:
         nativos em res.content (ex.: vision com imagem), anexa-os DIRETO como mensagem 'user' — sem
         passar pelo corte por orçamento de chars (que é p/ texto; truncar bloco de imagem o corromperia).
         Caso normal (texto): aplica o budget (teto por-resultado + teto AGREGADO do turno)."""
+        if res.content is not None and getattr(action, "call_id", ""):
+            from okami.core.harness.native_history import append_native_tool_result
+            append_native_tool_result(self.messages, action.call_id, res.content, ok=res.ok)
+            return
         if res.content is not None:                  # tool-result MULTIMODAL → blocos nativos, sem truncar
             # Bloco de imagem NÃO é truncável, mas CONTA no orçamento agregado do turno (item 6/14):
             # se o turno já estourou o teto, não enfia mais uma imagem nativa (blowup de contexto) —
@@ -1398,15 +1423,9 @@ class Harness:
         # logo acima é a assistant deste turno, ECHOA a tool_call nela (ATÔMICO: só agora que há resposta →
         # rejeição nunca vira tool_call órfã) e devolve o resultado como role=tool. Senão, observação user
         # (rail JSON, ou guard de segurança se a sequência não bater).
-        _prev = self.messages[-1] if self.messages else None
-        if (getattr(action, "call_id", "") and isinstance(_prev, dict)
-                and _prev.get("role") == "assistant" and "tool_calls" not in _prev):
-            from okami.core.harness.parsing import _oai_tool_call
-            _prev["tool_calls"] = [_oai_tool_call(
-                {"id": action.call_id, "name": action.tool, "arguments": action.args})]
-            if not _prev.get("content"):
-                _prev["content"] = None                # content vazio + tool_calls → null (alguns providers exigem)
-            self.messages.append({"role": "tool", "tool_call_id": action.call_id, "content": _obs})
+        if getattr(action, "call_id", ""):
+            from okami.core.harness.native_history import append_native_tool_result
+            append_native_tool_result(self.messages, action.call_id, _obs, ok=res.ok)
         else:
             self.messages.append({"role": "user", "content": _obs})
 
@@ -1419,6 +1438,7 @@ class Harness:
             if self._action_expected and not self._nudged_action and not t.steps:
                 self._nudged_action = True
                 self._emit("violation", n=0, text="respondeu sem rodar nenhuma ferramenta")
+                self._reject(action, "erro: respond REJEITADO — respondeu sem rodar nenhuma ferramenta.", "")
                 self.messages.append({"role": "user", "content":
                     "Você respondeu SEM usar nenhuma ferramenta. O pedido exige agir de verdade: leia/liste/"
                     "rode o que for preciso (read_file, list_dir, find_files, run_shell) e ENTREGUE o "
@@ -1428,6 +1448,7 @@ class Harness:
             if not msg and not self._empty_nudged:       # respondeu VAZIO (nem prosa) → pede a resposta 1x
                 self._empty_nudged = True
                 self._emit("violation", n=0, text="respondeu vazio")
+                self._reject(action, "erro: respond REJEITADO — resposta vazia.", "")
                 self.messages.append({"role": "user", "content":
                     'Sua resposta veio VAZIA. Responda o usuário de verdade no campo message: '
                     '{"tool": "respond", "args": {"message": "<sua resposta aqui>"}}.'})
@@ -1437,6 +1458,7 @@ class Harness:
             if self._action_expected and not self._punt_nudged and _looks_like_punt(msg):
                 self._punt_nudged = True
                 self._emit("violation", n=0, text="bail: pediu permissão/menu em vez de concluir")
+                self._reject(action, "erro: respond REJEITADO — pediu permissão/menu em vez de concluir.", "")
                 self.messages.append({"role": "user", "content":
                     "Você ENCERROU pedindo permissão/menu ('1 ou 2', 'quer que eu…?', 'posso seguir?') em "
                     "vez de CONCLUIR. Para próximos passos SEGUROS (ler/rodar/analisar/progredir) não peça "
@@ -1451,10 +1473,12 @@ class Harness:
                     and _deliverable_too_thin(t.goal, msg, _real)):
                 self._thin_nudged = True
                 self._emit("violation", n=0, text="entrega rasa vs trabalho feito")
+                self._reject(action, "erro: respond REJEITADO — entrega rasa vs trabalho feito.", "")
                 self.messages.append({"role": "user", "content": _THIN_NUDGE.format(n=_real)})
                 return None
             t.state = TaskState.COMPLETE
             t.result = msg or "(sem resposta)"
+            self._accept_terminal(action, t.result, t)
             self._emit("complete", summary=t.result)     # sem _extract: conversa não polui a memória
             return t
         if action.tool == "task_blocked":
@@ -1466,6 +1490,7 @@ class Harness:
                     and len(t.steps) < 2 and not self._failures):
                 self._blocked_nudged = True
                 self._emit("blocked_rejected", reason=action.args.get("reason", ""))
+                self._reject(action, "erro: task_blocked REJEITADO — bloqueio declarado cedo demais.", "")
                 self.messages.append({"role": "user", "content":
                     "Antes de declarar bloqueio: você quase não TENTOU. Faça primeiro o lookup/abordagem "
                     "óbvia (find_files/read_file/run_shell/browse/use_skill) — só declare task_blocked se "
@@ -1473,6 +1498,7 @@ class Harness:
                 return None
             t.state = TaskState.BLOCKED
             t.reason = action.args.get("reason", "(sem razão)")
+            self._accept_terminal(action, t.reason, t)
             self._emit("blocked", reason=t.reason)
             return t
         if action.tool == "need_input":
@@ -1482,6 +1508,7 @@ class Harness:
             if isinstance(opts, list) and opts:        # responde "2" em vez de digitar parágrafo
                 rendered = "\n".join(f"{i}. {o}" for i, o in enumerate(opts, 1))
                 t.reason = f"{t.reason}\n{rendered}\n(responda com o número ou escreva outra opção)"
+            self._accept_terminal(action, t.reason, t)
             self._emit("need_input", question=t.reason)
             return t
         if action.tool == "task_complete":
@@ -1495,6 +1522,7 @@ class Harness:
                 if self._action_expected and not self._nudged_action and not t.steps:
                     self._nudged_action = True
                     self._emit("complete_rejected", missing=["concluído sem rodar nenhuma ferramenta"])
+                    self._reject(action, "erro: task_complete REJEITADO — concluído sem rodar nenhuma ferramenta.", "")
                     self.messages.append({"role": "user", "content":
                         "Você declarou CONCLUÍDO sem usar nenhuma ferramenta. O pedido exige AGIR: leia/rode/"
                         "analise o que for preciso e ENTREGUE o resultado real — não conclua de memória."})
@@ -1503,6 +1531,7 @@ class Harness:
                         and _deliverable_too_thin(t.goal, _summary, _real)):   # entrega rasa → re-pede 1x
                     self._thin_nudged = True
                     self._emit("complete_rejected", missing=["entrega rasa vs trabalho feito"])
+                    self._reject(action, "erro: task_complete REJEITADO — entrega rasa vs trabalho feito.", "")
                     self.messages.append({"role": "user", "content": _THIN_NUDGE.format(n=_real)})
                     return None
                 # VERIFY-ON-STOP mínimo (WIN2, espírito Hermes verification_stop.py): exit_criteria VAZIO
@@ -1517,12 +1546,14 @@ class Harness:
                             if isinstance(_ret, dict) else False
                         if _cont:
                             _msg = _ret.get("message") or _ret.get("reason") or "continue verificando antes de concluir."
+                            self._reject(action, f"erro: task_complete REJEITADO — {_msg}", "")
                             self.messages.append({"role": "user", "content": _msg})
                             return None
                 if (not t.exit_criteria and not self._verify_nudged
                         and any(s.effect for s in t.steps) and not _verified_since_last_effect(t.steps)):
                     self._verify_nudged = True
                     self._emit("complete_rejected", missing=["sem verificação após o último efeito"])
+                    self._reject(action, "erro: task_complete REJEITADO — sem verificação após o último efeito.", "")
                     self.messages.append({"role": "user", "content":
                         "Antes de concluir: você fez mudança(s) mas não vi um comando de VERIFICAÇÃO rodar "
                         "depois delas. Verifique o resultado antes de concluir — rode um comando que comprove "
@@ -1530,6 +1561,7 @@ class Harness:
                     return None
                 t.state = TaskState.COMPLETE
                 t.result = _summary or "(sem resumo)"
+                self._accept_terminal(action, t.result, t)
                 self._extract_on_complete(t)
                 self._emit("complete", summary=t.result)
                 return t

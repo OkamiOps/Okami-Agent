@@ -75,6 +75,8 @@ class _LegacyTransport:
         kwargs = {}
         if request.raw_messages is not None and _accepts_keyword(fn, "raw_messages"):
             kwargs["raw_messages"] = request.raw_messages
+        if request.request is not None and _accepts_keyword(fn, "request"):
+            kwargs["request"] = request.request
         return fn(provider_config, request.messages, target.model, overrides, **kwargs)
 
     def stream(self, target, provider_config, request):
@@ -87,7 +89,9 @@ def _accepts_keyword(fn, name: str) -> bool:
         params = inspect.signature(fn).parameters.values()
     except (TypeError, ValueError):
         return False
-    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+    return any((p.name == name and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                               inspect.Parameter.KEYWORD_ONLY))
+               or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def default_transport_registry() -> TransportRegistry:

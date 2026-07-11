@@ -44,12 +44,26 @@ def _call_timeout(overrides: dict | None) -> float:
     return timeout
 
 
+def _request_timeout(request, fallback: float) -> float:
+    if request is None:
+        return fallback
+    request.check()
+    remaining = request.remaining()
+    if remaining is None:
+        return fallback
+    if remaining <= 0:
+        request.check()
+    return min(fallback, remaining)
+
+
 def _accepts_keyword(fn, name: str) -> bool:
     try:
         params = inspect.signature(fn).parameters.values()
     except (TypeError, ValueError):
         return False
-    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+    return any((p.name == name and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                               inspect.Parameter.KEYWORD_ONLY))
+               or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def _split_model(pc: ProviderConfig, model: str | None) -> str:
@@ -95,7 +109,7 @@ _CLAUDE_THINK = {"minimal": "", "low": "", "medium": "think", "high": "think har
 
 
 def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
-                        overrides: dict | None = None) -> Completion:
+                        overrides: dict | None = None, *, request=None) -> Completion:
     binary = claude_binary()
     if not binary:
         raise RuntimeError("CLI 'claude' não encontrado no PATH. Instale/logue o Claude Code.")
@@ -122,11 +136,13 @@ def claude_cli_complete(pc: ProviderConfig, messages: list[dict], model: str | N
     # NÃO fabricamos flag nenhuma: as duas testadas aqui aparecem literalmente no --help do binário.
     session_id = (overrides or {}).get("session_id")
     if session_id:
-        r = _run_claude_cli(cmd + ["--resume", session_id], prompt, timeout=timeout)
+        r = _run_claude_cli(cmd + ["--resume", session_id], prompt,
+                            timeout=_request_timeout(request, timeout))
         if r.returncode != 0:                          # sessão ainda não existe → cria com este id
-            r = _run_claude_cli(cmd + ["--session-id", session_id], prompt, timeout=timeout)
+            r = _run_claude_cli(cmd + ["--session-id", session_id], prompt,
+                                timeout=_request_timeout(request, timeout))
     else:
-        r = _run_claude_cli(cmd, prompt, timeout=timeout)
+        r = _run_claude_cli(cmd, prompt, timeout=_request_timeout(request, timeout))
     if r.returncode != 0:
         raise RuntimeError(f"claude -p falhou (exit {r.returncode}): {r.stderr.strip()[:400]}")
     out = r.stdout.strip()
@@ -303,7 +319,8 @@ def _codex_input_items(src: list[dict], *, replay_reasoning: bool = True) -> lis
 
 
 def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | None,
-                         overrides: dict | None = None, raw_messages: list[dict] | None = None) -> str:
+                         overrides: dict | None = None, raw_messages: list[dict] | None = None,
+                         *, request=None) -> str:
     """Assinatura ChatGPT via Responses API do Codex, com token OAuth NATIVO do Okami.
 
     Login: `okami login codex` (device flow nativo, sem precisar do codex CLI).
@@ -354,7 +371,7 @@ def codex_oauth_complete(pc: ProviderConfig, messages: list[dict], model: str | 
             req.add_header(k, v)
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "text/event-stream")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=_request_timeout(request, timeout)) as resp:  # noqa: S310
             return _codex_sse(resp)
 
     try:

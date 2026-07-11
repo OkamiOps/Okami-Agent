@@ -91,3 +91,30 @@ def test_kwargs_per_call_override_still_wins_over_tier_default():
     pc = ProviderConfig(name="p", model="openai/x", tier="strong")
     kw = prov._kwargs(pc, [{"role": "user", "content": "oi"}], stream=False, model=None, timeout=5.0)
     assert kw["timeout"] == 5.0
+
+
+def test_internal_claude_retry_uses_remaining_request_deadline(monkeypatch):
+    from types import SimpleNamespace
+    from okami.llm.request import RequestContext, RequestTimeouts
+
+    now = [100.0]
+    ctx = RequestContext(RequestTimeouts(total_s=10), clock=lambda: now[0])
+    seen = []
+    monkeypatch.setattr(prov.transports, "claude_binary", lambda: "claude")
+
+    def fake_run(cmd, prompt, *, timeout):
+        seen.append(timeout)
+        if len(seen) == 1:
+            now[0] += 3
+            return SimpleNamespace(returncode=1, stdout="", stderr="missing session")
+        return SimpleNamespace(returncode=0, stdout='{"result":"ok"}', stderr="")
+
+    monkeypatch.setattr(prov.transports, "_run_claude_cli", fake_run)
+    pc = ProviderConfig(name="claude", model="claude/test", transport="claude_cli")
+    result = prov.transports.claude_cli_complete(
+        pc, [{"role": "user", "content": "oi"}], None,
+        {"session_id": "s", "timeout": 9}, request=ctx,
+    )
+
+    assert result.text == "ok"
+    assert seen == [9.0, 7.0]

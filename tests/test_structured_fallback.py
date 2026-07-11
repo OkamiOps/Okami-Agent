@@ -63,3 +63,27 @@ def test_completion_reports_actual_fallback_provider_and_model(monkeypatch):
     result = providers.complete_messages_ex(fallback_cfg(["backup"]), [], _sleep=lambda seconds: None)
     assert (result.provider, result.model) == ("backup", "backup/default")
 
+
+def test_fallback_attempts_two_models_from_same_provider(monkeypatch):
+    cfg = build_config({
+        "default_provider": "primary",
+        "providers": {
+            "primary": {"model": "primary/default", "max_retries": 1,
+                         "fallback": [{"provider": "backup", "model": "backup/first"},
+                                       {"provider": "backup", "model": "backup/second"}]},
+            "backup": {"model": "backup/default", "max_retries": 1},
+        },
+    })
+    seen = []
+
+    def fake_one(pc, messages, model, response_schema, overrides):
+        seen.append(model)
+        if model == "backup/second":
+            return Completion(text="ok", provider=pc.name, model=model)
+        raise RuntimeError("provider overloaded")
+
+    monkeypatch.setattr(providers, "_complete_one", fake_one)
+    result = providers.complete_messages_ex(cfg, [], _sleep=lambda seconds: None)
+
+    assert result.model == "backup/second"
+    assert seen == ["primary/default", "backup/first", "backup/second"]

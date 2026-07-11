@@ -109,6 +109,43 @@ def test_request_run_returns_promptly_after_cancellation():
     assert done.wait(0.2)
 
 
+def test_cancel_callback_that_already_won_prevents_function_invocation():
+    started = []
+    ctx = RequestContext(RequestTimeouts(total_s=10))
+
+    with pytest.raises(RequestCancelled):
+        ctx.run(lambda: started.append(True), cancel=lambda: True)
+
+    assert started == []
+
+
+def test_positional_only_request_is_not_passed_as_keyword():
+    def legacy(request, /):
+        return request
+
+    with pytest.raises(TypeError):
+        providers._invoke_with_optional_request(
+            legacy, request=RequestContext(RequestTimeouts())
+        )
+
+
+def test_mock_side_effect_legacy_callable_does_not_receive_request_keyword():
+    from unittest.mock import Mock
+
+    calls = []
+
+    def legacy():
+        calls.append(True)
+        return "ok"
+
+    result = providers._invoke_with_optional_request(
+        Mock(side_effect=legacy), request=RequestContext(RequestTimeouts())
+    )
+
+    assert result == "ok"
+    assert calls == [True]
+
+
 def test_watchdog_timeout_does_not_enter_provider_fallback():
     now = [100.0]
     calls = []

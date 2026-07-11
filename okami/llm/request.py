@@ -224,6 +224,9 @@ class RequestContext:
     def run(self, fn: Callable[[], object], *, cancel: Callable[[], bool] | None = None):
         """Run a callable while polling request state and publishing one terminal outcome."""
         self.check()
+        if cancel is not None and cancel():
+            self.cancel("user")
+            self.check()
         with self._state_lock:
             exception = self._terminal_exception_locked()
             if exception is not None:
@@ -239,6 +242,10 @@ class RequestContext:
                 if self._terminal is not None:
                     done.set()
                     return
+            if cancel is not None and cancel():
+                self.cancel("user")
+                done.set()
+                return
             try:
                 outcome = (True, fn())
             except BaseException as exc:  # noqa: BLE001 — preserve the callable's exact failure

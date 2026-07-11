@@ -1,7 +1,7 @@
 """Crash-resume: checkpoint estruturado sobrevive a crash mid-tool-loop; resume semeia daqui (passos
 feitos preservados) em vez de reconstruir [system,user]. Tail órfão (tool_call sem resultado) reparado."""
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 from okami.core.harness.resume import write_checkpoint, load_checkpoint, clear_checkpoint
 
@@ -32,8 +32,9 @@ def test_repara_tail_orfao():
         write_checkpoint(ws, msgs, ts=1000.0)
         out = load_checkpoint(ws, max_age_s=3600, now=1100.0)
         assert out is not None
-        # o par órfão foi consertado: existe um role=tool respondendo c1 (senão o rail nativo leva 400)
-        assert any(m.get("role") == "tool" and m.get("tool_call_id") == "c1" for m in out)
+        # o par órfão vira resultado interrompido, portanto o resume nunca reexecuta c1.
+        result = next(m for m in out if m.get("role") == "tool" and m.get("tool_call_id") == "c1")
+        assert "interrupted" in result["content"].lower()
     finally:
         shutil.rmtree(ws)
 

@@ -114,8 +114,19 @@ def compact(messages: list[dict], memory: Memory | None, *,
     if len(messages) <= keep_tail + 2:
         return messages, 0
     system = messages[0]
-    head = messages[1:-keep_tail]
-    tail = messages[-keep_tail:]
+    tail_start = len(messages) - keep_tail
+    # A native group is indivisible: if the tail starts at a tool result, pull
+    # its assistant declaration (and preceding results) into the retained tail.
+    if tail_start > 1 and messages[tail_start].get("role") == "tool":
+        call_id = messages[tail_start].get("tool_call_id")
+        for i in range(tail_start - 1, 0, -1):
+            if messages[i].get("role") == "assistant" and any(
+                    (tc.get("id") or tc.get("function", {}).get("id")) == call_id
+                    for tc in (messages[i].get("tool_calls") or ())):
+                tail_start = i
+                break
+    head = messages[1:tail_start]
+    tail = messages[tail_start:]
 
     distilled = 0
     if memory is not None:

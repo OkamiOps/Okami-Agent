@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from okami.memory.compaction import _repair_tool_pairs   # reusa o reparo de par tool_call/role=tool órfão
+from okami.core.harness.native_history import repair_native_history
 
 _CKPT_NAME = "turn_ckpt.json"
 
@@ -48,7 +48,7 @@ def load_checkpoint(workspace, *, max_age_s: float, now: float) -> list[dict] | 
         msgs = data.get("messages")
         if not isinstance(msgs, list) or len(msgs) < 2:
             return None
-        repaired = _repair_tool_pairs(msgs)             # tail órfão (crash no meio da tool) → consertado
+        repaired = repair_native_history(msgs, interrupted=True)
         return repaired if repaired and len(repaired) >= 2 else None
     except Exception:  # noqa: BLE001 — qualquer problema → comportamento antigo
         return None

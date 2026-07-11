@@ -211,3 +211,39 @@ def test_streaming_off_when_native_and_caller_confirms_tools():
     from okami.llm.streaming import streaming_enabled
     # has_tools=True é só um reforço explícito do caso de sempre (nativo + tools → off).
     assert streaming_enabled(_cfg_native(tier="weak", native_tools=True), has_tools=True) is False
+
+
+def test_native_stream_accumulates_structured_tool_call_without_visible_args():
+    from okami.llm.streaming import StreamEvent, ToolCallDelta, streaming_generate
+
+    visible = []
+    comp = streaming_generate(
+        None, [], on_token=visible.append,
+        _events=iter([
+            StreamEvent(tool_call=ToolCallDelta(0, id="c1", name="read_file", arguments='{"path":')),
+            StreamEvent(tool_call=ToolCallDelta(0, arguments='"a.txt"}')),
+            StreamEvent(finish_reason="tool_calls"),
+        ]),
+    )
+
+    assert visible == []
+    assert comp.finish_reason == "tool_calls"
+    assert comp.tool_calls == [{"id": "c1", "name": "read_file", "arguments": '{"path":"a.txt"}'}]
+
+
+def test_native_stream_drops_incomplete_arguments_without_fallback():
+    from okami.llm.streaming import StreamEvent, ToolCallDelta, streaming_generate
+
+    fallback = []
+    comp = streaming_generate(
+        None, [],
+        _events=iter([
+            StreamEvent(tool_call=ToolCallDelta(0, id="c1", name="write_file", arguments='{"path":"a"')),
+            StreamEvent(finish_reason="length"),
+        ]),
+        _fallback=lambda: fallback.append(True),
+    )
+
+    assert comp.tool_calls == []
+    assert comp.finish_reason == "length"
+    assert fallback == []

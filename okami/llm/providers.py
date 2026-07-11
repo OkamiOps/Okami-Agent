@@ -474,13 +474,22 @@ def _request_cancel_probe(request: RequestContext | None, cancel=None):
     return probe
 
 
+def _target_key(target: RuntimeTarget) -> tuple[str, str, str | None, str, str]:
+    return (target.provider, target.model, target.base_url, target.api_mode, target.transport)
+
+
 def _accepts_keyword(fn, name: str) -> bool:
     """Return true only when signature inspection proves ``fn`` accepts ``name``."""
+    side_effect = getattr(fn, "side_effect", None)
+    if callable(side_effect):
+        fn = side_effect
     try:
         params = inspect.signature(fn).parameters.values()
     except (TypeError, ValueError):
         return False
-    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+    return any((p.name == name and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                               inspect.Parameter.KEYWORD_ONLY))
+               or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 def _invoke_with_optional_request(fn, *args, request: RequestContext | None = None, **kwargs):
@@ -805,14 +814,14 @@ def complete_messages_ex(
                     break
     # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
     _request_check(request, cancel)
-    tried = (_tried or set()) | {pc.name}
+    tried = (_tried or set()) | {_target_key(target)}
     if do_fallback:
         try:
             current_index = next(i for i, item in enumerate(fallback_chain) if item == target)
         except StopIteration:
             current_index = -1
         for fallback_target in fallback_chain[current_index + 1:]:
-            if fallback_target.provider in tried:
+            if _target_key(fallback_target) in tried:
                 continue
             _request_check(request, cancel)
             try:

@@ -46,3 +46,13 @@ def test_compact_repairs_orphan_in_tail():
                 declared.add(tc["id"])
         if m.get("role") == "tool":
             assert m["tool_call_id"] in declared, "tool órfã sobreviveu à compactação"
+
+
+def test_compaction_keeps_complete_native_group_intact():
+    group = [
+        _call("c1"),
+        {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+    ]
+    out, _ = compact([{"role": "system", "content": "s"}, {"role": "user", "content": "old"}, *group],
+                     None, keep_tail=1)
+    assert out[-2:] == group
