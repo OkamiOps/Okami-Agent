@@ -6,6 +6,77 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [Não lançado]
 
+## [0.15-beta] — 2026-07-11
+
+O `v0.15-beta` fecha a maior onda desde a abertura do beta: **39 commits** que endurecem o harness,
+separam provider/modelo de transport, tornam tool calls nativas recuperáveis e colocam a troca de modelo
+do Telegram no mesmo caminho de resolução usado pelo restante do produto. A comparação usou o snapshot
+recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitetura inteira.
+
+### 🧠 Harness e protocolo nativo
+
+- **Streaming estruturado de tool calls**: deltas de texto, reasoning e chamadas nativas são
+  reconstruídos sem converter a ação para JSON-em-texto.
+- **Histórico atômico**: `assistant.tool_calls` e resultados `role=tool` permanecem juntos em histórico,
+  compaction e resume. Calls órfãs após crash viram `INTERRUPTED`; terminais rejeitados recebem um único
+  `REJECTED`; calls posteriores a um terminal aceito são fechadas como não executadas.
+- **Cancelamento por request**: deadline total, TTFB, idle, aborters cooperativos, backoff interrompível e
+  gates antes/depois da geração impedem trabalho extra depois de `/stop` ou timeout.
+- **Freios contra loops ruins**: anti-hammer para tool repetida, detector de floundering, circuit breaker
+  com erro normalizado, teto do working context e `/steer` drenado no topo do loop.
+- **Crash-resume estruturado** preserva passos já feitos em vez de reconstruir uma sessão vazia.
+
+### 🔌 Providers, modelos e autenticação
+
+- `RuntimeTarget`, `TargetResolver` e `TransportRegistry` criam uma fronteira única e imutável para
+  provider, modelo, endpoint, API mode, capabilities, billing e referência de credencial.
+- LiteLLM passa a viver atrás de `LiteLLMCompatTransport`, sem mutação global durante import. Continua
+  suportado, mas deixa de ser o router arquitetural obrigatório.
+- Fallback estruturado distingue modelos diferentes sob o mesmo provider e registra no `Completion`
+  quem realmente serviu a resposta.
+- Menu de autenticação porta o fluxo OAuth de seis providers e lista tanto OAuth quanto token-plan, com
+  descoberta dos modelos reais disponíveis.
+- Configuração customizada registra o transport explicitamente e nunca exibe o valor do segredo.
+
+### 💬 Telegram e gateway
+
+- `/model` ganha picker inline seguro; callbacks curtos são validados contra catálogo associado ao chat
+  e reutilizam o resolver/persistência da sessão.
+- `/providers` entra no menu e mostra estado seguro dos providers configurados.
+- `/thoughts on|off` separa pensamento do modelo da exibição no chat.
+- Heartbeat edita uma única mensagem em vez de gerar spam.
+- Imagens e vídeos gerados passam a emitir `MEDIA:` e chegam ao Telegram no mesmo turno.
+
+### 🧰 Skills, plugins e ergonomia
+
+- Mais de 30 skills builtin adicionadas a partir do Hermes e skills.sh, incluindo frontend, design,
+  debugging de API, Google Workspace, Docker, OCR, diagramas, vídeo e automação.
+- Plugins de Git context, Google Meet e Teams entram no catálogo builtin.
+- Executor, busca remota de skills, ferramentas native-first e ergonomia de leitura/escrita foram
+  trazidos para o fluxo normal do agente.
+
+### 🛡️ Segurança e confiabilidade
+
+- Leitura e enumeração de credenciais ficam bloqueadas inclusive em modo yolo; `find_files`, `list_dir`
+  e `search_files` não denunciam nomes sensíveis.
+- Scanner `secret_plus_network` foi recalibrado para não acusar falsos positivos comuns de design/web.
+- Modelo ou ferramenta pedidos nominalmente não podem ser trocados em silêncio.
+- Uso de contexto passa a considerar cache/provider corretamente; reasoning não vaza na resposta e a
+  memória fica mais enxuta.
+
+### ✅ Qualidade e compatibilidade
+
+- **4.075 testes passando, 13 skipped** na validação controlada.
+- **75 achados Ruff → zero**; `uv run ruff check okami tests` passa no repositório inteiro.
+- YAML legado, aliases, fallbacks por nome e transports CLI/OAuth continuam válidos.
+- Sem migração obrigatória de configuração. LiteLLM permanece disponível como compatibilidade.
+
+### 🚧 Fora desta release
+
+- remoção total de LiteLLM antes de existirem adapters nativos para todos os providers;
+- catálogo/picker paginado para centenas de modelos;
+- paridade de UX com Discord e reescrita assíncrona completa dos demais gateways.
+
 ## [0.14.3-beta] — 2026-07-08
 
 ### 🐛 Correção
@@ -862,6 +933,7 @@ Primeiro **alpha público**. 🐺
 - Telegram deny-by-default; aprovação fail-closed (`off` ≠ `yolo`); SOUL nunca auto-evolui.
 - Sandbox por perfil (local/docker), SSRF guard em URLs controladas por modelo/usuário, audit log redigido.
 
+[0.15-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.15-beta
 [0.14.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.14.0-beta
 [0.13.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.13.0-beta
 [0.12.0-beta]: https://github.com/OkamiOps/Okami-Agent/releases/tag/v0.12.0-beta

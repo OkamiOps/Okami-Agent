@@ -1,136 +1,251 @@
-# Okami Agent — `v0.14.0-beta` "Instalação Limpa" 🐺
+# 🐺 Okami Agent `v0.15-beta` — Native Tools, Provider Control & Telegram
 
-**1 commit · suíte 3.590 → 3.613 testes** · lançada **2026-07-08**.
+> A reliability release for the part of an agent that matters most: **finishing the job without losing
+> tool calls, ignoring cancellation, or silently switching the model you asked for.**
 
-> ⚠️ **Beta.** A superfície de comandos e config ainda pode mudar até a GA. Recomendado para uso real
-> (inclusive em VPS 24/7) — mas rode `okami policy check --strict` antes de expor publicamente. Feedback
-> é muito bem-vindo. Ver o [CHANGELOG](CHANGELOG.md) completo.
+| | |
+|---|---|
+| **Release** | `v0.15-beta` |
+| **Published** | 2026-07-11 |
+| **Compared with** | `v0.14.3-beta` |
+| **Scope** | 39 commits · 413 files |
+| **Verification** | 4,075 passed · 13 skipped · Ruff clean |
+| **Compatibility** | Existing YAML, aliases and CLI/OAuth transports remain valid |
 
-🌐 Site: **https://okamiagent.com** · 📚 Docs: **https://okamiagent.com/docs**
+🌐 [Website](https://okamiagent.com) · 📚 [Documentation](https://okamiagent.com/docs) ·
+📋 [Full changelog](https://github.com/OkamiOps/Okami-Agent/blob/main/CHANGELOG.md)
 
 ---
 
-## A história desta release
+## Why this release exists
 
-As últimas releases fecharam gaps de capacidade — imagem, hooks, browser. Esta fecha uma lacuna
-diferente, mais operacional: **instalações existentes não tinham um caminho de atualização claro**. O
-único jeito de subir de versão era rerodar o instalador do zero, um processo não documentado e que não
-confirmava o que de fato mudou. Isso deixava instalações indo ficando presas em versões velhas com o
-tempo.
+Okami already had native tool calling, multiple providers and a Telegram gateway. The weak point was the
+space **between** those features:
 
-Esta release ataca essa lacuna de ponta a ponta: um comando `okami upgrade` dedicado que sabe identificar
-o tipo de instalação e aplicar o caminho de atualização certo, instaladores que verificam o próprio
-resultado, e um Docker que finalmente persiste o estado do agente entre reinícios do container. Ao lado
-disso, o menu de configuração ganha um jeito interativo de trocar de provider/modelo, e o terminal mostra
-mais informação em tempo real (timing por tool-call, tokens/custo ao vivo).
+- a streamed native tool call could not be reconstructed as a first-class action;
+- a crash could leave an assistant call without its tool result;
+- retry and fallback could outlive the request that created them;
+- provider, model and transport decisions were spread across multiple layers;
+- Telegram exposed only a fraction of the provider/model controls available in the CLI.
+
+`v0.15-beta` closes those gaps as one vertical path. A model can stream structured calls, the harness can
+execute and checkpoint them atomically, cancellation can stop the recovery chain, and Telegram can select
+the same runtime target as the CLI — without trusting arbitrary callback payloads.
 
 ## ✨ Highlights
 
-- **`okami upgrade`** (comando novo) — detecta o tipo de instalação (managed/dev/Docker/ausente) e aplica
-  o caminho certo: `git pull --ff-only` + `uv tool install --force`, reportando versão antiga → nova.
-  Flags `--check` (só verifica) e `--yes` (sem confirmação).
-- **Instaladores endurecidos** — `install.sh`/`install.ps1` verificam o binário recém-instalado e
-  reportam versão antiga → nova (antes, atualizavam em silêncio); `install.ps1` trata long-paths do
-  Windows.
-- **Docker com estado persistente** — `docker-compose.yml` guarda `OKAMI_HOME` (skills, agentes, sessões,
-  `.env`, credenciais, cofre) num volume nomeado — antes, tudo isso ia para o home efêmero do container e
-  se perdia a cada recriação. `Dockerfile` reconstruído multi-stage, `uv sync --frozen`, não-root,
-  `HEALTHCHECK`.
-- **`okami config` ganha picker de provider/modelo** — troca interativa direto no menu (aliases
-  `sonnet`/`opus`/`fast`/`smart`), mais uma visão de providers configurados; persiste em
-  `okami.local.yaml`.
-- **Terminal mais informativo** — tool cards mostram tempo de execução; status bar (REPL e TUI) mostra
-  tokens/custo ao vivo durante a sessão; toolbar do REPL mostra a tool em execução em vez de um
-  "pensando" genérico.
+| Area | What changed | What it means in practice |
+|---|---|---|
+| 🧠 **Native tool protocol** | Structured deltas, atomic assistant/tool history and interrupted-call repair | Fewer broken multi-turn sessions and no silent re-execution after a crash |
+| ⏱️ **Cancellation** | Total, TTFB and idle deadlines with cooperative abort and interruptible retry | `/stop` and timeouts stop the recovery chain instead of merely changing the UI |
+| 🔌 **Provider runtime** | Immutable targets, one resolver and a transport registry | Provider/model/endpoint decisions are inspectable and consistent |
+| 💬 **Telegram** | Secure model picker, `/providers`, persistent selection and safer callbacks | Switching models on mobile no longer requires memorizing IDs |
+| 🔐 **Authentication** | Six-provider OAuth/token-plan onboarding and real model discovery | Fewer manual `.env` edits and fewer fake “provider connected” states |
+| 🧰 **Skills** | 30+ built-in skills plus Git context, Meet and Teams plugins | More useful workflows ship with the agent instead of being copied by hand |
+| 🛡️ **Hardening** | Anti-hammer/floundering guards, credential-safe enumeration and clean Ruff gate | Less looping, less accidental secret exposure and a cleaner baseline |
 
-## 📦 Instalação & Upgrade
+---
 
-- `okami upgrade`: detecta 4 cenários — instalação **managed** (checkout git gerenciado pelo instalador),
-  **clone de desenvolvimento**, **Docker**, ou **ausente** — e só age no caminho aplicável. Para managed:
-  `git pull --ff-only` (nunca reescreve histórico local) seguido de `uv tool install --force`, com
-  relatório final de versão antiga → nova. `--check` reporta se há atualização disponível sem aplicar
-  nada; `--yes` pula a confirmação interativa (uso em automação).
-- `install.sh`/`install.ps1`: depois de instalar, o script agora **verifica o binário final** e imprime a
-  transição de versão — antes o resultado era mudo, sem confirmação de que a atualização realmente
-  aconteceu.
-- `install.ps1`: trata **long-paths do Windows** — checa a chave de registro relevante e habilita
-  `core.longpaths` no git quando necessário, evitando falhas silenciosas em instalações com caminho
-  profundo.
+## 🧠 Native tool calls are now a complete protocol
 
-## 🐳 Docker
+Streaming is no longer limited to text. Okami now accumulates structured tool-call deltas — ID, function
+name and JSON arguments — and returns them to the harness as native calls.
 
-- `deploy/docker-compose.yml`: `OKAMI_HOME` passa a viver num **volume nomeado** (`okami-data`) —
-  skills, agentes, sessões, `.env`, credenciais e o cofre de segredo cifrado agora sobrevivem a
-  recriações do container. Antes, esse estado ia para o home efêmero do container e desaparecia a cada
-  `docker compose up` novo.
-- `deploy/Dockerfile`: reescrito **multi-stage**, com `uv sync --frozen` (build reprodutível a partir do
-  lockfile), usuário não-root, `HEALTHCHECK` configurado e imagens base pinadas.
+The message history follows the provider protocol instead of approximating it:
 
-## ⚙️ Config — troca de provider/modelo pelo menu
-
-- `okami config` ganha uma opção de **picker interativo de provider/modelo**, reaproveitando o mesmo
-  fluxo do comando `okami model` (aliases `sonnet`/`opus`/`fast`/`smart`), e uma tela de **providers
-  configurados**. Antes o menu não oferecia caminho para trocar de provider ou modelo — só edição manual
-  de config. A escolha persiste em `okami.local.yaml`.
-
-## 🖥️ Terminal — mais visibilidade em tempo real
-
-- Cartões de tool-call finalizados mostram **quanto tempo a chamada levou**.
-- A barra de status — no REPL de linha e no TUI de tela cheia — mostra **tokens e custo ao vivo** durante
-  a sessão, não só no resumo final.
-- A toolbar do REPL mostra qual **tool está em execução** no momento, em vez de uma linha genérica de
-  "pensando".
-
-## ⚠️ Beta — caveats e trabalho em andamento
-
-- Comandos e chaves de config ainda podem mudar até a GA (sem promessa de estabilidade de superfície).
-- Recomendado pra uso real (VPS 24/7 inclusive), mas rode `okami policy check --strict` antes de expor
-  publicamente e acompanhe o [CHANGELOG](CHANGELOG.md) a cada atualização.
-- **Em andamento, fora desta release** — correções de conexão com provider seguem em paralelo: crash de
-  streaming do Claude e resolução do cofre de credenciais do Codex. Previstas para uma release de
-  acompanhamento.
-
-## ✅ Release verification
-
-- **3.613 testes** passando (`uv run pytest -q`), subindo de 3.590.
-- Reprodução local:
-  ```bash
-  uv sync --frozen
-  uv run pytest -q
-  uv run ruff check okami tests
-  uv run bandit -c pyproject.toml -r okami -q
-  uv run okami policy check --strict
-  ```
-
-## 🚀 Instalação / upgrade
-
-```bash
-# instalação nova (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.sh | bash
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.ps1 | iex
-
-# upgrade de instalação existente
-okami upgrade            # detecta o tipo de instalação e atualiza no lugar
-okami upgrade --check    # só verifica se há atualização, sem aplicar
-
-okami setup     # configura em 2-3 cliques
-okami doctor    # confirma que a versão instalada bate com o pyproject (sem version-drift)
-okami chat      # conversa no terminal
+```text
+assistant(tool_calls=[call_1, call_2])
+├─ tool(call_1) → result
+└─ tool(call_2) → result
 ```
 
-Nenhuma dependência Python nova nesta release — a mudança é toda em instalação/Docker/CLI. `okami.yaml`/
-`okami.local.yaml` existentes continuam válidos.
+That group stays atomic during:
 
-## 📄 License
+- session history persistence;
+- context compaction;
+- checkpoint/resume after a crash;
+- terminal acceptance or rejection.
 
-**MIT** ([LICENSE](https://github.com/OkamiOps/Okami-Agent/blob/main/LICENSE)) © 2026 OkamiOps — use it,
-fork it, ship it commercially, no strings attached and no warranty.
+If a checkpoint contains a call without a result, resume records it as `INTERRUPTED`; it does **not**
+quietly execute the action again. If a terminal action is rejected by verification, it receives one
+`REJECTED` result. If a terminal is accepted before later calls in the same batch, those calls are closed
+as `not executed` instead of being left orphaned.
 
-## 🔗 Links
+## ⏱️ Cancellation and timeouts now belong to the request
 
-- 🌐 Landing: https://okamiagent.com
-- 📚 Documentação: https://okamiagent.com/docs
-- 💻 Agente (este repo): https://github.com/OkamiOps/Okami-Agent
-- 🎨 Landing page (fonte): https://github.com/OkamiOps/Okami-Agent-LP
-- 📋 Changelog completo: [CHANGELOG.md](CHANGELOG.md)
+Each generation owns a `RequestContext` with:
+
+- total request deadline;
+- time-to-first-byte deadline;
+- stream idle deadline;
+- cancellation reason and terminal state;
+- cooperative abort handles when the transport exposes one.
+
+Retries use the **remaining** budget, not a fresh full timeout. Backoff is interruptible. The harness
+checks cancellation before worker admission, after generation and before compaction, escalation or
+fallback. Once cancellation wins, no “helpful” recovery branch gets to restart the work behind the
+user's back.
+
+> A transport without a physical abort handle cannot unsend a remote HTTP request. Okami stops waiting
+> and prevents subsequent work, but does not pretend it killed something the provider does not allow it
+> to kill.
+
+## 🔌 Provider/model routing has one source of truth
+
+The new runtime boundary separates three concepts that were previously tangled:
+
+| Concept | Responsibility |
+|---|---|
+| `RuntimeTarget` | Immutable effective provider, model, endpoint, API mode, capabilities and billing route |
+| `TargetResolver` | Converts aliases, overrides and fallbacks into a concrete target |
+| `TransportRegistry` | Executes the adapter selected by that target |
+
+LiteLLM still works and remains important for compatibility. The difference is architectural:
+`LiteLLMCompatTransport` is now **one adapter**, not the place where the entire provider model lives.
+
+Other provider improvements in this release:
+
+- structured fallbacks distinguish different models under the same provider;
+- `Completion.provider/model` reports the target that actually served the answer;
+- unknown provider knobs are preserved without silently colliding with core configuration;
+- custom providers record their transport explicitly;
+- endpoints and credential references can be shown without printing secret values;
+- authentication menus cover OAuth and token-plan providers and discover real models.
+
+## 💬 Telegram catches up with the CLI
+
+Telegram now uses the same provider/model resolver and session persistence as the CLI.
+
+```text
+/providers     show configured providers without exposing credentials
+/model         open the inline model picker
+/model <id>    select an explicit provider/model
+/thoughts off  hide live reasoning while keeping model reasoning enabled
+```
+
+The inline picker uses short callbacks such as `okmodel:3`. The number is resolved against an in-memory
+catalog bound to that chat; Telegram cannot inject an arbitrary provider/model string through callback
+data. Invalid or stale indexes are ignored safely.
+
+Also included:
+
+- heartbeat edits one status message instead of spamming the conversation;
+- generated images/videos emit `MEDIA:` and are attached to the Telegram turn;
+- slash-command descriptions include the new provider flow;
+- custom provider setup confirms endpoint, transport and env reference without echoing the key.
+
+## 🧯 The harness is harder to trap in stupid loops
+
+Several production-shaped failure modes were closed alongside the protocol work:
+
+- **anti-hammer** stops repeated calls to the same tool with the same ineffective input;
+- **floundering detection** interrupts long sequences that make no measurable progress;
+- the circuit breaker compares normalized failures instead of raw strings that never matched;
+- working context has a practical ceiling even when the advertised model window is enormous;
+- `/steer` is drained at the top of the loop, before the next generation;
+- streamed reasoning is scrubbed from the user-facing answer;
+- verification rules no longer punish documentation-only writes as if they were executable code;
+- an explicitly requested model or tool cannot be silently substituted.
+
+## 🧰 30+ skills and new built-in integrations
+
+The release also ships a large skills wave from the Hermes comparison and skills.sh ecosystem:
+
+- frontend design and implementation references;
+- API debugging, Docker operations and codebase inspection;
+- Google Workspace, Apple Notes and Reminders;
+- OCR, PDF, diagrams, infographics and video workflows;
+- Git context, Google Meet and Teams plugins;
+- remote skills discovery and native-first tool guidance.
+
+These are versioned defaults. Local skills and agent identity files still override the built-ins.
+
+## 🛡️ Security and correctness
+
+- credential files cannot be read even in permissive/yolo execution;
+- file enumeration and search hide sensitive credential names;
+- secret-plus-network scanning was recalibrated to avoid common design/web false positives;
+- context usage includes provider cache data instead of under-reporting occupancy;
+- provider reasoning stays out of normal user-visible responses;
+- 75 existing Ruff findings were reduced to zero.
+
+---
+
+## 🚀 Install or upgrade
+
+### Existing installation
+
+```bash
+okami upgrade --check
+okami upgrade
+okami version
+okami doctor
+```
+
+### Fresh install — Linux, macOS or WSL
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.sh | bash
+```
+
+### Fresh install — Windows PowerShell
+
+```powershell
+irm https://raw.githubusercontent.com/OkamiOps/Okami-Agent/main/scripts/install.ps1 | iex
+```
+
+No mandatory configuration migration is required. Existing `okami.yaml`, provider aliases, fallback
+names and CLI/OAuth transports remain supported.
+
+## ✅ Verification
+
+- [x] `4,075 passed, 13 skipped`
+- [x] `uv run ruff check okami tests` — clean
+- [x] `git diff --check` — clean
+- [x] native tool-call rejection/terminal regressions covered
+- [x] Telegram callback catalog isolation covered
+- [x] provider target/transport/fallback matrices covered
+
+The controlled full-suite run used the repository's complete agent identity fixture. The developer
+checkout may contain gitignored `agents/okami/*` overrides; stale or incomplete local overrides can make
+identity-content tests fail without changing the packaged defaults.
+
+## 🚧 Deliberately not included
+
+This release does **not** claim complete Hermes parity:
+
+- LiteLLM is not yet optional for every provider;
+- very large model catalogs still need a paginated/hierarchical Telegram picker;
+- Discord did not receive the same UX pass;
+- Okami did not copy Hermes' full asynchronous gateway architecture.
+
+Those are explicit follow-ups, not hidden unfinished branches in this release.
+
+<details>
+<summary><strong>🇧🇷 Resumo em português</strong></summary>
+
+O `v0.15-beta` fecha o caminho inteiro de tool call nativa: o modelo pode enviar deltas estruturados, o
+harness remonta a chamada, grava assistant/tool como grupo atômico, retoma crash sem reexecutar ação e
+respeita cancelamento durante retry/fallback.
+
+Providers agora passam por target imutável, resolver único e registry de transports. LiteLLM continua
+funcionando como compatibilidade, mas não concentra mais a arquitetura. No Telegram entraram
+`/providers`, picker inline seguro de `/model`, seleção persistente, `/thoughts`, heartbeat sem spam e
+entrega de mídia gerada.
+
+A release também traz OAuth/token-plan de seis providers, mais de 30 skills builtin, bloqueio de
+enumeração de credenciais, freios anti-loop e Ruff zerado. Não há migração obrigatória do YAML.
+
+</details>
+
+---
+
+## Links
+
+- 🌐 [okamiagent.com](https://okamiagent.com)
+- 📚 [Documentation](https://okamiagent.com/docs)
+- 💻 [Okami Agent repository](https://github.com/OkamiOps/Okami-Agent)
+- 📋 [Complete changelog](https://github.com/OkamiOps/Okami-Agent/blob/main/CHANGELOG.md)
+- 🏗️ [Architecture](https://github.com/OkamiOps/Okami-Agent/blob/main/docs/ARCHITECTURE.md)
+
+**MIT License** © 2026 OkamiOps.

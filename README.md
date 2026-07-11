@@ -10,12 +10,12 @@ A **reliable** coding agent with **capability parity across LLMs**, **self-impro
 (skills · persona · memory) and **mandatory adherence to design systems** — in the terminal, on Telegram,
 or wherever you want.
 
-![version](https://img.shields.io/badge/version-0.14.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.15--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
-![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3613%20passing-3fb950)
+![litellm](https://img.shields.io/badge/compat-LiteLLM-00A98F)
+![tests](https://img.shields.io/badge/tests-4075%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,25 +24,23 @@ or wherever you want.
 
 ---
 
-> 🐺 **Public beta (`v0.14.0-beta`).** Okami is open for you to try. The command/config surface may
+> 🐺 **Public beta (`v0.15-beta`).** Okami is open for you to try. The command/config surface may
 > still change before GA — before exposing it publicly, run `okami policy check --strict` first.
 > Feedback is very welcome. See the [CHANGELOG](CHANGELOG.md).
 
-> ### ✨ New in `0.14.0-beta` — "Instalação Limpa"
-> Previous releases closed capability gaps (image, hooks, browser). This one closes an operational gap:
-> existing installs had no documented upgrade path. Suite: **3,590 → 3,613 tests**.
-> - **`okami upgrade`** (new command) — detects the install kind (managed git checkout / dev clone /
->   Docker / missing) and applies the right path: `git pull --ff-only` + `uv tool install --force`,
->   reporting old → new version. `--check` and `--yes` flags for automation.
-> - **Hardened installers** — `install.sh`/`install.ps1` now verify the freshly-installed binary and
->   report old → new version (previously updated silently); `install.ps1` handles Windows long-paths.
-> - **Docker with persistent state** — `docker-compose.yml` now keeps `OKAMI_HOME` (skills, agents,
->   sessions, `.env`, credentials, vault) in a named volume — previously state lived in the container's
->   ephemeral home and was lost on recreation; `Dockerfile` rebuilt multi-stage, non-root, `HEALTHCHECK`.
-> - **`okami config` gets a provider/model picker** — interactive switch right from the menu (aliases
->   `sonnet`/`opus`/`fast`/`smart`), plus a configured-providers view, persisting to `okami.local.yaml`.
-> - **More live terminal feedback** — finished tool cards show per-call timing; the status bar (REPL and
->   full-screen TUI) shows live tokens/cost during a session; the REPL toolbar shows the running tool.
+> ### ✨ New in `v0.15-beta` — Native Tools & Provider Control
+> This release hardens the execution core and removes provider routing from the center of the agent.
+> **39 commits · 4,075 tests passing**.
+> - **Native tool streaming with atomic history** — structured tool-call deltas, crash-safe resume and
+>   compaction that never separates a call from its result.
+> - **Request-scoped cancellation** — total/TTFB/idle deadlines, cooperative abort, interruptible retry
+>   and no recovery work after a terminal cancellation.
+> - **Provider runtime boundary** — immutable runtime targets, one resolver and a transport registry;
+>   LiteLLM remains available as a compatibility adapter instead of acting as the architecture.
+> - **Telegram model control** — secure inline model picker, `/providers`, persistent session selection,
+>   safer callbacks, live heartbeat and generated media delivered to the chat.
+> - **OAuth, skills and hardening** — six-provider login flow, 30+ built-in skills, credential-safe file
+>   enumeration, anti-hammer/floundering guards and a repository-wide clean Ruff gate.
 >
 > Full notes in the [CHANGELOG](CHANGELOG.md) and [RELEASE_NOTES](RELEASE_NOTES.md).
 
@@ -478,7 +476,7 @@ tool metadata and retention. The `--strict` mode (production overlay) is the **G
 | `okami gateway` / `okami serve` / `okami room` | Telegram bots / HTTP API / multi-agent room. |
 | `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway as an OS service (launchd/systemd, starts at boot) + live log. |
 | `okami ps` / `okami process log\|kill\|signal\|wait\|clean` | Supervise the agent's background processes from the terminal (real kill, signals, PTY). |
-| Telegram: `/` menu (setMyCommands) · reactions 👀/👍/👎 (`gateway.reactions`) · inline approval buttons ✅/❌ | Native Telegram UX. |
+| Telegram: `/providers` · `/model` picker · `/thoughts` · reactions 👀/👍/👎 · approval buttons ✅/❌ | Native Telegram provider/model UX. |
 | `okami cron add\|list\|remove\|run\|tick` | Scheduling. |
 | `okami hooks` / `okami mcp` | Event hooks / MCP servers. |
 | `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voice, STT, TTS, image. |

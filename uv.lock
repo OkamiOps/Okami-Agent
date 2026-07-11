@@ -1774,7 +1774,7 @@ wheels = [
 
 [[package]]
 name = "okami-agent"
-version = "0.14.4b0"
+version = "0.15b0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

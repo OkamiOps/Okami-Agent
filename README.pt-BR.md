@@ -10,12 +10,12 @@ Agente de codificação **confiável**, com **paridade de capacidade entre LLMs*
 (skills · persona · memória) e **aderência obrigatória a design systems** — no terminal, no Telegram,
 ou onde você quiser.
 
-![version](https://img.shields.io/badge/version-0.14.0--beta-ff7527)
+![version](https://img.shields.io/badge/version-0.15--beta-ff7527)
 ![license](https://img.shields.io/badge/license-MIT-3fb950)
 ![python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)
 ![uv](https://img.shields.io/badge/managed%20by-uv-DE5FE9)
-![litellm](https://img.shields.io/badge/router-LiteLLM-00A98F)
-![tests](https://img.shields.io/badge/tests-3613%20passing-3fb950)
+![litellm](https://img.shields.io/badge/compat-LiteLLM-00A98F)
+![tests](https://img.shields.io/badge/tests-4075%20passing-3fb950)
 ![status](https://img.shields.io/badge/status-public%20beta-orange)
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentação](https://okamiagent.com/docs)** · **[🎨 Landing (fonte)](https://github.com/OkamiOps/Okami-Agent-LP)**
@@ -24,31 +24,24 @@ ou onde você quiser.
 
 ---
 
-> 🐺 **Beta público (`v0.14.0-beta`).** O Okami está aberto pra você experimentar. A superfície de
+> 🐺 **Beta público (`v0.15-beta`).** O Okami está aberto pra você experimentar. A superfície de
 > comandos/config ainda pode mudar até a GA — para expor publicamente, rode `okami policy check
 > --strict` antes. Feedback é muito bem-vindo. Veja o [CHANGELOG](CHANGELOG.md) e as
 > [RELEASE_NOTES](RELEASE_NOTES.md).
 
-> ### ✨ Novo no `0.14.0-beta` — "Instalação Limpa"
-> As últimas releases fecharam gaps de capacidade (imagem, hooks, browser). Esta fecha uma lacuna
-> operacional: instalações existentes não tinham um caminho de atualização documentado. Suíte:
-> **3.590 → 3.613 testes**.
-> - **`okami upgrade`** (comando novo) — detecta o tipo de instalação (managed/dev-clone/Docker/ausente)
->   e aplica o caminho certo: `git pull --ff-only` + `uv tool install --force`, reportando versão
->   antiga → nova. Flags `--check` e `--yes` para automação.
-> - **Instaladores endurecidos** — `install.sh`/`install.ps1` verificam o binário recém-instalado e
->   reportam versão antiga → nova (antes, atualizavam em silêncio); `install.ps1` trata long-paths do
->   Windows.
-> - **Docker com estado persistente** — `docker-compose.yml` guarda `OKAMI_HOME` (skills, agentes,
->   sessões, `.env`, credenciais, cofre) num volume nomeado — antes o estado ia pro home efêmero do
->   container e se perdia a cada recriação; `Dockerfile` reconstruído multi-stage, não-root,
->   `HEALTHCHECK`.
-> - **`okami config` ganha picker de provider/modelo** — troca interativa direto no menu (aliases
->   `sonnet`/`opus`/`fast`/`smart`), mais visão de providers configurados, persistindo em
->   `okami.local.yaml`.
-> - **Terminal mais informativo** — tool cards mostram tempo de execução por chamada; a status bar
->   (REPL e TUI de tela cheia) mostra tokens/custo ao vivo durante a sessão; a toolbar do REPL mostra a
->   tool em execução.
+> ### ✨ Novo no `v0.15-beta` — Tools nativas e controle de providers
+> Esta release endurece o núcleo de execução e tira o roteamento de providers do centro do agente.
+> **39 commits · 4.075 testes passando**.
+> - **Streaming nativo com histórico atômico** — deltas estruturados de tool call, retomada segura após
+>   crash e compaction que nunca separa uma chamada do resultado.
+> - **Cancelamento por request** — deadlines total/TTFB/idle, abort cooperativo, retry interrompível e
+>   nenhuma recuperação depois de um cancelamento terminal.
+> - **Fronteira de runtime de providers** — targets imutáveis, resolver único e registry de transports;
+>   LiteLLM permanece como adapter de compatibilidade, não como a arquitetura inteira.
+> - **Controle de modelo no Telegram** — picker inline seguro, `/providers`, seleção persistente por
+>   sessão, callbacks protegidos, heartbeat vivo e mídia gerada entregue no chat.
+> - **OAuth, skills e hardening** — login de seis providers, 30+ skills builtin, enumeração sem
+>   credenciais, freios anti-hammer/floundering e Ruff limpo no repositório inteiro.
 
 O `okami chat` abre um **TUI de tela cheia** na identidade da marca (Onyx + Heat Orange / Volt Cyan):
 
@@ -458,7 +451,7 @@ metadata de tool e retenção. O modo `--strict` (overlay de produção) é o **
 | `okami gateway` / `okami serve` / `okami room` | Telegram bots / API HTTP / sala multi-agente. |
 | `okami service install\|start\|stop\|status` / `okami logs -f` | Gateway como serviço do SO (launchd/systemd, sobe no boot) + log ao vivo. |
 | `okami ps` / `okami process log\|kill\|signal\|wait\|clean` | Supervisão dos processos em background do agente, do terminal (kill real, sinais, PTY). |
-| Telegram: menu `/` (setMyCommands) · reações 👀/👍/👎 (`gateway.reactions`) · botões inline de aprovação ✅/❌ | UX nativa do Telegram. |
+| Telegram: `/providers` · picker `/model` · `/thoughts` · reações 👀/👍/👎 · botões de aprovação ✅/❌ | UX nativa de provider/modelo. |
 | `okami cron add\|list\|remove\|run\|tick` | Agendamento. |
 | `okami hooks` / `okami mcp` | Event hooks / servidores MCP. |
 | `okami voice` / `okami transcribe` / `okami say` / `okami image` | Voz, STT, TTS, imagem. |

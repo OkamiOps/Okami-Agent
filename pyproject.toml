@@ -1,6 +1,6 @@
 [project]
 name = "okami-agent"
-version = "0.14.4-beta"
+version = "0.15-beta"
 description = "Okami Agent — reliable, self-improving coding agent with capability parity across LLMs"
 readme = "README.md"
 license = "MIT"
@@ -44,6 +44,9 @@ okami = "okami.cli:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = ["/.claude"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["okami"]
