@@ -235,7 +235,7 @@ PRESETS: list[Preset] = [
     # env aqui é só o default sugerido; troque o nome se for cadastrar mais de um custom.
     Preset("custom", "Traga seu provider (token-plan / API key / endpoint OpenAI-compat)",
            "qualquer /v1 que você já tenha — sem esperar preset dedicado; fica salvo no okami.yaml",
-           base={"auth": "api_key", "tier": "unknown"}, model_prefix="openai/",
+           base={"auth": "api_key", "transport": "litellm", "tier": "unknown"}, model_prefix="openai/",
            fields=[Field("api_base", "API base (.../v1)", "http://localhost:8080/v1"),
                    Field("__secret__", "API key / token do plano (vazio = sem chave)", env="CUSTOM_API_KEY",
                          kind="secret")],

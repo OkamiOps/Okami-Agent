@@ -955,7 +955,10 @@ class AgentEndpoint(EndpointCommandsMixin):
                 chat_id=chat_id, agent=self.agent_id))
             return
         if low == "/models":                            # ANTES de /model (startswith colide)
-            self.channel.send(chat_id, self._models_text())
+            self._send_models(chat_id)
+            return
+        if low == "/providers":
+            self.channel.send(chat_id, self._providers_text())
             return
         if low.startswith("/model"):
             self.channel.send(chat_id, self._model_cmd(s, text[len("/model"):].strip()))

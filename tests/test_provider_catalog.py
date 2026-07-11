@@ -173,3 +173,8 @@ def test_every_preset_builds_a_valid_provider_config():
                 base[f.key] = f.default
         cfg = _build_one(p.key, base)
         assert p.key in cfg.providers, p.key
+
+
+def test_custom_provider_declares_openai_compatible_transport():
+    p = preset("custom")
+    assert p.base["transport"] == "litellm"

@@ -404,6 +404,21 @@ class TelegramClient:
                 p["text"] = to_plain(text)                  # parse recusado → plain legível (botões preservados)
         return self._call("sendMessage", p)
 
+    def send_model_picker(self, chat_id, text: str, buttons, thread: int | None = None) -> dict:
+        """Envia o picker de modelos com callbacks curtos já preparados pelo canal."""
+        from okami.channels.markdown_telegram import to_html, to_plain
+        p = {"chat_id": chat_id, "text": text,
+             "reply_markup": {"inline_keyboard": buttons}}
+        if thread is not None:
+            p["message_thread_id"] = thread
+        rendered = to_html(text)
+        if rendered != text:
+            try:
+                return self._call("sendMessage", dict(p, text=rendered, parse_mode="HTML"))
+            except urllib.error.HTTPError:
+                p["text"] = to_plain(text)
+        return self._call("sendMessage", p)
+
     def set_my_commands(self, commands: list[dict]) -> None:
         """Registra o menu do botão '/' (setMyCommands). Best-effort — menu é cosmético."""
         try:
@@ -510,6 +525,7 @@ class TelegramChannel(Channel):
         self._offset = 0
         self.allow = {str(c) for c in (allow_chats or [])}
         self.allow_all = bool(allow_all)   # SÓ explícito abre p/ todos (deny-by-default)
+        self._model_callbacks: dict[str, dict[str, str]] = {}
 
     @staticmethod
     def _decode(chat_id) -> tuple[str, int | None]:
@@ -532,7 +548,8 @@ class TelegramChannel(Channel):
                 cmsg = cq.get("message") or {}
                 chat = (cmsg.get("chat") or {}).get("id")
                 frm = str((cq.get("from") or {}).get("id"))
-                if chat is None or not (data.startswith("okapprove:") or data.startswith("okclarify:")):
+                if chat is None or not (data.startswith("okapprove:") or data.startswith("okclarify:")
+                                        or data.startswith("okmodel:")):
                     continue
                 if self.allow and frm not in self.allow and not self.allow_all:  # auth POR CLICADOR
                     continue
@@ -543,10 +560,15 @@ class TelegramChannel(Channel):
                     nonce, verdict = rest.rsplit(":", 1) if ":" in rest else ("", rest)
                     cmd = "/yes" if verdict == "yes" else "/no"
                     out.append(Inbound("telegram", cid_cb, text=(f"{cmd}:{nonce}" if nonce else cmd)))
-                else:                                            # okclarify:<idx> → nº da opção (1-based): o
-                    idx = data[len("okclarify:"):]               # endpoint mapeia p/ o texto no clarify pendente
-                    if idx.isdigit():
-                        out.append(Inbound("telegram", cid_cb, text=str(int(idx) + 1)))
+                else:                                            # callbacks de clarify ou picker de modelo
+                    if data.startswith("okclarify:"):
+                        idx = data[len("okclarify:"):]           # endpoint mapeia p/ o texto no clarify pendente
+                        if idx.isdigit():
+                            out.append(Inbound("telegram", cid_cb, text=str(int(idx) + 1)))
+                    else:
+                        token = self._model_callbacks.get(cid_cb, {}).get(data)
+                        if token:                                # token vem só do catálogo atual do picker
+                            out.append(Inbound("telegram", cid_cb, text=f"/model {token}"))
                 continue
             msg = u.get("message") or {}
             chat = (msg.get("chat") or {}).get("id")
@@ -644,6 +666,18 @@ class TelegramChannel(Channel):
     def send_clarify(self, chat_id, text: str, options) -> None:
         chat, thread = self._decode(chat_id)               # tópico de fórum vai junto (igual aprovação)
         self.client.send_clarify(chat, text, options, thread=thread)
+
+    def send_model_picker(self, chat_id, text: str, options) -> None:
+        chat, thread = self._decode(chat_id)
+        key = str(chat_id)
+        callbacks: dict[str, str] = {}
+        buttons = []
+        for index, (token, label, _hint) in enumerate(options or []):
+            callback = f"okmodel:{index}"
+            callbacks[callback] = token
+            buttons.append([{"text": str(label)[:64], "callback_data": callback}])
+        self._model_callbacks[key] = callbacks
+        self.client.send_model_picker(chat, text, buttons, thread=thread)
 
     def send_audio(self, chat_id, audio_path) -> None:
         chat, _ = self._decode(chat_id)

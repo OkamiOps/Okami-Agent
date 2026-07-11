@@ -51,6 +51,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     # ---- model / reasoning ----
     CommandDef("model", "show or switch this session's model", "model", ("m",), args="[id]", tier="essential"),
     CommandDef("models", "list available models", "model"),
+    CommandDef("providers", "list configured providers and readiness", "model"),
     CommandDef("think", "reasoning effort (minimal·low·medium·high·off)", "model",
                ("reasoning",), args="<level>"),
     CommandDef("thoughts", "show/hide the live thinking in chat (model still thinks)", "model",

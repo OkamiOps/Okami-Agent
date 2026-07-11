@@ -84,6 +84,10 @@ def _provider_finish(pid: str, pdict: dict, *, made_default: bool) -> None:
     # --- como usar ---
     console.print(f"\n[bold green]pronto![/bold green] provider [bold]{pid}[/bold] · modelo [bold]{model}[/bold]"
                   + (" · [cyan]DEFAULT[/cyan]" if made_default else ""))
+    console.print(f"   endpoint: {getattr(pc, 'api_base', None) or '(transport nativo)'} · "
+                  f"transport: {getattr(pc, 'transport', 'litellm') or 'litellm'}")
+    if getattr(pc, "api_key_env", None):
+        console.print(f"   credencial: ref env [bold]{pc.api_key_env}[/bold] (valor oculto)")
     if made_default:
         console.print("   testar agora: [bold]okami chat \"oi\"[/bold]   ·   trocar modelo: [bold]okami chat -m <id>[/bold]")
     else:

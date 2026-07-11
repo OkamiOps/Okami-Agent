@@ -103,6 +103,70 @@ class EndpointCommandsMixin:
             _default="tip: /model sonnet|opus|codex|fast|smart = aliases · /model <alias> --save persists it."))
         return "\n".join(lines)
 
+    @staticmethod
+    def _model_id(model: str) -> str:
+        """Mostra o id curto do modelo sem expor o prefixo de transporte."""
+        return (model or "").split("/", 1)[-1]
+
+    @staticmethod
+    def _context_label(value) -> str:
+        try:
+            n = int(value or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if not n:
+            return "default"
+        return f"{n // 1000}k" if n >= 1000 else str(n)
+
+    def _model_picker_options(self) -> list[tuple[str, str, str]]:
+        """Catálogo fechado para o picker: somente providers/modelos configurados."""
+        if not self.cfg:
+            return []
+        options = []
+        for provider, pc in (self.cfg.providers or {}).items():
+            models = list(getattr(pc, "models", None) or [])
+            current = self._model_id(getattr(pc, "model", ""))
+            if current and current not in models:
+                models.insert(0, current)
+            auth = getattr(pc, "auth", "api_key") or "api_key"
+            ready = "ready" if bool(getattr(pc, "ready", False)) else "not ready"
+            transport = getattr(pc, "transport", "litellm") or "litellm"
+            context = self._context_label(getattr(pc, "context_window", 0))
+            hint = f"auth={auth} · {ready} · context={context} · transport={transport}"
+            for model in models:
+                token = f"{provider}/{model}"
+                marker = "★ " if model == current and provider == self.cfg.default_provider else ""
+                options.append((token, f"{marker}{provider} · {model}", hint))
+        return options
+
+    def _send_models(self, chat_id) -> None:
+        """Entrega /models como picker quando o canal suporta botões, com fallback textual."""
+        text = self._models_text()
+        options = self._model_picker_options()
+        picker = getattr(self.channel, "send_model_picker", None)
+        if callable(picker) and options:
+            details = "\n\nmodelos configurados (toque para trocar):\n" + "\n".join(
+                f"• {label} — {hint}" for _, label, hint in options)
+            picker(chat_id, text + details, options)
+            return
+        self.channel.send(chat_id, text)
+
+    def _providers_text(self) -> str:
+        """Status seguro e legível; nunca inclui valor de credencial."""
+        if not self.cfg:
+            return "—"
+        lines = ["🧩 providers configurados:"]
+        for provider, pc in (self.cfg.providers or {}).items():
+            state = "ready" if bool(getattr(pc, "ready", False)) else "not ready"
+            default = " ★ default" if provider == self.cfg.default_provider else ""
+            model = getattr(pc, "model", "?") or "?"
+            auth = getattr(pc, "auth", "api_key") or "api_key"
+            transport = getattr(pc, "transport", "litellm") or "litellm"
+            context = self._context_label(getattr(pc, "context_window", 0))
+            lines.append(f"• {provider}{default} · {model} · auth={auth} · {state} · "
+                         f"context={context} · transport={transport}")
+        return "\n".join(lines)
+
     def _model_cmd(self, s: "Session", arg: str) -> str:
         from okami.i18n import t
         from okami.llm.model_aliases import ALIASES, ModelAliasError, TIER_ALIASES, full_model_string, resolve
