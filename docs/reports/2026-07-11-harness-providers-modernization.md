@@ -1,113 +1,108 @@
-# Harness e providers — modernização de 2026-07-11
+# Harness, providers e Telegram — fechamento de 2026-07-11
 
 ## Resultado
 
-Esta rodada entregou a fundação que estava faltando para tornar o harness cancelável e tirar o
-LiteLLM do centro da arquitetura de providers. O gateway e o Telegram não fizeram parte desta
-entrega.
+A rodada foi fechada contra o snapshot recente do Hermes em `3b2ef789d`, usando subagentes
+`gpt-5.6-luna` com reasoning `high`. O escopo ficou restrito aos caminhos que estavam realmente
+faltando: streaming estruturado, histórico nativo atômico, cancelamento/timeout, gestão básica de
+providers/modelos no Telegram e limpeza do lint existente.
 
-O escopo foi encerrado após quatro blocos funcionais:
+LiteLLM deixou de ser o centro da arquitetura, mas continua disponível como transport de
+compatibilidade. Não copiamos a arquitetura inteira do Hermes nem abrimos outra reconstrução do
+gateway.
 
-1. watchdog e cancelamento por request;
-2. runtime targets imutáveis e resolver único;
-3. registry de transports e fronteira explícita para LiteLLM;
-4. fallback retrocompatível com destinos estruturados.
+## O que ficou pronto
 
-Streaming nativo de tool calls e histórico nativo atômico foram deliberadamente adiados. Isso
-evitou transformar uma correção do núcleo em outra reconstrução interminável do projeto.
+### Harness e protocolo nativo
 
-## O que mudou
-
-### Harness
-
-- `RequestContext` controla deadline total, TTFB, idle, cancelamento e aborters.
-- O primeiro evento terminal vence a corrida e preserva tipo e motivo.
-- Cada geração/escalada cria um contexto novo; retry e fallback internos compartilham o contexto
-  da chamada atual.
-- Cancelamento interrompe backoff e bloqueia classificação, compaction, escalada e fallback depois
-  do terminal conhecido.
-- Streaming observa progresso real, respeita o orçamento restante e fecha streams que expõem
-  `close()`.
-- Claude CLI, Codex OAuth, Copilot CLI, MiniMax OAuth, Google Code Assist, Bedrock e Gemini recebem
-  limites compatíveis com seus transports.
-- Adapters que não oferecem um handle físico de abort continuam limitados pelo timeout do
-  transporte e expõem essa limitação; não fingem que mataram a operação remota.
+- `RequestContext` controla deadline total, TTFB, idle, cancelamento e aborters por request.
+- Cancelamento é verificado antes da admissão, depois da geração e antes de recuperação, compaction,
+  escalada ou fallback.
+- Retries de Claude e Codex recebem o tempo restante do deadline, não um timeout novo completo.
+- `_accepts_keyword` respeita parâmetros positional-only e doubles/mocks usados pela suíte.
+- `StreamEvent`, `ToolCallDelta` e `NativeToolCallAccumulator` reconstroem tool calls recebidas em
+  deltas estruturados.
+- `stream_messages_events()` e `streaming_generate()` preservam texto, reasoning, usage e tool calls
+  nativas sem converter a ação para JSON-em-texto.
+- Mensagens `assistant.tool_calls` e seus resultados `role=tool` formam grupos atômicos no histórico.
+- Resume repara tool calls órfãs como `INTERRUPTED`, sem reexecutá-las silenciosamente.
+- Compaction preserva os grupos assistant/tool; não separa uma chamada do respectivo resultado.
+- Um terminal rejeitado recebe exatamente um resultado `REJECTED`; um terminal aceito fecha chamadas
+  pendentes do mesmo lote como não executadas, evitando IDs órfãos.
+- Fallback estruturado distingue destinos com o mesmo provider e modelos diferentes.
 
 ### Providers e modelos
 
-- `RuntimeTarget`, `TargetRef` e `BillingRoute` são imutáveis e seguros para retry, logs e
-  metadados.
-- `TargetResolver` centraliza aliases, override de modelo, transport, API mode, endpoint,
-  capabilities, billing e referência de credencial.
-- Segredos resolvidos não entram em `repr` de targets; apenas refs `env:`, `oauth:`, `pool:` ou
-  identidade hash de uma chave literal.
-- `ProviderConfig` preserva knobs futuros/desconhecidos em `params`, avisa uma vez por chave e
-  rejeita colisões ambíguas.
-- `TransportRegistry` conhece os transports existentes: `litellm`, `claude_cli`, `codex_oauth`,
-  `minimax_oauth`, `gemini_native`, `bedrock_native`, `gemini_cloudcode` e `copilot_cli`.
-- Todo uso executável de LiteLLM passa por `okami/llm/litellm_compat.py`; imports de providers não
-  alteram `drop_params` nem `suppress_debug_info` globais.
-- A política de parâmetros incompatíveis é local ao request: `warn` remove e registra os nomes;
-  `error` falha explicitamente.
-- Fallback legado continua válido. O formato estruturado preserva modelo, endpoint e API mode, e
-  o `Completion` informa o provider/modelo efetivamente usado.
+- `RuntimeTarget`, `TargetRef`, `BillingRoute`, `TargetResolver` e `TransportRegistry` formam a
+  fronteira única entre configuração e execução.
+- Aliases, override de modelo, transport, API mode, endpoint, capabilities, billing e credencial são
+  resolvidos no mesmo caminho.
+- Targets não carregam segredo resolvido; logs e UX mostram somente referências seguras como `env:`
+  e `oauth:`.
+- Todo uso executável de LiteLLM passa por `okami/llm/litellm_compat.py`, sem mutação global no import.
+- Fallback legado por nome continua aceito; destinos estruturados preservam provider, modelo,
+  endpoint e modo de API efetivamente usados.
+- O preset de provider customizado grava `transport: litellm` explicitamente e o resumo final mostra
+  endpoint, transport e referência de variável de ambiente sem exibir o segredo.
 
-## Compatibilidade preservada
+### Telegram
 
-- YAML legado de providers e fallback por nome;
-- aliases e IDs qualificados de modelos;
-- transports CLI/OAuth e seus stores atuais;
-- seam legado `transports.dispatch()` e callables injetados nos testes;
-- retry, rotação de chaves, rate guard, replay de reasoning e aprovação de tools;
-- comportamento de stream parcial: depois de emitir conteúdo, uma falha não reinicia silenciosamente
-  a resposta e não duplica texto.
+- `/providers` entrou no registry, menu e catálogo PT.
+- O comando exibe estado seguro dos providers configurados.
+- `/model` ganhou picker inline de modelos.
+- Callbacks curtos (`okmodel:N`) não carregam provider/modelo arbitrário enviado pelo cliente.
+- Cada índice é validado contra um catálogo em memória associado ao chat; índice inválido é ignorado.
+- A seleção reutiliza o mesmo resolver e a mesma persistência de sessão do comando `/model
+  provider/model`.
 
-## Verificação
+### Qualidade
+
+- Os 75 achados preexistentes do Ruff foram corrigidos mecanicamente, sem refatoração funcional.
+- Ruff agora passa no repositório inteiro.
+
+## Verificação final
 
 | Verificação | Resultado |
 |---|---:|
-| Testes novos de provider | `23 passed` |
-| Matriz diretamente afetada do worker | `147 passed` |
-| Reprodução order-dependent de logging | `3 passed` |
-| Suíte completa final | `4059 passed, 13 skipped` |
-| Ruff nos arquivos alterados | `All checks passed!` |
+| Matriz focada de providers/Telegram | `255 passed` |
+| Regressões do fechamento de tool calls | `55 passed` |
+| Correções de integração PT/streaming | `2 passed` |
+| Suíte completa final | `4075 passed, 13 skipped` |
+| `uv run ruff check okami tests` | `All checks passed!` |
 | `git diff --check` | limpo |
-| Source gate de uso direto de LiteLLM | zero ocorrências |
 
-A execução final da suíte completa levou 83,45 s. O Ruff do repositório inteiro ainda reporta 75
-achados em arquivos não tocados por esta rodada; o conjunto alterado está limpo. Esse débito global
-de lint não foi misturado com a modernização de providers.
+A suíte completa final levou 81,09 s. A primeira execução integrada encontrou duas regressões
+legítimas — tradução ausente de `/providers` e um teste acoplado ao texto da implementação antiga de
+streaming. Ambas foram corrigidas por um Luna em `high`; a segunda execução ficou totalmente verde.
 
-## O que ainda falta
+## O que deliberadamente não entrou
 
-### Próxima prioridade funcional
+- remoção total da dependência opcional de LiteLLM; isso exige adapters nativos para todos os
+  providers que o projeto pretende suportar;
+- catálogo gigantesco de providers do Hermes e descoberta automática de todas as suas integrações;
+- picker hierárquico/paginado para centenas de modelos; o picker atual cobre o catálogo configurado;
+- paridade do Discord e reescrita dos demais gateways; esta rodada tratou Telegram;
+- cópia da arquitetura assíncrona completa do Hermes.
 
-1. gateway/Telegram: formatação, slash commands, troca de modelo e picker de provider/modelo;
-2. onboarding e gestão de providers/credenciais inspirados no Hermes;
-3. streaming estruturado de tool calls nativas;
-4. histórico/compaction/resume com grupos nativos atômicos;
-5. tornar LiteLLM opcional depois que todos os providers necessários tiverem adapters próprios.
+Esses pontos são melhorias futuras, não buracos escondidos no caminho entregue. Copiá-los agora teria
+voltado ao overengineering que esta rodada precisava interromper.
 
-### Resíduos técnicos conhecidos
+## Limitações reais
 
-- `_accepts_keyword` ainda merece endurecimento para parâmetros positional-only e alguns mocks com
-  `side_effect` legado.
-- Há uma janela estreita entre admissão do worker e invocação da função quando cancelamento externo
-  é apenas consultado por callback.
-- Uma segunda tentativa interna de Claude/Codex ainda pode receber o timeout numérico original em
-  vez do deadline restante.
-- Cancelamento que chega junto de uma geração inválida ou de `steer` precisa de uma regressão
-  dedicada para provar que nenhuma recuperação extra é emitida.
-- O bookkeeping legado de `_tried` ainda é por provider; múltiplos destinos estruturados distintos
-  sob o mesmo provider não têm cobertura de execução sequencial nesta rodada.
-
-Esses itens são reais, mas não invalidaram a suíte nem o caminho comum entregue. Devem entrar em
-uma onda curta e orientada por regressão, não em outra auditoria aberta.
+- Transport sem handle físico de abort só pode respeitar o timeout/cancelamento na fronteira local;
+  não há como prometer que uma operação remota já enviada foi morta.
+- Um callback externo de cancelamento é consultivo; o harness consulta imediatamente antes da
+  execução, mas atomicidade absoluta exige que o próprio transport exponha cancelamento cooperativo.
+- Catálogos muito grandes ainda pedem paginação no Telegram.
 
 ## Commits da rodada
 
-- `3b8db16` — request-scoped cancellation watchdog;
-- `d2b38eb` — cancelamento atômico e propagação pelos transports;
-- `ded9a14` — runtime targets, transport registry, LiteLLM boundary e fallback estruturado.
+- `3b8db16` — watchdog de cancelamento por request;
+- `d2b38eb` — cancelamento atômico e propagação nos transports;
+- `ded9a14` — runtime targets, registry e fronteira LiteLLM;
+- `48602ba` — Ruff zerado no repositório;
+- `360e2f5` — picker seguro e UX de providers no Telegram;
+- `5438aad` — streaming nativo e histórico atômico;
+- `feba6f3` — tradução de providers e teste do fallback atualizados.
 
 Nenhum push foi executado.
