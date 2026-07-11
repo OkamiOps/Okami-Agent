@@ -73,18 +73,20 @@ def test_run_task_accepts_gateway_hooks_set_no_interrupt(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------- E2E: fallback de stream sem traceback
-def test_stream_fallback_warning_has_no_traceback():
-    """Achado RODANDO o app: provider fora → o aviso 'stream instável; caindo no robusto' (fallback
-    TRATADO) despejava o traceback inteiro (log.warn default exc_info=True) e o usuário achava que
-    crashou. Garante exc_info=False nas 2 chamadas de fallback."""
-    import inspect
-    import okami.llm.providers as prov
-    import okami.llm.streaming as st
-    for mod in (prov, st):
-        src = inspect.getsource(mod)
-        idx = src.index("stream instável")
-        call = src[idx - 40:idx + 200]                    # a chamada log.warn(...) em volta do texto
-        assert "exc_info=False" in call, f"warn de 'stream instável' em {mod.__name__} sem exc_info=False"
+def test_stream_fallback_warning_has_no_traceback(capfd):
+    """Falha tratada antes do primeiro token cai no fallback nativo sem despejar traceback."""
+    from okami.llm.streaming import streaming_generate
+    from okami.llm.usage import Completion
+
+    def _boom():
+        raise RuntimeError("stream caiu antes do 1º token")
+        yield  # generator marker after the intentional exception
+
+    comp = streaming_generate(None, [{"role": "user", "content": "x"}], _stream=_boom(),
+                              _fallback=lambda: Completion(text="resposta robusta"))
+
+    assert comp.text == "resposta robusta"
+    assert "Traceback" not in capfd.readouterr().err
 
 
 # ---------------------------------------------------------------- #21 gh sem auth vai pro log

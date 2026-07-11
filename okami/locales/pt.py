@@ -495,6 +495,7 @@ MESSAGES: dict[str, str] = {
     # modelo / raciocínio
     "cmd.model": "mostra ou troca o modelo desta sessão",
     "cmd.models": "lista os modelos disponíveis",
+    "cmd.providers": "lista os provedores configurados e o estado deles",
     "cmd.think": "esforço de raciocínio (minimal·low·medium·high·off)",
     "cmd.thoughts": "mostra/oculta o pensamento ao vivo no chat (o modelo pensa igual)",
     # identidade / gosto
