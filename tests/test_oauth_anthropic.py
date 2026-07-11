@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import urllib.parse
 
 from okami.llm import oauth_anthropic as oa

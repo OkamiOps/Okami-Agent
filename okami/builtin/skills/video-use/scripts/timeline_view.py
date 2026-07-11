@@ -121,7 +121,6 @@ def words_in_range(transcript_path: Path, start: float, end: float) -> list[dict
     data = json.loads(transcript_path.read_text())
     out: list[dict] = []
     for w in data.get("words", []):
-        t = w.get("type", "word")
         ws = w.get("start")
         we = w.get("end")
         if ws is None or we is None:
@@ -233,7 +232,6 @@ def render_timeline(
         )
 
         # Filmstrip
-        x = 50
         strip_width = canvas_width - 100
         if total_frame_w <= strip_width:
             cursor = 50

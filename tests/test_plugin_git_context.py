@@ -5,9 +5,7 @@ LÓGICA pura de parsing (sem precisar de um repo git de verdade em todo teste)."
 from __future__ import annotations
 
 import importlib.util
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent

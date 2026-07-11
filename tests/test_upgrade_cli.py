@@ -350,7 +350,10 @@ def test_uv_tool_install_usa_reinstall_nao_so_force(monkeypatch, tmp_path):
     monkeypatch.setattr(up.shutil, "which", lambda _: "/usr/bin/uv")
     def _fake_run(cmd, **kw):
         captured["cmd"] = cmd
-        class R: returncode = 0; stdout = "ok"; stderr = ""
+        class R:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
         return R()
     monkeypatch.setattr(up, "_run", _fake_run)
     up.uv_tool_install(tmp_path)

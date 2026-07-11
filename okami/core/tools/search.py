@@ -111,7 +111,10 @@ class SearchFiles(Tool):
         # incidente 2026-07-08: grep NUNCA varre arquivo de credencial — senão o próprio match VAZA o segredo
         # no resultado (pior que enumerar). INCONDICIONAL (nem yolo), nos dois caminhos (rg e puro-Python).
         from okami.core.tools.base import _SENSITIVE_PATH
-        _ok = lambda p: not _SENSITIVE_PATH.search(str(p))
+
+        def _ok(p):
+            return not _SENSITIVE_PATH.search(str(p))
+
         candidates = _rg_candidate_files(root, q, bool(args.get("ignore_case")), glob)
         if candidates is not None:                    # fast-path rg: só os arquivos que JÁ têm match
             paths = sorted({p for p in candidates if p.is_file() and _ok(p)})

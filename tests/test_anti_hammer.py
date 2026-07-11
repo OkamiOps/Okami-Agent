@@ -28,7 +28,6 @@ def test_martelo_da_mesma_tool_e_cortado_antes_de_200(tmp_path):
     Harness(_Script(outs), Task(goal="crie muitos arquivos"), tmp_path,
             budget=Budget(stall_limit=99), on_event=events.append).run()
 
-    kinds = [e.get("kind") for e in events]
     # 1) avisou cedo (consciência) em warn_same_tool e push_same_tool
     warns = [e for e in events if e.get("kind") == "same_tool_warn" and e.get("tool") == "write_file"]
     warn_counts = sorted(e.get("count") for e in warns)

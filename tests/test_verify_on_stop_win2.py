@@ -11,7 +11,6 @@ import json
 from okami.core import Harness, Task, TaskState
 from okami.core.harness.loop import _verified_since_last_effect
 from okami.core.harness.models import Step
-from okami.core.tools.base import ToolResult
 
 
 def J(tool: str, **args) -> str:

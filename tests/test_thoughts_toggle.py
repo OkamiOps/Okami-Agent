@@ -1,6 +1,5 @@
 """/thoughts on|off: oculta o PENSAMENTO ao vivo no chat (o modelo pensa igual). Pedido do dono:
 'quero que ele pense, não quero que fique enchendo meu telegram'."""
-import re
 
 
 def test_status_on_event_oculta_token_quando_off():
@@ -28,7 +27,7 @@ def test_status_on_event_strip_think_quando_on():
     self.channel = FakeChannel()
     ev = ep.AgentEndpoint._status_on_event(self, "c1", "s1", "💭", None, show_reasoning=True)
     ev({"kind": "token", "text": "<think>raciocinio secreto</think>resposta visivel"})
-    import time; ev({"kind": "token", "text": " continua"})   # força um due
+    ev({"kind": "token", "text": " continua"})   # força um due
     # o <think> nunca aparece; a resposta sim (em algum edit)
     joined = " ".join(sent)
     assert "raciocinio secreto" not in joined

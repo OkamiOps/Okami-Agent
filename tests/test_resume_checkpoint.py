@@ -1,6 +1,7 @@
 """Crash-resume: checkpoint estruturado sobrevive a crash mid-tool-loop; resume semeia daqui (passos
 feitos preservados) em vez de reconstruir [system,user]. Tail órfão (tool_call sem resultado) reparado."""
-import tempfile, shutil
+import tempfile
+import shutil
 from pathlib import Path
 from okami.core.harness.resume import write_checkpoint, load_checkpoint, clear_checkpoint
 

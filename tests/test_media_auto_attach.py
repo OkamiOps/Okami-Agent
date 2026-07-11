@@ -1,7 +1,8 @@
 """Bug real (2026-07-09): imagem/vídeo gerados mas NUNCA entregues no Telegram porque a saída da tool
 não emitia MEDIA:<path> (só o generate_pdf emitia). O gateway anexa varrendo os steps por MEDIA:, então
 image/pdf/video TÊM que emitir a tag na saída — não depender do modelo ecoar."""
-import inspect, re
+import inspect
+import re
 from okami.core.tools.agentic import GenerateImage
 from okami.core.tools.video import GenerateVideo
 import okami.core.tools.pdf as pdfmod

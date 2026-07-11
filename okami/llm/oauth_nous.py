@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import json
 import time
-import urllib.error
-import urllib.request
+import urllib as _urllib
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from typing import Callable
 
 from okami.llm.oauth import (
@@ -31,6 +32,8 @@ from okami.llm.oauth import (
     logout,
     save_tokens,
 )
+
+urllib = _urllib
 
 PROVIDER = "nous"
 
@@ -82,14 +85,14 @@ def _post_refresh(refresh_token: str) -> dict:
     fora do padrão RFC 6749 clássico, é assim que a Nous exige)."""
     import urllib.parse
     body = urllib.parse.urlencode({"grant_type": "refresh_token", "client_id": NOUS_CLIENT_ID}).encode("utf-8")
-    req = urllib.request.Request(NOUS_TOKEN_URL, data=body, method="POST")
+    req = urllib_request.Request(NOUS_TOKEN_URL, data=body, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
     req.add_header("Accept", "application/json")
     req.add_header("x-nous-refresh-token", refresh_token)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
+        with urllib_request.urlopen(req, timeout=30) as r:  # noqa: S310
             return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
+    except urllib_error.HTTPError as e:
         return _err_payload(e.code, e.read().decode("utf-8", "ignore"))
 
 

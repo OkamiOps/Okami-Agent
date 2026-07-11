@@ -162,8 +162,8 @@ def test_pre_tool_call_veto_blocks_dispatch_alongside_hooks_stub(tmp_path):
 
     bus = HookBus()
     bus.on("pre_tool_call", lambda **kw: False)   # plugin novo VETA
-    h = Harness(generate=lambda *a, **k: "", task=Task(goal="x"), workspace=tmp_path,
-               hooks=_LegacyHooksStub(), plugin_hooks=bus, budget=Budget(max_steps=1))
+    Harness(generate=lambda *a, **k: "", task=Task(goal="x"), workspace=tmp_path,
+            hooks=_LegacyHooksStub(), plugin_hooks=bus, budget=Budget(max_steps=1))
     # roda um passo do loop principal só até o gate de veto — smoke via chamada direta do trecho relevante:
     assert bus.fire_blockable("pre_tool_call", tool="run_shell", args={}) is False
 

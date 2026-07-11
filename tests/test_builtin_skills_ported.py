@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 from okami.builtin import builtin_skills_root
 from okami.skills import catalog, load_builtin_skills

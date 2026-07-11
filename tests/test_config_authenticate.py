@@ -13,7 +13,9 @@ def test_menu_lista_opcao_autenticar():
 def test_authenticate_chama_login_no_escolhido():
     cfg = MagicMock()
     cfg.providers = {"codex": {}}
-    pc = MagicMock(); pc.login_cmd = None; pc.oauth = None
+    pc = MagicMock()
+    pc.login_cmd = None
+    pc.oauth = None
     cfg.provider = lambda pid=None: pc
     with patch.object(c, "_load", return_value=cfg), \
          patch("okami.menu._interactive", return_value=True), \
@@ -25,8 +27,11 @@ def test_authenticate_chama_login_no_escolhido():
 
 
 def test_authenticate_sem_tty_degrada_sem_chamar_login():
-    cfg = MagicMock(); cfg.providers = {"codex": {}}
-    pc = MagicMock(); pc.login_cmd = None; pc.oauth = None
+    cfg = MagicMock()
+    cfg.providers = {"codex": {}}
+    pc = MagicMock()
+    pc.login_cmd = None
+    pc.oauth = None
     cfg.provider = lambda pid=None: pc
     with patch.object(c, "_load", return_value=cfg), \
          patch("okami.menu._interactive", return_value=False), \

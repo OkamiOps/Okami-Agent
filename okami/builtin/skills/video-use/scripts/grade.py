@@ -263,7 +263,7 @@ def auto_grade_for_clip(
         filter_string = "eq=" + ":".join(eq_parts)
 
     if verbose:
-        print(f"  auto-grade stats:")
+        print("  auto-grade stats:")
         print(f"    y_mean={y_mean:.3f}  y_range={y_range:.3f}  sat_mean={sat_mean:.3f}")
         print(f"    → contrast={contrast_adj:.3f}  gamma={gamma_adj:.3f}  sat={sat_adj:.3f}")
         print(f"    → filter: {filter_string or '(empty)'}")

@@ -320,7 +320,6 @@ def build_master_srt(edl: dict, edit_dir: Path, out_path: Path) -> None:
     - Output times computed as word.start - segment_start + segment_offset
     """
     transcripts_dir = edit_dir / "transcripts"
-    sources = edl["sources"]
 
     entries: list[tuple[float, float, str]] = []
     seg_offset = 0.0

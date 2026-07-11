@@ -302,26 +302,6 @@ def codex_access_token(now: Callable[[], float] = time.time) -> str | None:
     return _codex_cli_auth_token(now)
 
 
-def codex_account_id(now: Callable[[], float] = time.time) -> str:
-    """ChatGPT-Account-Id p/ o header anti-Cloudflare. Ordem: claim do JWT de acesso →
-    campo `tokens.account_id` do ~/.codex/auth.json (o codex CLI guarda o account fora do JWT →
-    o claim costuma estar AUSENTE, então esse fallback é o caminho normal, não a exceção)."""
-    from okami.llm.codex_headers import account_id_from_token
-    at = codex_access_token(now)
-    if acc := account_id_from_token(at or ""):
-        return acc
-    if _CLI_AUTH.exists():
-        try:
-            d = json.loads(_CLI_AUTH.read_text(encoding="utf-8"))
-            t = d.get("tokens", d) if isinstance(d.get("tokens", d), dict) else {}
-            acc = t.get("account_id")
-            if isinstance(acc, str) and acc:
-                return acc
-        except (json.JSONDecodeError, OSError):
-            pass
-    return ""
-
-
 def force_refresh_codex(now: Callable[[], float] = time.time) -> str | None:
     """Força refresh do token Codex IGNORANDO a expiração (#10) — p/ um 401 (token revogado/relógio).
     Devolve o novo access_token (já salvo no store), ou None se não houver refresh_token / falhar."""
