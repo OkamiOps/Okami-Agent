@@ -8,7 +8,7 @@ Todas as mudanças notáveis do **Okami Agent**. Formato baseado em
 
 ## [0.15-beta] — 2026-07-11
 
-O `v0.15-beta` fecha a maior onda desde a abertura do beta: **41 commits** que endurecem o harness,
+O `v0.15-beta` fecha a maior onda desde a abertura do beta: **42 commits** que endurecem o harness,
 separam provider/modelo de transport, tornam tool calls nativas recuperáveis e colocam a troca de modelo
 do Telegram no mesmo caminho de resolução usado pelo restante do produto. A comparação usou o snapshot
 recente do Hermes `3b2ef789d`, copiando contratos úteis sem clonar sua arquitetura inteira.

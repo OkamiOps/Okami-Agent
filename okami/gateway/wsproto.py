@@ -24,7 +24,7 @@ def accept_key(client_key: str) -> str:
     """Sec-WebSocket-Accept = base64(sha1(client_key + GUID)) — completa o handshake do servidor."""
     # SHA1 é EXIGIDO pelo handshake do RFC 6455 (não é uso de segurança/crypto) — usedforsecurity=False
     # sinaliza isso ao runtime e ao bandit.
-    digest = hashlib.sha1(  # noqa: S324
+    digest = hashlib.sha1(  # noqa: S324  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
         (client_key.strip() + _GUID).encode("ascii"), usedforsecurity=False).digest()
     return base64.b64encode(digest).decode("ascii")
 

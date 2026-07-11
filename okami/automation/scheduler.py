@@ -158,7 +158,7 @@ def gate_allows(job: dict, cwd: str = ".", timeout: float = 30.0) -> bool:
     from okami.core.tools import sanitized_env
     try:
         # gate é comando do OPERADOR (config confiável), não input do modelo → shell=True ok.
-        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602
+        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
                            timeout=timeout, env=sanitized_env())  # nosemgrep — gate do operador (B602 acima)
         return r.returncode == 0
     except Exception:  # noqa: BLE001 — erro de spawn/timeout → fail-open
@@ -192,7 +192,7 @@ def run_script(cmd: str, *, cwd: str = ".", timeout: float = 120.0) -> str:
     import subprocess
     from okami.core.tools import sanitized_env
     try:
-        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602
+        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,  # nosec B602  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
                            text=True, timeout=timeout, env=sanitized_env())  # nosemgrep — script do operador
     except subprocess.TimeoutExpired:
         return f"[script] timeout ({timeout}s): {cmd[:80]}"

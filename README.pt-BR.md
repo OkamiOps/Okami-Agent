@@ -31,7 +31,7 @@ ou onde você quiser.
 
 > ### ✨ Novo no `v0.15-beta` — Tools nativas e controle de providers
 > Esta release endurece o núcleo de execução e tira o roteamento de providers do centro do agente.
-> **41 commits · 4.081 testes passando**.
+> **42 commits · 4.081 testes passando**.
 > - **Streaming nativo com histórico atômico** — deltas estruturados de tool call, retomada segura após
 >   crash e compaction que nunca separa uma chamada do resultado.
 > - **Cancelamento por request** — deadlines total/TTFB/idle, abort cooperativo, retry interrompível e

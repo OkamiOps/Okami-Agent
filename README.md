@@ -30,7 +30,7 @@ or wherever you want.
 
 > ### ✨ New in `v0.15-beta` — Native Tools & Provider Control
 > This release hardens the execution core and removes provider routing from the center of the agent.
-> **41 commits · 4,081 tests passing**.
+> **42 commits · 4,081 tests passing**.
 > - **Native tool streaming with atomic history** — structured tool-call deltas, crash-safe resume and
 >   compaction that never separates a call from its result.
 > - **Request-scoped cancellation** — total/TTFB/idle deadlines, cooperative abort, interruptible retry

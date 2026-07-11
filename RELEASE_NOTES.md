@@ -8,7 +8,7 @@
 | **Release** | `v0.15-beta` |
 | **Published** | 2026-07-11 |
 | **Compared with** | `v0.14.3-beta` |
-| **Scope** | 41 commits · 413 files |
+| **Scope** | 42 commits · 413 files |
 | **Verification** | 4,081 passed · 7 skipped · Ruff clean |
 | **Compatibility** | Existing YAML, aliases and CLI/OAuth transports remain valid |
 
