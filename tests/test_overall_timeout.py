@@ -3,7 +3,7 @@ fallback recursivo de N providers ≈ cascata de minutos pendurando o canal. O t
 TimeoutError (que o loop classifica → encolhe+retry → salvage). Default 300s; OKAMI_OVERALL_TIMEOUT/cfg."""
 from __future__ import annotations
 
-import time
+import threading
 
 import pytest
 
@@ -20,8 +20,19 @@ def test_run_with_deadline_no_timeout_just_calls():
 
 def test_run_with_deadline_raises_on_overrun():
     from okami.runner import _run_with_deadline
-    with pytest.raises(TimeoutError):
-        _run_with_deadline(lambda: time.sleep(5), 0.2)       # estoura o teto → TimeoutError
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked():
+        started.set()
+        release.wait(1)
+
+    try:
+        with pytest.raises(TimeoutError):
+            _run_with_deadline(blocked, 0.05)                # estoura o teto → TimeoutError
+    finally:
+        release.set()
+    assert started.is_set()
 
 
 def test_run_with_deadline_propagates_inner_error():

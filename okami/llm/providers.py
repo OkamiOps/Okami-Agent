@@ -17,6 +17,7 @@ import litellm
 from okami.llm import errors as _err
 from okami.llm import transports
 from okami.llm.retry import retry_delay
+from okami.llm.request import RequestCancelled, RequestContext, RequestWatchdogTimeout
 from okami.llm.usage import Completion, as_completion, normalize_usage
 from okami.config import OkamiConfig, ProviderConfig
 
@@ -439,12 +440,62 @@ def _is_tool_schema_error(e) -> bool:
     return any(m in s for m in _SCHEMA_ERR_MARKERS)
 
 
-def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=None) -> Completion:
+def _request_check(request: RequestContext | None, cancel=None) -> None:
+    """Check the shared request before any retry/fallback decision."""
+    if request is not None:
+        request.check()
+    if cancel is not None and cancel():
+        if request is not None:
+            request.cancel("user")
+            request.check()
+        raise RequestCancelled("user")
+
+
+def _request_cancel_probe(request: RequestContext | None, cancel=None):
+    """Adapt legacy boolean cancellation to the shared request state for backoff polling."""
+    if request is None:
+        return cancel
+
+    def probe() -> bool:
+        request.check()
+        if request.cancelled:
+            return True
+        if cancel is not None and cancel():
+            request.cancel("user")
+            return True
+        return False
+
+    return probe
+
+
+def _bounded_request_overrides(request: RequestContext | None, overrides: dict) -> dict:
+    """Keep each transport call within the request's remaining finite deadline."""
+    if request is None:
+        return overrides
+    remaining = request.remaining()
+    if remaining is None:
+        return overrides
+    bounded = dict(overrides)
+    current = bounded.get("timeout")
+    if current is None or float(current) > remaining:
+        bounded["timeout"] = remaining
+    return bounded
+
+
+def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=None,
+                  request: RequestContext | None = None) -> Completion:
+    if request is not None:
+        request.check()
+    overrides = _bounded_request_overrides(request, overrides)
     # só passa raw_messages quando há (codex c/ replay) → mantém compat com mocks de dispatch de 4 args
     via = (transports.dispatch(pc, messages, model, overrides, raw_messages=raw_messages)
            if raw_messages is not None else transports.dispatch(pc, messages, model, overrides))
     if via is not None:
-        return as_completion(via)
+        result = as_completion(via)
+        if request is not None:
+            request.check()
+            request.observe()
+        return result
     messages = apply_prompt_caching(messages, _effective_model(pc, model))   # Claude → cache explícito
     rf = _response_format(pc, response_schema)
     if rf is not None:
@@ -469,11 +520,15 @@ def _complete_one(pc, messages, model, response_schema, overrides, raw_messages=
         else:
             raise
     choice = resp.choices[0]
-    return Completion(text=_message_text(choice.message),                   # content; vazio → reasoning_content
-                      tool_calls=_extract_tool_calls(choice.message),       # antes JOGADO FORA (P0.4)
-                      finish_reason=getattr(choice, "finish_reason", "") or "stop",
-                      usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
-                      provider=pc.name, model=_effective_model(pc, model))
+    result = Completion(text=_message_text(choice.message),                 # content; vazio → reasoning_content
+                        tool_calls=_extract_tool_calls(choice.message),     # antes JOGADO FORA (P0.4)
+                        finish_reason=getattr(choice, "finish_reason", "") or "stop",
+                        usage=normalize_usage(getattr(resp, "usage", None), transport="litellm"),
+                        provider=pc.name, model=_effective_model(pc, model))
+    if request is not None:
+        request.check()
+        request.observe()
+    return result
 
 
 _EMPTY_NUDGE = ("[ATENÇÃO: sua última resposta veio VAZIA (sem conteúdo). Responda AGORA de verdade — "
@@ -534,12 +589,14 @@ def complete_messages_ex(
     _sleep=time.sleep,
     cancel=None,
     on_heartbeat=None,
+    request: RequestContext | None = None,
     **overrides,
 ) -> Completion:
     """Completa a partir de uma lista de mensagens (harness §3) e devolve um `Completion` (texto +
     usage + provider/model que REALMENTE respondeu). Robustez (dor nº1): classifica o erro p/ a
     alavanca (rotacionar chave vs back off vs failover), espera com jitter, parqueia chave em 429,
     e trata RESPOSTA VAZIA como falha (não sucesso) — senão o harness vê turno em branco."""
+    _request_check(request, cancel)
     _orig = messages                                 # pré-sanitize (carrega reasoning_items) p/ o replay Codex
     messages = _sanitize_messages(messages)          # surrogate solto no histórico não trava o turno
     pc = cfg.provider(provider)
@@ -566,13 +623,16 @@ def complete_messages_ex(
     attempt = 0
     while attempt < attempts:
         attempt += 1
+        _request_check(request, cancel)
         ov = dict(overrides)
         if pc.key_pool():
             ov["_api_key"] = _rotate_key(pc)
         try:
-            res = as_completion(_complete_one(pc, send, model, response_schema, ov, raw_messages=_raw)
-                                if _raw is not None                       # codex c/ replay → passa o field-kept;
-                                else _complete_one(pc, send, model, response_schema, ov))   # resto: assinatura antiga
+            one_kwargs = {"raw_messages": _raw} if _raw is not None else {}
+            if request is not None:
+                one_kwargs["request"] = request
+            res = as_completion(_complete_one(pc, send, model, response_schema, ov, **one_kwargs))
+            _request_check(request, cancel)
             if not res.text.strip() and not res.tool_calls:   # vazio = falha, entra na escada…
                 from okami.llm.stream_diag import classify_completion
                 # …MAS vazio por finish_reason='length' (modelo gastou tudo em reasoning) é TRUNCAÇÃO, não
@@ -590,7 +650,10 @@ def complete_messages_ex(
                 except Exception:  # noqa: BLE001
                     pass
             return res
+        except (RequestCancelled, RequestWatchdogTimeout):
+            raise
         except Exception as e:  # noqa: BLE001
+            _request_check(request, cancel)
             last_exc = e
             ce = _err.classify(e)
             # Escada de resposta VAZIA, nível "nudge" (pesquisa #5 item 7): antes de queimar chave/
@@ -629,10 +692,14 @@ def complete_messages_ex(
             if attempt < attempts:                    # ainda há chave → espera e tenta de novo
                 # backoff INTERRUPTÍVEL: /stop do dono durante a espera para o retry NA HORA (não failover —
                 # cancelou = parar tudo), em vez de esperar o sleep inteiro (até 60s).
-                if _interruptible_sleep(retry_delay(attempt, ce.retry_after), cancel, on_heartbeat, _sleep):
+                if _interruptible_sleep(retry_delay(attempt, ce.retry_after),
+                                        _request_cancel_probe(request, cancel),
+                                        on_heartbeat, _sleep):
+                    _request_check(request, cancel)
                     do_fallback = False
                     break
     # esgotou chaves (ou erro não-retriável c/ fallback) → FAILOVER p/ outro provider (estilo Hermes)
+    _request_check(request, cancel)
     tried = (_tried or set()) | {pc.name}
     if do_fallback:
         for fb in (pc.fallback or []):
@@ -647,18 +714,22 @@ def complete_messages_ex(
             needs_key = bool(fbc.api_key_env) and not fbc.resolved_key()
             if needs_login or needs_key:
                 continue
+            _request_check(request, cancel)
             try:
                 return complete_messages_ex(cfg, messages, provider=fb, response_schema=response_schema,
                                             _tried=tried, _sleep=_sleep, cancel=cancel,
-                                            on_heartbeat=on_heartbeat, **overrides)
+                                            on_heartbeat=on_heartbeat, request=request, **overrides)
+            except (RequestCancelled, RequestWatchdogTimeout):
+                raise
             except Exception:  # noqa: BLE001
                 continue
     raise last_exc if last_exc else RuntimeError("sem provider disponível")
 
 
-def complete_messages(cfg: OkamiConfig, messages: list[dict], **kwargs) -> str:
+def complete_messages(cfg: OkamiConfig, messages: list[dict], *, request: RequestContext | None = None,
+                      **kwargs) -> str:
     """Compat: só o texto. Quem quer usage/served-by usa `complete_messages_ex`."""
-    return complete_messages_ex(cfg, messages, **kwargs).text
+    return complete_messages_ex(cfg, messages, request=request, **kwargs).text
 
 
 def stream_complete(

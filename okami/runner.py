@@ -11,6 +11,7 @@ from typing import Callable
 
 from okami import learning
 from okami.llm import providers as prov
+from okami.llm.request import RequestContext, RequestTimeouts
 from okami import skills as skillmod
 from okami.config import OkamiConfig
 from okami.core import Budget, Harness, Task
@@ -103,27 +104,16 @@ def _overall_timeout_for(cfg) -> float:
 
 
 def _run_with_deadline(fn, timeout):
-    """Roda `fn` com teto de relógio: devolve o resultado, ou levanta TimeoutError se passar de `timeout`
-    (a chamada em voo é ABANDONADA numa thread daemon — ela morre sozinha no próprio timeout de 150s). O
-    loop classifica o TimeoutError → encolhe o contexto + re-gera → salvage. 0/None = sem teto."""
+    """Compatibility wrapper around a request-scoped total deadline.
+
+    Existing imports and legacy no-argument callables keep working.  A finite
+    deadline limits the wrapper's wait; it does not claim to kill a transport
+    that has no physical abort handle.
+    """
     if not timeout or timeout <= 0:
         return fn()
-    import threading
-    box: dict = {}
-
-    def _worker():
-        try:
-            box["r"] = fn()
-        except BaseException as e:  # noqa: BLE001 — propaga o erro interno pro chamador
-            box["e"] = e
-    th = threading.Thread(target=_worker, daemon=True)
-    th.start()
-    th.join(timeout)
-    if th.is_alive():
-        raise TimeoutError(f"geração excedeu o teto global de {int(timeout)}s — abortando a cascata de retry")
-    if "e" in box:
-        raise box["e"]
-    return box.get("r")
+    ctx = RequestContext(RequestTimeouts(total_s=float(timeout)))
+    return ctx.run(fn)
 
 
 def _native_tools_for(pc, registry, eff_dict):
@@ -158,6 +148,7 @@ def run_task(
     skills_dir: str | None = None,           # None → casa central (okami.home.skills_dir): não espalha
     extra_context: str = "",
     cancel: Callable[[], bool] | None = None,
+    request: RequestContext | None = None,
     notify: Callable[[str], object] | None = None,   # entrega FORA-DO-TURNO ao dono (#7 item 3): o gateway
                                                      # injeta; o harness "toca" o dono no meio da tarefa
                                                      # (vigia/loop/lembrete). None = sem canal (CLI puro).
@@ -244,7 +235,9 @@ def run_task(
     from okami.llm.streaming import streaming_enabled as _stream_on
     _streaming = _stream_on(cfg, provider)   # MESMO provider selecionado p/ esta task (-p/--provider), não o default
 
-    _deadline = _overall_timeout_for(cfg)              # #3: teto global da fase de geração
+    _deadline = _overall_timeout_for(cfg)              # #3: teto GLOBAL compartilhado por retry/fallback
+    if request is None:
+        request = RequestContext(RequestTimeouts(total_s=_deadline if _deadline > 0 else None))
 
     try:                                               # chars/token p/ ESTIMAR tokens quando o provider local
         _cpt = float(cfg.provider(provider).chars_per_token) if cfg else 4.0   # (LMStudio) não reporta usage
@@ -263,6 +256,14 @@ def run_task(
     # normal só roda ENTRE passos; um backoff longo é UM passo bloqueado). Sem on_event → no-op.
     _retry_hb = (lambda: on_event({"type": "retry_wait"})) if on_event else None
 
+    def _request_cancel() -> bool:
+        if request.cancelled:
+            return True
+        if cancel is not None and cancel():
+            request.cancel("user")
+            return True
+        return False
+
     def generate(messages, schema=None, on_token=None, max_tokens=None):
         eff2 = dict(eff)
         if max_tokens:                      # boost de length (harness pede mais espaço p/ a continuação fechar)
@@ -273,12 +274,25 @@ def run_task(
         def _call():
             if on_token and _streaming:     # #16: streaming token-a-token (protocolo de texto)
                 from okami.llm.streaming import streaming_generate
+
+                def _observe_token(token):
+                    request.check()
+                    request.observe()
+                    on_token(token)
+
+                def _stream_fallback():
+                    return prov.complete_messages_ex(
+                        cfg, messages, provider=provider, model=model,
+                        response_schema=schema, cancel=_request_cancel,
+                        on_heartbeat=_retry_hb, request=request, **eff2)
+
                 return streaming_generate(cfg, messages, provider=provider, model=model,
-                                          response_schema=schema, on_token=on_token, **eff2)
+                                          response_schema=schema, on_token=_observe_token,
+                                          _fallback=_stream_fallback, **eff2)
             return prov.complete_messages_ex(cfg, messages, provider=provider, model=model,
-                                             response_schema=schema, cancel=cancel,   # /stop corta o backoff;
-                                             on_heartbeat=_retry_hb, **eff2)            # status vivo no backoff
-        res = _run_with_deadline(_call, _deadline)     # #3: aborta a cascata se passar do teto
+                                             response_schema=schema, cancel=_request_cancel,
+                                             on_heartbeat=_retry_hb, request=request, **eff2)
+        res = request.run(_call, cancel=cancel)         # #3: uma janela compartilhada por retry/fallback
         _fill_usage(res, messages)                     # usage zerado (local) → estima por chars (~)
         _acc["usage"] = _acc["usage"] + res.usage
         if res.provider:
@@ -290,8 +304,13 @@ def run_task(
         def escalate(messages, schema=None):  # noqa: F811
             eff_esc = _native_tools_for(cfg.provider(escalate_to), registry, dict(eff))  # MESMO registry
             #                                FILTRADO da geração normal (senão Telegram recebia run_shell/spawn)
-            res = prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema,
-                                            cancel=cancel, on_heartbeat=_retry_hb, **eff_esc)
+
+            def _call_escalate():
+                request.check()
+                return prov.complete_messages_ex(cfg, messages, provider=escalate_to, response_schema=schema,
+                                                 cancel=_request_cancel, on_heartbeat=_retry_hb,
+                                                 request=request, **eff_esc)
+            res = request.run(_call_escalate, cancel=cancel)
             _fill_usage(res, messages)                  # idem: estima se o provider não reportar
             _acc["usage"] = _acc["usage"] + res.usage
             if res.provider:
@@ -443,7 +462,7 @@ def run_task(
         budget=budget, stream_tokens=_streaming, native_tools=_native,
         on_event=on_event, escalate=escalate, system_extra=system_extra,
         memory=mem, core_block=core_block, approve=approve,
-        skills=skills_map, registry=registry, cancel=cancel,
+        skills=skills_map, registry=registry, cancel=_request_cancel,
         checkpoints=Checkpoints(ws), hooks=hooks, spawn=_spawn,   # snapshot + hooks + subagente
         plugin_hooks=plugin_hooks,    # sistema de hooks UNIFICADO (pre/post_tool_call, pre_llm_call, ...)
         images=images, prelearned_files=prelearned_files,   # vision §6 + arquivos pré-conhecidos

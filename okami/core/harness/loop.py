@@ -746,6 +746,16 @@ class Harness:
                 try:
                     out = self._do_generate(self.messages, self._action_schema)
                 except Exception as e:  # noqa: BLE001 — transporte esgotou retry/failover do provider
+                    from okami.llm.request import RequestCancelled, RequestWatchdogTimeout
+                    if isinstance(e, (RequestCancelled, RequestWatchdogTimeout)):
+                        t.state = TaskState.BLOCKED
+                        if isinstance(e, RequestCancelled):
+                            t.reason = f"cancelado: {e}" if str(e) else "cancelado pelo usuário (/stop)"
+                            self._emit("cancelled", reason=str(e) or "user")
+                        else:
+                            t.reason = f"watchdog da requisição excedido: {e}"
+                            self._emit("request_timeout", reason=str(e))
+                        return t
                     from okami.core.errors import Action as _Act
                     from okami.core.errors import classify_provider
                     fail = classify_provider(e)
