@@ -20,6 +20,8 @@ or wherever you want.
 
 **[🌐 okamiagent.com](https://okamiagent.com)** · **[📚 Documentation](https://okamiagent.com/docs)** · **[🎨 Landing (source)](https://github.com/OkamiOps/Okami-Agent-LP)**
 
+Part of [OKAMI HQ](https://okamiops.com).
+
 </div>
 
 ---
