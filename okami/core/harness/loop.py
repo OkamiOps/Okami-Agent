@@ -341,6 +341,18 @@ class Harness:
         self.approve = approve if approve is not None else (lambda req: False)
         self.cancel = cancel or (lambda: False)       # /stop do gateway (§13)
         self._set_no_interrupt = set_no_interrupt or (lambda v: None)   # marca fase sensível na sessão (no-op no CLI)
+        if spawn is not None and set_no_interrupt is not None:
+            # Subagente em curso também é uma fase sensível: interromper o pai no meio do spawn pode
+            # abandonar o resultado e deixar o estado do turno incompleto. O gateway enfileira novas
+            # mensagens enquanto a flag estiver ativa.
+            raw_spawn = spawn
+
+            def spawn(*args, _spawn=raw_spawn, _flag=self._set_no_interrupt, **kwargs):
+                _flag(True)
+                try:
+                    return _spawn(*args, **kwargs)
+                finally:
+                    _flag(False)
         self._steer_source = steer_source or (lambda: None)   # drena o /steer pendente da sessão (no-op no CLI)
         self._deferred_steer: str | None = None   # steer drenado mas SEM mensagem tool/user pra anexar ainda
         #                                            (ex.: observação multimodal) → entregue no PRÓXIMO passo

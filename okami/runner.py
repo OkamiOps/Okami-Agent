@@ -532,6 +532,7 @@ def run_task(
     except TypeError:                 # ctor ainda sem `notify`/`clarify` (landing paralelo) → fail-open
         _hkw.pop("notify", None)
         _hkw.pop("clarify", None)
+        _hkw.pop("set_no_interrupt", None)
         harness = Harness(generate, t, ws, **_hkw)
     try:
         harness.run()

@@ -22,6 +22,9 @@ def _sup(tmp_path, agents, spawned, alive):
 def _patch_liveness(monkeypatch, alive):
     # _proc_start(pid): start-time fixo se "vivo", None se "morto" → controla is_alive() determinística.
     monkeypatch.setattr(sup, "_proc_start", lambda pid: 111.0 if pid in alive else None)
+    # No macOS, _proc_start(None) cai no fallback de liveness do SO. Os PIDs sintéticos do teste podem
+    # coincidir com processos reais da máquina, então o fallback também precisa usar o conjunto fake.
+    monkeypatch.setattr(sup, "_pid_alive", lambda pid: pid in alive)
 
 
 def test_up_spawns_each_agent_once(tmp_path, monkeypatch):
